@@ -216,6 +216,7 @@ type QueuedChatSubmission = BranchScope & {
   selectedToolIDs: number[];
   selectedSkills: SkillSummaryDTO[];
   selectedPrompts: PromptPresetDTO[];
+  selectedRoleID: string;
   htmlVisualPromptEnabled: boolean;
 };
 
@@ -467,6 +468,7 @@ export function useChatMessageSubmit({
   selectedToolIDs,
   selectedSkills,
   selectedPrompts,
+  selectedRoleID,
   htmlVisualPromptEnabled,
   options,
   draft,
@@ -512,6 +514,7 @@ export function useChatMessageSubmit({
   selectedToolIDs: number[];
   selectedSkills: SkillSummaryDTO[];
   selectedPrompts: PromptPresetDTO[];
+  selectedRoleID: string;
   htmlVisualPromptEnabled: boolean;
   options: ConversationOptions;
   draft: string;
@@ -520,7 +523,7 @@ export function useChatMessageSubmit({
   uploading: boolean;
   restoreDraftOnFailure: boolean;
   autoGenerateLabels: boolean;
-  prependNewConversation: (platformModelName: string) => Promise<ConversationDTO | null | undefined>;
+  prependNewConversation: (platformModelName: string, projectID?: string, roleID?: string) => Promise<ConversationDTO | null | undefined>;
   onConversationCreated?: (conversationPublicID: string) => void;
   touchByPublicID: (publicID: string, patch?: Partial<ConversationDTO>) => void;
   reload: () => void;
@@ -957,7 +960,7 @@ export function useChatMessageSubmit({
         };
 
         if (!targetConversationID) {
-          const created = await prependNewConversation(requestPlatformModelName);
+          const created = await prependNewConversation(requestPlatformModelName, undefined, selectedRoleID);
           if (streamAbortController.signal.aborted) {
             throw new DOMException("Aborted", "AbortError");
           }
@@ -1472,6 +1475,8 @@ export function useChatMessageSubmit({
       modelOptions,
       selectedToolIDs,
       selectedSkills,
+      selectedPrompts,
+      selectedRoleID,
       htmlVisualPromptEnabled,
       selectedPlatformModelName,
       setAttachments,
@@ -1570,6 +1575,7 @@ export function useChatMessageSubmit({
           selectedToolIDs: selectedToolIDs.slice(),
           selectedSkills: selectedSkills.slice(),
           selectedPrompts: selectedPrompts.slice(),
+          selectedRoleID,
           htmlVisualPromptEnabled,
         },
       ];
