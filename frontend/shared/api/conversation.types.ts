@@ -135,7 +135,9 @@ export type MessageProcessTraceDTO = Omit<
 
 export type TraceEventDTO = MessageTraceEventResponse;
 
-export type CreateConversationRequest = ContractCreateConversationRequest;
+export type CreateConversationRequest = ContractCreateConversationRequest & {
+  roleID?: string;
+};
 
 export type CreateConversationProjectRequest = Omit<ContractCreateConversationProjectRequest, "mcpDefaultMode"> & {
   mcpDefaultMode?: ConversationProjectMCPDefaultMode;

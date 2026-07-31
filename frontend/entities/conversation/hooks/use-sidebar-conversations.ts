@@ -474,7 +474,7 @@ export function useSidebarConversationsController({
     await loadMore();
   }, [loadMore]);
 
-  const prependNewConversation = React.useCallback(async (platformModelName?: string, projectID?: string): Promise<ConversationDTO | null> => {
+  const prependNewConversation = React.useCallback(async (platformModelName?: string, projectID?: string, roleID?: string): Promise<ConversationDTO | null> => {
     const token = await resolveAccessToken();
     if (!token) {
       return null;
@@ -486,6 +486,7 @@ export function useSidebarConversationsController({
       title: newConversationTitle,
       model: modelName,
       projectID: projectID?.trim() || "",
+      roleID: roleID?.trim() || "",
     });
     setRecentItems((prev) => mergeUniqueByPublicID([item], prev, sortByUpdatedAtDesc));
     publishChange({ type: "upsert", publicID: item.publicID, item });
