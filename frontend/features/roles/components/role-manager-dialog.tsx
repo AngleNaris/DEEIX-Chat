@@ -16,11 +16,13 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { ScrollText, Sparkles, Trash2, PencilLine, Plus } from "lucide-react";
+import { ScrollText, Sparkles, Trash2, PencilLine, Plus, CopyPlus } from "lucide-react";
 import { listAvailableMCPTools } from "@/shared/api/mcp";
 import type { MCPToolDTO } from "@/shared/api/mcp.types";
 import { listPublicModels } from "@/shared/api/model";
 import type { PublicModelDTO } from "@/shared/api/model.types";
+import { listConversationProjects } from "@/shared/api/conversation";
+import type { ConversationProjectDTO } from "@/shared/api/conversation.types";
 import {
   createConversationRole,
   deleteConversationRole,
@@ -31,6 +33,9 @@ import type { ConversationRoleDTO } from "@/shared/api/roles.types";
 import { listVisibleSkills } from "@/shared/api/skills";
 import type { SkillSummaryDTO } from "@/shared/api/skills.types";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
+import { cn } from "@/lib/utils";
+
+const ICON_PRESETS = ["✨", "🦉", "🦊", "🐉", "🧙", "⚔️", "🎨", "🎬", "📝", "💡", "🔮", "🛡️", "🎵", "🧪", "🗡️", "👾", "🤖", "🌙", "⚡", "💎"];
 
 type RoleDraft = {
   publicID?: string;
@@ -63,6 +68,7 @@ function RoleForm({
   models,
   mcpTools,
   skills,
+  projects,
   submitting,
 }: {
   draft: RoleDraft;
@@ -70,10 +76,27 @@ function RoleForm({
   models: PublicModelDTO[];
   mcpTools: MCPToolDTO[];
   skills: SkillSummaryDTO[];
+  projects: ConversationProjectDTO[];
   submitting: boolean;
 }) {
   const update = <K extends keyof RoleDraft>(key: K, value: RoleDraft[K]) => {
     setDraft({ ...draft, [key]: value });
+  };
+  const importFromProject = (project: ConversationProjectDTO | null) => {
+    if (!project) {
+      return;
+    }
+    setDraft({
+      ...draft,
+      name: draft.name || project.name,
+      description: project.description,
+      systemPrompt: project.systemPrompt,
+      mcpDefaultMode: project.mcpDefaultMode,
+      defaultMCPToolIDs: project.defaultMCPToolIDs.slice(),
+      defaultSkillIDs: project.defaultSkillIDs.slice(),
+      color: project.color || draft.color,
+      icon: project.icon || draft.icon,
+    });
   };
   const toggleMCPTool = (toolID: number) => {
     update(
@@ -94,6 +117,32 @@ function RoleForm({
 
   return (
     <div className="min-h-0 space-y-4 overflow-y-auto px-0.5">
+      {projects.length > 0 ? (
+        <div className="space-y-1 rounded-md border border-border/60 bg-muted/20 p-2.5">
+          <Label className="text-xs text-muted-foreground">从项目复制配置</Label>
+          <div className="flex items-center gap-2">
+            <select
+              defaultValue=""
+              disabled={submitting}
+              onChange={(event) => {
+                const project = projects.find((item) => item.publicID === event.target.value) ?? null;
+                importFromProject(project);
+                event.target.value = "";
+              }}
+              className="h-8 min-w-0 flex-1 rounded-md border border-input bg-transparent px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+            >
+              <option value="">选择要复制的项目…</option>
+              {projects.map((project) => (
+                <option key={project.publicID} value={project.publicID}>
+                  {project.icon ? `${project.icon} ` : ""}{project.name}
+                </option>
+              ))}
+            </select>
+            <CopyPlus className="size-4 shrink-0 text-muted-foreground" strokeWidth={1.7} />
+          </div>
+          <p className="text-[11px] leading-4 text-muted-foreground">复制项目的提示词、MCP 工具、技能与配色到角色，再按需修改</p>
+        </div>
+      ) : null}
       <div className="space-y-1">
         <Label className="text-xs text-muted-foreground">名称</Label>
         <Input
@@ -152,6 +201,28 @@ function RoleForm({
             onChange={(event) => update("icon", event.target.value)}
             disabled={submitting}
           />
+          <div className="flex flex-wrap gap-1 pt-1">
+            {ICON_PRESETS.map((icon) => {
+              const selected = draft.icon === icon;
+              return (
+                <button
+                  key={icon}
+                  type="button"
+                  disabled={submitting}
+                  onClick={() => update("icon", selected ? "" : icon)}
+                  aria-label={`图标 ${icon}`}
+                  className={cn(
+                    "flex size-7 items-center justify-center rounded-md border text-sm transition-colors",
+                    selected
+                      ? "border-primary bg-primary/10"
+                      : "border-border/60 hover:border-primary/40 hover:bg-accent",
+                  )}
+                >
+                  {icon}
+                </button>
+              );
+            })}
+          </div>
         </div>
         <div className="space-y-1">
           <Label className="text-xs text-muted-foreground">颜色</Label>
@@ -259,6 +330,7 @@ export function RoleManagerDialog({
 }) {
   const t = useTranslations("recent.projects");
   const [roles, setRoles] = React.useState<ConversationRoleDTO[]>([]);
+  const [projects, setProjects] = React.useState<ConversationProjectDTO[]>([]);
   const [models, setModels] = React.useState<PublicModelDTO[]>([]);
   const [mcpTools, setMCPTools] = React.useState<MCPToolDTO[]>([]);
   const [skills, setSkills] = React.useState<SkillSummaryDTO[]>([]);
@@ -270,16 +342,18 @@ export function RoleManagerDialog({
     setLoading(true);
     try {
       const accessToken = await resolveAccessToken();
-      const [roleItems, modelItems, toolItems, skillItems] = await Promise.all([
+      const [roleItems, modelItems, toolItems, skillItems, projectItems] = await Promise.all([
         listConversationRoles(accessToken, { status: "all" }),
         listPublicModels(accessToken),
         listAvailableMCPTools(accessToken),
         listVisibleSkills(accessToken, { page: 1, pageSize: 100 }).then((page) => page.results),
+        listConversationProjects(accessToken),
       ]);
       setRoles(roleItems);
       setModels(modelItems);
       setMCPTools(toolItems);
       setSkills(skillItems);
+      setProjects(projectItems);
     } catch {
       toast.error(t("loadFailed") || "加载角色失败");
     } finally {
@@ -369,6 +443,7 @@ export function RoleManagerDialog({
               models={models}
               mcpTools={mcpTools}
               skills={skills}
+              projects={projects}
               submitting={submitting}
             />
             <DialogFooter>
