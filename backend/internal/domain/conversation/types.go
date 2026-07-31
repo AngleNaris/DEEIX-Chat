@@ -12,9 +12,13 @@ type Conversation struct {
 	ID                    uint
 	UserID                uint
 	ProjectID             *uint
+	RoleID                *uint
 	ProjectPublicID       string
 	ProjectName           string
 	ProjectSystemPrompt   string
+	RolePublicID          string
+	RoleName              string
+	RoleSystemPrompt      string
 	PublicID              string
 	Title                 string
 	LabelsJSON            string

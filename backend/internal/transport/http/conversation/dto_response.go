@@ -19,6 +19,8 @@ type ConversationResponse struct {
 	UserID              uint       `json:"userID"`
 	ProjectID           string     `json:"projectID"`
 	ProjectName         string     `json:"projectName"`
+	RoleID              string     `json:"roleID"`
+	RoleName            string     `json:"roleName"`
 	Title               string     `json:"title"`
 	LabelsJSON          string     `json:"labelsJSON"`
 	Model               string     `json:"model"`
@@ -105,6 +107,8 @@ func toConversationResponse(item *model.Conversation) ConversationResponse {
 		UserID:              item.UserID,
 		ProjectID:           item.ProjectPublicID,
 		ProjectName:         item.ProjectName,
+		RoleID:              item.RolePublicID,
+		RoleName:            item.RoleName,
 		Title:               item.Title,
 		LabelsJSON:          labelsJSON,
 		Model:               item.Model,

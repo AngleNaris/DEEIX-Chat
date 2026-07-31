@@ -728,9 +728,16 @@ func (s *Service) sendMessageInternal(
 		)
 	}
 	toolRuntime := s.resolveSelectedToolRuntime(ctx, input.SelectedToolIDs)
+	combinedSystemPrompt := strings.TrimSpace(conversation.ProjectSystemPrompt)
+	if rolePrompt := strings.TrimSpace(conversation.RoleSystemPrompt); rolePrompt != "" {
+		if combinedSystemPrompt != "" {
+			combinedSystemPrompt += "\n\n"
+		}
+		combinedSystemPrompt += rolePrompt
+	}
 	routePromptInput := messageRoutePromptInput{
 		UserContent:             input.Content,
-		ProjectSystemPrompt:     conversation.ProjectSystemPrompt,
+		ProjectSystemPrompt:     combinedSystemPrompt,
 		HTMLVisualPromptEnabled: input.HTMLVisualPromptEnabled,
 		DomainMessages:          promptScope.activeMessages(),
 		StableAttachments:       stableFullContextAttachments,

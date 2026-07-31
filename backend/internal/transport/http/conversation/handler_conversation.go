@@ -39,7 +39,7 @@ func (h *Handler) CreateConversation(c *gin.Context) {
 		return
 	}
 
-	item, err := h.service.CreateConversation(c.Request.Context(), userID, req.Title, req.Model, req.ProjectID)
+	item, err := h.service.CreateConversation(c.Request.Context(), userID, req.Title, req.Model, req.ProjectID, req.RoleID)
 	if err != nil {
 		if errors.Is(err, appconversation.ErrConversationProjectNotFound) {
 			response.Error(c, http.StatusNotFound, "conversation project not found")

@@ -41,7 +41,7 @@ type ConversationSearchResult struct {
 }
 
 // CreateConversation 创建用户新会话。
-func (s *Service) CreateConversation(ctx context.Context, userID uint, title string, modelName string, projectPublicID string) (*model.Conversation, error) {
+func (s *Service) CreateConversation(ctx context.Context, userID uint, title string, modelName string, projectPublicID string, rolePublicID string) (*model.Conversation, error) {
 	normalizedTitle := strings.TrimSpace(title)
 	if normalizedTitle == "" {
 		normalizedTitle = "新对话"
@@ -62,9 +62,27 @@ func (s *Service) CreateConversation(ctx context.Context, userID uint, title str
 		projectID = &project.ID
 	}
 
+	var roleID *uint
+	var role *model.ConversationRole
+	if normalizedRoleID := strings.TrimSpace(rolePublicID); normalizedRoleID != "" {
+		resolvedRole, err := s.repo.GetConversationRoleByPublicID(ctx, userID, normalizedRoleID)
+		if err != nil {
+			if errors.Is(err, repository.ErrNotFound) {
+				return nil, ErrConversationProjectNotFound
+			}
+			return nil, err
+		}
+		role = resolvedRole
+		roleID = &role.ID
+		if normalizedModel == "" && strings.TrimSpace(role.Model) != "" {
+			normalizedModel = strings.TrimSpace(role.Model)
+		}
+	}
+
 	item := &model.Conversation{
 		UserID:          userID,
 		ProjectID:       projectID,
+		RoleID:          roleID,
 		PublicID:        normalizePublicID(uuid.NewString()),
 		Title:           normalizedTitle,
 		LabelsJSON:      "[]",
@@ -84,6 +102,11 @@ func (s *Service) CreateConversation(ctx context.Context, userID uint, title str
 		item.ProjectPublicID = project.PublicID
 		item.ProjectName = project.Name
 		item.ProjectSystemPrompt = project.SystemPrompt
+	}
+	if role != nil {
+		item.RolePublicID = role.PublicID
+		item.RoleName = role.Name
+		item.RoleSystemPrompt = role.SystemPrompt
 	}
 	return item, nil
 }

@@ -165,6 +165,9 @@ func (r *Repo) ListConversationsByUser(
 	if err := r.hydrateConversationProjectSummaries(ctx, results); err != nil {
 		return nil, 0, err
 	}
+	if err := r.hydrateConversationRoleSummaries(ctx, results); err != nil {
+		return nil, 0, err
+	}
 	return results, total, nil
 }
 
@@ -195,6 +198,9 @@ func (r *Repo) ListConversationsForSearch(
 		return nil, err
 	}
 	if err := r.hydrateConversationProjectSummaries(ctx, results); err != nil {
+		return nil, err
+	}
+	if err := r.hydrateConversationRoleSummaries(ctx, results); err != nil {
 		return nil, err
 	}
 	return results, nil
@@ -367,6 +373,62 @@ func (r *Repo) hydrateConversationProjectSummary(ctx context.Context, item *doma
 	return nil
 }
 
+func (r *Repo) hydrateConversationRoleSummaries(ctx context.Context, items []domainconversation.Conversation) error {
+	if len(items) == 0 {
+		return nil
+	}
+	roleIDs := make([]uint, 0, len(items))
+	seen := make(map[uint]struct{}, len(items))
+	for _, item := range items {
+		if item.RoleID == nil || *item.RoleID == 0 {
+			continue
+		}
+		if _, exists := seen[*item.RoleID]; exists {
+			continue
+		}
+		seen[*item.RoleID] = struct{}{}
+		roleIDs = append(roleIDs, *item.RoleID)
+	}
+	if len(roleIDs) == 0 {
+		return nil
+	}
+	roles := make([]models.ConversationRole, 0, len(roleIDs))
+	if err := r.db.WithContext(ctx).
+		Where("id IN ?", roleIDs).
+		Find(&roles).Error; err != nil {
+		return translateError(err)
+	}
+	byID := make(map[uint]models.ConversationRole, len(roles))
+	for _, role := range roles {
+		byID[role.ID] = role
+	}
+	for index := range items {
+		if items[index].RoleID == nil {
+			continue
+		}
+		role, ok := byID[*items[index].RoleID]
+		if !ok {
+			continue
+		}
+		items[index].RolePublicID = role.PublicID
+		items[index].RoleName = role.Name
+		items[index].RoleSystemPrompt = role.SystemPrompt
+	}
+	return nil
+}
+
+func (r *Repo) hydrateConversationRoleSummary(ctx context.Context, item *domainconversation.Conversation) error {
+	if item == nil {
+		return nil
+	}
+	items := []domainconversation.Conversation{*item}
+	if err := r.hydrateConversationRoleSummaries(ctx, items); err != nil {
+		return err
+	}
+	*item = items[0]
+	return nil
+}
+
 // GetConversationByUser 查询归属用户会话。
 func (r *Repo) GetConversationByUser(ctx context.Context, conversationID uint, userID uint) (*domainconversation.Conversation, error) {
 	var item models.Conversation
@@ -380,6 +442,9 @@ func (r *Repo) GetConversationByUser(ctx context.Context, conversationID uint, u
 		return nil, err
 	}
 	if err := r.hydrateConversationProjectSummary(ctx, &result); err != nil {
+		return nil, err
+	}
+	if err := r.hydrateConversationRoleSummary(ctx, &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
@@ -398,6 +463,9 @@ func (r *Repo) GetConversationByPublicID(ctx context.Context, publicID string, u
 		return nil, err
 	}
 	if err := r.hydrateConversationProjectSummary(ctx, &result); err != nil {
+		return nil, err
+	}
+	if err := r.hydrateConversationRoleSummary(ctx, &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
@@ -3351,6 +3419,7 @@ func toConversationDomain(item models.Conversation) domainconversation.Conversat
 		ID:                    item.ID,
 		UserID:                item.UserID,
 		ProjectID:             item.ProjectID,
+		RoleID:                item.RoleID,
 		PublicID:              item.PublicID,
 		Title:                 item.Title,
 		LabelsJSON:            labelsJSON,
@@ -3409,6 +3478,7 @@ func toConversationModel(item *domainconversation.Conversation) models.Conversat
 	return models.Conversation{
 		UserID:                item.UserID,
 		ProjectID:             item.ProjectID,
+		RoleID:                item.RoleID,
 		PublicID:              item.PublicID,
 		Title:                 item.Title,
 		LabelsJSON:            labelsJSON,
