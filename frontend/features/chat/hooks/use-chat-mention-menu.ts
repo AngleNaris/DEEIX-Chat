@@ -109,6 +109,7 @@ type ChatMentionMenuControllerArgs = {
   maxSelectedTools: number;
   maxSelectedSkills: number;
   modelOptions: ChatModelOption[];
+  selectedPrompts?: PromptPresetDTO[];
   selectedSkills?: SkillSummaryDTO[];
   selectedPlatformModelName: string;
   selectedToolIDs: number[];
@@ -119,6 +120,7 @@ type ChatMentionMenuControllerArgs = {
   enabledKinds?: readonly ChatMentionMenuKind[];
   onFileSelect: (file: FileObjectDTO) => void | Promise<void>;
   onModelChange: (platformModelName: string) => void;
+  onSelectedPromptsChange?: (prompts: PromptPresetDTO[]) => void;
   onSelectedSkillsChange?: (skills: SkillSummaryDTO[]) => void;
   placementAnchor?: ChatMentionMenuPlacementAnchor;
   placementPreference?: ChatMentionMenuPlacementPreference;
@@ -576,6 +578,7 @@ export function useChatMentionMenu({
   maxSelectedTools,
   maxSelectedSkills,
   modelOptions,
+  selectedPrompts = [],
   selectedSkills = [],
   selectedPlatformModelName,
   selectedToolIDs,
@@ -583,6 +586,7 @@ export function useChatMentionMenu({
   textareaRef,
   toolsDisabled,
   onDraftChange,
+  onSelectedPromptsChange,
   onSelectedSkillsChange,
   enabledKinds = DEFAULT_MENTION_MENU_KINDS,
   onFileSelect,
@@ -915,13 +919,11 @@ export function useChatMentionMenu({
       }
 
       if (item.kind === "prompt") {
-        if (!triggerQuery) {
-          return;
+        const alreadySelected = (selectedPrompts ?? []).some((prompt) => prompt.id === item.prompt.id);
+        if (!alreadySelected) {
+          onSelectedPromptsChange?.([...(selectedPrompts ?? []), item.prompt]);
         }
-        const nextDraft = replaceTriggerRange(draft, triggerQuery.range, item.prompt.content);
-        onDraftChange(nextDraft.value);
-        setDismissedTriggerKey(null);
-        focusTextarea(nextDraft.caretIndex);
+        finishSelection();
         return;
       }
 
@@ -965,10 +967,12 @@ export function useChatMentionMenu({
       onFileSelect,
       onDraftChange,
       onModelChange,
+      onSelectedPromptsChange,
       onSelectedSkillsChange,
       onSkillLimitReached,
       onSelectedToolsChange,
       onToolLimitReached,
+      selectedPrompts,
       selectedSkills,
       selectedToolIDs,
       draft,

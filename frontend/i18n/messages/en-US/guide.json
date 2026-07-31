@@ -80,7 +80,8 @@
     "lagoon": "Lagoon",
     "ink": "Ink",
     "ochre": "Ochre",
-    "sepia": "Sepia"
+    "sepia": "Sepia",
+    "artilus": "Artilus"
   },
   "states": {
     "twoFactorUnavailable": "Two-factor authentication is not enabled in this environment.",

@@ -784,7 +784,7 @@ func normalizeAppearancePreferences(raw string) (string, error) {
 			}
 			normalized[key] = value
 		case "preset":
-			if value != "default" && value != "azure" && value != "cobalt" && value != "graphite" && value != "lagoon" && value != "ink" && value != "ochre" && value != "sepia" {
+			if value != "default" && value != "azure" && value != "cobalt" && value != "graphite" && value != "lagoon" && value != "ink" && value != "ochre" && value != "sepia" && value != "artilus" {
 				return "", ErrInvalidAppearancePreferences
 			}
 			normalized[key] = value

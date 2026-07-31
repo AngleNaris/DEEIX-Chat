@@ -12,6 +12,7 @@ import type {
   MessageDTO,
 } from "@/shared/api/conversation.types";
 import type { SkillSummaryDTO } from "@/shared/api/skills.types";
+import type { PromptPresetDTO } from "@/shared/api/prompt-presets.types";
 
 function selectPendingExchangesByScope(
   exchanges: PendingExchangeMap,
@@ -95,6 +96,7 @@ export function useChatRuntime({
   modelOptions,
   selectedToolIDs,
   selectedSkills,
+  selectedPrompts,
   htmlVisualPromptEnabled,
   options,
   draft,
@@ -123,6 +125,7 @@ export function useChatRuntime({
   modelOptions: ChatModelOption[];
   selectedToolIDs: number[];
   selectedSkills: SkillSummaryDTO[];
+  selectedPrompts: PromptPresetDTO[];
   htmlVisualPromptEnabled: boolean;
   options: ConversationOptions;
   draft: string;
@@ -187,6 +190,7 @@ export function useChatRuntime({
     modelOptions,
     selectedToolIDs,
     selectedSkills,
+    selectedPrompts,
     htmlVisualPromptEnabled,
     options,
     draft,

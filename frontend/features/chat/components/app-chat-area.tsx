@@ -19,6 +19,7 @@ import { useChatArtifacts } from "@/features/chat/hooks/use-chat-artifacts";
 import { useChatAttachments } from "@/features/chat/hooks/use-chat-attachments";
 import { useChatComposerState } from "@/features/chat/hooks/use-chat-composer-state";
 import { useChatComposerSelection } from "@/features/chat/hooks/use-chat-composer-selection";
+import type { PromptPresetDTO } from "@/shared/api/prompt-presets.types";
 import type { ChatAreaMessage, MessageAttachment } from "@/features/chat/types/messages";
 import { useChatModelOptions } from "@/features/chat/hooks/use-chat-model-options";
 import { useChatRuntime } from "@/features/chat/hooks/use-chat-runtime";
@@ -363,6 +364,7 @@ export function AppChatArea() {
     resetToken: newConversationRevision,
     hasConversation: Boolean(conversationID),
   });
+  const [selectedPrompts, setSelectedPrompts] = React.useState<PromptPresetDTO[]>([]);
   const [defaultToolIDs, setDefaultToolIDs] = React.useState<number[]>([]);
   const newConversationSelectionKey = `${newConversationRevision}:${newConversationProjectID || "unassigned"}`;
   const newConversationDefaultMCPToolIDs = React.useMemo(
@@ -583,6 +585,7 @@ export function AppChatArea() {
     modelOptions,
     selectedToolIDs,
     selectedSkills,
+    selectedPrompts,
     htmlVisualPromptEnabled: htmlVisualPrompt.enabled,
     options: modelOptionPolicyDisabled ? EMPTY_CONVERSATION_OPTIONS : options,
     draft,
@@ -604,6 +607,10 @@ export function AppChatArea() {
     resumingRunID,
   });
   const generating = sending;
+  const handleSendMessage = React.useCallback(() => {
+    setSelectedPrompts([]);
+    return onSendMessage();
+  }, [onSendMessage]);
   const uploadDropDisabled = loading || uploading;
   const onStopActiveMessage = React.useCallback(() => {
     const visibleRunID = currentLeafMessage?.runID?.trim() || "";
@@ -1109,6 +1116,7 @@ export function AppChatArea() {
     selectedPlatformModelName,
     availableTools,
     selectedToolIDs,
+    selectedPrompts,
     selectedSkills,
     defaultToolIDs,
     queuedMessages,
@@ -1124,6 +1132,7 @@ export function AppChatArea() {
     onModelChange: setSelectedPlatformModelName,
     onModelCatalogRefresh: refreshModelCatalogForComposer,
     onSelectedToolsChange,
+    onSelectedPromptsChange: setSelectedPrompts,
     maxSelectedSkills: mcpMaxSelectedTools,
     onSelectedSkillsChange,
     onDefaultToolsChange: onDefaultToolIDsChange,
@@ -1135,7 +1144,7 @@ export function AppChatArea() {
     onUploadFiles,
     onCaptureScreenshot,
     onRemoveAttachment,
-    onSendMessage,
+    onSendMessage: handleSendMessage,
     onStopMessage: onStopActiveMessage,
     onDeleteQueuedMessage,
     onEditQueuedMessage,

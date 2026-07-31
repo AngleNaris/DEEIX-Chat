@@ -16,6 +16,7 @@ import type {
   MessageDTO,
 } from "@/shared/api/conversation.types";
 import type { SkillSummaryDTO } from "@/shared/api/skills.types";
+import type { PromptPresetDTO } from "@/shared/api/prompt-presets.types";
 
 export function useChatSubmitStream({
   conversationID,
@@ -25,6 +26,7 @@ export function useChatSubmitStream({
   modelOptions,
   selectedToolIDs,
   selectedSkills,
+  selectedPrompts,
   htmlVisualPromptEnabled,
   options,
   draft,
@@ -63,6 +65,7 @@ export function useChatSubmitStream({
   modelOptions: ChatModelOption[];
   selectedToolIDs: number[];
   selectedSkills: SkillSummaryDTO[];
+  selectedPrompts: PromptPresetDTO[];
   htmlVisualPromptEnabled: boolean;
   options: ConversationOptions;
   draft: string;
@@ -106,6 +109,7 @@ export function useChatSubmitStream({
     modelOptions,
     selectedToolIDs,
     selectedSkills,
+    selectedPrompts,
     htmlVisualPromptEnabled,
     options,
     draft,

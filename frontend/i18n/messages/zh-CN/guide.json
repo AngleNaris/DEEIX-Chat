@@ -80,7 +80,8 @@
     "lagoon": "Lagoon",
     "ink": "Ink",
     "ochre": "Ochre",
-    "sepia": "Sepia"
+    "sepia": "Sepia",
+    "artilus": "Artilus"
   },
   "states": {
     "twoFactorUnavailable": "当前环境未启用两步验证。",

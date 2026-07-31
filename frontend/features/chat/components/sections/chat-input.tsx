@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import dynamic from "next/dynamic";
-import { Box, CornerDownRight, Film, Image, ImageOff, ImagePlus, LoaderCircle, PencilLine, Trash2 } from "lucide-react";
+import { Box, CornerDownRight, Film, Image, ImageOff, ImagePlus, LoaderCircle, PencilLine, ScrollText, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
@@ -61,6 +61,7 @@ import { cn } from "@/lib/utils";
 import type { ConversationOptions } from "@/shared/api/conversation.types";
 import type { FileObjectDTO } from "@/shared/api/file.types";
 import type { MCPToolDTO } from "@/shared/api/mcp.types";
+import type { PromptPresetDTO } from "@/shared/api/prompt-presets.types";
 import type { SkillSummaryDTO } from "@/shared/api/skills.types";
 import type { ModelOptionPolicy } from "@/shared/lib/model-option-policy";
 import type { SendShortcut } from "@/features/settings/types/settings";
@@ -96,6 +97,7 @@ type ChatInputProps = {
   selectedPlatformModelName: string;
   availableTools: MCPToolDTO[];
   selectedToolIDs: number[];
+  selectedPrompts: PromptPresetDTO[];
   selectedSkills: SkillSummaryDTO[];
   defaultToolIDs: number[];
   queuedMessages: QueuedComposerMessage[];
@@ -113,6 +115,7 @@ type ChatInputProps = {
   onModelChange: (platformModelName: string) => void;
   onModelCatalogRefresh?: () => void | Promise<void>;
   onSelectedToolsChange: (toolIDs: number[]) => void;
+  onSelectedPromptsChange: (prompts: PromptPresetDTO[]) => void;
   onSelectedSkillsChange: (skills: SkillSummaryDTO[]) => void;
   onDefaultToolsChange: (toolIDs: number[]) => void | Promise<void>;
   onHTMLVisualPromptChange: (enabled: boolean) => void;
@@ -236,6 +239,7 @@ function ChatInputComponent({
   selectedPlatformModelName,
   availableTools,
   selectedToolIDs,
+  selectedPrompts,
   selectedSkills,
   defaultToolIDs,
   queuedMessages,
@@ -253,6 +257,7 @@ function ChatInputComponent({
   onModelChange,
   onModelCatalogRefresh,
   onSelectedToolsChange,
+  onSelectedPromptsChange,
   onSelectedSkillsChange,
   onDefaultToolsChange,
   onHTMLVisualPromptChange,
@@ -368,6 +373,7 @@ function ChatInputComponent({
   const showHTMLVisualPromptButton = !isMediaMode;
   const hasComposerAttachments = attachments.length > 0 || uploadingAttachments.length > 0;
   const showSelectedSkills = selectedSkills.length > 0 && !isMediaMode;
+  const showSelectedPrompts = selectedPrompts.length > 0 && !isMediaMode;
   const {
     activeIndex: mentionActiveIndex,
     handleBlur: handleMentionBlur,
@@ -391,6 +397,7 @@ function ChatInputComponent({
     maxSelectedTools,
     maxSelectedSkills,
     modelOptions,
+    selectedPrompts,
     selectedSkills,
     selectedPlatformModelName,
     selectedToolIDs,
@@ -401,6 +408,7 @@ function ChatInputComponent({
     onFileSelect: onAttachExistingFile,
     onModelCatalogRefresh,
     onModelChange,
+    onSelectedPromptsChange,
     onSelectedSkillsChange,
     placementAnchor: "container",
     placementPreference: isConversationMode ? "top" : "bottom",
@@ -595,6 +603,29 @@ function ChatInputComponent({
         style={inputGroupHeight === null ? undefined : { height: inputGroupHeight }}
       >
         <div ref={inputGroupMeasureRef} className="flex w-full flex-col">
+          {showSelectedPrompts ? (
+            <div className="flex w-full max-h-14 flex-wrap items-center justify-start gap-x-3 gap-y-1 overflow-y-auto px-5 pt-3">
+              {selectedPrompts.map((prompt) => (
+                <span
+                  key={prompt.id}
+                  className="group inline-flex h-6 max-w-56 items-center gap-1.5 rounded-full border border-primary/25 bg-primary/10 py-0.5 pl-2.5 pr-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/15 disabled:opacity-60"
+                >
+                  <ScrollText className="size-3.5 shrink-0" strokeWidth={1.8} />
+                  <span className="min-w-0 truncate">{prompt.trigger || prompt.title}</span>
+                  <button
+                    type="button"
+                    disabled={loading || uploading}
+                    onClick={() => onSelectedPromptsChange(selectedPrompts.filter((item) => item.id !== prompt.id))}
+                    aria-label={prompt.trigger || prompt.title}
+                    className="rounded-full p-0.5 opacity-45 transition-opacity hover:bg-primary/15 hover:opacity-90 disabled:opacity-30"
+                  >
+                    <XIcon size={11} strokeWidth={1.8} />
+                  </button>
+                </span>
+              ))}
+            </div>
+          ) : null}
+
           {showSelectedSkills ? (
             <div className="flex w-full max-h-14 flex-wrap items-center justify-start gap-x-3 gap-y-1 overflow-y-auto px-5 pt-3">
               {selectedSkills.map((skill) => (

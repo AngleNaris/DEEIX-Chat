@@ -39,7 +39,7 @@ function isTheme(value: unknown): value is Theme {
 }
 
 function isThemePreset(value: unknown): value is ThemePreset {
-  return value === "default" || value === "azure" || value === "cobalt" || value === "graphite" || value === "lagoon" || value === "ink" || value === "ochre" || value === "sepia";
+  return value === "default" || value === "azure" || value === "cobalt" || value === "graphite" || value === "lagoon" || value === "ink" || value === "ochre" || value === "sepia" || value === "artilus";
 }
 
 export function parseAppearancePreferences(raw: string | null | undefined): AppearancePreferencePatch {

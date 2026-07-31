@@ -3,7 +3,7 @@
 import * as React from "react";
 
 export type Theme = "light" | "dark" | "system";
-export type ThemePreset = "default" | "azure" | "cobalt" | "graphite" | "lagoon" | "ink" | "ochre" | "sepia";
+export type ThemePreset = "default" | "azure" | "cobalt" | "graphite" | "lagoon" | "ink" | "ochre" | "sepia" | "artilus";
 
 type ThemeContextValue = {
   theme: Theme;
@@ -30,7 +30,7 @@ export function normalizeTheme(value: string | null | undefined): Theme {
 }
 
 export function normalizeThemePreset(value: string | null | undefined): ThemePreset {
-  return value === "azure" || value === "cobalt" || value === "graphite" || value === "lagoon" || value === "ink" || value === "ochre" || value === "sepia" ? value : "default";
+  return value === "azure" || value === "cobalt" || value === "graphite" || value === "lagoon" || value === "ink" || value === "ochre" || value === "sepia" || value === "artilus" ? value : "artilus";
 }
 
 function applyTheme(theme: Theme, systemTheme: "light" | "dark", preset: ThemePreset) {
@@ -105,7 +105,7 @@ export function ThemeProvider({
       resolvedTheme: theme === "system" ? systemTheme : theme,
       systemTheme,
       themes: ["light", "dark", "system"],
-      presets: ["default", "azure", "cobalt", "graphite", "lagoon", "ink", "ochre", "sepia"],
+      presets: ["default", "azure", "cobalt", "graphite", "lagoon", "ink", "ochre", "sepia", "artilus"],
     }),
     [preset, setPreset, setTheme, systemTheme, theme],
   );
@@ -124,7 +124,7 @@ export function useTheme() {
       resolvedTheme: "light" as const,
       systemTheme: "light" as const,
       themes: ["light", "dark", "system"] as Theme[],
-      presets: ["default", "azure", "cobalt", "graphite", "lagoon", "ink", "ochre", "sepia"] as ThemePreset[],
+      presets: ["default", "azure", "cobalt", "graphite", "lagoon", "ink", "ochre", "sepia", "artilus"] as ThemePreset[],
     };
   }
   return context;

@@ -182,7 +182,7 @@ export function ProjectDialog({
                 value={stableDraft?.systemPrompt ?? ""}
                 maxLength={12000}
                 placeholder={t("systemPromptPlaceholder")}
-                className="min-h-32 resize-y"
+                className="min-h-32 max-h-72 resize-y overflow-y-auto"
                 onChange={(event) => {
                   setDraft((current) => current ? { ...current, systemPrompt: event.target.value } : current);
                 }}

@@ -60,6 +60,15 @@ import type {
 } from "@/shared/api/conversation.types";
 import { ApiError } from "@/shared/api/http-client";
 import type { SkillSummaryDTO } from "@/shared/api/skills.types";
+import type { PromptPresetDTO } from "@/shared/api/prompt-presets.types";
+
+function resolveComposerContent(draft: string, selectedPrompts: PromptPresetDTO[]): string {
+  const promptText = (selectedPrompts ?? [])
+    .map((prompt) => prompt.content?.trim() ?? "")
+    .filter(Boolean)
+    .join("\n\n");
+  return [promptText, draft.trim()].filter(Boolean).join("\n\n");
+}
 
 const CONVERSATION_METADATA_REFRESH_MAX_WAIT_MS = 45_000;
 const CONVERSATION_METADATA_REFRESH_INITIAL_DELAY_MS = 800;
@@ -206,6 +215,7 @@ type QueuedChatSubmission = BranchScope & {
   options: ConversationOptions;
   selectedToolIDs: number[];
   selectedSkills: SkillSummaryDTO[];
+  selectedPrompts: PromptPresetDTO[];
   htmlVisualPromptEnabled: boolean;
 };
 
@@ -456,6 +466,7 @@ export function useChatMessageSubmit({
   modelOptions,
   selectedToolIDs,
   selectedSkills,
+  selectedPrompts,
   htmlVisualPromptEnabled,
   options,
   draft,
@@ -500,6 +511,7 @@ export function useChatMessageSubmit({
   modelOptions: ChatModelOption[];
   selectedToolIDs: number[];
   selectedSkills: SkillSummaryDTO[];
+  selectedPrompts: PromptPresetDTO[];
   htmlVisualPromptEnabled: boolean;
   options: ConversationOptions;
   draft: string;
@@ -1481,7 +1493,7 @@ export function useChatMessageSubmit({
   );
 
   const enqueueSubmission = React.useCallback(() => {
-    const content = draft.trim();
+    const content = resolveComposerContent(draft, selectedPrompts);
     const currentAttachments = attachments.slice();
     if ((!content && currentAttachments.length === 0) || uploading) {
       return false;
@@ -1557,6 +1569,7 @@ export function useChatMessageSubmit({
           options: sanitizeConversationOptions(options),
           selectedToolIDs: selectedToolIDs.slice(),
           selectedSkills: selectedSkills.slice(),
+          selectedPrompts: selectedPrompts.slice(),
           htmlVisualPromptEnabled,
         },
       ];
@@ -1575,6 +1588,7 @@ export function useChatMessageSubmit({
     htmlVisualPromptEnabled,
     options,
     selectedPlatformModelName,
+    selectedPrompts,
     selectedSkills,
     selectedToolIDs,
     setAttachments,
@@ -1740,7 +1754,7 @@ export function useChatMessageSubmit({
       enqueueSubmission();
       return;
     }
-    const content = draft.trim();
+    const content = resolveComposerContent(draft, selectedPrompts);
     const parentMessagePublicID =
       resolvePersistedPublicID(currentLeafMessage?.publicID) ??
       resolveDefaultSubmissionParentMessage(visibleMessages)?.publicID ??
@@ -1752,7 +1766,7 @@ export function useChatMessageSubmit({
       parentMessagePublicID,
       branchReason: "default",
     });
-  }, [attachments, currentLeafMessage?.publicID, draft, enqueueSubmission, resumeGenerationActive, sending, submitMessage, visibleMessages]);
+  }, [attachments, currentLeafMessage?.publicID, draft, enqueueSubmission, resumeGenerationActive, sending, selectedPrompts, submitMessage, visibleMessages]);
 
   React.useEffect(() => {
     const currentBranchHasPendingServerGeneration = visibleMessages.some(

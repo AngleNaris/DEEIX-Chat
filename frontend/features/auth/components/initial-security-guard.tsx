@@ -126,6 +126,7 @@ const ONBOARDING_THEME_PRESETS: ThemePreset[] = [
   "ink",
   "ochre",
   "sepia",
+  "artilus",
 ];
 
 function OnboardingFeatureCarousel({
