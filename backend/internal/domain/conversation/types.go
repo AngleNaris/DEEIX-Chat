@@ -70,6 +70,43 @@ type ConversationProjectPatch struct {
 	Status            *string
 }
 
+// ConversationRole 表示用户角色(助手)配置。
+// 角色 = 项目的全部能力 + 默认模型 + 图标。
+type ConversationRole struct {
+	ID                uint
+	UserID            uint
+	PublicID          string
+	Name              string
+	Description       string
+	SystemPrompt      string
+	Model             string
+	Provider          string
+	MCPDefaultMode    string
+	DefaultMCPToolIDs []uint
+	DefaultSkillIDs   []uint
+	Color             string
+	Icon              string
+	SortOrder         int
+	Status            string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+}
+
+// ConversationRolePatch 表示角色的局部更新。
+type ConversationRolePatch struct {
+	Name              *string
+	Description       *string
+	SystemPrompt      *string
+	Model             *string
+	Provider          *string
+	MCPDefaultMode    *string
+	DefaultMCPToolIDs *[]uint
+	DefaultSkillIDs   *[]uint
+	Color             *string
+	Icon              *string
+	Status            *string
+}
+
 // ConversationShare 表示会话公开分享快照。
 type ConversationShare struct {
 	ID                    uint

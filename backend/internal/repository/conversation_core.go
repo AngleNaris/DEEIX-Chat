@@ -54,6 +54,12 @@ type ConversationMetadataRepository interface {
 	ReorderConversationProjects(ctx context.Context, userID uint, publicIDs []string) error
 	UpdateConversationProjectAssignmentByPublicID(ctx context.Context, userID uint, conversationPublicID string, projectID *uint) (*domainconversation.Conversation, error)
 	BatchUpdateConversationProjectByPublicIDs(ctx context.Context, userID uint, conversationPublicIDs []string, projectID *uint) (int64, error)
+	CreateConversationRole(ctx context.Context, item *domainconversation.ConversationRole) error
+	ListConversationRoles(ctx context.Context, userID uint, statusFilter string) ([]domainconversation.ConversationRole, error)
+	GetConversationRoleByPublicID(ctx context.Context, userID uint, publicID string) (*domainconversation.ConversationRole, error)
+	UpdateConversationRoleByPublicID(ctx context.Context, userID uint, publicID string, patch domainconversation.ConversationRolePatch) (*domainconversation.ConversationRole, error)
+	DeleteConversationRoleByPublicID(ctx context.Context, userID uint, publicID string) error
+	ReorderConversationRoles(ctx context.Context, userID uint, publicIDs []string) error
 	GetActiveConversationShareByConversation(ctx context.Context, userID uint, conversationID uint) (*domainconversation.ConversationShare, error)
 	GetLatestConversationShareByConversation(ctx context.Context, userID uint, conversationID uint) (*domainconversation.ConversationShare, error)
 	GetActiveConversationShareByShareID(ctx context.Context, shareID string) (*domainconversation.ConversationShare, *domainconversation.Conversation, error)

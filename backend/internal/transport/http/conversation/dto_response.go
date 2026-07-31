@@ -235,6 +235,48 @@ func toConversationProjectResponse(item *model.ConversationProject) Conversation
 	}
 }
 
+// ConversationRoleResponse 对外角色响应 DTO。
+type ConversationRoleResponse struct {
+	PublicID          string    `json:"publicID"`
+	Name              string    `json:"name"`
+	Description       string    `json:"description"`
+	SystemPrompt      string    `json:"systemPrompt"`
+	Model             string    `json:"model"`
+	Provider          string    `json:"provider"`
+	MCPDefaultMode    string    `json:"mcpDefaultMode"`
+	DefaultMCPToolIDs []uint    `json:"defaultMCPToolIDs"`
+	DefaultSkillIDs   []uint    `json:"defaultSkillIDs"`
+	Color             string    `json:"color"`
+	Icon              string    `json:"icon"`
+	SortOrder         int       `json:"sortOrder"`
+	Status            string    `json:"status"`
+	CreatedAt         time.Time `json:"createdAt"`
+	UpdatedAt         time.Time `json:"updatedAt"`
+}
+
+func toConversationRoleResponse(item *model.ConversationRole) ConversationRoleResponse {
+	if item == nil {
+		return ConversationRoleResponse{}
+	}
+	return ConversationRoleResponse{
+		PublicID:          item.PublicID,
+		Name:              item.Name,
+		Description:       item.Description,
+		SystemPrompt:      item.SystemPrompt,
+		Model:             item.Model,
+		Provider:          item.Provider,
+		MCPDefaultMode:    item.MCPDefaultMode,
+		DefaultMCPToolIDs: append([]uint{}, item.DefaultMCPToolIDs...),
+		DefaultSkillIDs:   append([]uint{}, item.DefaultSkillIDs...),
+		Color:             item.Color,
+		Icon:              item.Icon,
+		SortOrder:         item.SortOrder,
+		Status:            item.Status,
+		CreatedAt:         item.CreatedAt,
+		UpdatedAt:         item.UpdatedAt,
+	}
+}
+
 // BatchSetConversationProjectResponse 批量设置会话项目归属响应 DTO。
 type BatchSetConversationProjectResponse struct {
 	Updated int64 `json:"updated"`
@@ -1310,8 +1352,20 @@ type ConversationPreviewMessageListResponseDoc struct {
 
 // ConversationProjectResponseDoc 会话项目响应文档。
 type ConversationProjectResponseDoc struct {
-	ErrorMsg string                      `json:"errorMsg"`
 	Data     ConversationProjectResponse `json:"data"`
+	ErrorMsg string                      `json:"errorMsg"`
+}
+
+// ConversationRoleResponseDoc 角色响应文档。
+type ConversationRoleResponseDoc struct {
+	Data     ConversationRoleResponse `json:"data"`
+	ErrorMsg string                   `json:"errorMsg"`
+}
+
+// ConversationRoleListResponseDoc 角色列表响应文档。
+type ConversationRoleListResponseDoc struct {
+	Data     []ConversationRoleResponse `json:"data"`
+	ErrorMsg string                     `json:"errorMsg"`
 }
 
 // ConversationProjectListResponseDoc 会话项目列表响应文档。

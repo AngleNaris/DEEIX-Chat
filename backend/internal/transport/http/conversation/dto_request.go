@@ -37,6 +37,40 @@ type ReorderConversationProjectsRequest struct {
 	ProjectIDs []string `json:"projectIDs" binding:"required,max=200"`
 }
 
+// CreateConversationRoleRequest 创建角色请求。
+type CreateConversationRoleRequest struct {
+	Name              string `json:"name" binding:"required,max=80"`
+	Description       string `json:"description,omitempty" binding:"max=255"`
+	SystemPrompt      string `json:"systemPrompt,omitempty" binding:"max=12000"`
+	Model             string `json:"model,omitempty" binding:"max=128"`
+	Provider          string `json:"provider,omitempty" binding:"max=32"`
+	MCPDefaultMode    string `json:"mcpDefaultMode,omitempty" binding:"omitempty,oneof=inherit custom"`
+	DefaultMCPToolIDs []uint `json:"defaultMCPToolIDs,omitempty" binding:"max=128"`
+	DefaultSkillIDs   []uint `json:"defaultSkillIDs,omitempty" binding:"max=128"`
+	Color             string `json:"color,omitempty" binding:"max=32"`
+	Icon              string `json:"icon,omitempty" binding:"max=32"`
+}
+
+// UpdateConversationRoleRequest 更新角色请求。
+type UpdateConversationRoleRequest struct {
+	Name              *string `json:"name,omitempty" binding:"omitempty,max=80"`
+	Description       *string `json:"description,omitempty" binding:"omitempty,max=255"`
+	SystemPrompt      *string `json:"systemPrompt,omitempty" binding:"omitempty,max=12000"`
+	Model             *string `json:"model,omitempty" binding:"omitempty,max=128"`
+	Provider          *string `json:"provider,omitempty" binding:"omitempty,max=32"`
+	MCPDefaultMode    *string `json:"mcpDefaultMode,omitempty" binding:"omitempty,oneof=inherit custom"`
+	DefaultMCPToolIDs *[]uint `json:"defaultMCPToolIDs,omitempty" binding:"omitempty,max=128"`
+	DefaultSkillIDs   *[]uint `json:"defaultSkillIDs,omitempty" binding:"omitempty,max=128"`
+	Color             *string `json:"color,omitempty" binding:"omitempty,max=32"`
+	Icon              *string `json:"icon,omitempty" binding:"omitempty,max=32"`
+	Status            *string `json:"status,omitempty" binding:"omitempty,oneof=active archived"`
+}
+
+// ReorderConversationRolesRequest 更新角色排序请求。
+type ReorderConversationRolesRequest struct {
+	RoleIDs []string `json:"roleIDs" binding:"required,max=200"`
+}
+
 // SetConversationProjectRequest 设置会话项目归属请求。
 type SetConversationProjectRequest struct {
 	ProjectID string `json:"projectID,omitempty" binding:"omitempty,max=32"`
