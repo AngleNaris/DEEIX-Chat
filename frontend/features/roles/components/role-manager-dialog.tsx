@@ -17,6 +17,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollText, Sparkles, Trash2, PencilLine, Plus, CopyPlus } from "lucide-react";
+import data from "@emoji-mart/data";
+import Picker from "@emoji-mart/react";
 import { listAvailableMCPTools } from "@/shared/api/mcp";
 import type { MCPToolDTO } from "@/shared/api/mcp.types";
 import { listPublicModels } from "@/shared/api/model";
@@ -114,6 +116,7 @@ function RoleForm({
         : [...draft.defaultSkillIDs, skillID],
     );
   };
+  const [iconPickerOpen, setIconPickerOpen] = React.useState(false);
 
   return (
     <div className="min-h-0 space-y-4 overflow-y-auto px-0.5">
@@ -194,13 +197,46 @@ function RoleForm({
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1">
           <Label className="text-xs text-muted-foreground">图标</Label>
-          <Input
-            value={draft.icon}
-            maxLength={32}
-            placeholder="emoji 或图标名"
-            onChange={(event) => update("icon", event.target.value)}
-            disabled={submitting}
-          />
+          <div className="flex items-center gap-2">
+            <Input
+              value={draft.icon}
+              maxLength={32}
+              placeholder="emoji 或图标名"
+              onChange={(event) => update("icon", event.target.value)}
+              disabled={submitting}
+              className="min-w-0 flex-1"
+            />
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-9 shrink-0"
+              onClick={() => setIconPickerOpen((open) => !open)}
+              disabled={submitting}
+            >
+              {draft.icon ? <span className="text-sm leading-none">{draft.icon}</span> : <Sparkles className="size-4" strokeWidth={1.8} />}
+              <span className="ml-1.5 text-xs">选择 Emoji</span>
+            </Button>
+          </div>
+          {iconPickerOpen ? (
+            <div className="relative z-50 overflow-hidden rounded-md border border-border/60 bg-background">
+              <Picker
+                data={data}
+                onEmojiSelect={(emoji: { native?: string }) => {
+                  if (emoji?.native) {
+                    update("icon", emoji.native);
+                  }
+                  setIconPickerOpen(false);
+                }}
+                theme="auto"
+                previewPosition="none"
+                skinTonePosition="none"
+                navPosition="top"
+                searchPosition="sticky"
+                style={{ width: "100%", maxHeight: 260 }}
+              />
+            </div>
+          ) : null}
           <div className="flex flex-wrap gap-1 pt-1">
             {ICON_PRESETS.map((icon) => {
               const selected = draft.icon === icon;

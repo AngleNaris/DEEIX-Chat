@@ -21,8 +21,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { AnimatePresence, motion, type Transition } from "motion/react";
-import { RoleManagerDialog } from "@/features/roles/components/role-manager-dialog";
-import { ChevronDown, PencilLine, Sparkles, Star, StarOff, Trash } from "lucide-react";
+import { ChevronDown, PencilLine, Star, StarOff, Trash } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
@@ -116,7 +115,6 @@ function ProjectGroupHeader({
   contentID,
   open,
   onCreate,
-  onManageRoles,
   onOpenChange,
   toggleLabel,
 }: {
@@ -125,7 +123,6 @@ function ProjectGroupHeader({
   contentID: string;
   open: boolean;
   onCreate: () => void;
-  onManageRoles: () => void;
   onOpenChange: (open: boolean) => void;
   toggleLabel: string;
 }) {
@@ -158,16 +155,8 @@ function ProjectGroupHeader({
       </SidebarGroupLabel>
       <SidebarGroupAction
         type="button"
-        aria-label="角色管理"
-        className="relative top-auto right-auto ml-auto size-7 shrink-0 text-sidebar-foreground/45 opacity-100 transition-[color,opacity,transform] duration-150 after:pointer-events-none hover:bg-transparent hover:text-sidebar-foreground dark:hover:bg-transparent md:opacity-0 md:group-hover/project-create:opacity-100 md:group-has-[:focus-visible]/project-create:opacity-100"
-        onClick={onManageRoles}
-      >
-        <Sparkles aria-hidden size={14} strokeWidth={1.8} />
-      </SidebarGroupAction>
-      <SidebarGroupAction
-        type="button"
         aria-label={createLabel}
-        className="relative top-auto right-auto size-7 shrink-0 text-sidebar-foreground/45 opacity-100 transition-[color,opacity,transform] duration-150 after:pointer-events-none hover:bg-transparent hover:text-sidebar-foreground dark:hover:bg-transparent md:opacity-0 md:group-hover/project-create:opacity-100 md:group-has-[:focus-visible]/project-create:opacity-100"
+        className="relative top-auto right-auto ml-auto size-7 shrink-0 text-sidebar-foreground/45 opacity-100 transition-[color,opacity,transform] duration-150 after:pointer-events-none hover:bg-transparent hover:text-sidebar-foreground dark:hover:bg-transparent md:opacity-0 md:group-hover/project-create:opacity-100 md:group-has-[:focus-visible]/project-create:opacity-100"
         onMouseEnter={() => setCreateHovered(true)}
         onMouseLeave={() => setCreateHovered(false)}
         onClick={onCreate}
@@ -444,7 +433,6 @@ export function NavProjects() {
   const [draggingProjectID, setDraggingProjectID] = React.useState<string | null>(null);
   const [savingProjectOrder, setSavingProjectOrder] = React.useState(false);
   const [projectsOpen, setProjectsOpen] = useStoredBoolean(PROJECTS_OPEN_STORAGE_KEY, true);
-  const [rolesOpen, setRolesOpen] = React.useState(false);
   const activeConversationProjectID = React.useMemo(
     () => items.find((item) => item.publicID === activeConversationID)?.projectID ?? "",
     [activeConversationID, items],
@@ -712,7 +700,6 @@ export function NavProjects() {
                   defaultMCPToolIDs: [],
                   defaultSkillIDs: [],
                 })}
-                onManageRoles={() => setRolesOpen(true)}
                 onOpenChange={setProjectsOpen}
                 toggleLabel={projectsOpen ? t("collapseSection") : t("expandSection")}
               />
@@ -723,7 +710,6 @@ export function NavProjects() {
           </Collapsible>
         </div>
         <ProjectDialog draft={draft} setDraft={setDraft} onOpenChange={(open) => !open && closeDraft()} onSubmit={commitDraft} />
-        <RoleManagerDialog open={rolesOpen} onOpenChange={setRolesOpen} />
       </>
     );
   }
@@ -745,7 +731,6 @@ export function NavProjects() {
                 defaultMCPToolIDs: [],
                 defaultSkillIDs: [],
               })}
-              onManageRoles={() => setRolesOpen(true)}
               onOpenChange={setProjectsOpen}
               toggleLabel={projectsOpen ? t("collapseSection") : t("expandSection")}
             />
@@ -991,8 +976,6 @@ export function NavProjects() {
       </div>
 
       <ProjectDialog draft={draft} setDraft={setDraft} onOpenChange={(open) => !open && closeDraft()} onSubmit={commitDraft} />
-
-      <RoleManagerDialog open={rolesOpen} onOpenChange={setRolesOpen} />
 
       <AlertDialog
         open={Boolean(deleteTarget)}

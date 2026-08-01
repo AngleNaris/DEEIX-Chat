@@ -43,7 +43,10 @@ import type {
 } from "@deeix/api-contract";
 import type { UserStorageQuotaDTO } from "@/shared/api/file.types";
 
-export type ConversationDTO = ConversationResponse;
+export type ConversationDTO = ConversationResponse & {
+  roleID?: string;
+  roleName?: string;
+};
 
 export type ConversationSearchResultDTO = ConversationSearchResultResponse;
 

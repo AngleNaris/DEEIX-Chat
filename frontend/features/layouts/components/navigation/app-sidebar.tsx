@@ -13,6 +13,7 @@ import {
 import { NavControl } from "@/features/layouts/components/navigation/nav-control";
 import { NavMain } from "@/features/layouts/components/navigation/nav-main";
 import { NavProjects } from "@/features/layouts/components/navigation/nav-projects";
+import { NavRoles } from "@/features/layouts/components/navigation/nav-roles";
 import { NavRecents } from "@/features/layouts/components/navigation/nav-recents";
 import { NavStarred } from "@/features/layouts/components/navigation/nav-starred";
 import { NavUser } from "@/features/layouts/components/navigation/nav-user";
@@ -56,6 +57,7 @@ export function AppSidebar({
           className="min-h-0 flex-1 overflow-y-auto [overflow-anchor:none] [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
         >
           <LayoutGroup id="sidebar-conversations">
+            <NavRoles />
             <NavProjects />
             <NavStarred />
             <NavRecents />
