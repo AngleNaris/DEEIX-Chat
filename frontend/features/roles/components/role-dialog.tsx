@@ -16,7 +16,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { ScrollText, Sparkles, Trash2, PencilLine, Plus, CopyPlus } from "lucide-react";
+import { Sparkles, CopyPlus } from "lucide-react";
 import data from "@emoji-mart/data";
 import Picker from "@emoji-mart/react";
 import { listAvailableMCPTools } from "@/shared/api/mcp";
@@ -25,13 +25,6 @@ import { listPublicModels } from "@/shared/api/model";
 import type { PublicModelDTO } from "@/shared/api/model.types";
 import { listConversationProjects } from "@/shared/api/conversation";
 import type { ConversationProjectDTO } from "@/shared/api/conversation.types";
-import {
-  createConversationRole,
-  deleteConversationRole,
-  listConversationRoles,
-  updateConversationRole,
-} from "@/shared/api/roles";
-import type { ConversationRoleDTO } from "@/shared/api/roles.types";
 import { listVisibleSkills } from "@/shared/api/skills";
 import type { SkillSummaryDTO } from "@/shared/api/skills.types";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
@@ -39,7 +32,7 @@ import { cn } from "@/lib/utils";
 
 const ICON_PRESETS = ["✨", "🦉", "🦊", "🐉", "🧙", "⚔️", "🎨", "🎬", "📝", "💡", "🔮", "🛡️", "🎵", "🧪", "🗡️", "👾", "🤖", "🌙", "⚡", "💎"];
 
-type RoleDraft = {
+export type RoleDraft = {
   publicID?: string;
   name: string;
   description: string;
@@ -52,7 +45,7 @@ type RoleDraft = {
   icon: string;
 };
 
-const EMPTY_DRAFT: RoleDraft = {
+export const EMPTY_ROLE_DRAFT: RoleDraft = {
   name: "",
   description: "",
   systemPrompt: "",
@@ -74,7 +67,7 @@ function RoleForm({
   submitting,
 }: {
   draft: RoleDraft;
-  setDraft: (next: RoleDraft) => void;
+  setDraft: React.Dispatch<React.SetStateAction<RoleDraft>>;
   models: PublicModelDTO[];
   mcpTools: MCPToolDTO[];
   skills: SkillSummaryDTO[];
@@ -357,125 +350,86 @@ function RoleForm({
   );
 }
 
-export function RoleManagerDialog({
-  open,
+export function RoleDialog({
+  draft,
+  setDraft,
   onOpenChange,
+  onSubmit,
 }: {
-  open: boolean;
+  draft: RoleDraft | null;
+  setDraft: React.Dispatch<React.SetStateAction<RoleDraft | null>>;
   onOpenChange: (open: boolean) => void;
+  onSubmit: () => void | Promise<void>;
 }) {
   const t = useTranslations("recent.projects");
-  const [roles, setRoles] = React.useState<ConversationRoleDTO[]>([]);
-  const [projects, setProjects] = React.useState<ConversationProjectDTO[]>([]);
   const [models, setModels] = React.useState<PublicModelDTO[]>([]);
   const [mcpTools, setMCPTools] = React.useState<MCPToolDTO[]>([]);
   const [skills, setSkills] = React.useState<SkillSummaryDTO[]>([]);
+  const [projects, setProjects] = React.useState<ConversationProjectDTO[]>([]);
   const [loading, setLoading] = React.useState(false);
-  const [submitting, setSubmitting] = React.useState(false);
-  const [editing, setEditing] = React.useState<RoleDraft | null>(null);
 
-  const load = React.useCallback(async () => {
-    setLoading(true);
-    try {
-      const accessToken = await resolveAccessToken();
-      const [roleItems, modelItems, toolItems, skillItems, projectItems] = await Promise.all([
-        listConversationRoles(accessToken, { status: "all" }),
-        listPublicModels(accessToken),
-        listAvailableMCPTools(accessToken),
-        listVisibleSkills(accessToken, { page: 1, pageSize: 100 }).then((page) => page.results),
-        listConversationProjects(accessToken),
-      ]);
-      setRoles(roleItems);
-      setModels(modelItems);
-      setMCPTools(toolItems);
-      setSkills(skillItems);
-      setProjects(projectItems);
-    } catch {
-      toast.error(t("loadFailed") || "加载角色失败");
-    } finally {
-      setLoading(false);
-    }
-  }, [t]);
+  const open = draft !== null;
 
   React.useEffect(() => {
-    if (open) {
-      void load();
-    }
-  }, [open, load]);
-
-  const close = React.useCallback(() => {
-    setEditing(null);
-    onOpenChange(false);
-  }, [onOpenChange]);
-
-  const commitDraft = React.useCallback(async () => {
-    if (!editing) {
+    if (!open) {
       return;
     }
-    if (!editing.name.trim()) {
-      toast.error("角色名称不能为空");
-      return;
-    }
-    setSubmitting(true);
-    try {
-      const accessToken = await resolveAccessToken();
-      const payload = {
-        name: editing.name.trim(),
-        description: editing.description,
-        systemPrompt: editing.systemPrompt,
-        model: editing.model,
-        provider: "",
-        mcpDefaultMode: editing.mcpDefaultMode,
-        defaultMCPToolIDs: editing.defaultMCPToolIDs,
-        defaultSkillIDs: editing.defaultSkillIDs,
-        color: editing.color,
-        icon: editing.icon,
-      };
-      if (editing.publicID) {
-        await updateConversationRole(accessToken, editing.publicID, payload);
-      } else {
-        await createConversationRole(accessToken, payload);
-      }
-      toast.success(editing.publicID ? "角色已更新" : "角色已创建");
-      setEditing(null);
-      await load();
-    } catch {
-      toast.error("保存角色失败");
-    } finally {
-      setSubmitting(false);
-    }
-  }, [editing, load]);
-
-  const removeRole = React.useCallback(
-    async (role: ConversationRoleDTO) => {
-      if (!window.confirm(`确定删除角色「${role.name}」吗？`)) {
+    let cancelled = false;
+    setLoading(true);
+    void resolveAccessToken().then(async (token) => {
+      if (!token) {
         return;
       }
       try {
-        const accessToken = await resolveAccessToken();
-        await deleteConversationRole(accessToken, role.publicID);
-        toast.success("角色已删除");
-        await load();
+        const [modelItems, toolItems, skillItems, projectItems] = await Promise.all([
+          listPublicModels(token),
+          listAvailableMCPTools(token),
+          listVisibleSkills(token, { page: 1, pageSize: 100 }).then((page) => page.results),
+          listConversationProjects(token),
+        ]);
+        if (!cancelled) {
+          setModels(modelItems);
+          setMCPTools(toolItems);
+          setSkills(skillItems);
+          setProjects(projectItems);
+        }
       } catch {
-        toast.error("删除角色失败");
+        toast.error(t("loadFailed") || "加载数据失败");
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
-    },
-    [load],
-  );
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, t]);
+
+  const submitting = loading;
 
   return (
-    <Dialog open={open} onOpenChange={(next) => (next ? undefined : close())}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) {
+          setDraft(null);
+          onOpenChange(false);
+        }
+      }}
+    >
       <DialogContent className="overflow-hidden sm:max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>角色管理</DialogTitle>
-          <DialogDescription>创建和管理独立的助手角色，角色自带提示词、默认模型与图标</DialogDescription>
-        </DialogHeader>
-
-        {editing ? (
+        {draft ? (
           <>
+            <DialogHeader>
+              <DialogTitle>{draft.publicID ? "编辑角色" : "新建角色"}</DialogTitle>
+              <DialogDescription>
+                角色自带提示词、默认模型与图标；保存后可在左侧角色区直接开始对话
+              </DialogDescription>
+            </DialogHeader>
             <RoleForm
-              draft={editing}
-              setDraft={setEditing}
+              draft={draft}
+              setDraft={setDraft}
               models={models}
               mcpTools={mcpTools}
               skills={skills}
@@ -483,100 +437,15 @@ export function RoleManagerDialog({
               submitting={submitting}
             />
             <DialogFooter>
-              <Button type="button" variant="ghost" onClick={() => setEditing(null)} disabled={submitting}>
+              <Button type="button" variant="ghost" onClick={() => setDraft(null)} disabled={submitting}>
                 取消
               </Button>
-              <Button type="button" onClick={() => void commitDraft()} disabled={submitting || !editing.name.trim()}>
-                {editing.publicID ? "保存修改" : "创建角色"}
+              <Button type="button" onClick={() => void onSubmit()} disabled={submitting || !draft.name.trim()}>
+                {draft.publicID ? "保存修改" : "创建角色"}
               </Button>
             </DialogFooter>
           </>
-        ) : (
-          <>
-            <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-0.5">
-              {loading ? (
-                <p className="py-8 text-center text-sm text-muted-foreground">加载中…</p>
-              ) : roles.length === 0 ? (
-                <div className="py-8 text-center">
-                  <Sparkles className="mx-auto size-8 text-muted-foreground/50" strokeWidth={1.5} />
-                  <p className="mt-2 text-sm text-muted-foreground">还没有角色，点击右下角创建第一个</p>
-                </div>
-              ) : (
-                roles.map((role) => (
-                  <div
-                    key={role.publicID}
-                    className="flex items-center gap-3 rounded-lg border border-border/60 bg-muted/20 px-3 py-2.5"
-                  >
-                    <div
-                      className="flex size-9 shrink-0 items-center justify-center rounded-md text-base"
-                      style={{ backgroundColor: role.color || "var(--muted)" }}
-                    >
-                      {role.icon ? (
-                        <span className="text-base">{role.icon}</span>
-                      ) : (
-                        <ScrollText className="size-4 text-muted-foreground" strokeWidth={1.7} />
-                      )}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium text-foreground">{role.name}</p>
-                      <p className="truncate text-xs text-muted-foreground">
-                        {role.model || "跟随全局默认模型"}
-                        {role.systemPrompt ? ` · ${role.systemPrompt.length} 字提示词` : ""}
-                      </p>
-                    </div>
-                    <div className="flex shrink-0 items-center gap-1">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="size-8 text-muted-foreground hover:text-foreground"
-                        onClick={() =>
-                          setEditing({
-                            publicID: role.publicID,
-                            name: role.name,
-                            description: role.description,
-                            systemPrompt: role.systemPrompt,
-                            model: role.model,
-                            mcpDefaultMode: role.mcpDefaultMode,
-                            defaultMCPToolIDs: role.defaultMCPToolIDs,
-                            defaultSkillIDs: role.defaultSkillIDs,
-                            color: role.color,
-                            icon: role.icon,
-                          })
-                        }
-                      >
-                        <PencilLine className="size-4" strokeWidth={1.7} />
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="size-8 text-muted-foreground hover:text-destructive"
-                        onClick={() => void removeRole(role)}
-                      >
-                        <Trash2 className="size-4" strokeWidth={1.7} />
-                      </Button>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-            <DialogFooter>
-              <Button
-                type="button"
-                onClick={() =>
-                  setEditing({
-                    ...EMPTY_DRAFT,
-                    model: models[0]?.platformModelName ?? "",
-                  })
-                }
-              >
-                <Plus className="mr-1.5 size-4" strokeWidth={1.8} />
-                新建角色
-              </Button>
-            </DialogFooter>
-          </>
-        )}
+        ) : null}
       </DialogContent>
     </Dialog>
   );

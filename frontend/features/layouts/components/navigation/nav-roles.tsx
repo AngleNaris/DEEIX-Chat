@@ -18,15 +18,23 @@ import {
   SidebarMenu,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
-import { ChevronDown, LoaderCircle, Plus, Sparkles } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { ChevronDown, LoaderCircle, MoreHorizontal, PencilLine, Plus, Trash2, Sparkles } from "lucide-react";
+import { PlusIcon } from "@/components/ui/plus";
 import { cn } from "@/lib/utils";
-import { listConversationRoles } from "@/shared/api/roles";
+import { listConversationRoles, createConversationRole, updateConversationRole, deleteConversationRole } from "@/shared/api/roles";
 import type { ConversationRoleDTO } from "@/shared/api/roles.types";
 import type { ConversationDTO } from "@/shared/api/conversation.types";
 import { useSidebarConversations } from "@/entities/conversation";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 import { useStoredBoolean } from "@/shared/hooks/use-stored-boolean";
-import { RoleManagerDialog } from "@/features/roles/components/role-manager-dialog";
+import { RoleDialog, EMPTY_ROLE_DRAFT, type RoleDraft } from "@/features/roles/components/role-dialog";
 
 const ROLES_OPEN_STORAGE_KEY = "deeix-roles-open";
 
@@ -48,9 +56,11 @@ export function NavRoles() {
   const { items, prependNewConversation } = useSidebarConversations();
   const [roles, setRoles] = React.useState<ConversationRoleDTO[]>([]);
   const [rolesOpen, setRolesOpen] = useStoredBoolean(ROLES_OPEN_STORAGE_KEY, true);
-  const [rolesDialogOpen, setRolesDialogOpen] = React.useState(false);
+  const [draft, setDraft] = React.useState<RoleDraft | null>(null);
   const [expandedRoleIDs, setExpandedRoleIDs] = React.useState<Set<string>>(new Set());
   const [startingRoleID, setStartingRoleID] = React.useState<string | null>(null);
+  const [submitting, setSubmitting] = React.useState(false);
+  const [openMenuID, setOpenMenuID] = React.useState<string | null>(null);
 
   const loadRoles = React.useCallback(async () => {
     const token = await resolveAccessToken();
@@ -113,6 +123,62 @@ export function NavRoles() {
     }
   };
 
+  const commitDraft = React.useCallback(async () => {
+    if (!draft) {
+      return;
+    }
+    if (!draft.name.trim()) {
+      toast.error("角色名称不能为空");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const token = await resolveAccessToken();
+      const payload = {
+        name: draft.name.trim(),
+        description: draft.description,
+        systemPrompt: draft.systemPrompt,
+        model: draft.model,
+        provider: "",
+        mcpDefaultMode: draft.mcpDefaultMode,
+        defaultMCPToolIDs: draft.defaultMCPToolIDs,
+        defaultSkillIDs: draft.defaultSkillIDs,
+        color: draft.color,
+        icon: draft.icon,
+      };
+      if (draft.publicID) {
+        await updateConversationRole(token, draft.publicID, payload);
+        toast.success("角色已更新");
+      } else {
+        await createConversationRole(token, payload);
+        toast.success("角色已创建");
+      }
+      setDraft(null);
+      await loadRoles();
+    } catch {
+      toast.error("保存角色失败");
+    } finally {
+      setSubmitting(false);
+    }
+  }, [draft, loadRoles]);
+
+  const removeRole = React.useCallback(
+    async (role: ConversationRoleDTO) => {
+      if (!window.confirm(`确定删除角色「${role.name}」吗？`)) {
+        return;
+      }
+      try {
+        const token = await resolveAccessToken();
+        await deleteConversationRole(token, role.publicID);
+        toast.success("角色已删除");
+        await loadRoles();
+      } catch {
+        toast.error("删除角色失败");
+      }
+    },
+    [loadRoles],
+  );
+
   return (
     <>
       <div className="relative z-10 group-data-[collapsible=icon]:pointer-events-none group-data-[collapsible=icon]:opacity-0">
@@ -139,11 +205,11 @@ export function NavRoles() {
               </SidebarGroupLabel>
               <SidebarGroupAction
                 type="button"
-                aria-label="角色管理"
-                className="relative top-auto right-auto ml-auto size-7 shrink-0 text-sidebar-foreground/45 opacity-100 transition-[color,opacity,transform] duration-150 after:pointer-events-none hover:bg-transparent hover:text-sidebar-foreground dark:hover:bg-transparent"
-                onClick={() => setRolesDialogOpen(true)}
+                aria-label="新建角色"
+                className="relative top-auto right-auto ml-auto size-7 shrink-0 text-sidebar-foreground/45 opacity-100 transition-[color,opacity,transform] duration-150 after:pointer-events-none hover:bg-transparent hover:text-sidebar-foreground dark:hover:bg-transparent md:opacity-0 md:group-hover/project-create:opacity-100 md:group-has-[:focus-visible]/project-create:opacity-100"
+                onClick={() => setDraft({ ...EMPTY_ROLE_DRAFT })}
               >
-                <Sparkles aria-hidden size={14} strokeWidth={1.8} />
+                <PlusIcon aria-hidden size={14} strokeWidth={1.8} />
               </SidebarGroupAction>
             </div>
             <CollapsibleContent>
@@ -157,56 +223,94 @@ export function NavRoles() {
                     const expanded = expandedRoleIDs.has(role.publicID);
                     const conversations = conversationsByRole.get(role.publicID) ?? [];
                     const starting = startingRoleID === role.publicID;
+                    const menuOpen = openMenuID === role.publicID;
                     return (
                       <SidebarMenuItem key={role.publicID}>
                         <Collapsible open={expanded} onOpenChange={() => toggleRole(role.publicID)}>
-                          <div className="flex h-8 w-full items-center gap-1.5 rounded-md px-2 text-sm transition-colors hover:bg-accent">
-                            <button
-                              type="button"
-                              className="flex min-w-0 flex-1 items-center gap-2 py-1.5 text-left"
-                              title={`以「${role.name}」开始新对话`}
-                              onClick={() => void startRoleChat(role)}
-                              disabled={Boolean(startingRoleID)}
-                            >
-                              <span
-                                className="flex size-6 shrink-0 items-center justify-center rounded text-sm"
-                                style={{ backgroundColor: role.color || "var(--muted)" }}
-                              >
-                                {role.icon ? (
-                                  <span className="text-sm leading-none">{role.icon}</span>
-                                ) : (
-                                  <Sparkles className="size-3.5 text-muted-foreground" strokeWidth={1.8} />
-                                )}
-                              </span>
-                              <span className="min-w-0 flex-1 truncate text-xs">{role.name}</span>
-                              {starting ? (
-                                <LoaderCircle className="size-3.5 animate-spin text-muted-foreground" />
-                              ) : null}
-                            </button>
-                            <span className="shrink-0 text-[10px] text-muted-foreground/70">{conversations.length}</span>
+                          <div className="group/role-row flex h-8 w-full items-center gap-0.5 rounded-md px-1 pr-2 text-sm transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground">
                             <CollapsibleTrigger asChild>
                               <button
                                 type="button"
-                                aria-label={expanded ? "收起对话" : "展开对话"}
-                                className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-muted hover:text-foreground"
+                                className="flex h-8 min-w-0 flex-1 items-center gap-1.5 py-1.5 text-left"
+                                aria-expanded={expanded}
+                                aria-label={role.name}
+                                onClick={() => toggleRole(role.publicID)}
                               >
-                                <ChevronDown
-                                  className={cn("!size-3.5 transition-transform duration-200", expanded && "rotate-180")}
-                                />
+                                <span
+                                  className="flex size-6 shrink-0 items-center justify-center rounded text-sm"
+                                  style={{ backgroundColor: role.color || "var(--muted)" }}
+                                >
+                                  {role.icon ? (
+                                    <span className="text-sm leading-none">{role.icon}</span>
+                                  ) : (
+                                    <Sparkles className="size-3.5 text-muted-foreground" strokeWidth={1.8} />
+                                  )}
+                                </span>
+                                <span className="min-w-0 flex-1 truncate text-xs">{role.name}</span>
                               </button>
                             </CollapsibleTrigger>
-                          </div>
-                          <CollapsibleContent>
-                            <div className="pb-1 pl-7 pr-1">
+                            <span className="shrink-0 text-[10px] text-muted-foreground/70">{conversations.length}</span>
+                            <div className="flex shrink-0 items-center">
                               <button
                                 type="button"
-                                className="flex h-7 w-full items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                                aria-label={`以「${role.name}」开始新对话`}
+                                className={cn(
+                                  "flex size-6 items-center justify-center rounded-md text-sidebar-foreground/45 transition-colors hover:bg-sidebar-accent-foreground/10 hover:text-sidebar-foreground",
+                                  starting && "pointer-events-none",
+                                )}
                                 onClick={() => void startRoleChat(role)}
                                 disabled={Boolean(startingRoleID)}
                               >
-                                <Plus className="size-3.5" strokeWidth={2} />
-                                新对话
+                                {starting ? (
+                                  <LoaderCircle className="size-3.5 animate-spin" />
+                                ) : (
+                                  <Plus className="size-4" strokeWidth={1.8} />
+                                )}
                               </button>
+                              <DropdownMenu open={menuOpen} onOpenChange={(open) => setOpenMenuID(open ? role.publicID : null)}>
+                                <DropdownMenuTrigger asChild>
+                                  <button
+                                    type="button"
+                                    aria-label="角色操作"
+                                    className="flex size-6 items-center justify-center rounded-md text-sidebar-foreground/45 transition-colors hover:bg-sidebar-accent-foreground/10 hover:text-sidebar-foreground"
+                                  >
+                                    <MoreHorizontal className="size-4" strokeWidth={1.8} />
+                                  </button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="start" className="w-40">
+                                  <DropdownMenuItem
+                                    onClick={() =>
+                                      setDraft({
+                                        publicID: role.publicID,
+                                        name: role.name,
+                                        description: role.description,
+                                        systemPrompt: role.systemPrompt,
+                                        model: role.model,
+                                        mcpDefaultMode: role.mcpDefaultMode,
+                                        defaultMCPToolIDs: role.defaultMCPToolIDs,
+                                        defaultSkillIDs: role.defaultSkillIDs,
+                                        color: role.color,
+                                        icon: role.icon,
+                                      })
+                                    }
+                                  >
+                                    <PencilLine className="mr-2 size-4" strokeWidth={1.7} />
+                                    编辑角色
+                                  </DropdownMenuItem>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem
+                                    className="text-destructive focus:text-destructive"
+                                    onClick={() => void removeRole(role)}
+                                  >
+                                    <Trash2 className="mr-2 size-4" strokeWidth={1.7} />
+                                    删除角色
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </div>
+                          </div>
+                          <CollapsibleContent>
+                            <div className="pb-1 pl-7 pr-1">
                               {conversations.length === 0 ? (
                                 <p className="px-2 py-1 text-[11px] text-muted-foreground/60">暂无对话</p>
                               ) : (
@@ -235,7 +339,7 @@ export function NavRoles() {
           </SidebarGroup>
         </Collapsible>
       </div>
-      <RoleManagerDialog open={rolesDialogOpen} onOpenChange={setRolesDialogOpen} />
+      <RoleDialog draft={draft} setDraft={setDraft} onOpenChange={(open) => !open && setDraft(null)} onSubmit={commitDraft} />
     </>
   );
 }
