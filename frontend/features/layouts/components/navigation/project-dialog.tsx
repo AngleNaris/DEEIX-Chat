@@ -37,7 +37,7 @@ export type ProjectDraft = {
   defaultSkillIDs: number[];
 };
 
-type ProjectDefaultOption = {
+export type ProjectDefaultOption = {
   id: number;
   label: string;
   detail: string;
@@ -315,7 +315,7 @@ async function listAllVisibleSkills(accessToken: string): Promise<SkillSummaryDT
   return results;
 }
 
-function ProjectDefaultSelector({
+export function ProjectDefaultSelector({
   icon: Icon,
   label,
   description,

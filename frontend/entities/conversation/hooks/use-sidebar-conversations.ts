@@ -7,6 +7,7 @@ import { readAccessToken } from "@/shared/auth/session";
 import { dispatchFileLibraryInvalidated } from "@/shared/events/file-library-events";
 import { runBulkActionInChunks } from "@/shared/lib/bulk-action";
 import { resolveConversationDefaultModel } from "@/shared/model/conversation-default-model";
+import { getConversationRole } from "@/shared/api/roles";
 import {
   batchSetConversationProject,
   createConversation,
@@ -481,9 +482,20 @@ export function useSidebarConversationsController({
     }
     const explicitModel = platformModelName?.trim() || "";
     const modelName = explicitModel || (await resolveConversationDefaultModel({ accessToken: token })).platformModelName;
+    let resolvedTitle = newConversationTitle;
+    if (roleID?.trim()) {
+      try {
+        const role = await getConversationRole(token, roleID.trim());
+        if (role?.name) {
+          resolvedTitle = role.name;
+        }
+      } catch {
+        // 角色查询失败时使用默认标题
+      }
+    }
 
     const item = await createConversation(token, {
-      title: newConversationTitle,
+      title: resolvedTitle,
       model: modelName,
       projectID: projectID?.trim() || "",
       roleID: roleID?.trim() || "",

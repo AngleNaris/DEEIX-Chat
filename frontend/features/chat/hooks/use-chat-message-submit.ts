@@ -216,7 +216,6 @@ type QueuedChatSubmission = BranchScope & {
   selectedToolIDs: number[];
   selectedSkills: SkillSummaryDTO[];
   selectedPrompts: PromptPresetDTO[];
-  selectedRoleID: string;
   htmlVisualPromptEnabled: boolean;
 };
 
@@ -468,7 +467,6 @@ export function useChatMessageSubmit({
   selectedToolIDs,
   selectedSkills,
   selectedPrompts,
-  selectedRoleID,
   htmlVisualPromptEnabled,
   options,
   draft,
@@ -514,7 +512,6 @@ export function useChatMessageSubmit({
   selectedToolIDs: number[];
   selectedSkills: SkillSummaryDTO[];
   selectedPrompts: PromptPresetDTO[];
-  selectedRoleID: string;
   htmlVisualPromptEnabled: boolean;
   options: ConversationOptions;
   draft: string;
@@ -960,7 +957,7 @@ export function useChatMessageSubmit({
         };
 
         if (!targetConversationID) {
-          const created = await prependNewConversation(requestPlatformModelName, undefined, selectedRoleID);
+          const created = await prependNewConversation(requestPlatformModelName);
           if (streamAbortController.signal.aborted) {
             throw new DOMException("Aborted", "AbortError");
           }
@@ -1476,7 +1473,6 @@ export function useChatMessageSubmit({
       selectedToolIDs,
       selectedSkills,
       selectedPrompts,
-      selectedRoleID,
       htmlVisualPromptEnabled,
       selectedPlatformModelName,
       setAttachments,
@@ -1575,7 +1571,6 @@ export function useChatMessageSubmit({
           selectedToolIDs: selectedToolIDs.slice(),
           selectedSkills: selectedSkills.slice(),
           selectedPrompts: selectedPrompts.slice(),
-          selectedRoleID,
           htmlVisualPromptEnabled,
         },
       ];

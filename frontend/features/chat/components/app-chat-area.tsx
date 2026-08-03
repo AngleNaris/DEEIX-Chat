@@ -365,7 +365,6 @@ export function AppChatArea() {
     hasConversation: Boolean(conversationID),
   });
   const [selectedPrompts, setSelectedPrompts] = React.useState<PromptPresetDTO[]>([]);
-  const [selectedRoleID, setSelectedRoleID] = React.useState("");
   const [defaultToolIDs, setDefaultToolIDs] = React.useState<number[]>([]);
   const newConversationSelectionKey = `${newConversationRevision}:${newConversationProjectID || "unassigned"}`;
   const newConversationDefaultMCPToolIDs = React.useMemo(
@@ -587,7 +586,6 @@ export function AppChatArea() {
     selectedToolIDs,
     selectedSkills,
     selectedPrompts,
-    selectedRoleID,
     htmlVisualPromptEnabled: htmlVisualPrompt.enabled,
     options: modelOptionPolicyDisabled ? EMPTY_CONVERSATION_OPTIONS : options,
     draft,
@@ -1135,8 +1133,6 @@ export function AppChatArea() {
     onModelCatalogRefresh: refreshModelCatalogForComposer,
     onSelectedToolsChange,
     onSelectedPromptsChange: setSelectedPrompts,
-    selectedRoleID,
-    onSelectedRoleIDChange: setSelectedRoleID,
     maxSelectedSkills: mcpMaxSelectedTools,
     onSelectedSkillsChange,
     onDefaultToolsChange: onDefaultToolIDsChange,

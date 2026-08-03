@@ -27,7 +27,6 @@ export function useChatSubmitStream({
   selectedToolIDs,
   selectedSkills,
   selectedPrompts,
-  selectedRoleID,
   htmlVisualPromptEnabled,
   options,
   draft,
@@ -67,7 +66,6 @@ export function useChatSubmitStream({
   selectedToolIDs: number[];
   selectedSkills: SkillSummaryDTO[];
   selectedPrompts: PromptPresetDTO[];
-  selectedRoleID: string;
   htmlVisualPromptEnabled: boolean;
   options: ConversationOptions;
   draft: string;
@@ -112,7 +110,6 @@ export function useChatSubmitStream({
     selectedToolIDs,
     selectedSkills,
     selectedPrompts,
-    selectedRoleID,
     htmlVisualPromptEnabled,
     options,
     draft,

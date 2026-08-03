@@ -5,20 +5,22 @@ import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Sparkles, CopyPlus, Box, Globe2, SlidersHorizontal, Wrench } from "lucide-react";
+import data from "@emoji-mart/data";
+import Picker from "@emoji-mart/react";
 import {
   Dialog,
+  DialogCollapsible,
   DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { Sparkles, CopyPlus } from "lucide-react";
-import data from "@emoji-mart/data";
-import Picker from "@emoji-mart/react";
+import { ProjectDefaultSelector } from "@/features/layouts/components/navigation/project-dialog";
 import { listAvailableMCPTools } from "@/shared/api/mcp";
 import type { MCPToolDTO } from "@/shared/api/mcp.types";
 import { listPublicModels } from "@/shared/api/model";
@@ -274,77 +276,78 @@ function RoleForm({
         </div>
       </div>
       <div className="space-y-2 border-t border-border/60 pt-3">
-        <div className="flex items-center justify-between">
-          <Label className="text-xs text-muted-foreground">默认 MCP 工具</Label>
-          <select
-            value={draft.mcpDefaultMode}
-            onChange={(event) => update("mcpDefaultMode", event.target.value as "inherit" | "custom")}
+        <p className="text-xs text-muted-foreground">默认 MCP 工具</p>
+        <div className="flex w-full items-center gap-1 rounded-md bg-muted/60 p-1">
+          <Button
+            type="button"
+            aria-pressed={draft.mcpDefaultMode === "inherit"}
+            variant="ghost"
+            size="sm"
+            className={draft.mcpDefaultMode === "inherit"
+              ? "h-7 min-w-0 gap-1.5 rounded-sm bg-background px-2 text-foreground shadow-sm hover:bg-background"
+              : "h-7 min-w-0 gap-1.5 rounded-sm px-2 text-muted-foreground hover:bg-transparent hover:text-foreground"}
             disabled={submitting}
-            className="h-8 rounded-md border border-input bg-transparent px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+            onClick={() => update("mcpDefaultMode", "inherit")}
           >
-            <option value="inherit">继承全局</option>
-            <option value="custom">自定义</option>
-          </select>
+            <Globe2 className="size-3.5 shrink-0" strokeWidth={1.7} />
+            <span className="truncate">继承全局</span>
+          </Button>
+          <Button
+            type="button"
+            aria-pressed={draft.mcpDefaultMode === "custom"}
+            variant="ghost"
+            size="sm"
+            className={draft.mcpDefaultMode === "custom"
+              ? "h-7 min-w-0 gap-1.5 rounded-sm bg-background px-2 text-foreground shadow-sm hover:bg-background"
+              : "h-7 min-w-0 gap-1.5 rounded-sm px-2 text-muted-foreground hover:bg-transparent hover:text-foreground"}
+            disabled={submitting}
+            onClick={() => update("mcpDefaultMode", "custom")}
+          >
+            <SlidersHorizontal className="size-3.5 shrink-0" strokeWidth={1.7} />
+            <span className="truncate">自定义</span>
+          </Button>
         </div>
-        {draft.mcpDefaultMode === "custom" ? (
-          <div className="max-h-28 space-y-1 overflow-y-auto rounded-md border border-border/60 p-2">
-            {mcpTools.length === 0 ? (
-              <p className="px-2 py-3 text-center text-xs text-muted-foreground">暂无可用 MCP 工具</p>
-            ) : (
-              mcpTools.map((tool) => {
-                const selected = draft.defaultMCPToolIDs.includes(tool.id);
-                return (
-                  <label
-                    key={tool.id}
-                    className="flex min-h-8 cursor-pointer items-center gap-2 rounded px-2 py-1 text-xs transition-colors hover:bg-accent"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={selected}
-                      onChange={() => toggleMCPTool(tool.id)}
-                      disabled={submitting}
-                      className="size-3.5 shrink-0 accent-primary"
-                    />
-                    <span className="min-w-0 flex-1 truncate">
-                      {tool.displayName || tool.name}
-                      {tool.serverName ? <span className="ml-1 text-muted-foreground">({tool.serverName})</span> : null}
-                    </span>
-                  </label>
-                );
-              })
-            )}
-          </div>
-        ) : null}
+        <DialogCollapsible open={draft.mcpDefaultMode === "custom"}>
+          <ProjectDefaultSelector
+            icon={Wrench}
+            label="选择 MCP 工具"
+            description="为该角色预设可用的 MCP 工具"
+            emptyLabel="选择 MCP 工具…"
+            searchPlaceholder="搜索 MCP 工具…"
+            options={mcpTools.map((tool) => ({
+              id: tool.id,
+              label: tool.displayName || tool.name,
+              detail: tool.serverName ?? "",
+            }))}
+            selectedIDs={draft.defaultMCPToolIDs}
+            selectionLimit={128}
+            loading={false}
+            disabled={submitting}
+            onChange={(defaultMCPToolIDs) => update("defaultMCPToolIDs", defaultMCPToolIDs)}
+          />
+        </DialogCollapsible>
+        <DialogCollapsible open={draft.mcpDefaultMode === "inherit"}>
+          <p className="pt-1 text-[11px] leading-4 text-muted-foreground">继承全局 MCP 工具配置</p>
+        </DialogCollapsible>
       </div>
       <div className="space-y-2 border-t border-border/60 pt-3">
-        <Label className="text-xs text-muted-foreground">默认 Skills</Label>
-        <div className="max-h-28 space-y-1 overflow-y-auto rounded-md border border-border/60 p-2">
-          {skills.length === 0 ? (
-            <p className="px-2 py-3 text-center text-xs text-muted-foreground">暂无可用技能</p>
-          ) : (
-            skills.map((skill) => {
-              const selected = draft.defaultSkillIDs.includes(skill.id);
-              return (
-                <label
-                  key={skill.id}
-                  className="flex min-h-8 cursor-pointer items-center gap-2 rounded px-2 py-1 text-xs transition-colors hover:bg-accent"
-                >
-                  <input
-                    type="checkbox"
-                    checked={selected}
-                    onChange={() => toggleSkill(skill.id)}
-                    disabled={submitting}
-                    className="size-3.5 shrink-0 accent-primary"
-                  />
-                  <span className="min-w-0 flex-1 truncate">
-                    {skill.trigger || skill.title}
-                    <span className="ml-1 text-muted-foreground">{skill.description}</span>
-                  </span>
-                </label>
-              );
-            })
-          )}
-        </div>
+        <ProjectDefaultSelector
+          icon={Box}
+          label="默认 Skills"
+          description="为该角色预设技能"
+          emptyLabel="选择技能…"
+          searchPlaceholder="搜索技能…"
+          options={skills.map((skill) => ({
+            id: skill.id,
+            label: skill.title,
+            detail: skill.description.trim() || (skill.trigger ? `/${skill.trigger}` : ""),
+          }))}
+          selectedIDs={draft.defaultSkillIDs}
+          selectionLimit={128}
+          loading={false}
+          disabled={submitting}
+          onChange={(defaultSkillIDs) => update("defaultSkillIDs", defaultSkillIDs)}
+        />
       </div>
     </div>
   );

@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import dynamic from "next/dynamic";
-import { Box, CornerDownRight, Film, Image, ImageOff, ImagePlus, LoaderCircle, PencilLine, ScrollText, Sparkles, Trash2 } from "lucide-react";
+import { Box, CornerDownRight, Film, Image, ImageOff, ImagePlus, LoaderCircle, PencilLine, ScrollText, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
@@ -63,9 +63,6 @@ import type { FileObjectDTO } from "@/shared/api/file.types";
 import type { MCPToolDTO } from "@/shared/api/mcp.types";
 import type { PromptPresetDTO } from "@/shared/api/prompt-presets.types";
 import type { SkillSummaryDTO } from "@/shared/api/skills.types";
-import { listConversationRoles } from "@/shared/api/roles";
-import type { ConversationRoleDTO } from "@/shared/api/roles.types";
-import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 import type { ModelOptionPolicy } from "@/shared/lib/model-option-policy";
 import type { SendShortcut } from "@/features/settings/types/settings";
 import { isSendShortcutEvent } from "@/shared/lib/platform-shortcuts";
@@ -102,7 +99,6 @@ type ChatInputProps = {
   selectedToolIDs: number[];
   selectedPrompts: PromptPresetDTO[];
   selectedSkills: SkillSummaryDTO[];
-  selectedRoleID: string;
   defaultToolIDs: number[];
   queuedMessages: QueuedComposerMessage[];
   htmlVisualPromptEnabled: boolean;
@@ -121,7 +117,6 @@ type ChatInputProps = {
   onSelectedToolsChange: (toolIDs: number[]) => void;
   onSelectedPromptsChange: (prompts: PromptPresetDTO[]) => void;
   onSelectedSkillsChange: (skills: SkillSummaryDTO[]) => void;
-  onSelectedRoleIDChange: (roleID: string) => void;
   onDefaultToolsChange: (toolIDs: number[]) => void | Promise<void>;
   onHTMLVisualPromptChange: (enabled: boolean) => void;
   onOptionsChange: React.Dispatch<React.SetStateAction<ConversationOptions>>;
@@ -246,7 +241,6 @@ function ChatInputComponent({
   selectedToolIDs,
   selectedPrompts,
   selectedSkills,
-  selectedRoleID,
   defaultToolIDs,
   queuedMessages,
   htmlVisualPromptEnabled,
@@ -265,7 +259,6 @@ function ChatInputComponent({
   onSelectedToolsChange,
   onSelectedPromptsChange,
   onSelectedSkillsChange,
-  onSelectedRoleIDChange,
   onDefaultToolsChange,
   onHTMLVisualPromptChange,
   onOptionsChange,
@@ -381,30 +374,6 @@ function ChatInputComponent({
   const hasComposerAttachments = attachments.length > 0 || uploadingAttachments.length > 0;
   const showSelectedSkills = selectedSkills.length > 0 && !isMediaMode;
   const showSelectedPrompts = selectedPrompts.length > 0 && !isMediaMode;
-  const [roles, setRoles] = React.useState<ConversationRoleDTO[]>([]);
-  React.useEffect(() => {
-    if (isConversationMode || isMediaMode) {
-      return;
-    }
-    let cancelled = false;
-    void resolveAccessToken().then(async (token) => {
-      if (!token) {
-        return;
-      }
-      try {
-        const items = await listConversationRoles(token, { status: "active" });
-        if (!cancelled) {
-          setRoles(items);
-        }
-      } catch {
-        // 角色列表加载失败不影响输入
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [isConversationMode, isMediaMode]);
-  const selectedRole = roles.find((role) => role.publicID === selectedRoleID) ?? null;
   const {
     activeIndex: mentionActiveIndex,
     handleBlur: handleMentionBlur,
@@ -634,34 +603,6 @@ function ChatInputComponent({
         style={inputGroupHeight === null ? undefined : { height: inputGroupHeight }}
       >
         <div ref={inputGroupMeasureRef} className="flex w-full flex-col">
-          {!isConversationMode && roles.length > 0 ? (
-            <div className="flex w-full flex-wrap items-center justify-start gap-x-3 gap-y-1 px-5 pt-3">
-              <span className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-                <Sparkles className="size-3.5 shrink-0" strokeWidth={1.8} />
-                角色
-              </span>
-              <select
-                value={selectedRoleID}
-                onChange={(event) => onSelectedRoleIDChange(event.target.value)}
-                disabled={loading || uploading}
-                className="h-7 max-w-56 rounded-md border border-primary/25 bg-primary/10 px-2 text-xs font-medium text-primary outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
-              >
-                <option value="">(不指定)</option>
-                {roles.map((role) => (
-                  <option key={role.publicID} value={role.publicID}>
-                    {role.icon ? `${role.icon} ` : ""}{role.name}
-                  </option>
-                ))}
-              </select>
-              {selectedRole ? (
-                <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
-                  {selectedRole.model ? `默认模型 ${selectedRole.model}` : "跟随全局默认模型"}
-                  {selectedRole.systemPrompt ? ` · ${selectedRole.systemPrompt.length} 字提示词` : ""}
-                </span>
-              ) : null}
-            </div>
-          ) : null}
-
           {showSelectedPrompts ? (
             <div className="flex w-full max-h-14 flex-wrap items-center justify-start gap-x-3 gap-y-1 overflow-y-auto px-5 pt-3">
               {selectedPrompts.map((prompt) => (

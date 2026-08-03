@@ -9,7 +9,6 @@ import { Button } from "@/components/ui/button";
 import {
   Collapsible,
   CollapsibleContent,
-  CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import {
   SidebarGroup,
@@ -226,110 +225,112 @@ export function NavRoles() {
                     const menuOpen = openMenuID === role.publicID;
                     return (
                       <SidebarMenuItem key={role.publicID}>
-                        <Collapsible open={expanded} onOpenChange={() => toggleRole(role.publicID)}>
-                          <div className="group/role-row flex h-8 w-full items-center gap-0.5 rounded-md px-1 pr-2 text-sm transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground">
-                            <CollapsibleTrigger asChild>
-                              <button
-                                type="button"
-                                className="flex h-8 min-w-0 flex-1 items-center gap-1.5 py-1.5 text-left"
-                                aria-expanded={expanded}
-                                aria-label={role.name}
-                                onClick={() => toggleRole(role.publicID)}
-                              >
-                                <span
-                                  className="flex size-6 shrink-0 items-center justify-center rounded text-sm"
-                                  style={{ backgroundColor: role.color || "var(--muted)" }}
-                                >
-                                  {role.icon ? (
-                                    <span className="text-sm leading-none">{role.icon}</span>
-                                  ) : (
-                                    <Sparkles className="size-3.5 text-muted-foreground" strokeWidth={1.8} />
-                                  )}
-                                </span>
-                                <span className="min-w-0 flex-1 truncate text-xs">{role.name}</span>
-                              </button>
-                            </CollapsibleTrigger>
-                            <span className="shrink-0 text-[10px] text-muted-foreground/70">{conversations.length}</span>
-                            <div className="flex shrink-0 items-center">
-                              <button
-                                type="button"
-                                aria-label={`以「${role.name}」开始新对话`}
-                                className={cn(
-                                  "flex size-6 items-center justify-center rounded-md text-sidebar-foreground/45 transition-colors hover:bg-sidebar-accent-foreground/10 hover:text-sidebar-foreground",
-                                  starting && "pointer-events-none",
-                                )}
-                                onClick={() => void startRoleChat(role)}
-                                disabled={Boolean(startingRoleID)}
-                              >
-                                {starting ? (
-                                  <LoaderCircle className="size-3.5 animate-spin" />
-                                ) : (
-                                  <Plus className="size-4" strokeWidth={1.8} />
-                                )}
-                              </button>
-                              <DropdownMenu open={menuOpen} onOpenChange={(open) => setOpenMenuID(open ? role.publicID : null)}>
-                                <DropdownMenuTrigger asChild>
-                                  <button
-                                    type="button"
-                                    aria-label="角色操作"
-                                    className="flex size-6 items-center justify-center rounded-md text-sidebar-foreground/45 transition-colors hover:bg-sidebar-accent-foreground/10 hover:text-sidebar-foreground"
-                                  >
-                                    <MoreHorizontal className="size-4" strokeWidth={1.8} />
-                                  </button>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent align="start" className="w-40">
-                                  <DropdownMenuItem
-                                    onClick={() =>
-                                      setDraft({
-                                        publicID: role.publicID,
-                                        name: role.name,
-                                        description: role.description,
-                                        systemPrompt: role.systemPrompt,
-                                        model: role.model,
-                                        mcpDefaultMode: role.mcpDefaultMode,
-                                        defaultMCPToolIDs: role.defaultMCPToolIDs,
-                                        defaultSkillIDs: role.defaultSkillIDs,
-                                        color: role.color,
-                                        icon: role.icon,
-                                      })
-                                    }
-                                  >
-                                    <PencilLine className="mr-2 size-4" strokeWidth={1.7} />
-                                    编辑角色
-                                  </DropdownMenuItem>
-                                  <DropdownMenuSeparator />
-                                  <DropdownMenuItem
-                                    className="text-destructive focus:text-destructive"
-                                    onClick={() => void removeRole(role)}
-                                  >
-                                    <Trash2 className="mr-2 size-4" strokeWidth={1.7} />
-                                    删除角色
-                                  </DropdownMenuItem>
-                                </DropdownMenuContent>
-                              </DropdownMenu>
-                            </div>
-                          </div>
-                          <CollapsibleContent>
-                            <div className="pb-1 pl-7 pr-1">
-                              {conversations.length === 0 ? (
-                                <p className="px-2 py-1 text-[11px] text-muted-foreground/60">暂无对话</p>
+                        <div className="group/role-row flex h-8 w-full items-center gap-0.5 rounded-md px-1 pr-2 text-sm transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground">
+                          <button
+                            type="button"
+                            className="flex h-8 min-w-0 flex-1 items-center gap-1.5 py-1.5 text-left"
+                            aria-expanded={expanded}
+                            aria-label={role.name}
+                            onClick={() => toggleRole(role.publicID)}
+                          >
+                            <span
+                              className="flex size-6 shrink-0 items-center justify-center rounded text-sm"
+                              style={{ backgroundColor: role.color || "var(--muted)" }}
+                            >
+                              {role.icon ? (
+                                <span className="text-sm leading-none">{role.icon}</span>
                               ) : (
-                                conversations.map((conversation) => (
-                                  <a
-                                    key={conversation.publicID}
-                                    href={`/chat?conversation_id=${conversation.publicID}`}
-                                    className="flex h-7 w-full items-center gap-1.5 rounded-md px-2 text-xs text-sidebar-foreground/85 transition-colors hover:bg-accent"
-                                  >
-                                    <span className="min-w-0 flex-1 truncate">{conversation.title}</span>
-                                    <span className="shrink-0 text-[10px] text-muted-foreground/60">
-                                      {relativeTime(conversation.updatedAt)}
-                                    </span>
-                                  </a>
-                                ))
+                                <Sparkles className="size-3.5 text-muted-foreground" strokeWidth={1.8} />
                               )}
-                            </div>
-                          </CollapsibleContent>
-                        </Collapsible>
+                            </span>
+                            <span className="min-w-0 flex-1 truncate text-xs">{role.name}</span>
+                            <ChevronDown
+                              className={cn(
+                                "size-3.5 shrink-0 text-muted-foreground/60 transition-transform duration-200",
+                                expanded && "rotate-180",
+                              )}
+                            />
+                          </button>
+                          <span className="shrink-0 text-[10px] text-muted-foreground/70">{conversations.length}</span>
+                          <div className="flex shrink-0 items-center">
+                            <button
+                              type="button"
+                              aria-label={`以「${role.name}」开始新对话`}
+                              className={cn(
+                                "flex size-6 items-center justify-center rounded-md text-sidebar-foreground/45 transition-colors hover:bg-sidebar-accent-foreground/10 hover:text-sidebar-foreground",
+                                starting && "pointer-events-none",
+                              )}
+                              onClick={() => void startRoleChat(role)}
+                              disabled={Boolean(startingRoleID)}
+                            >
+                              {starting ? (
+                                <LoaderCircle className="size-3.5 animate-spin" />
+                              ) : (
+                                <Plus className="size-4" strokeWidth={1.8} />
+                              )}
+                            </button>
+                            <DropdownMenu open={menuOpen} onOpenChange={(open) => setOpenMenuID(open ? role.publicID : null)}>
+                              <DropdownMenuTrigger asChild>
+                                <button
+                                  type="button"
+                                  aria-label="角色操作"
+                                  className="flex size-6 items-center justify-center rounded-md text-sidebar-foreground/45 transition-colors hover:bg-sidebar-accent-foreground/10 hover:text-sidebar-foreground"
+                                >
+                                  <MoreHorizontal className="size-4" strokeWidth={1.8} />
+                                </button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="start" className="w-40">
+                                <DropdownMenuItem
+                                  onClick={() =>
+                                    setDraft({
+                                      publicID: role.publicID,
+                                      name: role.name,
+                                      description: role.description,
+                                      systemPrompt: role.systemPrompt,
+                                      model: role.model,
+                                      mcpDefaultMode: role.mcpDefaultMode,
+                                      defaultMCPToolIDs: role.defaultMCPToolIDs,
+                                      defaultSkillIDs: role.defaultSkillIDs,
+                                      color: role.color,
+                                      icon: role.icon,
+                                    })
+                                  }
+                                >
+                                  <PencilLine className="mr-2 size-4" strokeWidth={1.7} />
+                                  编辑角色
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  className="text-destructive focus:text-destructive"
+                                  onClick={() => void removeRole(role)}
+                                >
+                                  <Trash2 className="mr-2 size-4" strokeWidth={1.7} />
+                                  删除角色
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </div>
+                        </div>
+                        {expanded ? (
+                          <div className="pb-1 pl-7 pr-1">
+                            {conversations.length === 0 ? (
+                              <p className="px-2 py-1 text-[11px] text-muted-foreground/60">暂无对话</p>
+                            ) : (
+                              conversations.map((conversation) => (
+                                <a
+                                  key={conversation.publicID}
+                                  href={`/chat?conversation_id=${conversation.publicID}`}
+                                  className="flex h-7 w-full items-center gap-1.5 rounded-md px-2 text-xs text-sidebar-foreground/85 transition-colors hover:bg-accent"
+                                >
+                                  <span className="min-w-0 flex-1 truncate">{conversation.title}</span>
+                                  <span className="shrink-0 text-[10px] text-muted-foreground/60">
+                                    {relativeTime(conversation.updatedAt)}
+                                  </span>
+                                </a>
+                              ))
+                            )}
+                          </div>
+                        ) : null}
                       </SidebarMenuItem>
                     );
                   })}
