@@ -55,14 +55,9 @@ type Tool struct {
 	InputSchema json.RawMessage `json:"inputSchema,omitempty"`
 }
 
-// NewClient 创建 MCP 客户端。
-func NewClient() *Client {
-	return NewClientWithEnv("", false)
-}
-
-// NewClientWithEnv 创建带运行环境的 MCP 客户端。
-func NewClientWithEnv(env string, ssrfProtectionEnabled bool) *Client {
-	transport := security.NewOutboundHTTPTransport(env, ssrfProtectionEnabled, defaultConnectTimeout)
+// NewClient 创建带出站安全策略的 MCP 客户端。
+func NewClient(outboundPolicy security.OutboundPolicy) *Client {
+	transport := security.NewOutboundHTTPTransport(outboundPolicy, defaultConnectTimeout)
 	return &Client{
 		httpClient: &http.Client{
 			Transport: platformtracing.NewHTTPTransport(transport),

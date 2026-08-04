@@ -238,6 +238,29 @@ func TestFilterModelOptionsRejectsUnsupportedOpenAIServiceTier(t *testing.T) {
 	}
 }
 
+func TestFilterModelOptionsRejectsUserOpenAIPromptCacheFields(t *testing.T) {
+	for _, mode := range []string{modelOptionPolicyAllowlist, modelOptionPolicyDenylist} {
+		filtered := filterModelOptions(map[string]interface{}{
+			"temperature":             0.2,
+			"prompt_cache_key":        "user-controlled-key",
+			"prompt_cache_options":    map[string]interface{}{"mode": "explicit", "ttl": "30m"},
+			"prompt_cache_breakpoint": map[string]interface{}{"mode": "explicit"},
+			"prompt_cache_retention":  "24h",
+		}, llm.AdapterOpenAIResponses, modelOptionPolicyConfig{
+			Mode:             mode,
+			AllowedPathsJSON: `{"default":["temperature","prompt_cache_key","prompt_cache_options.mode","prompt_cache_options.ttl","prompt_cache_breakpoint","prompt_cache_retention"]}`,
+		})
+		for _, key := range []string{"prompt_cache_key", "prompt_cache_options", "prompt_cache_breakpoint", "prompt_cache_retention"} {
+			if _, ok := filtered[key]; ok {
+				t.Fatalf("expected %s to remain server-controlled in %s mode, got %#v", key, mode, filtered)
+			}
+		}
+		if filtered["temperature"] != 0.2 {
+			t.Fatalf("expected unrelated options to remain in %s mode, got %#v", mode, filtered)
+		}
+	}
+}
+
 func TestFilterModelOptionsKeepsOpenRouterChatServiceTierOutOfDefaultAllowlist(t *testing.T) {
 	filtered := filterModelOptions(map[string]interface{}{
 		"service_tier":     "priority",

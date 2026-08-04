@@ -46,11 +46,10 @@ const upstreamRequestIDHeaderTemplate = "${DEEIX_UPSTREAM_REQUEST_ID}"
 
 // Client 负责跨厂商共享的 HTTP client、adapter 路由和上游调试能力。
 type Client struct {
-	baseTransport         *http.Transport
-	httpClients           sync.Map
-	adapters              map[string]transportAdapter
-	env                   string
-	ssrfProtectionEnabled bool
+	baseTransport  *http.Transport
+	httpClients    sync.Map
+	adapters       map[string]transportAdapter
+	outboundPolicy security.OutboundPolicy
 }
 
 // RouteConfig 定义渠道路由调用参数。
@@ -134,7 +133,9 @@ type GenerateInput struct {
 	ConversationID         uint
 	ConversationPublicID   string
 	ConversationSessionKey string
-	Messages               []Message
+	// PromptCacheKey 是 OpenAI prompt_cache_key 的服务端受控值，用户 Options 不得覆盖。
+	PromptCacheKey string
+	Messages       []Message
 	// Instructions 承载可映射到上游原生指令字段的系统/开发者指令。
 	// 不支持原生指令字段的 adapter 应继续通过 messages 承载系统提示。
 	Instructions string
@@ -772,17 +773,23 @@ type UpstreamDebugSnapshot struct {
 
 // UpstreamDebugRequest 表示上游请求侧的调试信息。
 type UpstreamDebugRequest struct {
-	Method  string            `json:"method"`
-	Path    string            `json:"path"`
-	Headers map[string]string `json:"headers,omitempty"`
-	Body    string            `json:"body"`
+	Method        string            `json:"method"`
+	Path          string            `json:"path"`
+	Headers       map[string]string `json:"headers,omitempty"`
+	Body          string            `json:"body"`
+	BodyBytes     int               `json:"bodyBytes,omitempty"`
+	BodyTruncated bool              `json:"bodyTruncated,omitempty"`
+	RedactedParts int               `json:"redactedParts,omitempty"`
 }
 
 // UpstreamDebugResponse 表示上游响应侧的调试信息。
 type UpstreamDebugResponse struct {
-	StatusCode int               `json:"statusCode"`
-	Headers    map[string]string `json:"headers,omitempty"`
-	Body       string            `json:"body"`
+	StatusCode    int               `json:"statusCode"`
+	Headers       map[string]string `json:"headers,omitempty"`
+	Body          string            `json:"body"`
+	BodyBytes     int               `json:"bodyBytes,omitempty"`
+	BodyTruncated bool              `json:"bodyTruncated,omitempty"`
+	RedactedParts int               `json:"redactedParts,omitempty"`
 }
 
 func (e *UpstreamError) Error() string {
@@ -792,13 +799,8 @@ func (e *UpstreamError) Error() string {
 	return fmt.Sprintf("upstream request failed: status=%d message=%s", e.StatusCode, e.Message)
 }
 
-// NewClient 创建上游调用客户端。
-func NewClient() *Client {
-	return NewClientWithEnv("", false)
-}
-
-// NewClientWithEnv 创建带运行环境的上游调用客户端。
-func NewClientWithEnv(env string, ssrfProtectionEnabled bool) *Client {
+// NewClient 创建带出站安全策略的上游调用客户端。
+func NewClient(outboundPolicy security.OutboundPolicy) *Client {
 	transport := &http.Transport{
 		MaxIdleConns:        100,
 		MaxIdleConnsPerHost: 20,
@@ -806,9 +808,8 @@ func NewClientWithEnv(env string, ssrfProtectionEnabled bool) *Client {
 		ForceAttemptHTTP2:   true,
 	}
 	client := &Client{
-		baseTransport:         transport,
-		env:                   strings.TrimSpace(env),
-		ssrfProtectionEnabled: ssrfProtectionEnabled,
+		baseTransport:  transport,
+		outboundPolicy: outboundPolicy,
 	}
 	client.adapters = map[string]transportAdapter{
 		AdapterOpenAIResponses:        &openAIResponsesAdapter{client: client},
@@ -858,7 +859,7 @@ func (c *Client) httpClientForRoute(route RouteConfig) *http.Client {
 
 func (c *Client) newHTTPClient(connectTimeoutMS int) *http.Client {
 	transport := c.baseTransport.Clone()
-	transport.DialContext = security.NewOutboundDialContext(c.env, c.ssrfProtectionEnabled, time.Duration(connectTimeoutMS)*time.Millisecond, 30*time.Second)
+	transport.DialContext = security.NewOutboundDialContext(c.outboundPolicy, time.Duration(connectTimeoutMS)*time.Millisecond, 30*time.Second)
 
 	return &http.Client{
 		Timeout:   0,
@@ -1191,17 +1192,25 @@ func upstreamDebugSnapshot(req *http.Request, requestBody []byte, resp *http.Res
 			path += "?" + req.URL.RawQuery
 		}
 	}
+	requestDebugBody := sanitizeUpstreamDebugBody(requestBody)
+	responseDebugBody := sanitizeUpstreamDebugBody(responseBody)
 	return &UpstreamDebugSnapshot{
 		Request: UpstreamDebugRequest{
-			Method:  req.Method,
-			Path:    path,
-			Headers: redactHeaders(req.Header),
-			Body:    string(requestBody),
+			Method:        req.Method,
+			Path:          path,
+			Headers:       redactHeaders(req.Header),
+			Body:          requestDebugBody.Body,
+			BodyBytes:     requestDebugBody.OriginalBytes,
+			BodyTruncated: requestDebugBody.Truncated,
+			RedactedParts: requestDebugBody.RedactedParts,
 		},
 		Response: UpstreamDebugResponse{
-			StatusCode: responseStatusCode(resp),
-			Headers:    responseHeaders(resp),
-			Body:       string(responseBody),
+			StatusCode:    responseStatusCode(resp),
+			Headers:       responseHeaders(resp),
+			Body:          responseDebugBody.Body,
+			BodyBytes:     responseDebugBody.OriginalBytes,
+			BodyTruncated: responseDebugBody.Truncated,
+			RedactedParts: responseDebugBody.RedactedParts,
 		},
 	}
 }

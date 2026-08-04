@@ -336,6 +336,8 @@ docker compose logs app
 | 安全 | `JWT_SECRET` | JWT 签名密钥。 |
 | 安全 | `DATA_ENCRYPTION_KEY` | 上游 API Key、SSO Secret、MCP Token、敏感设置和 TOTP Secret 的加密密钥材料。 |
 | 安全 | `SSRF_PROTECTION_ENABLED` | 是否启用出站 SSRF 防护。 |
+| 安全 | `SSRF_ALLOWED_HOSTS` | 可信集成的精确主机名，逗号分隔；不能包含协议、端口、IP 或通配符。 |
+| 安全 | `SSRF_ALLOWED_CIDRS` | 可信集成的 CIDR 网段，逗号分隔。 |
 | 安全 | `TURNSTILE_SITEVERIFY_URL` | Cloudflare Turnstile siteverify 端点。 |
 | 数据库 | `DATABASE_DRIVER` | `postgres` 或 `sqlite`。 |
 | PostgreSQL | `POSTGRES_DSN` | PostgreSQL DSN。 |
@@ -383,6 +385,8 @@ docker compose logs app
 | OpenTelemetry | `OTEL_TRACES_SAMPLER_ARG` / `OTEL_SAMPLING_RATE` | Trace 采样率，范围 `0~1`；`OTEL_TRACES_SAMPLER_ARG` 优先。 |
 
 认证、注册、会话配置、模型参数策略、文件处理、RAG、Embedding、MCP、计费、支付和公告等运行时业务配置不属于静态 YAML 配置，默认值由后端种子初始化，并在后台管理中维护。
+
+生产环境启用 SSRF 防护后，白名单只应用于管理员配置的服务集成，例如模型上游、MCP、Embedding、认证提供方和 GeoIP；两个配置彼此独立：按主机名或容器名访问时只配置 `SSRF_ALLOWED_HOSTS`，确实需要放行 IP 网段时配置 `SSRF_ALLOWED_CIDRS`，两种目标都存在时才同时配置。模型或上游响应返回的媒体下载以及公共目录下载仍执行严格的公网策略。主机名采用大小写不敏感的精确匹配，CIDR 应尽量缩小范围。链路本地、组播、未指定地址和已知云元数据目标始终禁止，即使配置了宽泛 CIDR，或可信主机解析到了这些地址也不会放行。白名单配置不合法会阻止后端启动，修改后需重启生效。
 
 ## 功能指南
 

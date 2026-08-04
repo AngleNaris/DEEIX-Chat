@@ -5,6 +5,8 @@ import "errors"
 var (
 	// ErrConversationNotFound 会话不存在或无权限。
 	ErrConversationNotFound = errors.New("conversation not found")
+	// ErrConversationEventNotFound 对话事件日志不存在。
+	ErrConversationEventNotFound = errors.New("conversation event not found")
 	// ErrConversationShareNotFound 会话分享不存在、已关闭或原会话已删除。
 	ErrConversationShareNotFound = errors.New("conversation share not found")
 	// ErrInvalidConversationShare 会话分享请求不合法。
@@ -45,6 +47,10 @@ var (
 	ErrTooManyMessageFiles = errors.New("too many message files")
 	// ErrTooManySelectedTools 单条消息选择的 MCP 工具数超限。
 	ErrTooManySelectedTools = errors.New("too many selected tools")
+	// ErrMultipleImageAttachmentProcessors 单条消息不能同时选择多个图片附件处理器。
+	ErrMultipleImageAttachmentProcessors = errors.New("multiple image attachment processors selected")
+	// ErrImageAttachmentProcessingFailed 图片附件处理器调用失败。
+	ErrImageAttachmentProcessingFailed = errors.New("image attachment processing failed")
 	// ErrTooManySelectedSkills 单条消息选择的 Skill 数超限。
 	ErrTooManySelectedSkills = errors.New("too many selected skills")
 	// ErrSkillNotFound 技能不存在或当前用户不可用。

@@ -185,6 +185,7 @@ func (s *Service) recallHistoricalContextArtifacts(
 		domainconversation.ContextArtifactFileRAGFallback,
 		domainconversation.ContextArtifactToolResult,
 		domainconversation.ContextArtifactNativeTool,
+		domainconversation.ContextArtifactImageAnalysis,
 	}
 	if !hasCurrentSnapshot {
 		kinds = append(kinds, domainconversation.ContextArtifactSummary)
@@ -571,6 +572,11 @@ func ragFallbackEvidenceAttachments(items []ragFallbackEvidence) []AttachmentInp
 }
 
 func toolArtifactContent(row domainconversation.ToolCall) string {
+	if strings.EqualFold(strings.TrimSpace(row.ToolType), "mcp_attachment") {
+		if content := imageAttachmentAnalysisText(row.OutputJSON); content != "" {
+			return content
+		}
+	}
 	switch strings.TrimSpace(row.Status) {
 	case "error", "failed":
 		return firstNonEmptyString(row.ErrorJSON, row.OutputJSON)
@@ -595,6 +601,8 @@ func toolContextArtifactKind(row domainconversation.ToolCall) domainconversation
 	switch toolType {
 	case "", "function", "mcp":
 		return domainconversation.ContextArtifactToolResult
+	case "mcp_attachment":
+		return domainconversation.ContextArtifactImageAnalysis
 	default:
 		return domainconversation.ContextArtifactNativeTool
 	}

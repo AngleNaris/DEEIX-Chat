@@ -138,7 +138,7 @@ func TestGenerateXAIImageUsesImageEndpoint(t *testing.T) {
 	}))
 	defer server.Close()
 
-	output, err := NewClient().Generate(context.Background(), RouteConfig{
+	output, err := newTestClient().Generate(context.Background(), RouteConfig{
 		Protocol:      AdapterXAIImage,
 		BaseURL:       server.URL + "/v1",
 		APIKey:        "xai-key",
@@ -175,7 +175,7 @@ func TestGenerateXAIImageGenerationAdapterKeepsGenerationEndpoint(t *testing.T) 
 	}))
 	defer server.Close()
 
-	_, err := NewClient().Generate(context.Background(), RouteConfig{
+	_, err := newTestClient().Generate(context.Background(), RouteConfig{
 		Protocol:      AdapterXAIImage,
 		Endpoint:      EndpointImageEdits,
 		BaseURL:       server.URL + "/v1",
@@ -213,7 +213,7 @@ func TestGenerateXAIImageEditUsesImageEditsEndpoint(t *testing.T) {
 	}))
 	defer server.Close()
 
-	output, err := NewClient().Generate(context.Background(), RouteConfig{
+	output, err := newTestClient().Generate(context.Background(), RouteConfig{
 		Protocol:      AdapterXAIImageEdits,
 		BaseURL:       server.URL + "/v1",
 		APIKey:        "xai-key",

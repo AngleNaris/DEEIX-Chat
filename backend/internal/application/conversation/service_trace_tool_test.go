@@ -147,6 +147,20 @@ func TestBuildMessageProcessTraceDTOIncludesOrderedEvents(t *testing.T) {
 	}
 }
 
+func TestTracePayloadJSONBoundsOversizedPayload(t *testing.T) {
+	secret := strings.Repeat("x", maxTracePayloadBytes+1)
+	serialized := tracePayloadJSON(map[string]interface{}{"upstream_debug": secret})
+	if len(serialized) >= maxTracePayloadBytes {
+		t.Fatalf("expected bounded trace payload, got %d bytes", len(serialized))
+	}
+	if strings.Contains(serialized, secret[:1024]) {
+		t.Fatal("oversized trace payload must not retain original content")
+	}
+	if !strings.Contains(serialized, `"payloadOmitted":true`) {
+		t.Fatalf("expected payload omission marker, got %s", serialized)
+	}
+}
+
 func TestProcessTraceStaysStreamingUntilNextVisiblePhase(t *testing.T) {
 	recorder := &messageTraceRecorder{
 		cfg: config.Config{
@@ -631,6 +645,17 @@ func TestModelToolOutputForModelOmitsNestedOpaquePayload(t *testing.T) {
 	}
 	if strings.Contains(got, strings.Repeat("A", 512)) {
 		t.Fatalf("expected nested opaque payload to be removed, got %d chars", len(got))
+	}
+}
+
+func TestSanitizeOpaqueToolOutputOmitsSmallDataURL(t *testing.T) {
+	raw := `{"content":[{"type":"text","text":"ok"}],"structuredContent":{"image":"data:image/png;base64,QUJD"}}`
+	got := sanitizeOpaqueToolOutput(raw)
+	if !strings.Contains(got, `"text":"ok"`) || !strings.Contains(got, "Opaque tool payload omitted") {
+		t.Fatalf("expected readable output with the data URL removed, got %q", got)
+	}
+	if strings.Contains(got, ";base64,") {
+		t.Fatalf("expected data URL bytes to be removed, got %q", got)
 	}
 }
 

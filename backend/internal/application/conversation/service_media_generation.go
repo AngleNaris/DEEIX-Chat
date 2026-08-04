@@ -741,7 +741,7 @@ func (s *Service) readGeneratedImage(ctx context.Context, image llm.GeneratedIma
 		return nil, mimeType, err
 	}
 	cfg := s.cfg.Snapshot()
-	client := security.NewOutboundHTTPClient(cfg.Env, cfg.SSRFProtectionEnabled, 60*time.Second)
+	client := security.NewOutboundHTTPClient(cfg.StrictOutboundPolicy(), 60*time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, mimeType, err

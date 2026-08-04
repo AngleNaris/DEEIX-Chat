@@ -27,6 +27,10 @@ import { listVisibleSkills } from "@/shared/api/skills";
 import type { SkillSummaryDTO } from "@/shared/api/skills.types";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 import { useDialogSnapshot } from "@/shared/hooks/use-dialog-snapshot";
+import {
+  hasMultipleImageAttachmentProcessors,
+  normalizeImageAttachmentProcessorSelection,
+} from "@/shared/lib/mcp-tool-selection";
 
 export type ProjectDraft = {
   publicID?: string;
@@ -102,7 +106,10 @@ export function ProjectDialog({
             if (!current) {
               return current;
             }
-            const defaultMCPToolIDs = current.defaultMCPToolIDs.filter((id) => availableMCPToolIDs.has(id));
+            const defaultMCPToolIDs = normalizeImageAttachmentProcessorSelection(
+              current.defaultMCPToolIDs.filter((id) => availableMCPToolIDs.has(id)).slice(0, Math.max(1, policy.maxSelectedToolsPerMessage)),
+              tools,
+            );
             const defaultSkillIDs = current.defaultSkillIDs.filter((id) => availableSkillIDs.has(id));
             const unchangedMCPTools = defaultMCPToolIDs.length === current.defaultMCPToolIDs.length;
             const unchangedSkills = defaultSkillIDs.length === current.defaultSkillIDs.length;
@@ -256,6 +263,12 @@ export function ProjectDialog({
                     loading={catalogLoading}
                     disabled={submitting}
                     onChange={(defaultMCPToolIDs) => {
+                      if (hasMultipleImageAttachmentProcessors(defaultMCPToolIDs, mcpTools)) {
+                        toast.error(t("imageProcessorLimitTitle"), {
+                          description: t("imageProcessorLimitDescription"),
+                        });
+                        return;
+                      }
                       setDraft((current) => current ? { ...current, defaultMCPToolIDs } : current);
                     }}
                   />

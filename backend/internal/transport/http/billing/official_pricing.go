@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -13,12 +12,10 @@ import (
 	"time"
 
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/response"
-	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/security"
 	"github.com/gin-gonic/gin"
 )
 
 const (
-	openRouterModelsURL           = "https://openrouter.ai/api/v1/models"
 	openRouterPricingCacheRelPath = "admin/openrouter-model-pricing.json"
 	openRouterPricingCacheTTL     = 24 * time.Hour
 )
@@ -26,24 +23,6 @@ const (
 type openRouterOfficialPricingCacheFile struct {
 	FetchedAt time.Time                               `json:"fetchedAt"`
 	Items     []OpenRouterOfficialPricingItemResponse `json:"items"`
-}
-
-type openRouterModelsResponse struct {
-	Data []openRouterModelItem `json:"data"`
-}
-
-type openRouterModelItem struct {
-	ID            string                 `json:"id"`
-	CanonicalSlug string                 `json:"canonical_slug"`
-	Name          string                 `json:"name"`
-	Pricing       openRouterModelPricing `json:"pricing"`
-}
-
-type openRouterModelPricing struct {
-	Prompt          string `json:"prompt"`
-	Completion      string `json:"completion"`
-	InputCacheRead  string `json:"input_cache_read"`
-	InputCacheWrite string `json:"input_cache_write"`
 }
 
 // GetOpenRouterOfficialPricing godoc
@@ -158,69 +137,28 @@ func (h *Handler) writeOpenRouterOfficialPricingCache(cache openRouterOfficialPr
 }
 
 func (h *Handler) fetchOpenRouterOfficialPricing(ctx context.Context) ([]OpenRouterOfficialPricingItemResponse, error) {
-	env := ""
-	ssrfProtectionEnabled := false
-	if h.cfg != nil {
-		cfg := h.cfg.Snapshot()
-		env = cfg.Env
-		ssrfProtectionEnabled = cfg.SSRFProtectionEnabled
+	if h.service == nil {
+		return nil, errors.New("openrouter pricing provider is not configured")
 	}
-	client := security.NewOutboundHTTPClient(env, ssrfProtectionEnabled, 15*time.Second)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, openRouterModelsURL, nil)
+	items, err := h.service.FetchOpenRouterOfficialPricing(ctx)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Accept", "application/json")
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
+	result := make([]OpenRouterOfficialPricingItemResponse, 0, len(items))
+	for _, item := range items {
+		result = append(result, OpenRouterOfficialPricingItemResponse{
+			ID:            item.ID,
+			CanonicalSlug: item.CanonicalSlug,
+			Name:          item.Name,
+			Pricing: OpenRouterOfficialPricingUnitPricingResponse{
+				Prompt:          item.Pricing.Prompt,
+				Completion:      item.Pricing.Completion,
+				InputCacheRead:  item.Pricing.InputCacheRead,
+				InputCacheWrite: item.Pricing.InputCacheWrite,
+			},
+		})
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("openrouter models request failed: %d", resp.StatusCode)
-	}
-	var payload openRouterModelsResponse
-	decoder := json.NewDecoder(io.LimitReader(resp.Body, 8<<20))
-	if err := decoder.Decode(&payload); err != nil {
-		return nil, err
-	}
-	items := make([]OpenRouterOfficialPricingItemResponse, 0, len(payload.Data))
-	for _, item := range payload.Data {
-		normalized := normalizeOpenRouterOfficialPricingItem(item)
-		if normalized.ID != "" {
-			items = append(items, normalized)
-		}
-	}
-	if len(items) == 0 {
-		return nil, errors.New("openrouter model list is empty")
-	}
-	return items, nil
-}
-
-func normalizeOpenRouterOfficialPricingItem(item openRouterModelItem) OpenRouterOfficialPricingItemResponse {
-	id := strings.TrimSpace(item.ID)
-	if id == "" {
-		return OpenRouterOfficialPricingItemResponse{}
-	}
-	canonicalSlug := strings.TrimSpace(item.CanonicalSlug)
-	if canonicalSlug == "" {
-		canonicalSlug = id
-	}
-	name := strings.TrimSpace(item.Name)
-	if name == "" {
-		name = id
-	}
-	return OpenRouterOfficialPricingItemResponse{
-		ID:            id,
-		CanonicalSlug: canonicalSlug,
-		Name:          name,
-		Pricing: OpenRouterOfficialPricingUnitPricingResponse{
-			Prompt:          strings.TrimSpace(item.Pricing.Prompt),
-			Completion:      strings.TrimSpace(item.Pricing.Completion),
-			InputCacheRead:  strings.TrimSpace(item.Pricing.InputCacheRead),
-			InputCacheWrite: strings.TrimSpace(item.Pricing.InputCacheWrite),
-		},
-	}
+	return result, nil
 }
 
 func openRouterOfficialPricingCacheStale(fetchedAt time.Time) bool {

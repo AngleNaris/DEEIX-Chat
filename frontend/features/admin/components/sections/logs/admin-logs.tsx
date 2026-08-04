@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -26,7 +27,7 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { SpinnerLabel } from "@/components/ui/spinner";
+import { Spinner, SpinnerLabel } from "@/components/ui/spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Tooltip,
@@ -59,7 +60,9 @@ import type {
 } from "@/features/admin/api/admin.types";
 import { getAdminBillingConfig } from "@/features/admin/api/billing";
 import {
+  cleanupAdminConversationRuns,
   cleanupAdminLogs,
+  getAdminConversationEvent,
   type AdminLogCleanupType,
 } from "@/features/admin/api/audit";
 import {
@@ -95,6 +98,7 @@ import {
   type BillingDisplayOptions,
 } from "@/shared/lib/billing-display";
 import { ModelSelect, type ModelSelectOption } from "@/shared/components/model-select";
+import { formatBytes } from "@/shared/lib/file-display";
 
 type LogDetail =
   | { kind: "audit"; item: AdminAuditLogDTO }
@@ -702,10 +706,12 @@ function DetailBlock({ title, children }: { title: string; children: React.React
 function LogDetailSheet({
   detail: rawDetail,
   billingDisplay,
+  conversationDetailLoading,
   onClose,
 }: {
   detail: LogDetail | null;
   billingDisplay: BillingDisplayOptions;
+  conversationDetailLoading: boolean;
   onClose: () => void;
 }) {
   const locale = useLocale();
@@ -948,6 +954,7 @@ function LogDetailSheet({
                 <DetailRow label={t("fields.latency")} value={`${formatCount(detail.item.latencyMS, locale)} ms`} mono />
                 <DetailRow label={t("fields.title")} value={detail.item.title || "-"} />
                 <DetailRow label={t("fields.summary")} value={detail.item.summary || "-"} />
+                <DetailRow label={t("fields.payloadSize")} value={formatBytes(detail.item.payloadSizeBytes)} mono />
               </DetailBlock>
             </>
           ) : null}
@@ -975,6 +982,7 @@ function LogDetailSheet({
                   size="sm"
                   className="h-7 px-2 text-xs shadow-none"
                   value={formattedJSON}
+                  disabled={conversationDetailLoading || (detail?.kind === "conversation" && detail.item.payloadOmitted)}
                   messages={copyMessages}
                   copyOptions={{ copied: t("copied", { label: t("jsonTitle") }) }}
                 >
@@ -982,9 +990,22 @@ function LogDetailSheet({
                 </CopyActionButton>
               </div>
             </div>
-            <pre className="max-h-[320px] overflow-auto rounded-lg border border-border/60 bg-muted/35 p-3 text-xs leading-5 text-foreground/86">
-              <code>{formattedJSON}</code>
-            </pre>
+            {conversationDetailLoading ? (
+              <div className="flex h-28 items-center justify-center rounded-lg border border-border/60 bg-muted/20">
+                <Spinner label={t("loading")} className="size-4 text-muted-foreground" />
+              </div>
+            ) : (
+              <>
+                {detail?.kind === "conversation" && detail.item.payloadOmitted ? (
+                  <p className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2 text-xs leading-5 text-muted-foreground">
+                    {t("payloadOmitted", { size: formatBytes(detail.item.payloadSizeBytes) })}
+                  </p>
+                ) : null}
+                <pre className="max-h-[320px] overflow-auto rounded-lg border border-border/60 bg-muted/35 p-3 text-xs leading-5 text-foreground/86">
+                  <code>{formattedJSON}</code>
+                </pre>
+              </>
+            )}
           </section>
         </div>
       </SheetContent>
@@ -1503,11 +1524,78 @@ function PaymentOrderTable({ onOpenDetail }: { onOpenDetail: (item: AdminPayment
 function ConversationEventTable({ onOpenDetail }: { onOpenDetail: (item: AdminConversationEventDTO) => void }) {
   const locale = useLocale();
   const t = useTranslations("adminLogs");
+  const commonT = useTranslations("common.actions");
   const logs = useAdminConversationEvents();
+  const [selectedRunIDs, setSelectedRunIDs] = React.useState<Set<string>>(new Set());
+  const [cleanupOpen, setCleanupOpen] = React.useState(false);
+  const [cleanupPending, setCleanupPending] = React.useState(false);
   const virtualRows = useVirtualTableRows(logs.events, {
     enabled: logs.events.length > 100,
     estimateSize: 40,
   });
+  const visibleRunIDs = React.useMemo(
+    () => [...new Set(logs.events.map((item) => item.runID.trim()).filter(Boolean))],
+    [logs.events],
+  );
+  const allVisibleSelected = visibleRunIDs.length > 0 && visibleRunIDs.every((runID) => selectedRunIDs.has(runID));
+  const someVisibleSelected = visibleRunIDs.some((runID) => selectedRunIDs.has(runID));
+
+  React.useEffect(() => {
+    setSelectedRunIDs(new Set());
+  }, [logs.events]);
+
+  const toggleRun = React.useCallback((runID: string, selected: boolean) => {
+    if (!runID) return;
+    setSelectedRunIDs((current) => {
+      const next = new Set(current);
+      if (selected) {
+        if (next.size >= 100 && !next.has(runID)) {
+          toast.error(t("conversation.cleanup.maxSelection"));
+          return current;
+        }
+        next.add(runID);
+      } else {
+        next.delete(runID);
+      }
+      return next;
+    });
+  }, [t]);
+
+  const toggleVisibleRuns = React.useCallback((selected: boolean) => {
+    if (!selected) {
+      setSelectedRunIDs(new Set());
+      return;
+    }
+    if (visibleRunIDs.length > 100) {
+      toast.error(t("conversation.cleanup.maxSelection"));
+    }
+    setSelectedRunIDs(new Set(visibleRunIDs.slice(0, 100)));
+  }, [t, visibleRunIDs]);
+
+  const cleanupSelectedRuns = React.useCallback(async () => {
+    const runIDs = [...selectedRunIDs];
+    if (runIDs.length === 0) return;
+    setCleanupPending(true);
+    try {
+      const token = await resolveAccessToken();
+      if (!token) {
+        toast.error(t("toast.sessionExpired"), { description: t("toast.signInAgain") });
+        return;
+      }
+      const result = await cleanupAdminConversationRuns(token, { runIDs });
+      toast.success(t("conversation.cleanup.success", {
+        runs: result.runCount,
+        events: result.deletedCount,
+      }));
+      setCleanupOpen(false);
+      setSelectedRunIDs(new Set());
+      await logs.loadConversationEvents(logs.page, logs.pageSize);
+    } catch (error) {
+      toast.error(t("conversation.cleanup.failed"), { description: resolveAdminErrorMessage(error) });
+    } finally {
+      setCleanupPending(false);
+    }
+  }, [logs, selectedRunIDs, t]);
   const scopeLabel = React.useCallback((value: string) => {
     switch (value) {
       case "trace_block":
@@ -1591,6 +1679,15 @@ function ConversationEventTable({ onOpenDetail }: { onOpenDetail: (item: AdminCo
           onValueChange: (value) => logs.setSortValue(value as ConversationEventSortValue),
           options: CONVERSATION_EVENT_SORT_OPTIONS.map((item) => ({ label: t(item.labelKey), value: item.value })),
         }}
+        selectedCount={selectedRunIDs.size}
+        bulkActions={[
+          {
+            key: "delete-runs",
+            label: t("conversation.cleanup.action"),
+            icon: <Trash2 />,
+            onClick: () => setCleanupOpen(true),
+          },
+        ]}
         loading={logs.loading}
         onRefresh={() => void logs.loadConversationEvents(logs.page, logs.pageSize)}
       />
@@ -1602,6 +1699,16 @@ function ConversationEventTable({ onOpenDetail }: { onOpenDetail: (item: AdminCo
       >
         <TableHeader>
           <TableRow className="hover:bg-transparent">
+            <TableHead className="w-[44px] py-1.5 text-center">
+              <div className="flex h-7 items-center justify-center">
+                <Checkbox
+                  checked={allVisibleSelected ? true : someVisibleSelected ? "indeterminate" : false}
+                  disabled={visibleRunIDs.length === 0}
+                  onCheckedChange={(checked) => toggleVisibleRuns(checked === true)}
+                  aria-label={t("conversation.cleanup.selectAll")}
+                />
+              </div>
+            </TableHead>
             <TableHead className="w-[72px]">ID</TableHead>
             <TableHead>{t("columns.user")}</TableHead>
             <TableHead>{t("columns.scope")}</TableHead>
@@ -1614,33 +1721,52 @@ function ConversationEventTable({ onOpenDetail }: { onOpenDetail: (item: AdminCo
           </TableRow>
         </TableHeader>
         <TableBody>
-          {logs.loading && logs.events.length === 0 ? <TableLoadingRow colSpan={9} /> : null}
-          {logs.events.length > 0 ? <VirtualTablePaddingRow colSpan={9} height={virtualRows.paddingTop} /> : null}
-          {logs.events.length > 0 ? virtualRows.rows.map(({ item }) => (
-            <TableRow key={item.id} className="cursor-pointer" onClick={() => onOpenDetail(item)}>
-              <TableCell className="font-mono text-xs text-foreground">{item.id}</TableCell>
-              <TableCell className="whitespace-nowrap text-muted-foreground">
-                {resolveUserDisplayName(item.userLabel, item.username, item.userID)}
-              </TableCell>
-              <TableCell className="whitespace-nowrap text-muted-foreground">{scopeLabel(item.eventScope)}</TableCell>
-              <TableCell>
-                <div className="max-w-[12rem] truncate" title={item.eventType || item.title || "-"}>{item.eventType || item.title || "-"}</div>
-              </TableCell>
-              <TableCell className="whitespace-nowrap">{eventStatusLabel(item.status)}</TableCell>
-              <TableCell>
-                <div className="max-w-[12rem] truncate text-muted-foreground" title={item.upstreamName || "-"}>{item.upstreamName || "-"}</div>
-              </TableCell>
-              <TableCell>
-                <div className="max-w-[10rem] truncate text-muted-foreground" title={item.toolName || "-"}>{item.toolName || "-"}</div>
-              </TableCell>
-              <TableCell className="font-mono text-xs text-muted-foreground">
-                <div className="max-w-[13rem] truncate" title={item.runID || "-"}>{item.runID || "-"}</div>
-              </TableCell>
-              <TableCell className="whitespace-nowrap text-muted-foreground">{formatDateTime(item.createdAt, locale)}</TableCell>
-            </TableRow>
-          )) : null}
-          {logs.events.length > 0 ? <VirtualTablePaddingRow colSpan={9} height={virtualRows.paddingBottom} /> : null}
-          {!logs.loading && logs.events.length === 0 ? <TableEmptyRow colSpan={9}>{t("conversation.empty")}</TableEmptyRow> : null}
+          {logs.loading && logs.events.length === 0 ? <TableLoadingRow colSpan={10} /> : null}
+          {logs.events.length > 0 ? <VirtualTablePaddingRow colSpan={10} height={virtualRows.paddingTop} /> : null}
+          {logs.events.length > 0 ? virtualRows.rows.map(({ item }) => {
+            const runID = item.runID.trim();
+            return (
+              <TableRow
+                key={item.id}
+                className="cursor-pointer"
+                selected={selectedRunIDs.has(runID)}
+                onClick={() => onOpenDetail(item)}
+              >
+                <TableCell className="w-[44px] py-1.5 text-center">
+                  <div className="flex h-7 items-center justify-center">
+                    <Checkbox
+                      checked={selectedRunIDs.has(runID)}
+                      disabled={!runID}
+                      onClick={(event) => event.stopPropagation()}
+                      onCheckedChange={(checked) => toggleRun(runID, checked === true)}
+                      aria-label={t("conversation.cleanup.selectRun", { runID: runID || "-" })}
+                    />
+                  </div>
+                </TableCell>
+                <TableCell className="font-mono text-xs text-foreground">{item.id}</TableCell>
+                <TableCell className="whitespace-nowrap text-muted-foreground">
+                  {resolveUserDisplayName(item.userLabel, item.username, item.userID)}
+                </TableCell>
+                <TableCell className="whitespace-nowrap text-muted-foreground">{scopeLabel(item.eventScope)}</TableCell>
+                <TableCell>
+                  <div className="max-w-[12rem] truncate" title={item.eventType || item.title || "-"}>{item.eventType || item.title || "-"}</div>
+                </TableCell>
+                <TableCell className="whitespace-nowrap">{eventStatusLabel(item.status)}</TableCell>
+                <TableCell>
+                  <div className="max-w-[12rem] truncate text-muted-foreground" title={item.upstreamName || "-"}>{item.upstreamName || "-"}</div>
+                </TableCell>
+                <TableCell>
+                  <div className="max-w-[10rem] truncate text-muted-foreground" title={item.toolName || "-"}>{item.toolName || "-"}</div>
+                </TableCell>
+                <TableCell className="font-mono text-xs text-muted-foreground">
+                  <div className="max-w-[13rem] truncate" title={runID || "-"}>{runID || "-"}</div>
+                </TableCell>
+                <TableCell className="whitespace-nowrap text-muted-foreground">{formatDateTime(item.createdAt, locale)}</TableCell>
+              </TableRow>
+            );
+          }) : null}
+          {logs.events.length > 0 ? <VirtualTablePaddingRow colSpan={10} height={virtualRows.paddingBottom} /> : null}
+          {!logs.loading && logs.events.length === 0 ? <TableEmptyRow colSpan={10}>{t("conversation.empty")}</TableEmptyRow> : null}
         </TableBody>
       </Table>
 
@@ -1653,6 +1779,30 @@ function ConversationEventTable({ onOpenDetail }: { onOpenDetail: (item: AdminCo
         onPageChange={(nextPage) => void logs.loadConversationEvents(nextPage, logs.pageSize)}
         onPageSizeChange={(nextPageSize) => void logs.loadConversationEvents(1, nextPageSize)}
       />
+
+      <AlertDialog open={cleanupOpen} onOpenChange={(open) => !cleanupPending && setCleanupOpen(open)}>
+        <AlertDialogContent className="sm:max-w-[440px]">
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("conversation.cleanup.title")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("conversation.cleanup.description", { count: selectedRunIDs.size })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={cleanupPending}>{commonT("cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              disabled={cleanupPending || selectedRunIDs.size === 0}
+              onClick={(event) => {
+                event.preventDefault();
+                void cleanupSelectedRuns();
+              }}
+            >
+              {cleanupPending ? <SpinnerLabel>{t("conversation.cleanup.deleting")}</SpinnerLabel> : t("conversation.cleanup.confirm")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -1822,6 +1972,8 @@ function LogCleanupDialog({
 export function AdminLogsPage() {
   const t = useTranslations("adminLogs");
   const [detail, setDetail] = React.useState<LogDetail | null>(null);
+  const [conversationDetailLoading, setConversationDetailLoading] = React.useState(false);
+  const detailRequestRef = React.useRef(0);
   const [cleanupOpen, setCleanupOpen] = React.useState(false);
   const [billingDisplay, setBillingDisplay] = React.useState<BillingDisplayOptions>({
     currency: "USD",
@@ -1864,6 +2016,38 @@ export function AdminLogsPage() {
       ...current,
       [type]: current[type] + 1,
     }));
+  }, []);
+
+  const openConversationDetail = React.useCallback(async (item: AdminConversationEventDTO) => {
+    const requestID = detailRequestRef.current + 1;
+    detailRequestRef.current = requestID;
+    setDetail({ kind: "conversation", item });
+    setConversationDetailLoading(true);
+    try {
+      const token = await resolveAccessToken();
+      if (!token) {
+        toast.error(t("toast.sessionExpired"), { description: t("toast.signInAgain") });
+        return;
+      }
+      const loaded = await getAdminConversationEvent(token, item.id);
+      if (detailRequestRef.current === requestID) {
+        setDetail({ kind: "conversation", item: loaded });
+      }
+    } catch (error) {
+      if (detailRequestRef.current === requestID) {
+        toast.error(t("toast.conversationEventDetailLoadFailed"), { description: resolveAdminErrorMessage(error) });
+      }
+    } finally {
+      if (detailRequestRef.current === requestID) {
+        setConversationDetailLoading(false);
+      }
+    }
+  }, [t]);
+
+  const closeDetail = React.useCallback(() => {
+    detailRequestRef.current += 1;
+    setConversationDetailLoading(false);
+    setDetail(null);
   }, []);
 
   return (
@@ -1909,11 +2093,16 @@ export function AdminLogsPage() {
           <PaymentOrderTable key={cleanupRevisions.orders} onOpenDetail={(item) => setDetail({ kind: "order", item })} />
         </TabsContent>
         <TabsContent value="conversation">
-          <ConversationEventTable key={cleanupRevisions.conversation} onOpenDetail={(item) => setDetail({ kind: "conversation", item })} />
+          <ConversationEventTable key={cleanupRevisions.conversation} onOpenDetail={(item) => void openConversationDetail(item)} />
         </TabsContent>
       </Tabs>
 
-      <LogDetailSheet detail={detail} billingDisplay={billingDisplay} onClose={() => setDetail(null)} />
+      <LogDetailSheet
+        detail={detail}
+        billingDisplay={billingDisplay}
+        conversationDetailLoading={conversationDetailLoading}
+        onClose={closeDetail}
+      />
       <LogCleanupDialog
         open={cleanupOpen}
         onOpenChange={setCleanupOpen}

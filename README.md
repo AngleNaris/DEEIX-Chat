@@ -336,6 +336,8 @@ Static configuration environment variables:
 | Security | `JWT_SECRET` | JWT signing secret. |
 | Security | `DATA_ENCRYPTION_KEY` | Key material for upstream API keys, SSO secrets, MCP tokens, sensitive settings, and TOTP secrets. |
 | Security | `SSRF_PROTECTION_ENABLED` | Enables outbound SSRF protection. |
+| Security | `SSRF_ALLOWED_HOSTS` | Exact trusted integration hostnames, comma-separated; no schemes, ports, IPs, or wildcards. |
+| Security | `SSRF_ALLOWED_CIDRS` | Trusted integration CIDRs, comma-separated. |
 | Security | `TURNSTILE_SITEVERIFY_URL` | Cloudflare Turnstile siteverify endpoint. |
 | Database | `DATABASE_DRIVER` | `postgres` or `sqlite`. |
 | PostgreSQL | `POSTGRES_DSN` | PostgreSQL DSN. |
@@ -383,6 +385,8 @@ Static configuration environment variables:
 | OpenTelemetry | `OTEL_TRACES_SAMPLER_ARG` / `OTEL_SAMPLING_RATE` | Trace sampling rate from `0` to `1`; `OTEL_TRACES_SAMPLER_ARG` takes priority. |
 
 Authentication, registration, conversation settings, model option policies, file processing, RAG, embedding, MCP, billing, payments, and announcements are runtime business settings, not static YAML configuration. Their defaults are seeded by the backend and maintained in the admin console.
+
+When SSRF protection is enabled in production, the allowlist applies only to administrator-configured service integrations such as model upstreams, MCP, embedding, authentication providers, and GeoIP. The two allowlist settings are independent: configure `SSRF_ALLOWED_HOSTS` for exact hostname/container-name targets, `SSRF_ALLOWED_CIDRS` only for trusted IP ranges, or both when both forms are needed. Downloads derived from model/provider responses and public catalog downloads keep the strict public-network policy. Host entries are exact and case-insensitive; CIDRs should be as narrow as possible. Link-local, multicast, unspecified, and known metadata targets remain blocked even if a broad CIDR or trusted hostname resolves to them. Invalid allowlist entries stop backend startup, and configuration changes require a restart.
 
 ## Feature Guides
 

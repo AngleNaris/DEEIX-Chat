@@ -484,6 +484,8 @@ type EventLog struct {
 	Summary           string
 	ContentMarkdown   string
 	PayloadJSON       string
+	PayloadSizeBytes  int64
+	PayloadOmitted    bool
 	Seq               int
 	ToolCallID        string
 	ToolName          string

@@ -11,11 +11,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/security"
 	"github.com/google/uuid"
 )
 
 func TestHTTPClientForRouteReusesClientByConnectTimeout(t *testing.T) {
-	client := NewClient()
+	client := newTestClient()
 
 	defaultClient := client.httpClientForRoute(RouteConfig{})
 	explicitDefaultClient := client.httpClientForRoute(RouteConfig{ConnectTimeoutMS: defaultConnectTimeoutMS})
@@ -72,7 +73,11 @@ func TestListModelsFallsBackToOpenAICompatibleModels(t *testing.T) {
 	}))
 	defer server.Close()
 
-	items, err := NewClient().ListModels(context.Background(), RouteConfig{
+	policy, err := security.NewOutboundPolicy(true, nil, []string{"127.0.0.0/8", "::1/128"})
+	if err != nil {
+		t.Fatalf("build outbound policy: %v", err)
+	}
+	items, err := NewClient(policy).ListModels(context.Background(), RouteConfig{
 		Protocol: AdapterAnthropicMessages,
 		BaseURL:  server.URL,
 		APIKey:   "test-key",
@@ -138,7 +143,7 @@ func TestListModelsFallsBackToOpenAICompatibleModelsForGemini(t *testing.T) {
 	}))
 	defer server.Close()
 
-	items, err := NewClient().ListModels(context.Background(), RouteConfig{
+	items, err := newTestClient().ListModels(context.Background(), RouteConfig{
 		Protocol: AdapterGoogleGenerateContent,
 		BaseURL:  server.URL,
 		APIKey:   "test-key",
@@ -322,7 +327,7 @@ func TestSetAdditionalHeadersOmitsDynamicTemplatesWithoutContext(t *testing.T) {
 }
 
 func TestProviderRequestBuildersExpandConversationIdentityHeaders(t *testing.T) {
-	client := NewClient()
+	client := newTestClient()
 	input := &GenerateInput{
 		ConversationPublicID:   "conversation-1",
 		ConversationSessionKey: "session-1",
@@ -368,7 +373,7 @@ func TestOpenAIGenerationExpandsConversationIdentityHeader(t *testing.T) {
 	}))
 	defer server.Close()
 
-	output, err := NewClient().Generate(t.Context(), RouteConfig{
+	output, err := newTestClient().Generate(t.Context(), RouteConfig{
 		Protocol:      AdapterOpenAIChatCompletions,
 		BaseURL:       server.URL,
 		UpstreamModel: "test-model",
@@ -411,7 +416,7 @@ func TestOpenAIChatCompletionsStreamRetriesWhenAutoUsageOptionIsRejected(t *test
 	}))
 	defer server.Close()
 
-	output, err := NewClient().GenerateStream(context.Background(), RouteConfig{
+	output, err := newTestClient().GenerateStream(context.Background(), RouteConfig{
 		Protocol:      AdapterOpenAIChatCompletions,
 		BaseURL:       server.URL,
 		UpstreamModel: "gpt-compatible",
@@ -437,7 +442,7 @@ func TestGenerateMarksSuccessfulHTTPParseFailureAsAccepted(t *testing.T) {
 	}))
 	defer server.Close()
 
-	_, err := NewClient().Generate(t.Context(), RouteConfig{
+	_, err := newTestClient().Generate(t.Context(), RouteConfig{
 		Protocol:      AdapterOpenAIChatCompletions,
 		BaseURL:       server.URL,
 		UpstreamModel: "test-model",
@@ -463,7 +468,7 @@ func TestGenerateMarksConnectionDropAfterRequestWriteAsAccepted(t *testing.T) {
 	}))
 	defer server.Close()
 
-	_, err := NewClient().Generate(t.Context(), RouteConfig{
+	_, err := newTestClient().Generate(t.Context(), RouteConfig{
 		Protocol:      AdapterOpenAIChatCompletions,
 		BaseURL:       server.URL,
 		UpstreamModel: "test-model",
@@ -481,7 +486,7 @@ func TestGenerateStreamMarksSuccessfulHTTPStreamFailureAsAccepted(t *testing.T) 
 	}))
 	defer server.Close()
 
-	_, err := NewClient().GenerateStream(t.Context(), RouteConfig{
+	_, err := newTestClient().GenerateStream(t.Context(), RouteConfig{
 		Protocol:      AdapterOpenAIChatCompletions,
 		BaseURL:       server.URL,
 		UpstreamModel: "test-model",
@@ -500,7 +505,7 @@ func TestGenerateStreamPreservesBackgroundResponseIDBeforeAcceptedFailure(t *tes
 	defer server.Close()
 
 	responseID := ""
-	_, err := NewClient().GenerateStream(t.Context(), RouteConfig{
+	_, err := newTestClient().GenerateStream(t.Context(), RouteConfig{
 		Protocol:      AdapterOpenAIResponses,
 		BaseURL:       server.URL,
 		UpstreamModel: "test-model",

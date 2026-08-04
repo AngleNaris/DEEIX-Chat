@@ -577,7 +577,7 @@ func buildGeminiInteractionTools(tools []ToolDefinition) []map[string]interface{
 			"type":        "function",
 			"name":        name,
 			"description": strings.TrimSpace(tool.Description),
-			"parameters":  geminiToolParameterSchema(decodeToolSchema(tool.InputSchema)),
+			"parameters":  decodeToolSchema(tool.InputSchema),
 		})
 	}
 	return items

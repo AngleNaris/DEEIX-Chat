@@ -519,88 +519,15 @@ func buildGeminiTools(tools []ToolDefinition) []map[string]interface{} {
 			continue
 		}
 		declarations = append(declarations, map[string]interface{}{
-			"name":        name,
-			"description": strings.TrimSpace(tool.Description),
-			"parameters":  geminiToolParameterSchema(decodeToolSchema(tool.InputSchema)),
+			"name":                 name,
+			"description":          strings.TrimSpace(tool.Description),
+			"parametersJsonSchema": decodeToolSchema(tool.InputSchema),
 		})
 	}
 	if len(declarations) == 0 {
 		return nil
 	}
 	return []map[string]interface{}{{"functionDeclarations": declarations}}
-}
-
-func geminiToolParameterSchema(schema map[string]interface{}) map[string]interface{} {
-	if len(schema) == 0 {
-		return map[string]interface{}{"type": "object", "properties": map[string]interface{}{}}
-	}
-	normalized := sanitizeGeminiSchema(schema)
-	if strings.TrimSpace(getString(normalized["type"])) == "" {
-		normalized["type"] = "object"
-	}
-	if _, ok := normalized["properties"]; !ok && strings.EqualFold(getString(normalized["type"]), "object") {
-		normalized["properties"] = map[string]interface{}{}
-	}
-	return normalized
-}
-
-func sanitizeGeminiSchema(schema map[string]interface{}) map[string]interface{} {
-	result := make(map[string]interface{}, len(schema))
-	for key, value := range schema {
-		switch key {
-		case "type", "format", "title", "description", "nullable", "enum", "required", "propertyOrdering":
-			if !isEmptyGeminiPayloadValue(value) {
-				result[key] = value
-			}
-		case "properties":
-			properties := sanitizeGeminiSchemaProperties(asMap(value))
-			if len(properties) > 0 {
-				result[key] = properties
-			}
-		case "items":
-			itemSchema := sanitizeGeminiSchema(asMap(value))
-			if len(itemSchema) > 0 {
-				result[key] = itemSchema
-			}
-		case "anyOf":
-			anyOf := sanitizeGeminiSchemaList(asSlice(value))
-			if len(anyOf) > 0 {
-				result[key] = anyOf
-			}
-		case "minItems", "maxItems":
-			result[key] = value
-		}
-	}
-	return result
-}
-
-func sanitizeGeminiSchemaProperties(properties map[string]interface{}) map[string]interface{} {
-	if len(properties) == 0 {
-		return nil
-	}
-	result := make(map[string]interface{}, len(properties))
-	for name, raw := range properties {
-		property := sanitizeGeminiSchema(asMap(raw))
-		if len(property) == 0 {
-			continue
-		}
-		result[name] = property
-	}
-	return result
-}
-
-func sanitizeGeminiSchemaList(items []interface{}) []interface{} {
-	if len(items) == 0 {
-		return nil
-	}
-	result := make([]interface{}, 0, len(items))
-	for _, raw := range items {
-		item := sanitizeGeminiSchema(asMap(raw))
-		if len(item) > 0 {
-			result = append(result, item)
-		}
-	}
-	return result
 }
 
 func buildGeminiProviderTools(tools []map[string]interface{}) []map[string]interface{} {

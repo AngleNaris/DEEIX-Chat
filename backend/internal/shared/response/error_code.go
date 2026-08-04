@@ -154,6 +154,8 @@ var exactErrorSpecs = map[string]errorSpec{
 	"message generation canceled":                             {Code: "conversation_run.canceled", Message: "message generation canceled"},
 	"too many files in one message":                           {Code: "message.too_many_files", Message: "too many files in one message"},
 	"too many selected tools":                                 {Code: "message.too_many_selected_tools", Message: "too many selected tools"},
+	"multiple image attachment processors selected":           {Code: "message.multiple_image_processors", Message: "select only one image attachment processor"},
+	"image attachment processing failed":                      {Code: "mcp.image_processing_failed", Message: "image processing tool failed"},
 	"too many selected skills":                                {Code: "message.too_many_selected_skills", Message: "too many selected skills"},
 	"generation stream not found":                             {Code: "conversation_run.stream_not_found", Message: "generation stream not found"},
 	"image prompt is required":                                {Code: "media.image_prompt_required", Message: "image prompt is required"},
@@ -166,6 +168,7 @@ var exactErrorSpecs = map[string]errorSpec{
 	"too many video generation input images":                  {Code: "media.video_too_many_inputs", Message: "too many video generation input images"},
 	"media route protocol does not match task":                {Code: "media.route_protocol_mismatch", Message: "media route protocol does not match task"},
 	"invalid media generation task":                           {Code: "media.invalid_task", Message: "invalid media generation task"},
+	"invalid mcp tool attachment configuration":               {Code: "mcp.invalid_attachment_configuration", Message: "invalid MCP tool attachment configuration"},
 
 	"file is required":                                     {Code: "file.required", Message: "file is required"},
 	"invalid file stream":                                  {Code: "file.invalid_stream", Message: "invalid file stream"},

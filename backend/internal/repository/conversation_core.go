@@ -133,6 +133,7 @@ type ConversationTraceRepository interface {
 	ListConversationRuns(ctx context.Context, userID uint, conversationID uint, offset int, limit int) ([]domainconversation.Run, int64, error)
 	ListConversationRunsByRunIDs(ctx context.Context, userID uint, conversationID uint, runIDs []string) ([]domainconversation.Run, error)
 	ListConversationEventLogs(ctx context.Context, filter ConversationEventLogListFilter, offset int, limit int) ([]domainconversation.EventLog, int64, error)
+	GetConversationEventLog(ctx context.Context, eventID uint) (*domainconversation.EventLog, error)
 }
 
 // ConversationEventLogListFilter 描述管理员对话事件列表筛选和排序条件。

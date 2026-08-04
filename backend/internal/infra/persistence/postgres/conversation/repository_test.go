@@ -158,6 +158,144 @@ func TestListConversationEventLogsHydratesRunRouteSnapshot(t *testing.T) {
 	}
 }
 
+func TestConversationEventLogListAndDetailBoundPayloads(t *testing.T) {
+	db := openConversationRepositoryTestDB(t)
+	repo := NewRepo(db)
+	ctx := context.Background()
+	now := time.Now()
+	largePayload := strings.Repeat("x", maxConversationEventDetailPayloadBytes+1)
+	events := []model.ChatRunEvent{
+		{
+			ConversationID:  1,
+			UserID:          1,
+			RunID:           "run_normal_payload",
+			EventScope:      "trace_event",
+			EventID:         "event_normal_payload",
+			EventType:       "error",
+			Status:          "error",
+			ContentMarkdown: "request failed after upload",
+			PayloadJSON:     `{"error":"上游不可用"}`,
+			InputJSON:       `{"input":true}`,
+			OutputJSON:      `{"output":true}`,
+			ErrorJSON:       `{"code":"upstream_unavailable"}`,
+			StartedAt:       now,
+		},
+		{
+			ConversationID: 1,
+			UserID:         1,
+			RunID:          "run_large_payload",
+			EventScope:     "trace_event",
+			EventID:        "event_large_payload",
+			EventType:      "error",
+			Status:         "error",
+			PayloadJSON:    largePayload,
+			StartedAt:      now,
+		},
+	}
+	if err := db.Create(&events).Error; err != nil {
+		t.Fatalf("create conversation events: %v", err)
+	}
+
+	items, total, err := repo.ListConversationEventLogs(ctx, repository.ConversationEventLogListFilter{}, 0, 10)
+	if err != nil {
+		t.Fatalf("ListConversationEventLogs() error = %v", err)
+	}
+	if total != 2 || len(items) != 2 {
+		t.Fatalf("got total=%d len=%d, want 2", total, len(items))
+	}
+	itemsByRunID := make(map[string]domainconversation.EventLog, len(items))
+	for _, item := range items {
+		itemsByRunID[item.RunID] = item
+		if item.ContentMarkdown != "" || item.PayloadJSON != "" || item.InputJSON != "" || item.OutputJSON != "" || item.ErrorJSON != "" {
+			t.Fatalf("list item contains detail payloads: %#v", item)
+		}
+	}
+	if got := itemsByRunID["run_normal_payload"].PayloadSizeBytes; got != int64(len(events[0].PayloadJSON)) {
+		t.Fatalf("normal payload size = %d, want %d", got, len(events[0].PayloadJSON))
+	}
+	if itemsByRunID["run_normal_payload"].PayloadOmitted {
+		t.Fatal("normal list payload should not be marked omitted")
+	}
+	if got := itemsByRunID["run_large_payload"].PayloadSizeBytes; got != int64(len(largePayload)) {
+		t.Fatalf("large payload size = %d, want %d", got, len(largePayload))
+	}
+	if !itemsByRunID["run_large_payload"].PayloadOmitted {
+		t.Fatal("large list payload should be marked omitted")
+	}
+
+	normalDetail, err := repo.GetConversationEventLog(ctx, events[0].ID)
+	if err != nil {
+		t.Fatalf("GetConversationEventLog(normal) error = %v", err)
+	}
+	if normalDetail.ContentMarkdown != events[0].ContentMarkdown ||
+		normalDetail.PayloadJSON != events[0].PayloadJSON ||
+		normalDetail.InputJSON != events[0].InputJSON ||
+		normalDetail.OutputJSON != events[0].OutputJSON ||
+		normalDetail.ErrorJSON != events[0].ErrorJSON ||
+		normalDetail.PayloadOmitted {
+		t.Fatalf("normal detail = %#v", normalDetail)
+	}
+
+	largeDetail, err := repo.GetConversationEventLog(ctx, events[1].ID)
+	if err != nil {
+		t.Fatalf("GetConversationEventLog(large) error = %v", err)
+	}
+	if largeDetail.PayloadJSON != "" || !largeDetail.PayloadOmitted {
+		t.Fatalf("large detail should omit payload, got %#v", largeDetail)
+	}
+	if largeDetail.PayloadSizeBytes != int64(len(largePayload)) {
+		t.Fatalf("large detail payload size = %d, want %d", largeDetail.PayloadSizeBytes, len(largePayload))
+	}
+}
+
+func TestConversationMessageTraceReadsBoundPayloads(t *testing.T) {
+	db := openConversationRepositoryTestDB(t)
+	repo := NewRepo(db)
+	ctx := context.Background()
+	now := time.Now()
+	largePayload := strings.Repeat("x", maxConversationEventDetailPayloadBytes+1)
+	items := []model.ChatRunEvent{
+		{
+			MessageID:       11,
+			RunID:           "run_trace_block_large",
+			EventScope:      "trace_block",
+			EventID:         "trace_block_large",
+			EventType:       "process",
+			ContentMarkdown: "处理失败",
+			PayloadJSON:     largePayload,
+			StartedAt:       now,
+		},
+		{
+			MessageID:   11,
+			RunID:       "run_trace_event_large",
+			EventScope:  "trace_event",
+			EventID:     "trace_event_large",
+			EventType:   "error",
+			PayloadJSON: largePayload,
+			StartedAt:   now,
+		},
+	}
+	if err := db.Create(&items).Error; err != nil {
+		t.Fatalf("create trace events: %v", err)
+	}
+
+	blocks, err := repo.ListConversationMessageTracesByMessageIDs(ctx, []uint{11})
+	if err != nil {
+		t.Fatalf("list message traces: %v", err)
+	}
+	if len(blocks) != 1 || blocks[0].PayloadJSON != "" || blocks[0].ContentMarkdown != "处理失败" {
+		t.Fatalf("large trace block was not safely loaded: %#v", blocks)
+	}
+
+	events, err := repo.ListConversationMessageTraceEventsByMessageIDs(ctx, []uint{11})
+	if err != nil {
+		t.Fatalf("list trace events: %v", err)
+	}
+	if len(events) != 1 || events[0].PayloadJSON != "" {
+		t.Fatalf("large trace event was not safely loaded: %#v", events)
+	}
+}
+
 func TestListMessagesBeforeIDReturnsPreviousWindowAscending(t *testing.T) {
 	db := openConversationRepositoryTestDB(t)
 	repo := NewRepo(db)

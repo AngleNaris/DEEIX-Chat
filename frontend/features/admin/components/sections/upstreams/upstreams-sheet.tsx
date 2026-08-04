@@ -70,6 +70,7 @@ import {
   Fingerprint,
   KeyRound,
   ListPlus,
+  Network,
   RotateCcw,
   ScanSearch,
   Trash2,
@@ -97,6 +98,11 @@ const REQUEST_ID_HEADER = ["X-Request-Id", `\${DEEIX_REQUEST_ID}`] as const;
 const OPENAI_CLIENT_REQUEST_ID_HEADER = [
   "X-Client-Request-Id",
   `\${DEEIX_UPSTREAM_REQUEST_ID}`,
+] as const;
+const CODEX_COMPATIBLE_AFFINITY_HEADERS = [
+  ["session-id", `\${DEEIX_SESSION_ID}`],
+  ["thread-id", `\${DEEIX_CONVERSATION_ID}`],
+  ["x-client-request-id", `\${DEEIX_CONVERSATION_ID}`],
 ] as const;
 
 const PROTOCOL_OPTIONS_BY_KIND: Record<(typeof PROTOCOL_DEFAULT_KINDS)[number], string[]> = {
@@ -170,7 +176,8 @@ function countMaskedApiKeys(json: string): number {
 function addHeaderPresets(
   headersJson: string,
   presets: ReadonlyArray<readonly [name: string, value: string]>,
-): string | null {
+  rejectConflicts = false,
+): string | null | undefined {
   const value = headersJson.trim();
   let headers: Record<string, unknown> = {};
   if (value) {
@@ -183,12 +190,21 @@ function addHeaderPresets(
     }
   }
 
-  const existingNames = new Set(Object.keys(headers).map((key) => key.toLowerCase()));
+  const existingHeaders = new Map(
+    Object.entries(headers).map(([key, headerValue]) => [key.toLowerCase(), headerValue]),
+  );
+  if (rejectConflicts && presets.some(
+    ([name, template]) => existingHeaders.has(name.toLowerCase())
+      && existingHeaders.get(name.toLowerCase()) !== template,
+  )) {
+    return undefined;
+  }
+
   let changed = false;
   for (const [name, template] of presets) {
-    if (existingNames.has(name.toLowerCase())) continue;
+    if (existingHeaders.has(name.toLowerCase())) continue;
     headers[name] = template;
-    existingNames.add(name.toLowerCase());
+    existingHeaders.set(name.toLowerCase(), template);
     changed = true;
   }
 
@@ -395,10 +411,15 @@ export function UpstreamSheet({
 
   function fillHeaderPresets(
     presets: ReadonlyArray<readonly [name: string, value: string]>,
+    rejectConflicts = false,
   ) {
-    const nextHeadersJson = addHeaderPresets(form.headersJson, presets);
+    const nextHeadersJson = addHeaderPresets(form.headersJson, presets, rejectConflicts);
     if (nextHeadersJson === null) {
       toast.error(t("sheet.headersInvalidForFill"));
+      return;
+    }
+    if (nextHeadersJson === undefined) {
+      toast.error(t("sheet.headerPresetConflict"));
       return;
     }
     if (nextHeadersJson === form.headersJson) {
@@ -895,7 +916,7 @@ export function UpstreamSheet({
                             <ChevronDown className="size-3" />
                           </Button>
                         </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="min-w-52">
+                        <DropdownMenuContent align="end" className="min-w-64">
                           <DropdownMenuLabel className="text-[10px] text-muted-foreground">
                             {t("sheet.commonHeaderPresets")}
                           </DropdownMenuLabel>
@@ -926,6 +947,12 @@ export function UpstreamSheet({
                           >
                             <ScanSearch />
                             {t("sheet.openAIClientRequestIDHeader")}
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onSelect={() => fillHeaderPresets(CODEX_COMPATIBLE_AFFINITY_HEADERS, true)}
+                          >
+                            <Network />
+                            {t("sheet.codexCompatibleAffinityHeaders")}
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>

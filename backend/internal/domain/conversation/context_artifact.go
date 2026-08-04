@@ -12,6 +12,7 @@ const (
 	ContextArtifactUserMemory      ContextArtifactKind = "user_memory"
 	ContextArtifactToolResult      ContextArtifactKind = "tool_result"
 	ContextArtifactNativeTool      ContextArtifactKind = "native_tool_result"
+	ContextArtifactImageAnalysis   ContextArtifactKind = "image_analysis"
 	ContextArtifactSummary         ContextArtifactKind = "conversation_summary"
 )
 

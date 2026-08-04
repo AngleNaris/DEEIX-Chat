@@ -491,7 +491,7 @@ func writeOpenAIMultipartFile(writer *multipart.Writer, fieldName string, fileNa
 }
 
 func buildOpenAIImageEditDebugBody(fields map[string]string, imageCount int, hasMask bool) []byte {
-	payload := make(map[string]interface{}, len(fields)+2)
+	payload := make(map[string]interface{})
 	for key, value := range fields {
 		payload[key] = value
 	}

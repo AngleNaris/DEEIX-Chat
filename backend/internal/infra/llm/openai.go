@@ -346,11 +346,9 @@ func setOpenAIResponseTextParam(payload map[string]interface{}, key string, valu
 }
 
 func normalizePromptCacheRetention(value string) string {
-	switch strings.TrimSpace(value) {
-	case "in-memory":
-		return "in-memory"
-	case "in_memory":
-		return "in-memory"
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "in-memory", "in_memory":
+		return "in_memory"
 	case "24h":
 		return "24h"
 	default:

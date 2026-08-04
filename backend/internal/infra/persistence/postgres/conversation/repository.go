@@ -1698,6 +1698,63 @@ const (
 	chatContextRecordArtifact   = "artifact"
 )
 
+const maxConversationEventDetailPayloadBytes = 1024 * 1024
+
+func conversationEventPayloadSizeExpression(db *gorm.DB) string {
+	if db != nil && db.Dialector != nil {
+		switch db.Dialector.Name() {
+		case "postgres":
+			return "OCTET_LENGTH(payload_json)"
+		case "sqlite":
+			return "LENGTH(CAST(payload_json AS BLOB))"
+		}
+	}
+	return "LENGTH(payload_json)"
+}
+
+func conversationEventSummarySelectColumns(db *gorm.DB) []string {
+	payloadSize := conversationEventPayloadSizeExpression(db)
+	return []string{
+		"id",
+		"message_id",
+		"conversation_id",
+		"user_id",
+		"run_id",
+		"event_scope",
+		"event_id",
+		"event_type",
+		"phase",
+		"stage",
+		"round_id",
+		"parent_event_id",
+		"status",
+		"title",
+		"summary",
+		"seq",
+		"tool_call_id",
+		"tool_name",
+		"latency_ms",
+		"started_at",
+		"ended_at",
+		"created_at",
+		"updated_at",
+		payloadSize + " AS payload_size_bytes",
+		fmt.Sprintf("CASE WHEN %s > %d THEN TRUE ELSE FALSE END AS payload_omitted", payloadSize, maxConversationEventDetailPayloadBytes),
+	}
+}
+
+func conversationEventDetailSelectColumns(db *gorm.DB) []string {
+	payloadSize := conversationEventPayloadSizeExpression(db)
+	return append(
+		conversationEventSummarySelectColumns(db),
+		"content_markdown",
+		fmt.Sprintf("CASE WHEN %s <= %d THEN payload_json ELSE '' END AS payload_json", payloadSize, maxConversationEventDetailPayloadBytes),
+		"input_json",
+		"output_json",
+		"error_json",
+	)
+}
+
 // CreateConversationRun 写入会话运行日志。
 func (r *Repo) CreateConversationRun(ctx context.Context, item *domainconversation.Run) error {
 	entity := toConversationRunModel(item)
@@ -1751,6 +1808,7 @@ func (r *Repo) ListConversationMessageTracesByMessageIDs(ctx context.Context, me
 		return []domainconversation.MessageTrace{}, nil
 	}
 	if err := r.db.WithContext(ctx).
+		Select(conversationEventDetailSelectColumns(r.db)).
 		Where("message_id IN ? AND event_scope = ?", messageIDs, chatRunEventScopeTraceBlock).
 		Order("message_id ASC, seq ASC, id ASC").
 		Find(&items).Error; err != nil {
@@ -1802,6 +1860,7 @@ func (r *Repo) ListConversationMessageTraceEventsByMessageIDs(ctx context.Contex
 		return []domainconversation.MessageTraceEventRow{}, nil
 	}
 	if err := r.db.WithContext(ctx).
+		Select(conversationEventDetailSelectColumns(r.db)).
 		Where("message_id IN ? AND event_scope = ?", messageIDs, chatRunEventScopeTraceEvent).
 		Order("message_id ASC, seq ASC, id ASC").
 		Find(&items).Error; err != nil {
@@ -1931,6 +1990,7 @@ func (r *Repo) ListConversationEventLogs(
 		order = "run_id ASC, seq ASC, id ASC"
 	}
 	if err := query.
+		Select(conversationEventSummarySelectColumns(r.db)).
 		Order(order).
 		Offset(offset).
 		Limit(limit).
@@ -1938,6 +1998,32 @@ func (r *Repo) ListConversationEventLogs(
 		return nil, 0, translateError(err)
 	}
 	results := toConversationEventLogDomains(items)
+	if err := r.hydrateConversationEventRunMetadata(ctx, results); err != nil {
+		return nil, 0, err
+	}
+	return results, total, nil
+}
+
+// GetConversationEventLog 查询单条管理员对话事件日志详情。
+func (r *Repo) GetConversationEventLog(ctx context.Context, eventID uint) (*domainconversation.EventLog, error) {
+	var item models.ChatRunEvent
+	if err := r.db.WithContext(ctx).
+		Select(conversationEventDetailSelectColumns(r.db)).
+		Where("id = ?", eventID).
+		First(&item).Error; err != nil {
+		return nil, translateError(err)
+	}
+	results := toConversationEventLogDomains([]models.ChatRunEvent{item})
+	if err := r.hydrateConversationEventRunMetadata(ctx, results); err != nil {
+		return nil, err
+	}
+	if len(results) == 0 {
+		return nil, repository.ErrNotFound
+	}
+	return &results[0], nil
+}
+
+func (r *Repo) hydrateConversationEventRunMetadata(ctx context.Context, results []domainconversation.EventLog) error {
 	runIDs := make([]string, 0, len(results))
 	seenRunIDs := make(map[string]struct{}, len(results))
 	for _, item := range results {
@@ -1952,7 +2038,7 @@ func (r *Repo) ListConversationEventLogs(
 		runIDs = append(runIDs, runID)
 	}
 	if len(runIDs) == 0 {
-		return results, total, nil
+		return nil
 	}
 
 	runs := make([]models.ConversationRun, 0, len(runIDs))
@@ -1960,7 +2046,7 @@ func (r *Repo) ListConversationEventLogs(
 		Select("run_id", "provider_protocol", "upstream_name", "platform_model_name", "routed_binding_code", "upstream_model_name").
 		Where("run_id IN ?", runIDs).
 		Find(&runs).Error; err != nil {
-		return nil, 0, translateError(err)
+		return translateError(err)
 	}
 	runsByID := make(map[string]models.ConversationRun, len(runs))
 	for _, run := range runs {
@@ -1977,7 +2063,7 @@ func (r *Repo) ListConversationEventLogs(
 		results[index].RoutedBindingCode = run.RoutedBindingCode
 		results[index].UpstreamModelName = run.UpstreamModelName
 	}
-	return results, total, nil
+	return nil
 }
 
 // ListConversationRunsByRunIDs 按运行 ID 查询会话运行快照。
@@ -3702,34 +3788,36 @@ func toConversationEventLogDomains(items []models.ChatRunEvent) []domainconversa
 	results := make([]domainconversation.EventLog, 0, len(items))
 	for _, item := range items {
 		results = append(results, domainconversation.EventLog{
-			ID:              item.ID,
-			MessageID:       item.MessageID,
-			ConversationID:  item.ConversationID,
-			UserID:          item.UserID,
-			RunID:           item.RunID,
-			EventScope:      item.EventScope,
-			EventID:         item.EventID,
-			EventType:       item.EventType,
-			Phase:           item.Phase,
-			Stage:           item.Stage,
-			RoundID:         item.RoundID,
-			ParentEventID:   item.ParentEventID,
-			Status:          item.Status,
-			Title:           item.Title,
-			Summary:         item.Summary,
-			ContentMarkdown: item.ContentMarkdown,
-			PayloadJSON:     item.PayloadJSON,
-			Seq:             item.Seq,
-			ToolCallID:      item.ToolCallID,
-			ToolName:        item.ToolName,
-			LatencyMS:       item.LatencyMS,
-			InputJSON:       item.InputJSON,
-			OutputJSON:      item.OutputJSON,
-			ErrorJSON:       item.ErrorJSON,
-			StartedAt:       item.StartedAt,
-			EndedAt:         item.EndedAt,
-			CreatedAt:       item.CreatedAt,
-			UpdatedAt:       item.UpdatedAt,
+			ID:               item.ID,
+			MessageID:        item.MessageID,
+			ConversationID:   item.ConversationID,
+			UserID:           item.UserID,
+			RunID:            item.RunID,
+			EventScope:       item.EventScope,
+			EventID:          item.EventID,
+			EventType:        item.EventType,
+			Phase:            item.Phase,
+			Stage:            item.Stage,
+			RoundID:          item.RoundID,
+			ParentEventID:    item.ParentEventID,
+			Status:           item.Status,
+			Title:            item.Title,
+			Summary:          item.Summary,
+			ContentMarkdown:  item.ContentMarkdown,
+			PayloadJSON:      item.PayloadJSON,
+			PayloadSizeBytes: item.PayloadSizeBytes,
+			PayloadOmitted:   item.PayloadOmitted,
+			Seq:              item.Seq,
+			ToolCallID:       item.ToolCallID,
+			ToolName:         item.ToolName,
+			LatencyMS:        item.LatencyMS,
+			InputJSON:        item.InputJSON,
+			OutputJSON:       item.OutputJSON,
+			ErrorJSON:        item.ErrorJSON,
+			StartedAt:        item.StartedAt,
+			EndedAt:          item.EndedAt,
+			CreatedAt:        item.CreatedAt,
+			UpdatedAt:        item.UpdatedAt,
 		})
 	}
 	return results

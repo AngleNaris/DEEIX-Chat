@@ -545,7 +545,7 @@ func (s *Service) readGeneratedVideo(ctx context.Context, video llm.GeneratedVid
 		req.Header.Set("x-goog-api-key", strings.TrimSpace(apiKey))
 	}
 	cfg := s.cfg.Snapshot()
-	client := security.NewOutboundHTTPClient(cfg.Env, cfg.SSRFProtectionEnabled, 120*time.Second)
+	client := security.NewOutboundHTTPClient(cfg.StrictOutboundPolicy(), 120*time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, mimeType, err
@@ -576,7 +576,7 @@ func (s *Service) waitGeminiGeneratedVideoFileReady(ctx context.Context, metadat
 		return "", fmt.Errorf("Gemini Files generated video URI requires an API key")
 	}
 	cfg := s.cfg.Snapshot()
-	client := security.NewOutboundHTTPClient(cfg.Env, cfg.SSRFProtectionEnabled, 30*time.Second)
+	client := security.NewOutboundHTTPClient(cfg.StrictOutboundPolicy(), 30*time.Second)
 	mimeType, err := pollGeminiGeneratedFileReady(ctx, client, metadataURL, apiKey)
 	if err != nil {
 		return "", err

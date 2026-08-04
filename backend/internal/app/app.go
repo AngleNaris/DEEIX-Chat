@@ -37,6 +37,7 @@ import (
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/geoip"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/llm"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/mcp"
+	openrouterpricing "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/modelpricing/openrouter"
 	platformlogger "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/observability/logger"
 	platformtracing "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/observability/tracing"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/openwebui"
@@ -194,6 +195,7 @@ func NewApp() (*App, error) {
 	billingService := billing.NewService(billingRepo)
 	billingService.SetAuditWriter(auditService)
 	billingService.SetRedemptionCodeSecret(cfg.DataEncryptionKey)
+	billingService.SetOpenRouterPricingProvider(openrouterpricing.New(cfg.StrictOutboundPolicy()))
 	billingHandler := billinghttp.NewHandler(billingService, settingsService, runtimeCfg)
 	billingModule := billinghttp.NewModule(billingHandler)
 	objectStoreProvider := appstorage.NewRuntimeProvider(runtimeCfg, nil)
@@ -217,8 +219,9 @@ func NewApp() (*App, error) {
 	memoryModule := memoryhttp.NewModule(memoryHandler)
 	channelRepo := channelrepo.NewRepo(db)
 	channelCache := buildChannelCache(cfg, redisClient, memoryCache)
-	llmClient := llm.NewClientWithEnv(cfg.Env, cfg.SSRFProtectionEnabled)
-	mcpClient := mcp.NewClientWithEnv(cfg.Env, cfg.SSRFProtectionEnabled)
+	trustedOutboundPolicy := cfg.TrustedOutboundPolicy()
+	llmClient := llm.NewClient(trustedOutboundPolicy)
+	mcpClient := mcp.NewClient(trustedOutboundPolicy)
 	channelService := channel.NewServiceWithRuntime(runtimeCfg, channelRepo, channelCache, llmClient)
 	channelService.SetLogger(log)
 	channelService.SetBillingModelPricingFilter(billingService)
@@ -237,7 +240,7 @@ func NewApp() (*App, error) {
 	settingsService.SetVectorStoreAvailabilityService(conversationRepo)
 	conversationCache := buildConversationCache(cfg, redisClient, memoryCache)
 	mcpRepo := mcprepo.NewRepo(db)
-	embedClient := embedding.NewWithEnv(cfg.Env, cfg.SSRFProtectionEnabled)
+	embedClient := embedding.New(trustedOutboundPolicy)
 	compactService := compact.NewServiceWithRuntime(runtimeCfg, conversationRepo, log)
 	extractionService := extraction.NewServiceWithRuntime(runtimeCfg)
 	extractionService.SetObjectStoreProvider(objectStoreProvider)

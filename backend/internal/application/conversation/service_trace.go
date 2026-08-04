@@ -46,6 +46,7 @@ const (
 const (
 	toolTracePreviewMaxChars = 260
 	toolTraceDetailMaxChars  = 4096
+	maxTracePayloadBytes     = 1024 * 1024
 )
 
 const (
@@ -842,6 +843,23 @@ func tracePayloadJSON(payload map[string]interface{}) string {
 	if err != nil {
 		return "{}"
 	}
+	if len(raw) > maxTracePayloadBytes {
+		return tracePayloadOmittedJSON(len(raw))
+	}
+	return string(raw)
+}
+
+func tracePayloadOmittedJSON(originalBytes int) string {
+	raw, err := json.Marshal(map[string]interface{}{
+		"_trace": map[string]interface{}{
+			"payloadOmitted": true,
+			"originalBytes":  originalBytes,
+			"reason":         "payload_too_large",
+		},
+	})
+	if err != nil {
+		return "{}"
+	}
 	return string(raw)
 }
 
@@ -962,11 +980,9 @@ func traceDraftToBlock(draft *messageTraceDraft) *model.MessageTraceBlock {
 	if draft.endedAt != nil {
 		updatedAt = *draft.endedAt
 	}
-	var payloadJSON string
+	payloadJSON := ""
 	if len(draft.payload) > 0 {
-		if raw, err := json.Marshal(draft.payload); err == nil {
-			payloadJSON = string(raw)
-		}
+		payloadJSON = tracePayloadJSON(draft.payload)
 	}
 	return &model.MessageTraceBlock{
 		Title:           draft.title,
