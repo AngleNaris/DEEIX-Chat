@@ -30,7 +30,7 @@ function mergeContent(previous: string, event: UpstreamThinkDeltaEvent) {
   return previous;
 }
 
-function mergeUpstreamThinkBlock(current: ChatTraceBlock | undefined, event: UpstreamThinkDeltaEvent): ChatTraceBlock {
+export function mergeUpstreamThinkBlock(current: ChatTraceBlock | undefined, event: UpstreamThinkDeltaEvent): ChatTraceBlock {
   const contentMarkdown = mergeContent(current?.contentMarkdown ?? "", event);
   return {
     title: event.title?.trim() || current?.title || "",

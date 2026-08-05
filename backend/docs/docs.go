@@ -6425,6 +6425,193 @@ const docTemplate = `{
                 }
             }
         },
+        "/agent-group-runs/{run_id}/abandon": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "放弃已暂停或被阻塞的群组运行：消息标记结局，运行不再可重试",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "chat"
+                ],
+                "summary": "放弃群组运行",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "运行 public_id",
+                        "name": "run_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/AgentGroupRunAbandonResponseDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgroupErrorDoc"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgroupErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgroupErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/agent-group-runs/{run_id}/cancel": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "取消进行中的群组运行：中断当前 Attempt，运行回到 paused_retryable",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "chat"
+                ],
+                "summary": "取消群组运行",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "运行 public_id",
+                        "name": "run_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/AgentGroupRunCancelResponseDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgroupErrorDoc"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgroupErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgroupErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/agent-group-runs/{run_id}/steps/{step_id}/retry": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "从暂停的失败步骤原地重试：复用原配置快照，仅为该步骤追加一次新 Attempt，NDJSON 流式返回群组事件与正文增量",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/x-ndjson"
+                ],
+                "tags": [
+                    "chat"
+                ],
+                "summary": "重试失败步骤",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "运行 public_id",
+                        "name": "run_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "步骤 public_id",
+                        "name": "step_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "重试参数（retryRequestID 防止双击重复）",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/AgentGroupStepRetryRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "NDJSON stream",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgroupErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgroupErrorDoc"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgroupErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgroupErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
         "/announcements": {
             "get": {
                 "security": [
@@ -7648,6 +7835,748 @@ const docTemplate = `{
                 }
             }
         },
+        "/conversation-agent-group-runs/lookup": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "前端消息只持有 clientRunID，刷新页面后据此恢复群组运行时间线（会话经公开 ID 解析）",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "chat"
+                ],
+                "summary": "按会话与流式运行 ID 查询运行详情",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "会话公开 ID",
+                        "name": "conversationID",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "父流式运行 ID",
+                        "name": "clientRunID",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/AgentGroupRunDetailResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgroupErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgroupErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgroupErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/conversation-agent-group-runs/{run_id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "查询群组运行及其步骤、尝试完整视图",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "chat"
+                ],
+                "summary": "运行详情",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "运行 public_id",
+                        "name": "run_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/AgentGroupRunDetailResponseDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgroupErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgroupErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/conversation-agent-groups": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "查询当前用户项目下的 Agent 群组",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "chat"
+                ],
+                "summary": "群组列表",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "项目 public_id",
+                        "name": "projectID",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/AgentGroupListResponseDoc"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgroupErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgroupErrorDoc"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "创建 Agent 群组（主管 + 工作成员，成员从现有角色中选择）",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "chat"
+                ],
+                "summary": "创建群组",
+                "parameters": [
+                    {
+                        "description": "群组参数",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/CreateAgentGroupRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/AgentGroupResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgroupErrorDoc"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgroupErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgroupErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/conversation-agent-groups/feature": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "查询 Agent 群组功能是否启用",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "chat"
+                ],
+                "summary": "群组功能开关",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/AgentGroupFeatureResponseDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgroupErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/conversation-agent-groups/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "查询单个 Agent 群组（含成员与角色摘要）",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "chat"
+                ],
+                "summary": "群组详情",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "群组 public_id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/AgentGroupResponseDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgroupErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgroupErrorDoc"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "删除没有历史记录的 Agent 群组（存在会话或运行历史时拒绝）",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "chat"
+                ],
+                "summary": "删除群组",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "群组 public_id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgroupErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgroupErrorDoc"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgroupErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgroupErrorDoc"
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "更新群组名称、描述、协调提示词与排序",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "chat"
+                ],
+                "summary": "更新群组",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "群组 public_id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "群组参数",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/UpdateAgentGroupRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/AgentGroupResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgroupErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgroupErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgroupErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/conversation-agent-groups/{id}/members": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "向群组添加工作成员（角色不可与现有成员重复）",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "chat"
+                ],
+                "summary": "添加成员",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "群组 public_id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "成员参数",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/AddAgentGroupMemberRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/AgentGroupResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgroupErrorDoc"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgroupErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgroupErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgroupErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/conversation-agent-groups/{id}/members/reorder": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "按传入顺序重排群组成员",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "chat"
+                ],
+                "summary": "重排成员",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "群组 public_id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "成员顺序",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/ReorderAgentGroupMembersRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/AgentGroupResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgroupErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgroupErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgroupErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/conversation-agent-groups/{id}/members/{member_id}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "移除工作成员（主管须先更换）",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "chat"
+                ],
+                "summary": "移除成员",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "群组 public_id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "成员 public_id",
+                        "name": "member_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/AgentGroupResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgroupErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgroupErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgroupErrorDoc"
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "更新成员启用状态、模型覆盖与职责指令（主管不可禁用）",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "chat"
+                ],
+                "summary": "更新成员",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "群组 public_id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "成员 public_id",
+                        "name": "member_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "成员参数",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/UpdateAgentGroupMemberRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/AgentGroupResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgroupErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgroupErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgroupErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/conversation-agent-groups/{id}/supervisor": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "更换群组主管（原主管自动转为工作成员）",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "chat"
+                ],
+                "summary": "更换主管",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "群组 public_id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "新主管成员",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/ChangeAgentGroupSupervisorRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/AgentGroupResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgroupErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgroupErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgroupErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
         "/conversation-projects": {
             "get": {
                 "security": [
@@ -7902,6 +8831,300 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/ConversationProjectResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/ConversationErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/ConversationErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/ConversationErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/conversation-roles": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "查询当前用户的角色(助手)列表",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "chat"
+                ],
+                "summary": "角色列表",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "状态筛选: active|archived|all",
+                        "name": "status",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ConversationRoleListResponseDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/ConversationErrorDoc"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "创建当前用户的角色(助手)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "chat"
+                ],
+                "summary": "创建角色",
+                "parameters": [
+                    {
+                        "description": "角色参数",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/CreateConversationRoleRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ConversationRoleResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/ConversationErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/ConversationErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/conversation-roles/reorder": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "更新当前用户角色展示顺序",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "chat"
+                ],
+                "summary": "角色排序",
+                "parameters": [
+                    {
+                        "description": "角色排序",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/ReorderConversationRolesRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ConversationErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/ConversationErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/conversation-roles/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "查询当前用户单个角色",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "chat"
+                ],
+                "summary": "角色详情",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "角色 public_id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ConversationRoleResponseDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/ConversationErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/ConversationErrorDoc"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "删除当前用户的角色",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "chat"
+                ],
+                "summary": "删除角色",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "角色 public_id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ConversationErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/ConversationErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/ConversationErrorDoc"
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "更新当前用户的角色",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "chat"
+                ],
+                "summary": "更新角色",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "角色 public_id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "角色参数",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/UpdateConversationRoleRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ConversationRoleResponseDoc"
                         }
                     },
                     "400": {
@@ -11548,6 +12771,26 @@ const docTemplate = `{
                 }
             }
         },
+        "AddAgentGroupMemberRequest": {
+            "type": "object",
+            "required": [
+                "rolePublicID"
+            ],
+            "properties": {
+                "dutyInstruction": {
+                    "type": "string",
+                    "maxLength": 4000
+                },
+                "modelOverride": {
+                    "type": "string",
+                    "maxLength": 128
+                },
+                "rolePublicID": {
+                    "type": "string",
+                    "maxLength": 32
+                }
+            }
+        },
         "AdminAnnouncementListResponseDoc": {
             "type": "object",
             "required": [
@@ -11775,6 +13018,483 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "AgentGroupFeatureResponse": {
+            "type": "object",
+            "required": [
+                "enabled"
+            ],
+            "properties": {
+                "enabled": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "AgentGroupFeatureResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/AgentGroupFeatureResponse"
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "AgentGroupListResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/AgentGroupResponse"
+                    }
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "AgentGroupMemberRequest": {
+            "type": "object",
+            "required": [
+                "rolePublicID"
+            ],
+            "properties": {
+                "dutyInstruction": {
+                    "type": "string",
+                    "maxLength": 4000
+                },
+                "modelOverride": {
+                    "type": "string",
+                    "maxLength": 128
+                },
+                "rolePublicID": {
+                    "type": "string",
+                    "maxLength": 32
+                }
+            }
+        },
+        "AgentGroupMemberResponse": {
+            "type": "object",
+            "required": [
+                "createdAt",
+                "dutyInstruction",
+                "enabled",
+                "memberType",
+                "modelOverride",
+                "publicID",
+                "roleColor",
+                "roleIcon",
+                "roleModel",
+                "roleName",
+                "roleProvider",
+                "rolePublicID",
+                "sortOrder",
+                "updatedAt"
+            ],
+            "properties": {
+                "createdAt": {
+                    "type": "string"
+                },
+                "dutyInstruction": {
+                    "type": "string"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "memberType": {
+                    "type": "string"
+                },
+                "modelOverride": {
+                    "type": "string"
+                },
+                "publicID": {
+                    "type": "string"
+                },
+                "roleColor": {
+                    "type": "string"
+                },
+                "roleIcon": {
+                    "type": "string"
+                },
+                "roleModel": {
+                    "type": "string"
+                },
+                "roleName": {
+                    "type": "string"
+                },
+                "roleProvider": {
+                    "type": "string"
+                },
+                "rolePublicID": {
+                    "type": "string"
+                },
+                "sortOrder": {
+                    "type": "integer"
+                },
+                "updatedAt": {
+                    "type": "string"
+                }
+            }
+        },
+        "AgentGroupResponse": {
+            "type": "object",
+            "required": [
+                "coordinationPrompt",
+                "createdAt",
+                "description",
+                "members",
+                "name",
+                "projectID",
+                "projectName",
+                "publicID",
+                "revision",
+                "sortOrder",
+                "status",
+                "supervisorMemberID",
+                "updatedAt"
+            ],
+            "properties": {
+                "coordinationPrompt": {
+                    "type": "string"
+                },
+                "createdAt": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "members": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/AgentGroupMemberResponse"
+                    }
+                },
+                "name": {
+                    "type": "string"
+                },
+                "projectID": {
+                    "type": "string"
+                },
+                "projectName": {
+                    "type": "string"
+                },
+                "publicID": {
+                    "type": "string"
+                },
+                "revision": {
+                    "type": "integer"
+                },
+                "sortOrder": {
+                    "type": "integer"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "supervisorMemberID": {
+                    "type": "string"
+                },
+                "updatedAt": {
+                    "type": "string"
+                }
+            }
+        },
+        "AgentGroupResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/AgentGroupResponse"
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "AgentGroupRunAbandonResponse": {
+            "type": "object",
+            "required": [
+                "status"
+            ],
+            "properties": {
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "AgentGroupRunAbandonResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/AgentGroupRunAbandonResponse"
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "AgentGroupRunCancelResponse": {
+            "type": "object",
+            "required": [
+                "canceled"
+            ],
+            "properties": {
+                "canceled": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "AgentGroupRunCancelResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/AgentGroupRunCancelResponse"
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "AgentGroupRunDetailResponse": {
+            "type": "object",
+            "required": [
+                "run",
+                "steps"
+            ],
+            "properties": {
+                "run": {
+                    "$ref": "#/definitions/AgentGroupRunResponse"
+                },
+                "steps": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/AgentGroupStepResponse"
+                    }
+                }
+            }
+        },
+        "AgentGroupRunDetailResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/AgentGroupRunDetailResponse"
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "AgentGroupRunResponse": {
+            "type": "object",
+            "required": [
+                "clientRunID",
+                "conversationID",
+                "createdAt",
+                "endedAt",
+                "errorCode",
+                "errorMessage",
+                "groupPublicID",
+                "publicID",
+                "startedAt",
+                "status",
+                "updatedAt"
+            ],
+            "properties": {
+                "clientRunID": {
+                    "type": "string"
+                },
+                "conversationID": {
+                    "type": "integer"
+                },
+                "createdAt": {
+                    "type": "string"
+                },
+                "endedAt": {
+                    "type": "string"
+                },
+                "errorCode": {
+                    "type": "string"
+                },
+                "errorMessage": {
+                    "type": "string"
+                },
+                "groupPublicID": {
+                    "type": "string"
+                },
+                "publicID": {
+                    "type": "string"
+                },
+                "startedAt": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "updatedAt": {
+                    "type": "string"
+                }
+            }
+        },
+        "AgentGroupStepAttemptResponse": {
+            "type": "object",
+            "required": [
+                "attemptNo",
+                "createdAt",
+                "endedAt",
+                "errorCode",
+                "errorMessage",
+                "outputMarkdown",
+                "publicID",
+                "requestedModel",
+                "resolvedModel",
+                "startedAt",
+                "status"
+            ],
+            "properties": {
+                "attemptNo": {
+                    "type": "integer"
+                },
+                "createdAt": {
+                    "type": "string"
+                },
+                "endedAt": {
+                    "type": "string"
+                },
+                "errorCode": {
+                    "type": "string"
+                },
+                "errorMessage": {
+                    "type": "string"
+                },
+                "outputMarkdown": {
+                    "type": "string"
+                },
+                "publicID": {
+                    "type": "string"
+                },
+                "requestedModel": {
+                    "type": "string"
+                },
+                "resolvedModel": {
+                    "type": "string"
+                },
+                "startedAt": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "AgentGroupStepResponse": {
+            "type": "object",
+            "required": [
+                "actorMemberPublicID",
+                "actorNameSnapshot",
+                "actorTypeSnapshot",
+                "attempts",
+                "createdAt",
+                "instruction",
+                "publicID",
+                "sequence",
+                "status",
+                "stepType",
+                "updatedAt"
+            ],
+            "properties": {
+                "actorMemberPublicID": {
+                    "type": "string"
+                },
+                "actorNameSnapshot": {
+                    "type": "string"
+                },
+                "actorTypeSnapshot": {
+                    "type": "string"
+                },
+                "attempts": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/AgentGroupStepAttemptResponse"
+                    }
+                },
+                "createdAt": {
+                    "type": "string"
+                },
+                "instruction": {
+                    "type": "string"
+                },
+                "publicID": {
+                    "type": "string"
+                },
+                "sequence": {
+                    "type": "integer"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "stepType": {
+                    "type": "string"
+                },
+                "updatedAt": {
+                    "type": "string"
+                }
+            }
+        },
+        "AgentGroupStepRetryRequest": {
+            "type": "object",
+            "required": [
+                "retryRequestID"
+            ],
+            "properties": {
+                "retryRequestID": {
+                    "type": "string",
+                    "maxLength": 64
+                }
+            }
+        },
+        "AgentgroupErrorDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {},
+                "details": {},
+                "errorCode": {
+                    "type": "string"
+                },
+                "errorMsg": {
+                    "type": "string"
+                },
+                "requestId": {
                     "type": "string"
                 }
             }
@@ -13195,6 +14915,18 @@ const docTemplate = `{
                 }
             }
         },
+        "ChangeAgentGroupSupervisorRequest": {
+            "type": "object",
+            "required": [
+                "memberPublicID"
+            ],
+            "properties": {
+                "memberPublicID": {
+                    "type": "string",
+                    "maxLength": 32
+                }
+            }
+        },
         "ChannelErrorDoc": {
             "type": "object",
             "required": [
@@ -14056,6 +15788,8 @@ const docTemplate = `{
         "ConversationResponse": {
             "type": "object",
             "required": [
+                "agentGroupID",
+                "agentGroupName",
                 "contextPolicyJSON",
                 "createdAt",
                 "isStarred",
@@ -14069,6 +15803,8 @@ const docTemplate = `{
                 "projectName",
                 "provider",
                 "publicID",
+                "roleID",
+                "roleName",
                 "sessionKey",
                 "shareID",
                 "shareStatus",
@@ -14080,6 +15816,12 @@ const docTemplate = `{
                 "userID"
             ],
             "properties": {
+                "agentGroupID": {
+                    "type": "string"
+                },
+                "agentGroupName": {
+                    "type": "string"
+                },
                 "contextPolicyJSON": {
                     "type": "string"
                 },
@@ -14123,6 +15865,12 @@ const docTemplate = `{
                 "publicID": {
                     "type": "string"
                 },
+                "roleID": {
+                    "type": "string"
+                },
+                "roleName": {
+                    "type": "string"
+                },
                 "sessionKey": {
                     "type": "string"
                 },
@@ -14153,6 +15901,112 @@ const docTemplate = `{
                 },
                 "userID": {
                     "type": "integer"
+                }
+            }
+        },
+        "ConversationRoleListResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/ConversationRoleResponse"
+                    }
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "ConversationRoleResponse": {
+            "type": "object",
+            "required": [
+                "color",
+                "createdAt",
+                "defaultMCPToolIDs",
+                "defaultSkillIDs",
+                "description",
+                "icon",
+                "mcpDefaultMode",
+                "model",
+                "name",
+                "provider",
+                "publicID",
+                "sortOrder",
+                "status",
+                "systemPrompt",
+                "updatedAt"
+            ],
+            "properties": {
+                "color": {
+                    "type": "string"
+                },
+                "createdAt": {
+                    "type": "string"
+                },
+                "defaultMCPToolIDs": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "defaultSkillIDs": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "description": {
+                    "type": "string"
+                },
+                "icon": {
+                    "type": "string"
+                },
+                "mcpDefaultMode": {
+                    "type": "string"
+                },
+                "model": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "provider": {
+                    "type": "string"
+                },
+                "publicID": {
+                    "type": "string"
+                },
+                "sortOrder": {
+                    "type": "integer"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "systemPrompt": {
+                    "type": "string"
+                },
+                "updatedAt": {
+                    "type": "string"
+                }
+            }
+        },
+        "ConversationRoleResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/ConversationRoleResponse"
+                },
+                "errorMsg": {
+                    "type": "string"
                 }
             }
         },
@@ -14339,6 +16193,42 @@ const docTemplate = `{
                 }
             }
         },
+        "CreateAgentGroupRequest": {
+            "type": "object",
+            "required": [
+                "name",
+                "projectID",
+                "supervisor"
+            ],
+            "properties": {
+                "coordinationPrompt": {
+                    "type": "string",
+                    "maxLength": 12000
+                },
+                "description": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "name": {
+                    "type": "string",
+                    "maxLength": 80
+                },
+                "projectID": {
+                    "type": "string",
+                    "maxLength": 32
+                },
+                "supervisor": {
+                    "$ref": "#/definitions/AgentGroupMemberRequest"
+                },
+                "workers": {
+                    "type": "array",
+                    "maxItems": 31,
+                    "items": {
+                        "$ref": "#/definitions/AgentGroupMemberRequest"
+                    }
+                }
+            }
+        },
         "CreateAnnouncementRequest": {
             "type": "object",
             "required": [
@@ -14485,6 +16375,10 @@ const docTemplate = `{
         "CreateConversationRequest": {
             "type": "object",
             "properties": {
+                "agentGroupID": {
+                    "type": "string",
+                    "maxLength": 32
+                },
                 "model": {
                     "type": "string",
                     "maxLength": 128
@@ -14493,9 +16387,70 @@ const docTemplate = `{
                     "type": "string",
                     "maxLength": 32
                 },
+                "roleID": {
+                    "type": "string",
+                    "maxLength": 32
+                },
                 "title": {
                     "type": "string",
                     "maxLength": 255
+                }
+            }
+        },
+        "CreateConversationRoleRequest": {
+            "type": "object",
+            "required": [
+                "name"
+            ],
+            "properties": {
+                "color": {
+                    "type": "string",
+                    "maxLength": 32
+                },
+                "defaultMCPToolIDs": {
+                    "type": "array",
+                    "maxItems": 128,
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "defaultSkillIDs": {
+                    "type": "array",
+                    "maxItems": 128,
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "description": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "icon": {
+                    "type": "string",
+                    "maxLength": 32
+                },
+                "mcpDefaultMode": {
+                    "type": "string",
+                    "enum": [
+                        "inherit",
+                        "custom"
+                    ]
+                },
+                "model": {
+                    "type": "string",
+                    "maxLength": 128
+                },
+                "name": {
+                    "type": "string",
+                    "maxLength": 80
+                },
+                "provider": {
+                    "type": "string",
+                    "maxLength": 32
+                },
+                "systemPrompt": {
+                    "type": "string",
+                    "maxLength": 12000
                 }
             }
         },
@@ -18878,6 +20833,21 @@ const docTemplate = `{
                 }
             }
         },
+        "ReorderAgentGroupMembersRequest": {
+            "type": "object",
+            "required": [
+                "orderedPublicIDs"
+            ],
+            "properties": {
+                "orderedPublicIDs": {
+                    "type": "array",
+                    "maxItems": 32,
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
         "ReorderConversationProjectsRequest": {
             "type": "object",
             "required": [
@@ -18885,6 +20855,21 @@ const docTemplate = `{
             ],
             "properties": {
                 "projectIDs": {
+                    "type": "array",
+                    "maxItems": 200,
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "ReorderConversationRolesRequest": {
+            "type": "object",
+            "required": [
+                "roleIDs"
+            ],
+            "properties": {
+                "roleIDs": {
                     "type": "array",
                     "maxItems": 200,
                     "items": {
@@ -20274,6 +22259,47 @@ const docTemplate = `{
                 }
             }
         },
+        "UpdateAgentGroupMemberRequest": {
+            "type": "object",
+            "properties": {
+                "dutyInstruction": {
+                    "type": "string",
+                    "maxLength": 4000
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "modelOverride": {
+                    "type": "string",
+                    "maxLength": 128
+                },
+                "sortOrder": {
+                    "type": "integer",
+                    "minimum": 0
+                }
+            }
+        },
+        "UpdateAgentGroupRequest": {
+            "type": "object",
+            "properties": {
+                "coordinationPrompt": {
+                    "type": "string",
+                    "maxLength": 12000
+                },
+                "description": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "name": {
+                    "type": "string",
+                    "maxLength": 80
+                },
+                "sortOrder": {
+                    "type": "integer",
+                    "minimum": 0
+                }
+            }
+        },
         "UpdateBillingAccountBalanceRequest": {
             "type": "object",
             "required": [
@@ -20396,6 +22422,67 @@ const docTemplate = `{
                 "name": {
                     "type": "string",
                     "maxLength": 80
+                },
+                "status": {
+                    "type": "string",
+                    "enum": [
+                        "active",
+                        "archived"
+                    ]
+                },
+                "systemPrompt": {
+                    "type": "string",
+                    "maxLength": 12000
+                }
+            }
+        },
+        "UpdateConversationRoleRequest": {
+            "type": "object",
+            "properties": {
+                "color": {
+                    "type": "string",
+                    "maxLength": 32
+                },
+                "defaultMCPToolIDs": {
+                    "type": "array",
+                    "maxItems": 128,
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "defaultSkillIDs": {
+                    "type": "array",
+                    "maxItems": 128,
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "description": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "icon": {
+                    "type": "string",
+                    "maxLength": 32
+                },
+                "mcpDefaultMode": {
+                    "type": "string",
+                    "enum": [
+                        "inherit",
+                        "custom"
+                    ]
+                },
+                "model": {
+                    "type": "string",
+                    "maxLength": 128
+                },
+                "name": {
+                    "type": "string",
+                    "maxLength": 80
+                },
+                "provider": {
+                    "type": "string",
+                    "maxLength": 32
                 },
                 "status": {
                     "type": "string",

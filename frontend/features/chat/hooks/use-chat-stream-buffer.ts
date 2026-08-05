@@ -2,8 +2,10 @@
 
 import * as React from "react";
 
+import { clearLiveGroupRun, upsertLiveGroupRunThink } from "@/features/agent-groups/model/group-run-store";
 import { clearLiveUpstreamThinkTrace, upsertLiveUpstreamThinkTrace } from "@/features/chat/model/upstream-think-store";
 import type { PendingExchangeMap } from "@/features/chat/types/chat-runtime";
+import { isGroupStreamAwareEvent } from "@/shared/api/conversation";
 import type { StreamMessageEvent } from "@/shared/api/conversation.types";
 
 const STREAM_TEXT_FLUSH_INTERVAL_MS = 50;
@@ -124,7 +126,11 @@ export function useChatStreamBuffer({
     if (!buffer.pendingThinkDelta) {
       buffer.pendingThinkEvent = null;
     }
-    upsertLiveUpstreamThinkTrace(buffer.runID, event);
+    if (isGroupStreamAwareEvent(event)) {
+      upsertLiveGroupRunThink(buffer.runID, event);
+    } else {
+      upsertLiveUpstreamThinkTrace(buffer.runID, event);
+    }
 
     if (buffer.pendingThinkDelta) {
       scheduleThinkFlushRef.current(exchangeKey);
@@ -202,6 +208,7 @@ export function useChatStreamBuffer({
     const buffer = createStreamBuffer(runID);
     buffersRef.current.set(exchangeKey, buffer);
     clearLiveUpstreamThinkTrace(buffer.runID);
+    clearLiveGroupRun(buffer.runID);
   }, []);
 
   const flushStreamTextNow = React.useCallback((exchangeKey: string) => {
@@ -236,13 +243,18 @@ export function useChatStreamBuffer({
     if (!buffer.runID || !buffer.pendingThinkEvent) {
       return;
     }
-    upsertLiveUpstreamThinkTrace(buffer.runID, {
+    const event: UpstreamThinkDeltaEvent = {
       ...buffer.pendingThinkEvent,
       delta: buffer.pendingThinkDelta,
       contentMarkdown: buffer.pendingThinkDelta ? undefined : buffer.pendingThinkEvent.contentMarkdown,
-    });
+    };
     buffer.pendingThinkDelta = "";
     buffer.pendingThinkEvent = null;
+    if (isGroupStreamAwareEvent(event)) {
+      upsertLiveGroupRunThink(buffer.runID, event);
+    } else {
+      upsertLiveUpstreamThinkTrace(buffer.runID, event);
+    }
   }, []);
 
   const resetStreamBuffer = React.useCallback((exchangeKey?: string) => {

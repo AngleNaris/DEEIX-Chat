@@ -41,7 +41,7 @@ type ConversationSearchResult struct {
 }
 
 // CreateConversation 创建用户新会话。
-func (s *Service) CreateConversation(ctx context.Context, userID uint, title string, modelName string, projectPublicID string, rolePublicID string) (*model.Conversation, error) {
+func (s *Service) CreateConversation(ctx context.Context, userID uint, title string, modelName string, projectPublicID string, rolePublicID string, agentGroupPublicID string) (*model.Conversation, error) {
 	normalizedTitle := strings.TrimSpace(title)
 	if normalizedTitle == "" {
 		normalizedTitle = "新对话"
@@ -79,10 +79,50 @@ func (s *Service) CreateConversation(ctx context.Context, userID uint, title str
 		}
 	}
 
+	var agentGroupID *uint
+	var agentGroupPublicIDNormalized string
+	var agentGroupName string
+	if normalizedGroupID := strings.TrimSpace(agentGroupPublicID); normalizedGroupID != "" {
+		if s.agentGroupRepo == nil {
+			return nil, ErrConversationAgentGroupNotFound
+		}
+		resolvedGroup, err := s.agentGroupRepo.GetAgentGroupByPublicID(ctx, userID, normalizedGroupID)
+		if err != nil {
+			if errors.Is(err, repository.ErrNotFound) {
+				return nil, ErrConversationAgentGroupNotFound
+			}
+			return nil, err
+		}
+		// 群组会话的成员由群组编排决定，禁止同时绑定单个角色。
+		if roleID != nil {
+			return nil, ErrConversationRoleNotAllowedWithGroup
+		}
+		// 群组会话的模型由成员覆盖与角色默认值决定，禁止请求级模型覆盖。
+		if normalizedModel != "" {
+			return nil, ErrConversationModelNotAllowedWithGroup
+		}
+		// 群组所属项目必须与会话项目一致；未指定项目时沿用群组项目。
+		if projectID != nil && *projectID != resolvedGroup.ProjectID {
+			return nil, ErrConversationGroupProjectMismatch
+		}
+		if projectID == nil && resolvedGroup.ProjectID != 0 {
+			projectID = &resolvedGroup.ProjectID
+			project = &model.ConversationProject{
+				ID:       resolvedGroup.ProjectID,
+				PublicID: resolvedGroup.ProjectPublicID,
+				Name:     resolvedGroup.ProjectName,
+			}
+		}
+		agentGroupID = &resolvedGroup.ID
+		agentGroupPublicIDNormalized = resolvedGroup.PublicID
+		agentGroupName = resolvedGroup.Name
+	}
+
 	item := &model.Conversation{
 		UserID:          userID,
 		ProjectID:       projectID,
 		RoleID:          roleID,
+		AgentGroupID:    agentGroupID,
 		PublicID:        normalizePublicID(uuid.NewString()),
 		Title:           normalizedTitle,
 		LabelsJSON:      "[]",
@@ -107,6 +147,10 @@ func (s *Service) CreateConversation(ctx context.Context, userID uint, title str
 		item.RolePublicID = role.PublicID
 		item.RoleName = role.Name
 		item.RoleSystemPrompt = role.SystemPrompt
+	}
+	if agentGroupID != nil {
+		item.AgentGroupPublicID = agentGroupPublicIDNormalized
+		item.AgentGroupName = agentGroupName
 	}
 	return item, nil
 }
@@ -220,11 +264,15 @@ func (s *Service) ExportConversation(ctx context.Context, userID uint, publicID 
 	if err = s.hydrateMessageProcessTraces(ctx, items); err != nil {
 		return nil, err
 	}
+	// §18 默认导出：群组会话剥离思考过程与过程 trace，仅保留用户消息与主管最终答案。
+	sanitizeSharedMessagesForPublic(items, conversation.AgentGroupID != nil)
 
 	runs, err := s.repo.ListConversationRunsByRunIDs(ctx, userID, conversation.ID, collectExportMessageRunIDs(items))
 	if err != nil {
 		return nil, err
 	}
+	// §18 纵深防御：群组会话的运行错误同样收敛为通用消息，失败诊断不进入导出。
+	sanitizeSharedRunsForPublic(runs, conversation.AgentGroupID != nil)
 
 	return &ConversationExportResult{
 		Version:                 conversationExportVersion,
@@ -263,6 +311,8 @@ func (s *Service) ExportConversationData(ctx context.Context, conversation *mode
 	if err != nil {
 		return nil, err
 	}
+	// §18 默认导出：群组会话剥离显式思考内容（管理员全量导出同样遵循）。
+	sanitizeSharedMessagesForPublic(items, conversation.AgentGroupID != nil)
 
 	var runs []model.Run
 	runIDs := collectExportMessageRunIDs(items)
@@ -273,6 +323,8 @@ func (s *Service) ExportConversationData(ctx context.Context, conversation *mode
 			s.logger.Warn("export_conversation_runs_failed", zap.Uint("conversation_id", conversation.ID), zap.Error(runsErr))
 		}
 	}
+	// §18 纵深防御：群组会话的运行错误收敛为通用消息，失败诊断不进入管理员导出。
+	sanitizeSharedRunsForPublic(runs, conversation.AgentGroupID != nil)
 	if runs == nil {
 		runs = []model.Run{}
 	}

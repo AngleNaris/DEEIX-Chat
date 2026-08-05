@@ -125,6 +125,25 @@ export type ReasoningDeltaDTO = {
   encrypted_content?: string;
 };
 
+// Agent 群组流式事件的可选 Actor 元数据（方案 §15）。
+// 后端在群组运行期间为现有事件（process_update/upstream_think_delta/工具事件/usage）
+// 与 8 个群组事件附加相同的一组公共字段；字段均为可选以容忍省略。
+export type GroupStreamEventMeta = {
+  groupRunID?: string;
+  stepID?: string;
+  attemptID?: string;
+  attemptNumber?: number;
+  sequence?: number;
+  stepType?: string;
+  status?: string;
+  actorMemberID?: string;
+  actorName?: string;
+  actorType?: string;
+  actorIcon?: string;
+  actorColor?: string;
+  model?: string;
+};
+
 export type MessageProcessTraceDTO = Omit<
   MessageProcessTraceResponse,
   "events" | "process" | "promptTrace" | "tools" | "upstreamThink"
@@ -242,14 +261,14 @@ export type StreamMessageEvent =
       seq?: number;
       message: string;
     }
-  | {
+  | ({
       type: "process_update";
       seq?: number;
       status: string;
       block?: TraceBlockDTO;
       trace?: MessageProcessTraceDTO;
-    }
-  | {
+    } & GroupStreamEventMeta)
+  | ({
       type: "upstream_think_delta";
       seq?: number;
       status: string;
@@ -264,13 +283,13 @@ export type StreamMessageEvent =
       block?: TraceBlockDTO;
       trace?: MessageProcessTraceDTO;
       reasoning?: ReasoningDeltaDTO;
-    }
+    } & GroupStreamEventMeta)
   | {
       type: "delta";
       seq?: number;
       delta: string;
     }
-  | {
+  | ({
       type: "usage";
       seq?: number;
       input_tokens: number;
@@ -278,7 +297,7 @@ export type StreamMessageEvent =
       cache_read_tokens: number;
       cache_write_tokens: number;
       reasoning_tokens: number;
-    }
+    } & GroupStreamEventMeta)
   | {
       type: "media_status";
       seq?: number;
@@ -314,4 +333,57 @@ export type StreamMessageEvent =
       errorCode?: string;
       debug?: UpstreamDebugInfo;
       data?: SendMessageResult;
-    };
+    }
+  // 群组运行期间内部 Actor 回合转发的中间事件（方案 §15：现有事件附加 Actor 元数据）。
+  | ({
+      type: "status";
+      seq?: number;
+      status: string;
+      message?: string;
+    } & GroupStreamEventMeta)
+  | ({
+      type: "tool_call";
+      seq?: number;
+      tool_name?: string;
+      tool_call_id?: string;
+      arguments?: string;
+    } & GroupStreamEventMeta)
+  | ({
+      type: "tool_result";
+      seq?: number;
+      tool_name?: string;
+      tool_call_id?: string;
+      status?: string;
+      error?: string;
+    } & GroupStreamEventMeta)
+  // Agent 群组 8 个流式事件（方案 §15.1-§15.2）。
+  | ({
+      type:
+        | "group_step_started"
+        | "group_step_output_delta"
+        | "group_step_completed"
+        | "group_step_failed"
+        | "group_step_retry_started"
+        | "group_run_paused"
+        | "group_run_completed"
+        | "group_run_abandoned";
+      seq?: number;
+      delta?: string;
+      outputMarkdown?: string;
+      errorCode?: string;
+      message?: string;
+      answer?: string;
+      stepCount?: number;
+    } & GroupStreamEventMeta);
+
+export type GroupStreamEventType =
+  | "group_step_started"
+  | "group_step_output_delta"
+  | "group_step_completed"
+  | "group_step_failed"
+  | "group_step_retry_started"
+  | "group_run_paused"
+  | "group_run_completed"
+  | "group_run_abandoned";
+
+export type GroupStreamEvent = Extract<StreamMessageEvent, { type: GroupStreamEventType }>;

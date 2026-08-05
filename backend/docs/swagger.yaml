@@ -115,6 +115,20 @@ definitions:
     - timezoneName
     - updatedAt
     type: object
+  AddAgentGroupMemberRequest:
+    properties:
+      dutyInstruction:
+        maxLength: 4000
+        type: string
+      modelOverride:
+        maxLength: 128
+        type: string
+      rolePublicID:
+        maxLength: 32
+        type: string
+    required:
+    - rolePublicID
+    type: object
   AdminAnnouncementListResponseDoc:
     properties:
       data:
@@ -284,6 +298,341 @@ definitions:
     - twoFactorRequired
     - updatedAt
     - username
+    type: object
+  AgentGroupFeatureResponse:
+    properties:
+      enabled:
+        type: boolean
+    required:
+    - enabled
+    type: object
+  AgentGroupFeatureResponseDoc:
+    properties:
+      data:
+        $ref: '#/definitions/AgentGroupFeatureResponse'
+      errorMsg:
+        type: string
+    required:
+    - data
+    - errorMsg
+    type: object
+  AgentGroupListResponseDoc:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/AgentGroupResponse'
+        type: array
+      errorMsg:
+        type: string
+    required:
+    - data
+    - errorMsg
+    type: object
+  AgentGroupMemberRequest:
+    properties:
+      dutyInstruction:
+        maxLength: 4000
+        type: string
+      modelOverride:
+        maxLength: 128
+        type: string
+      rolePublicID:
+        maxLength: 32
+        type: string
+    required:
+    - rolePublicID
+    type: object
+  AgentGroupMemberResponse:
+    properties:
+      createdAt:
+        type: string
+      dutyInstruction:
+        type: string
+      enabled:
+        type: boolean
+      memberType:
+        type: string
+      modelOverride:
+        type: string
+      publicID:
+        type: string
+      roleColor:
+        type: string
+      roleIcon:
+        type: string
+      roleModel:
+        type: string
+      roleName:
+        type: string
+      roleProvider:
+        type: string
+      rolePublicID:
+        type: string
+      sortOrder:
+        type: integer
+      updatedAt:
+        type: string
+    required:
+    - createdAt
+    - dutyInstruction
+    - enabled
+    - memberType
+    - modelOverride
+    - publicID
+    - roleColor
+    - roleIcon
+    - roleModel
+    - roleName
+    - roleProvider
+    - rolePublicID
+    - sortOrder
+    - updatedAt
+    type: object
+  AgentGroupResponse:
+    properties:
+      coordinationPrompt:
+        type: string
+      createdAt:
+        type: string
+      description:
+        type: string
+      members:
+        items:
+          $ref: '#/definitions/AgentGroupMemberResponse'
+        type: array
+      name:
+        type: string
+      projectID:
+        type: string
+      projectName:
+        type: string
+      publicID:
+        type: string
+      revision:
+        type: integer
+      sortOrder:
+        type: integer
+      status:
+        type: string
+      supervisorMemberID:
+        type: string
+      updatedAt:
+        type: string
+    required:
+    - coordinationPrompt
+    - createdAt
+    - description
+    - members
+    - name
+    - projectID
+    - projectName
+    - publicID
+    - revision
+    - sortOrder
+    - status
+    - supervisorMemberID
+    - updatedAt
+    type: object
+  AgentGroupResponseDoc:
+    properties:
+      data:
+        $ref: '#/definitions/AgentGroupResponse'
+      errorMsg:
+        type: string
+    required:
+    - data
+    - errorMsg
+    type: object
+  AgentGroupRunAbandonResponse:
+    properties:
+      status:
+        type: string
+    required:
+    - status
+    type: object
+  AgentGroupRunAbandonResponseDoc:
+    properties:
+      data:
+        $ref: '#/definitions/AgentGroupRunAbandonResponse'
+      errorMsg:
+        type: string
+    required:
+    - data
+    - errorMsg
+    type: object
+  AgentGroupRunCancelResponse:
+    properties:
+      canceled:
+        type: boolean
+    required:
+    - canceled
+    type: object
+  AgentGroupRunCancelResponseDoc:
+    properties:
+      data:
+        $ref: '#/definitions/AgentGroupRunCancelResponse'
+      errorMsg:
+        type: string
+    required:
+    - data
+    - errorMsg
+    type: object
+  AgentGroupRunDetailResponse:
+    properties:
+      run:
+        $ref: '#/definitions/AgentGroupRunResponse'
+      steps:
+        items:
+          $ref: '#/definitions/AgentGroupStepResponse'
+        type: array
+    required:
+    - run
+    - steps
+    type: object
+  AgentGroupRunDetailResponseDoc:
+    properties:
+      data:
+        $ref: '#/definitions/AgentGroupRunDetailResponse'
+      errorMsg:
+        type: string
+    required:
+    - data
+    - errorMsg
+    type: object
+  AgentGroupRunResponse:
+    properties:
+      clientRunID:
+        type: string
+      conversationID:
+        type: integer
+      createdAt:
+        type: string
+      endedAt:
+        type: string
+      errorCode:
+        type: string
+      errorMessage:
+        type: string
+      groupPublicID:
+        type: string
+      publicID:
+        type: string
+      startedAt:
+        type: string
+      status:
+        type: string
+      updatedAt:
+        type: string
+    required:
+    - clientRunID
+    - conversationID
+    - createdAt
+    - endedAt
+    - errorCode
+    - errorMessage
+    - groupPublicID
+    - publicID
+    - startedAt
+    - status
+    - updatedAt
+    type: object
+  AgentGroupStepAttemptResponse:
+    properties:
+      attemptNo:
+        type: integer
+      createdAt:
+        type: string
+      endedAt:
+        type: string
+      errorCode:
+        type: string
+      errorMessage:
+        type: string
+      outputMarkdown:
+        type: string
+      publicID:
+        type: string
+      requestedModel:
+        type: string
+      resolvedModel:
+        type: string
+      startedAt:
+        type: string
+      status:
+        type: string
+    required:
+    - attemptNo
+    - createdAt
+    - endedAt
+    - errorCode
+    - errorMessage
+    - outputMarkdown
+    - publicID
+    - requestedModel
+    - resolvedModel
+    - startedAt
+    - status
+    type: object
+  AgentGroupStepResponse:
+    properties:
+      actorMemberPublicID:
+        type: string
+      actorNameSnapshot:
+        type: string
+      actorTypeSnapshot:
+        type: string
+      attempts:
+        items:
+          $ref: '#/definitions/AgentGroupStepAttemptResponse'
+        type: array
+      createdAt:
+        type: string
+      instruction:
+        type: string
+      publicID:
+        type: string
+      sequence:
+        type: integer
+      status:
+        type: string
+      stepType:
+        type: string
+      updatedAt:
+        type: string
+    required:
+    - actorMemberPublicID
+    - actorNameSnapshot
+    - actorTypeSnapshot
+    - attempts
+    - createdAt
+    - instruction
+    - publicID
+    - sequence
+    - status
+    - stepType
+    - updatedAt
+    type: object
+  AgentGroupStepRetryRequest:
+    properties:
+      retryRequestID:
+        maxLength: 64
+        type: string
+    required:
+    - retryRequestID
+    type: object
+  AgentgroupErrorDoc:
+    properties:
+      data: {}
+      details: {}
+      errorCode:
+        type: string
+      errorMsg:
+        type: string
+      requestId:
+        type: string
+    required:
+    - data
+    - errorMsg
     type: object
   AnnouncementCloseDataResponse:
     properties:
@@ -1286,6 +1635,14 @@ definitions:
     - data
     - errorMsg
     type: object
+  ChangeAgentGroupSupervisorRequest:
+    properties:
+      memberPublicID:
+        maxLength: 32
+        type: string
+    required:
+    - memberPublicID
+    type: object
   ChannelErrorDoc:
     properties:
       data: {}
@@ -1890,6 +2247,10 @@ definitions:
     type: object
   ConversationResponse:
     properties:
+      agentGroupID:
+        type: string
+      agentGroupName:
+        type: string
       contextPolicyJSON:
         type: string
       createdAt:
@@ -1920,6 +2281,10 @@ definitions:
         type: string
       publicID:
         type: string
+      roleID:
+        type: string
+      roleName:
+        type: string
       sessionKey:
         type: string
       shareID:
@@ -1943,6 +2308,8 @@ definitions:
       userID:
         type: integer
     required:
+    - agentGroupID
+    - agentGroupName
     - contextPolicyJSON
     - createdAt
     - isStarred
@@ -1956,6 +2323,8 @@ definitions:
     - projectName
     - provider
     - publicID
+    - roleID
+    - roleName
     - sessionKey
     - shareID
     - shareStatus
@@ -1965,6 +2334,81 @@ definitions:
     - title
     - updatedAt
     - userID
+    type: object
+  ConversationRoleListResponseDoc:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/ConversationRoleResponse'
+        type: array
+      errorMsg:
+        type: string
+    required:
+    - data
+    - errorMsg
+    type: object
+  ConversationRoleResponse:
+    properties:
+      color:
+        type: string
+      createdAt:
+        type: string
+      defaultMCPToolIDs:
+        items:
+          type: integer
+        type: array
+      defaultSkillIDs:
+        items:
+          type: integer
+        type: array
+      description:
+        type: string
+      icon:
+        type: string
+      mcpDefaultMode:
+        type: string
+      model:
+        type: string
+      name:
+        type: string
+      provider:
+        type: string
+      publicID:
+        type: string
+      sortOrder:
+        type: integer
+      status:
+        type: string
+      systemPrompt:
+        type: string
+      updatedAt:
+        type: string
+    required:
+    - color
+    - createdAt
+    - defaultMCPToolIDs
+    - defaultSkillIDs
+    - description
+    - icon
+    - mcpDefaultMode
+    - model
+    - name
+    - provider
+    - publicID
+    - sortOrder
+    - status
+    - systemPrompt
+    - updatedAt
+    type: object
+  ConversationRoleResponseDoc:
+    properties:
+      data:
+        $ref: '#/definitions/ConversationRoleResponse'
+      errorMsg:
+        type: string
+    required:
+    - data
+    - errorMsg
     type: object
   ConversationRunListResponseDoc:
     properties:
@@ -2094,6 +2538,32 @@ definitions:
     - data
     - errorMsg
     type: object
+  CreateAgentGroupRequest:
+    properties:
+      coordinationPrompt:
+        maxLength: 12000
+        type: string
+      description:
+        maxLength: 255
+        type: string
+      name:
+        maxLength: 80
+        type: string
+      projectID:
+        maxLength: 32
+        type: string
+      supervisor:
+        $ref: '#/definitions/AgentGroupMemberRequest'
+      workers:
+        items:
+          $ref: '#/definitions/AgentGroupMemberRequest'
+        maxItems: 31
+        type: array
+    required:
+    - name
+    - projectID
+    - supervisor
+    type: object
   CreateAnnouncementRequest:
     properties:
       contentMarkdown:
@@ -2200,15 +2670,62 @@ definitions:
     type: object
   CreateConversationRequest:
     properties:
+      agentGroupID:
+        maxLength: 32
+        type: string
       model:
         maxLength: 128
         type: string
       projectID:
         maxLength: 32
         type: string
+      roleID:
+        maxLength: 32
+        type: string
       title:
         maxLength: 255
         type: string
+    type: object
+  CreateConversationRoleRequest:
+    properties:
+      color:
+        maxLength: 32
+        type: string
+      defaultMCPToolIDs:
+        items:
+          type: integer
+        maxItems: 128
+        type: array
+      defaultSkillIDs:
+        items:
+          type: integer
+        maxItems: 128
+        type: array
+      description:
+        maxLength: 255
+        type: string
+      icon:
+        maxLength: 32
+        type: string
+      mcpDefaultMode:
+        enum:
+        - inherit
+        - custom
+        type: string
+      model:
+        maxLength: 128
+        type: string
+      name:
+        maxLength: 80
+        type: string
+      provider:
+        maxLength: 32
+        type: string
+      systemPrompt:
+        maxLength: 12000
+        type: string
+    required:
+    - name
     type: object
   CreateConversationShareRequest:
     properties:
@@ -5287,6 +5804,16 @@ definitions:
     required:
     - title
     type: object
+  ReorderAgentGroupMembersRequest:
+    properties:
+      orderedPublicIDs:
+        items:
+          type: string
+        maxItems: 32
+        type: array
+    required:
+    - orderedPublicIDs
+    type: object
   ReorderConversationProjectsRequest:
     properties:
       projectIDs:
@@ -5296,6 +5823,16 @@ definitions:
         type: array
     required:
     - projectIDs
+    type: object
+  ReorderConversationRolesRequest:
+    properties:
+      roleIDs:
+        items:
+          type: string
+        maxItems: 200
+        type: array
+    required:
+    - roleIDs
     type: object
   ReorderIdentityProvidersRequest:
     properties:
@@ -6259,6 +6796,35 @@ definitions:
     - data
     - errorMsg
     type: object
+  UpdateAgentGroupMemberRequest:
+    properties:
+      dutyInstruction:
+        maxLength: 4000
+        type: string
+      enabled:
+        type: boolean
+      modelOverride:
+        maxLength: 128
+        type: string
+      sortOrder:
+        minimum: 0
+        type: integer
+    type: object
+  UpdateAgentGroupRequest:
+    properties:
+      coordinationPrompt:
+        maxLength: 12000
+        type: string
+      description:
+        maxLength: 255
+        type: string
+      name:
+        maxLength: 80
+        type: string
+      sortOrder:
+        minimum: 0
+        type: integer
+    type: object
   UpdateBillingAccountBalanceRequest:
     properties:
       balanceUSD:
@@ -6348,6 +6914,50 @@ definitions:
         type: string
       name:
         maxLength: 80
+        type: string
+      status:
+        enum:
+        - active
+        - archived
+        type: string
+      systemPrompt:
+        maxLength: 12000
+        type: string
+    type: object
+  UpdateConversationRoleRequest:
+    properties:
+      color:
+        maxLength: 32
+        type: string
+      defaultMCPToolIDs:
+        items:
+          type: integer
+        maxItems: 128
+        type: array
+      defaultSkillIDs:
+        items:
+          type: integer
+        maxItems: 128
+        type: array
+      description:
+        maxLength: 255
+        type: string
+      icon:
+        maxLength: 32
+        type: string
+      mcpDefaultMode:
+        enum:
+        - inherit
+        - custom
+        type: string
+      model:
+        maxLength: 128
+        type: string
+      name:
+        maxLength: 80
+        type: string
+      provider:
+        maxLength: 32
         type: string
       status:
         enum:
@@ -12046,6 +12656,126 @@ paths:
       summary: 管理员导入 OpenWebUI 用户
       tags:
       - admin
+  /agent-group-runs/{run_id}/abandon:
+    post:
+      consumes:
+      - application/json
+      description: 放弃已暂停或被阻塞的群组运行：消息标记结局，运行不再可重试
+      parameters:
+      - description: 运行 public_id
+        in: path
+        name: run_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/AgentGroupRunAbandonResponseDoc'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/AgentgroupErrorDoc'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/AgentgroupErrorDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/AgentgroupErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 放弃群组运行
+      tags:
+      - chat
+  /agent-group-runs/{run_id}/cancel:
+    post:
+      consumes:
+      - application/json
+      description: 取消进行中的群组运行：中断当前 Attempt，运行回到 paused_retryable
+      parameters:
+      - description: 运行 public_id
+        in: path
+        name: run_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/AgentGroupRunCancelResponseDoc'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/AgentgroupErrorDoc'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/AgentgroupErrorDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/AgentgroupErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 取消群组运行
+      tags:
+      - chat
+  /agent-group-runs/{run_id}/steps/{step_id}/retry:
+    post:
+      consumes:
+      - application/json
+      description: 从暂停的失败步骤原地重试：复用原配置快照，仅为该步骤追加一次新 Attempt，NDJSON 流式返回群组事件与正文增量
+      parameters:
+      - description: 运行 public_id
+        in: path
+        name: run_id
+        required: true
+        type: string
+      - description: 步骤 public_id
+        in: path
+        name: step_id
+        required: true
+        type: string
+      - description: 重试参数（retryRequestID 防止双击重复）
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/AgentGroupStepRetryRequest'
+      produces:
+      - application/x-ndjson
+      responses:
+        "200":
+          description: NDJSON stream
+          schema:
+            type: string
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/AgentgroupErrorDoc'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/AgentgroupErrorDoc'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/AgentgroupErrorDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/AgentgroupErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 重试失败步骤
+      tags:
+      - chat
   /announcements:
     get:
       consumes:
@@ -12822,6 +13552,481 @@ paths:
       summary: 查询上下文证据详情
       tags:
       - chat
+  /conversation-agent-group-runs/{run_id}:
+    get:
+      consumes:
+      - application/json
+      description: 查询群组运行及其步骤、尝试完整视图
+      parameters:
+      - description: 运行 public_id
+        in: path
+        name: run_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/AgentGroupRunDetailResponseDoc'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/AgentgroupErrorDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/AgentgroupErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 运行详情
+      tags:
+      - chat
+  /conversation-agent-group-runs/lookup:
+    get:
+      consumes:
+      - application/json
+      description: 前端消息只持有 clientRunID，刷新页面后据此恢复群组运行时间线（会话经公开 ID 解析）
+      parameters:
+      - description: 会话公开 ID
+        in: query
+        name: conversationID
+        required: true
+        type: string
+      - description: 父流式运行 ID
+        in: query
+        name: clientRunID
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/AgentGroupRunDetailResponseDoc'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/AgentgroupErrorDoc'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/AgentgroupErrorDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/AgentgroupErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 按会话与流式运行 ID 查询运行详情
+      tags:
+      - chat
+  /conversation-agent-groups:
+    get:
+      consumes:
+      - application/json
+      description: 查询当前用户项目下的 Agent 群组
+      parameters:
+      - description: 项目 public_id
+        in: query
+        name: projectID
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/AgentGroupListResponseDoc'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/AgentgroupErrorDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/AgentgroupErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 群组列表
+      tags:
+      - chat
+    post:
+      consumes:
+      - application/json
+      description: 创建 Agent 群组（主管 + 工作成员，成员从现有角色中选择）
+      parameters:
+      - description: 群组参数
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/CreateAgentGroupRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/AgentGroupResponseDoc'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/AgentgroupErrorDoc'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/AgentgroupErrorDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/AgentgroupErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 创建群组
+      tags:
+      - chat
+  /conversation-agent-groups/{id}:
+    delete:
+      consumes:
+      - application/json
+      description: 删除没有历史记录的 Agent 群组（存在会话或运行历史时拒绝）
+      parameters:
+      - description: 群组 public_id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/AgentgroupErrorDoc'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/AgentgroupErrorDoc'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/AgentgroupErrorDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/AgentgroupErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 删除群组
+      tags:
+      - chat
+    get:
+      consumes:
+      - application/json
+      description: 查询单个 Agent 群组（含成员与角色摘要）
+      parameters:
+      - description: 群组 public_id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/AgentGroupResponseDoc'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/AgentgroupErrorDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/AgentgroupErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 群组详情
+      tags:
+      - chat
+    patch:
+      consumes:
+      - application/json
+      description: 更新群组名称、描述、协调提示词与排序
+      parameters:
+      - description: 群组 public_id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 群组参数
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/UpdateAgentGroupRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/AgentGroupResponseDoc'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/AgentgroupErrorDoc'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/AgentgroupErrorDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/AgentgroupErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 更新群组
+      tags:
+      - chat
+  /conversation-agent-groups/{id}/members:
+    post:
+      consumes:
+      - application/json
+      description: 向群组添加工作成员（角色不可与现有成员重复）
+      parameters:
+      - description: 群组 public_id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 成员参数
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/AddAgentGroupMemberRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/AgentGroupResponseDoc'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/AgentgroupErrorDoc'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/AgentgroupErrorDoc'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/AgentgroupErrorDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/AgentgroupErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 添加成员
+      tags:
+      - chat
+  /conversation-agent-groups/{id}/members/{member_id}:
+    delete:
+      consumes:
+      - application/json
+      description: 移除工作成员（主管须先更换）
+      parameters:
+      - description: 群组 public_id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 成员 public_id
+        in: path
+        name: member_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/AgentGroupResponseDoc'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/AgentgroupErrorDoc'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/AgentgroupErrorDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/AgentgroupErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 移除成员
+      tags:
+      - chat
+    patch:
+      consumes:
+      - application/json
+      description: 更新成员启用状态、模型覆盖与职责指令（主管不可禁用）
+      parameters:
+      - description: 群组 public_id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 成员 public_id
+        in: path
+        name: member_id
+        required: true
+        type: string
+      - description: 成员参数
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/UpdateAgentGroupMemberRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/AgentGroupResponseDoc'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/AgentgroupErrorDoc'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/AgentgroupErrorDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/AgentgroupErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 更新成员
+      tags:
+      - chat
+  /conversation-agent-groups/{id}/members/reorder:
+    post:
+      consumes:
+      - application/json
+      description: 按传入顺序重排群组成员
+      parameters:
+      - description: 群组 public_id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 成员顺序
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/ReorderAgentGroupMembersRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/AgentGroupResponseDoc'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/AgentgroupErrorDoc'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/AgentgroupErrorDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/AgentgroupErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 重排成员
+      tags:
+      - chat
+  /conversation-agent-groups/{id}/supervisor:
+    post:
+      consumes:
+      - application/json
+      description: 更换群组主管（原主管自动转为工作成员）
+      parameters:
+      - description: 群组 public_id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 新主管成员
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/ChangeAgentGroupSupervisorRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/AgentGroupResponseDoc'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/AgentgroupErrorDoc'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/AgentgroupErrorDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/AgentgroupErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 更换主管
+      tags:
+      - chat
+  /conversation-agent-groups/feature:
+    get:
+      consumes:
+      - application/json
+      description: 查询 Agent 群组功能是否启用
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/AgentGroupFeatureResponseDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/AgentgroupErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 群组功能开关
+      tags:
+      - chat
   /conversation-projects:
     get:
       consumes:
@@ -12997,6 +14202,192 @@ paths:
       security:
       - BearerAuth: []
       summary: 调整会话项目顺序
+      tags:
+      - chat
+  /conversation-roles:
+    get:
+      consumes:
+      - application/json
+      description: 查询当前用户的角色(助手)列表
+      parameters:
+      - description: '状态筛选: active|archived|all'
+        in: query
+        name: status
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/ConversationRoleListResponseDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/ConversationErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 角色列表
+      tags:
+      - chat
+    post:
+      consumes:
+      - application/json
+      description: 创建当前用户的角色(助手)
+      parameters:
+      - description: 角色参数
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/CreateConversationRoleRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/ConversationRoleResponseDoc'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/ConversationErrorDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/ConversationErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 创建角色
+      tags:
+      - chat
+  /conversation-roles/{id}:
+    delete:
+      consumes:
+      - application/json
+      description: 删除当前用户的角色
+      parameters:
+      - description: 角色 public_id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/ConversationErrorDoc'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/ConversationErrorDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/ConversationErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 删除角色
+      tags:
+      - chat
+    get:
+      consumes:
+      - application/json
+      description: 查询当前用户单个角色
+      parameters:
+      - description: 角色 public_id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/ConversationRoleResponseDoc'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/ConversationErrorDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/ConversationErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 角色详情
+      tags:
+      - chat
+    patch:
+      consumes:
+      - application/json
+      description: 更新当前用户的角色
+      parameters:
+      - description: 角色 public_id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 角色参数
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/UpdateConversationRoleRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/ConversationRoleResponseDoc'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/ConversationErrorDoc'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/ConversationErrorDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/ConversationErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 更新角色
+      tags:
+      - chat
+  /conversation-roles/reorder:
+    post:
+      consumes:
+      - application/json
+      description: 更新当前用户角色展示顺序
+      parameters:
+      - description: 角色排序
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/ReorderConversationRolesRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/ConversationErrorDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/ConversationErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 角色排序
       tags:
       - chat
   /conversation-runs/{run_id}/cancel:

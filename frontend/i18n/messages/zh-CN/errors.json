@@ -9,6 +9,21 @@
     "defaultPermissionGroupUsersImplicit": "默认权限组成员由系统自动维护。",
     "permissionGroupReferencedByPlan": "该权限组已被计费套餐引用，请先解除绑定再删除。"
   },
+  "agentGroup": {
+    "casConflict": "群组配置已变更，请刷新后重试。",
+    "featureDisabled": "群组功能未启用。",
+    "modelOverrideNotAllowed": "群组会话不允许指定模型，模型由群组成员配置决定。",
+    "runBlocked": "群组运行被阻塞，当前操作不可用。",
+    "runControlFailed": "群组运行控制失败，请稍后重试。",
+    "runInProgress": "群组正在运行中，请等待完成。",
+    "runNotAbandonable": "当前状态无法放弃该群组运行。",
+    "runNotCancelable": "当前状态无法取消该群组运行。",
+    "runNotFound": "群组运行不存在。",
+    "runNotRetryable": "当前状态无法重试该步骤。",
+    "runPaused": "群组运行已暂停。",
+    "runStateConflict": "群组运行状态冲突，请刷新后重试。",
+    "runStateCorrupt": "群组运行状态异常，请重新发送消息。"
+  },
   "auth": {
     "adminRequired": "需要管理员权限。",
     "authorizationCodeRequired": "缺少授权码。",
@@ -120,7 +135,15 @@
   "config": {
     "invalidJson": "配置 JSON 无效。"
   },
+  "contextArtifact": {
+    "invalidId": "上下文产物 ID 无效。",
+    "notFound": "上下文产物不存在。"
+  },
   "conversation": {
+    "agentGroupConstraintViolated": "对话不符合群组约束。",
+    "agentGroupModelOverrideRejected": "群组会话不允许覆盖模型。",
+    "agentGroupNotFound": "群组不存在或已删除。",
+    "agentGroupProjectImmutable": "群组会话不能更改所属项目。",
     "invalidId": "对话 ID 无效。",
     "invalidTitle": "对话标题无效。",
     "noTitleableContent": "当前对话没有可用于生成标题的内容。",
@@ -136,10 +159,6 @@
     "invalidId": "分享 ID 无效。",
     "notFound": "分享不存在。",
     "schemaOutdated": "分享数据结构已过期，请重建数据库。"
-  },
-  "contextArtifact": {
-    "invalidId": "上下文产物 ID 无效。",
-    "notFound": "上下文产物不存在。"
   },
   "cors": {
     "originForbidden": "当前来源不允许访问。"
@@ -168,9 +187,6 @@
   },
   "internal": {
     "error": "服务器内部错误，请稍后重试。"
-  },
-  "toolRun": {
-    "finalAnswerMissing": "工具调用已到达运行上限，但模型没有生成最终回答。请重试或减少本次启用的工具。"
   },
   "llm": {
     "apiKeysRequired": "API Keys 不能为空。",
@@ -211,9 +227,6 @@
       "invalidId": "MCP 工具 ID 无效。"
     }
   },
-  "memory": {
-    "keyRequired": "记忆键不能为空。"
-  },
   "media": {
     "imagePromptRequired": "请输入图片提示词。",
     "imageGenerationRejectsInputs": "图片生成不支持携带输入图片，请移除附件或选择图片编辑。",
@@ -223,6 +236,9 @@
     "imageStreamUnsupported": "Tips：当前上游可能不支持流式响应，请管理员在模型能力中关闭“图像流式调用”（设置 image.stream=false）后重试。",
     "routeProtocolMismatch": "当前模型路由协议与图片任务不匹配，请检查模型绑定。",
     "invalidTask": "图片任务参数无效。"
+  },
+  "memory": {
+    "keyRequired": "记忆键不能为空。"
   },
   "message": {
     "feedbackTargetInvalid": "消息反馈目标无效。",
@@ -293,6 +309,9 @@
     "notFound": "设置项不存在。",
     "serviceUnavailable": "设置服务不可用。",
     "smtpInvalid": "SMTP 设置无效。"
+  },
+  "toolRun": {
+    "finalAnswerMissing": "工具调用已到达运行上限，但模型没有生成最终回答。请重试或减少本次启用的工具。"
   },
   "upstream": {
     "unavailable": "上游服务不可用。"

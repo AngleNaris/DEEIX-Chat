@@ -11,6 +11,8 @@ import {
   useConversationExport,
   useSidebarConversations,
 } from "@/entities/conversation";
+import { useGroupRunRecovery } from "@/features/agent-groups/hooks/use-group-run-recovery";
+import { subscribeGroupRunSettled } from "@/features/agent-groups/model/group-run-store";
 import { ChatArea, ChatAreaLoadError, ChatAreaSkeleton } from "@/features/chat/components/sections/chat-area";
 import { ChatArtifactWorkspace } from "@/features/chat/components/sections/chat-artifact";
 import { ChatEmptyState } from "@/features/chat/components/sections/chat-empty";
@@ -232,6 +234,13 @@ export function AppChatArea() {
     setProjectByPublicID,
     deleteByPublicID,
   } = useSidebarConversations();
+  // 群组会话标志：useChatData 先于 activeAgentGroup memo 执行，需提前从 items 计算（§16.8 占位恢复）。
+  const groupConversationAgentGroupID = React.useMemo(() => {
+    if (!conversationID) {
+      return "";
+    }
+    return items.find((item) => item.publicID === conversationID)?.agentGroupID?.trim() || "";
+  }, [conversationID, items]);
   const {
     cancelResumedGeneration,
     loading,
@@ -247,6 +256,7 @@ export function AppChatArea() {
   } = useChatData(conversationID, {
     activeGenerationRunsRef,
     failedGenerationRunsRef,
+    isGroupConversation: Boolean(groupConversationAgentGroupID),
   });
   const { greetingTitle } = useChatViewerProfile();
   const [manualConversationTitle, setManualConversationTitle] = React.useState("");
@@ -292,6 +302,16 @@ export function AppChatArea() {
   }, [activeConversation?.publicID, conversationID]);
   const currentConversation =
     activeConversation ?? (loadedConversation?.publicID === conversationID ? loadedConversation : null);
+  const activeAgentGroup = React.useMemo(() => {
+    const groupID = currentConversation?.agentGroupID?.trim();
+    if (!groupID) {
+      return null;
+    }
+    return {
+      publicID: groupID,
+      name: currentConversation.agentGroupName?.trim() || "",
+    };
+  }, [currentConversation?.agentGroupID, currentConversation?.agentGroupName]);
   const activeRouteProject = React.useMemo(() => {
     if (!routeProjectID || conversationID) {
       return null;
@@ -614,6 +634,7 @@ export function AppChatArea() {
     onGuideQueuedMessage,
     queuedMessages,
     sending,
+    groupRunAwaitingAction,
     visibleMessageCount,
     visibleMessages,
     isConversationMode,
@@ -648,6 +669,21 @@ export function AppChatArea() {
     resumingRunID,
   });
   const generating = sending;
+  // §16.7/§16.10 刷新恢复：群组会话加载后重建最后一条 assistant 消息的运行时间线；
+  // 重试/放弃结算后刷新消息列表（最终答案持久化在顶层消息中，需 reload 展示）。
+  const recoveryTargetMessage = visibleMessages[visibleMessages.length - 1];
+  const recoveryRunID =
+    recoveryTargetMessage?.role === "assistant" ? recoveryTargetMessage.runID : undefined;
+  useGroupRunRecovery({
+    conversationPublicID: currentConversation?.publicID,
+    isGroupConversation: Boolean(currentConversation?.agentGroupID?.trim()),
+    lastAssistantRunID: recoveryRunID,
+  });
+  React.useEffect(() => {
+    return subscribeGroupRunSettled((clientRunID) => {
+      reload();
+    });
+  }, [reload]);
   const handleSendMessage = React.useCallback(() => {
     setSelectedPrompts([]);
     return onSendMessage();
@@ -1143,6 +1179,7 @@ export function AppChatArea() {
     draft,
     loading,
     sending: generating,
+    groupRunLocked: groupRunAwaitingAction,
     uploading,
     isConversationMode,
     maxFilesPerMessage,
@@ -1168,6 +1205,7 @@ export function AppChatArea() {
     defaultOptions: selectedModelDefaultOptions,
     modelOptionPolicy,
     modelLoading: modelsLoading,
+    hideModelPicker: Boolean(activeAgentGroup),
     dropActive: fileDragActive,
     onDraftChange: setDraft,
     onModelChange: setSelectedPlatformModelName,
@@ -1252,6 +1290,7 @@ export function AppChatArea() {
                   selectedPlatformModelName={selectedPlatformModelName}
                   onModelChange={setSelectedPlatformModelName}
                   onModelCatalogRefresh={refreshModelCatalogForComposer}
+                  agentGroup={activeAgentGroup}
                   onEditImageAttachment={onEditGeneratedImageAttachment}
                   onOpenCodeArtifact={artifactWorkspace.openArtifact}
                   onCycleMessageBranch={onCycleMessageBranch}

@@ -173,7 +173,7 @@ func (h *Handler) UpdateConversationRole(c *gin.Context) {
 // @Produce json
 // @Security BearerAuth
 // @Param id path string true "角色 public_id"
-// @Success 200 {object} DeleteConversationResponse
+// @Success 200 {object} ErrorDoc
 // @Failure 404 {object} ErrorDoc
 // @Failure 500 {object} ErrorDoc
 // @Router /conversation-roles/{id} [delete]
@@ -187,6 +187,10 @@ func (h *Handler) DeleteConversationRole(c *gin.Context) {
 	if err = h.service.DeleteConversationRole(c.Request.Context(), userID, publicID); err != nil {
 		if errors.Is(err, appconversation.ErrConversationProjectNotFound) {
 			response.Error(c, http.StatusNotFound, "conversation role not found")
+			return
+		}
+		if errors.Is(err, appconversation.ErrConversationRoleInUseByAgentGroup) {
+			response.ErrorWithCode(c, http.StatusConflict, "conversation.agent_group_role_in_use", "conversation role is in use by agent group member")
 			return
 		}
 		response.Error(c, http.StatusInternalServerError, "delete conversation role failed")

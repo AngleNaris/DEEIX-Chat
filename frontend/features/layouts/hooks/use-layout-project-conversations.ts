@@ -161,7 +161,7 @@ export function useLayoutProjectConversations({
         updateProjectConversationState((previous) => ({
           ...previous,
           [projectID]: {
-            items: sortByUpdatedAtDesc(data.results ?? []),
+            items: sortByUpdatedAtDesc((data.results ?? []).filter((item) => !item.roleID)),
             loading: false,
             loaded: true,
             error: false,
@@ -285,7 +285,10 @@ export function useLayoutProjectConversations({
         }
 
         const updated = lastChange.patch ? { ...base, ...lastChange.patch } : base;
-        const belongsToProject = updated.projectID === projectID && updated.status !== "archived";
+        const belongsToProject =
+          updated.projectID === projectID &&
+          !updated.roleID &&
+          updated.status !== "archived";
         if (belongsToProject) {
           next[projectID] = { ...state, items: upsertByPublicID(state.items, updated, sortByUpdatedAtDesc) };
           changed = true;

@@ -19,6 +19,44 @@ var (
 	ErrInvalidConversationLabels = errors.New("invalid conversation labels")
 	// ErrConversationProjectNotFound 会话项目不存在或无权限。
 	ErrConversationProjectNotFound = errors.New("conversation project not found")
+	// ErrConversationAgentGroupNotFound 会话绑定的群组不存在或无权限。
+	ErrConversationAgentGroupNotFound = errors.New("conversation agent group not found")
+	// ErrConversationRoleInUseByAgentGroup 角色仍被未移除的群组成员引用，禁止删除（§18 删除保护）。
+	ErrConversationRoleInUseByAgentGroup = errors.New("conversation role is in use by agent group member")
+	// ErrConversationProjectInUseByAgentGroup 项目下仍存在群组，禁止删除（§18 删除保护）。
+	ErrConversationProjectInUseByAgentGroup = errors.New("conversation project is in use by agent group")
+	// ErrConversationRoleNotAllowedWithGroup 群组会话禁止绑定单个角色。
+	ErrConversationRoleNotAllowedWithGroup = errors.New("conversation role not allowed with agent group")
+	// ErrConversationModelNotAllowedWithGroup 群组会话禁止请求级模型覆盖。
+	ErrConversationModelNotAllowedWithGroup = errors.New("conversation model override not allowed with agent group")
+	// ErrConversationGroupProjectMismatch 群组所属项目与会话项目不一致。
+	ErrConversationGroupProjectMismatch = errors.New("conversation agent group project mismatch")
+	// ErrConversationGroupImmutable 群组会话的绑定不可变更。
+	ErrConversationGroupImmutable = errors.New("conversation agent group binding is immutable")
+	// ErrAgentGroupFeatureDisabled 群组功能未启用。
+	ErrAgentGroupFeatureDisabled = errors.New("agent group feature disabled")
+	// ErrAgentGroupRunInProgress 会话已有进行中的群组运行。
+	ErrAgentGroupRunInProgress = errors.New("agent group run already in progress")
+	// ErrAgentGroupRunNotFound 群组运行不存在或无权限。
+	ErrAgentGroupRunNotFound = errors.New("agent group run not found")
+	// ErrAgentGroupRunNotRetryable 当前运行状态不允许重试。
+	ErrAgentGroupRunNotRetryable = errors.New("agent group run not retryable")
+	// ErrAgentGroupRunNotCancelable 当前运行状态不允许取消。
+	ErrAgentGroupRunNotCancelable = errors.New("agent group run not cancelable")
+	// ErrAgentGroupRunNotAbandonable 当前运行状态不允许放弃。
+	ErrAgentGroupRunNotAbandonable = errors.New("agent group run not abandonable")
+	// ErrAgentGroupRunStateCorrupt 运行持久化状态损坏，无法安全恢复执行。
+	ErrAgentGroupRunStateCorrupt = errors.New("agent group run state corrupt")
+	// ErrAgentGroupRunPaused 群组运行已暂停（可重试），等待重试或放弃。
+	ErrAgentGroupRunPaused = errors.New("agent group run paused")
+	// ErrAgentGroupRunBlocked 群组运行被阻塞，无法继续执行。
+	ErrAgentGroupRunBlocked = errors.New("agent group run blocked")
+	// ErrAgentGroupCASConflict 群组运行状态并发冲突。
+	ErrAgentGroupCASConflict = errors.New("agent group run state conflict")
+	// ErrAgentGroupInvalidDecision 主管决策无法解析或不符合协议。
+	ErrAgentGroupInvalidDecision = errors.New("invalid supervisor decision")
+	// ErrAgentGroupInvalidMember 主管指派的成员不合法。
+	ErrAgentGroupInvalidMember = errors.New("invalid supervisor member target")
 	// ErrInvalidConversationProject 会话项目请求不合法。
 	ErrInvalidConversationProject = errors.New("invalid conversation project")
 	// ErrInvalidFileReference 文件引用无效。

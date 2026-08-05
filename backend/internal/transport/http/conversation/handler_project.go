@@ -176,6 +176,10 @@ func (h *Handler) DeleteConversationProject(c *gin.Context) {
 			response.Error(c, http.StatusNotFound, "conversation project not found")
 			return
 		}
+		if errors.Is(err, appconversation.ErrConversationProjectInUseByAgentGroup) {
+			response.ErrorWithCode(c, http.StatusConflict, "conversation.agent_group_project_in_use", "conversation project is in use by agent group")
+			return
+		}
 		response.Error(c, http.StatusInternalServerError, "delete conversation project failed")
 		return
 	}
@@ -269,6 +273,9 @@ func (h *Handler) SetConversationProject(c *gin.Context) {
 		case errors.Is(err, appconversation.ErrConversationNotFound):
 			response.Error(c, http.StatusNotFound, "conversation not found")
 			return
+		case errors.Is(err, appconversation.ErrConversationGroupImmutable):
+			response.Error(c, http.StatusConflict, "agent group conversation project is immutable")
+			return
 		default:
 			response.Error(c, http.StatusInternalServerError, "set conversation project failed")
 			return
@@ -309,6 +316,9 @@ func (h *Handler) BatchSetConversationProject(c *gin.Context) {
 			return
 		case errors.Is(err, appconversation.ErrConversationNotFound):
 			response.Error(c, http.StatusNotFound, "conversation not found")
+			return
+		case errors.Is(err, appconversation.ErrConversationGroupImmutable):
+			response.Error(c, http.StatusConflict, "agent group conversation project is immutable")
 			return
 		default:
 			response.Error(c, http.StatusInternalServerError, "batch set conversation project failed")

@@ -30,6 +30,8 @@ const USER_MESSAGE_EXPAND_TRANSITION = {
   ease: [0.16, 1, 0.3, 1] as const,
 };
 const EDIT_MESSAGE_MENTION_KINDS: readonly ChatMentionMenuKind[] = ["model", "prompt"];
+/** 群组会话中编辑用户消息：禁止请求级模型覆盖，仅保留提示词引用。 */
+const EDIT_MESSAGE_PROMPT_ONLY_KINDS: readonly ChatMentionMenuKind[] = ["prompt"];
 const EDIT_MESSAGE_EMPTY_ATTACHMENTS = [];
 const EDIT_MESSAGE_EMPTY_TOOLS = [];
 const EDIT_MESSAGE_EMPTY_TOOL_IDS = [];
@@ -42,6 +44,7 @@ type ChatMessageUserProps = {
   selectedPlatformModelName?: string;
   onModelChange?: (platformModelName: string) => void;
   onModelCatalogRefresh?: () => void | Promise<void>;
+  modelMenuDisabled?: boolean;
   onCycleMessageBranch: (parentPublicID: string | null, direction: "previous" | "next") => void;
   onCopy: () => void;
   copySucceeded?: boolean;
@@ -59,6 +62,7 @@ export function ChatMessageUser({
   selectedPlatformModelName = "",
   onModelChange = () => undefined,
   onModelCatalogRefresh,
+  modelMenuDisabled = false,
   onCycleMessageBranch,
   onCopy,
   copySucceeded = false,
@@ -165,7 +169,7 @@ export function ChatMessageUser({
     defaultFileLabel: "",
     disabled: readOnly || !isEditing,
     draft: editingValue,
-    enabledKinds: EDIT_MESSAGE_MENTION_KINDS,
+    enabledKinds: modelMenuDisabled ? EDIT_MESSAGE_PROMPT_ONLY_KINDS : EDIT_MESSAGE_MENTION_KINDS,
     maxSelectedSkills: 0,
     maxSelectedTools: 0,
     modelOptions,

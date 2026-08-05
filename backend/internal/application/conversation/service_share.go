@@ -234,6 +234,7 @@ func (s *Service) GetPublicSharedConversation(ctx context.Context, shareID strin
 	if err = s.hydrateMessageProcessTraces(ctx, messages); err != nil {
 		return nil, err
 	}
+	sanitizeSharedMessagesForPublic(messages, conversation.AgentGroupID != nil)
 	runModels, err := s.loadPublicSharedRunModels(ctx, share.UserID, conversation.ID, messages)
 	if err != nil {
 		return nil, err
@@ -286,6 +287,7 @@ func (s *Service) CloneSharedConversation(ctx context.Context, userID uint, shar
 	if err = s.hydrateMessageProcessTraces(ctx, messages); err != nil {
 		return nil, err
 	}
+	sanitizeSharedMessagesForPublic(messages, sourceConversation.AgentGroupID != nil)
 
 	clonedFiles, err := s.cloneSharedFiles(ctx, share.UserID, userID, messages)
 	if err != nil {
@@ -318,7 +320,7 @@ func (s *Service) CloneSharedConversation(ctx context.Context, userID uint, shar
 		return nil, err
 	}
 
-	runIDMap, err := s.cloneSharedRuns(ctx, share.UserID, sourceConversation.ID, userID, targetConversation.ID, messages)
+	runIDMap, err := s.cloneSharedRuns(ctx, share.UserID, sourceConversation.ID, userID, targetConversation.ID, messages, sourceConversation.AgentGroupID != nil)
 	if err != nil {
 		return nil, err
 	}
@@ -357,6 +359,7 @@ func (s *Service) cloneSharedRuns(
 	targetUserID uint,
 	targetConversationID uint,
 	messages []model.Message,
+	isAgentGroupConversation bool,
 ) (map[string]string, error) {
 	sourceRunIDs := make([]string, 0, len(messages))
 	seen := make(map[string]struct{}, len(messages))
@@ -378,6 +381,8 @@ func (s *Service) cloneSharedRuns(
 	if err != nil {
 		return nil, err
 	}
+	// 群组会话：克隆运行不携带内部失败诊断，快照复制后同样遵循脱敏约束。
+	sanitizeSharedRunsForPublic(runs, isAgentGroupConversation)
 	byRunID := make(map[string]model.Run, len(runs))
 	for _, run := range runs {
 		runID := strings.TrimSpace(run.RunID)
@@ -805,6 +810,53 @@ func sanitizeSharedTracePayloadJSON(raw string) string {
 		return ""
 	}
 	return string(data)
+}
+
+// sanitizeSharedMessagesForPublic 清洗公开分享/克隆快照消息（§18）：
+// 群组会话只保留用户消息与主管最终 assistant 消息正文，剥离显式思考过程与全部过程 trace
+// （成员内部指令、工具输入、失败诊断不进入公开快照）；非群组会话保留 trace 展示行为，
+// 但统一清除 trace payload 中的凭证与上游调试字段。
+func sanitizeSharedMessagesForPublic(messages []model.Message, isAgentGroupConversation bool) {
+	for i := range messages {
+		if isAgentGroupConversation {
+			messages[i].ReasoningContent = ""
+			messages[i].ProcessTrace = nil
+			// 纵深防御：即使库中存在异常诊断文本（注入/历史脏数据），
+			// 群组会话的错误消息也一律收敛为通用消息，不泄露失败诊断。
+			messages[i].ErrorMessage = genericAgentGroupErrorMessage(messages[i].ErrorCode)
+			continue
+		}
+		sanitizePublicMessageProcessTrace(messages[i].ProcessTrace)
+	}
+}
+
+// sanitizeSharedRunsForPublic 清洗公开分享/导出的运行记录（§18）：
+// 群组会话的运行错误只保留通用错误消息，内部失败诊断（上游原文、堆栈等）不进入快照/导出。
+func sanitizeSharedRunsForPublic(runs []model.Run, isAgentGroupConversation bool) {
+	if !isAgentGroupConversation {
+		return
+	}
+	for i := range runs {
+		if runs[i].TaskType != "agent_group" {
+			continue
+		}
+		runs[i].ErrorMessage = genericAgentGroupErrorMessage(runs[i].ErrorCode)
+	}
+}
+
+// sanitizePublicMessageProcessTrace 清除公开快照 trace 的敏感负载（凭证、上游调试信息）。
+func sanitizePublicMessageProcessTrace(trace *model.MessageProcessTrace) {
+	if trace == nil {
+		return
+	}
+	for _, block := range []*model.MessageTraceBlock{trace.Process, trace.Tools, trace.UpstreamThink} {
+		if block != nil {
+			block.PayloadJSON = sanitizeSharedTracePayloadJSON(block.PayloadJSON)
+		}
+	}
+	for i := range trace.Events {
+		trace.Events[i].PayloadJSON = sanitizeSharedTracePayloadJSON(trace.Events[i].PayloadJSON)
+	}
 }
 
 func deleteSharedTraceInternalFields(payload map[string]interface{}, parentKey string) {

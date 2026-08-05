@@ -39,10 +39,20 @@ func (h *Handler) CreateConversation(c *gin.Context) {
 		return
 	}
 
-	item, err := h.service.CreateConversation(c.Request.Context(), userID, req.Title, req.Model, req.ProjectID, req.RoleID)
+	item, err := h.service.CreateConversation(c.Request.Context(), userID, req.Title, req.Model, req.ProjectID, req.RoleID, req.AgentGroupID)
 	if err != nil {
 		if errors.Is(err, appconversation.ErrConversationProjectNotFound) {
 			response.Error(c, http.StatusNotFound, "conversation project not found")
+			return
+		}
+		if errors.Is(err, appconversation.ErrConversationAgentGroupNotFound) {
+			response.Error(c, http.StatusNotFound, "conversation agent group not found")
+			return
+		}
+		if errors.Is(err, appconversation.ErrConversationRoleNotAllowedWithGroup) ||
+			errors.Is(err, appconversation.ErrConversationModelNotAllowedWithGroup) ||
+			errors.Is(err, appconversation.ErrConversationGroupProjectMismatch) {
+			response.Error(c, http.StatusBadRequest, "agent group conversation constraints violated")
 			return
 		}
 		response.Error(c, http.StatusInternalServerError, "create conversation failed")

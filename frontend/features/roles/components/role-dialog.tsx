@@ -7,8 +7,19 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
-import { Sparkles, CopyPlus, Box, Globe2, SlidersHorizontal, Wrench } from "lucide-react";
+import {
+  Box,
+  Check,
+  ChevronDown,
+  CopyPlus,
+  Globe2,
+  SlidersHorizontal,
+  Sparkles,
+  Wrench,
+  type LucideIcon,
+} from "lucide-react";
 import data from "@emoji-mart/data";
 import Picker from "@emoji-mart/react";
 import {
@@ -30,9 +41,6 @@ import type { ConversationProjectDTO } from "@/shared/api/conversation.types";
 import { listVisibleSkills } from "@/shared/api/skills";
 import type { SkillSummaryDTO } from "@/shared/api/skills.types";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
-import { cn } from "@/lib/utils";
-
-const ICON_PRESETS = ["✨", "🦉", "🦊", "🐉", "🧙", "⚔️", "🎨", "🎬", "📝", "💡", "🔮", "🛡️", "🎵", "🧪", "🗡️", "👾", "🤖", "🌙", "⚡", "💎"];
 
 export type RoleDraft = {
   publicID?: string;
@@ -58,6 +66,85 @@ export const EMPTY_ROLE_DRAFT: RoleDraft = {
   color: "",
   icon: "",
 };
+
+type RoleSelectorOption = {
+  value: string;
+  label: string;
+  leading?: React.ReactNode;
+};
+
+function RoleSingleSelector({
+  disabled,
+  icon: Icon,
+  loading,
+  onChange,
+  options,
+  placeholder,
+  value,
+}: {
+  disabled: boolean;
+  icon: LucideIcon;
+  loading: boolean;
+  onChange: (value: string) => void;
+  options: RoleSelectorOption[];
+  placeholder: string;
+  value: string;
+}) {
+  const [open, setOpen] = React.useState(false);
+  const selected = options.find((option) => option.value === value);
+
+  return (
+    <Popover
+      open={open}
+      onOpenChange={setOpen}
+    >
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          className="h-8 w-full justify-between px-3 font-normal shadow-none"
+          disabled={disabled || loading}
+          aria-expanded={open}
+        >
+          <span className="flex min-w-0 items-center gap-2">
+            {selected?.leading ?? <Icon className="size-3.5 text-muted-foreground" strokeWidth={1.7} />}
+            <span className="truncate">{selected?.label ?? placeholder}</span>
+          </span>
+          <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" strokeWidth={1.7} />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="start" sideOffset={6} className="w-[min(28rem,calc(100vw-3rem))] p-1.5">
+        <div className="max-h-64 space-y-0.5 overflow-y-auto" role="listbox">
+          {options.map((option) => {
+            const selectedOption = option.value === value;
+            return (
+              <button
+                key={option.value || "__empty__"}
+                type="button"
+                role="option"
+                aria-selected={selectedOption}
+                className="flex min-h-9 w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-accent"
+                onClick={() => {
+                  onChange(option.value);
+                  setOpen(false);
+                }}
+              >
+                <span className="flex min-w-0 items-center gap-2">
+                  {option.leading ?? <Icon className="size-3.5 text-muted-foreground" strokeWidth={1.7} />}
+                  <span className="truncate">{option.label}</span>
+                </span>
+                {selectedOption ? <Check className="size-3.5 shrink-0 text-primary" strokeWidth={1.8} /> : null}
+              </button>
+            );
+          })}
+          {options.length === 0 ? (
+            <p className="px-2 py-6 text-center text-xs text-muted-foreground">{placeholder}</p>
+          ) : null}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 function RoleForm({
   draft,
@@ -95,22 +182,6 @@ function RoleForm({
       icon: project.icon || draft.icon,
     });
   };
-  const toggleMCPTool = (toolID: number) => {
-    update(
-      "defaultMCPToolIDs",
-      draft.defaultMCPToolIDs.includes(toolID)
-        ? draft.defaultMCPToolIDs.filter((id) => id !== toolID)
-        : [...draft.defaultMCPToolIDs, toolID],
-    );
-  };
-  const toggleSkill = (skillID: number) => {
-    update(
-      "defaultSkillIDs",
-      draft.defaultSkillIDs.includes(skillID)
-        ? draft.defaultSkillIDs.filter((id) => id !== skillID)
-        : [...draft.defaultSkillIDs, skillID],
-    );
-  };
   const [iconPickerOpen, setIconPickerOpen] = React.useState(false);
 
   return (
@@ -118,26 +189,26 @@ function RoleForm({
       {projects.length > 0 ? (
         <div className="space-y-1 rounded-md border border-border/60 bg-muted/20 p-2.5">
           <Label className="text-xs text-muted-foreground">从项目复制配置</Label>
-          <div className="flex items-center gap-2">
-            <select
-              defaultValue=""
-              disabled={submitting}
-              onChange={(event) => {
-                const project = projects.find((item) => item.publicID === event.target.value) ?? null;
-                importFromProject(project);
-                event.target.value = "";
-              }}
-              className="h-8 min-w-0 flex-1 rounded-md border border-input bg-transparent px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
-            >
-              <option value="">选择要复制的项目…</option>
-              {projects.map((project) => (
-                <option key={project.publicID} value={project.publicID}>
-                  {project.icon ? `${project.icon} ` : ""}{project.name}
-                </option>
-              ))}
-            </select>
-            <CopyPlus className="size-4 shrink-0 text-muted-foreground" strokeWidth={1.7} />
-          </div>
+          <RoleSingleSelector
+            value=""
+            placeholder="选择要复制的项目…"
+            icon={CopyPlus}
+            loading={submitting}
+            disabled={false}
+            options={projects.map((project) => ({
+              value: project.publicID,
+              label: project.name,
+              leading: project.icon ? (
+                <span className="flex size-3.5 shrink-0 items-center justify-center text-sm leading-none">
+                  {project.icon}
+                </span>
+              ) : undefined,
+            }))}
+            onChange={(projectID) => {
+              const project = projects.find((item) => item.publicID === projectID) ?? null;
+              importFromProject(project);
+            }}
+          />
           <p className="text-[11px] leading-4 text-muted-foreground">复制项目的提示词、MCP 工具、技能与配色到角色，再按需修改</p>
         </div>
       ) : null}
@@ -175,19 +246,21 @@ function RoleForm({
       </div>
       <div className="space-y-1">
         <Label className="text-xs text-muted-foreground">默认模型</Label>
-        <select
+        <RoleSingleSelector
           value={draft.model}
-          onChange={(event) => update("model", event.target.value)}
-          disabled={submitting}
-          className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
-        >
-          <option value="">(跟随全局默认)</option>
-          {models.map((model) => (
-            <option key={model.platformModelName} value={model.platformModelName}>
-              {model.platformModelName} {model.vendor ? `· ${model.vendor}` : ""}
-            </option>
-          ))}
-        </select>
+          placeholder="(跟随全局默认)"
+          icon={Sparkles}
+          loading={submitting}
+          disabled={false}
+          options={[
+            { value: "", label: "(跟随全局默认)" },
+            ...models.map((model) => ({
+              value: model.platformModelName,
+              label: `${model.platformModelName}${model.vendor ? ` · ${model.vendor}` : ""}`,
+            })),
+          ]}
+          onChange={(value) => update("model", value)}
+        />
       </div>
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1">
@@ -201,58 +274,52 @@ function RoleForm({
               disabled={submitting}
               className="min-w-0 flex-1"
             />
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-9 shrink-0"
-              onClick={() => setIconPickerOpen((open) => !open)}
-              disabled={submitting}
+            <Popover
+              open={iconPickerOpen}
+              onOpenChange={setIconPickerOpen}
             >
-              {draft.icon ? <span className="text-sm leading-none">{draft.icon}</span> : <Sparkles className="size-4" strokeWidth={1.8} />}
-              <span className="ml-1.5 text-xs">选择 Emoji</span>
-            </Button>
-          </div>
-          {iconPickerOpen ? (
-            <div className="relative z-50 overflow-hidden rounded-md border border-border/60 bg-background">
-              <Picker
-                data={data}
-                onEmojiSelect={(emoji: { native?: string }) => {
-                  if (emoji?.native) {
-                    update("icon", emoji.native);
-                  }
-                  setIconPickerOpen(false);
-                }}
-                theme="auto"
-                previewPosition="none"
-                skinTonePosition="none"
-                navPosition="top"
-                searchPosition="sticky"
-                style={{ width: "100%", maxHeight: 260 }}
-              />
-            </div>
-          ) : null}
-          <div className="flex flex-wrap gap-1 pt-1">
-            {ICON_PRESETS.map((icon) => {
-              const selected = draft.icon === icon;
-              return (
-                <button
-                  key={icon}
+              <PopoverTrigger asChild>
+                <Button
                   type="button"
+                  variant="outline"
+                  className="h-8 min-w-0 flex-1 justify-between px-3 font-normal shadow-none"
                   disabled={submitting}
-                  onClick={() => update("icon", selected ? "" : icon)}
-                  aria-label={`图标 ${icon}`}
-                  className={cn(
-                    "flex size-7 items-center justify-center rounded-md border text-sm transition-colors",
-                    selected
-                      ? "border-primary bg-primary/10"
-                      : "border-border/60 hover:border-primary/40 hover:bg-accent",
-                  )}
+                  aria-expanded={iconPickerOpen}
                 >
-                  {icon}
-                </button>
-              );
-            })}
+                  <span className="flex min-w-0 items-center gap-2">
+                    {draft.icon ? (
+                      <span className="text-sm leading-none">{draft.icon}</span>
+                    ) : (
+                      <Sparkles className="size-3.5 text-muted-foreground" strokeWidth={1.8} />
+                    )}
+                    <span className="truncate text-xs">选择 Emoji</span>
+                  </span>
+                  <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" strokeWidth={1.7} />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent
+                align="end"
+                sideOffset={6}
+                collisionPadding={12}
+                className="w-[min(24rem,calc(100vw-2rem))] overflow-hidden p-0"
+              >
+                <Picker
+                  data={data}
+                  onEmojiSelect={(emoji: { native?: string }) => {
+                    if (emoji.native) {
+                      update("icon", emoji.native);
+                    }
+                    setIconPickerOpen(false);
+                  }}
+                  theme="auto"
+                  previewPosition="none"
+                  skinTonePosition="none"
+                  navPosition="top"
+                  searchPosition="sticky"
+                  style={{ width: "100%", maxHeight: 260 }}
+                />
+              </PopoverContent>
+            </Popover>
           </div>
         </div>
         <div className="space-y-1">

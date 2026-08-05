@@ -445,20 +445,22 @@ html[data-branding-pending] body {
 
 /* cobalt & artilus: 方形风格主题, 压平遗留的派生圆角(rounded-md/lg/xl 等) */
 [data-theme="cobalt"] :is(
-  .rounded-sm, .rounded, .rounded-md, .rounded-lg, .rounded-xl, .rounded-2xl,
+  .rounded-sm, .rounded, .rounded-md, .rounded-lg, .rounded-xl, .rounded-2xl, .rounded-3xl,
   .rounded-t-sm, .rounded-b-sm, .rounded-t-md, .rounded-b-md,
   .rounded-t-lg, .rounded-b-lg, .rounded-t-xl, .rounded-b-xl,
+  .rounded-t-2xl, .rounded-b-2xl,
   .rounded-l-md, .rounded-r-md, .rounded-l-lg, .rounded-r-lg,
-  .rounded-l-xl, .rounded-r-xl
+  .rounded-l-xl, .rounded-r-xl, .rounded-l-2xl, .rounded-r-2xl
 ) {
   border-radius: 0.125rem;
 }
 [data-theme="artilus"] :is(
-  .rounded-sm, .rounded, .rounded-md, .rounded-lg, .rounded-xl, .rounded-2xl,
+  .rounded-sm, .rounded, .rounded-md, .rounded-lg, .rounded-xl, .rounded-2xl, .rounded-3xl,
   .rounded-t-sm, .rounded-b-sm, .rounded-t-md, .rounded-b-md,
   .rounded-t-lg, .rounded-b-lg, .rounded-t-xl, .rounded-b-xl,
+  .rounded-t-2xl, .rounded-b-2xl,
   .rounded-l-md, .rounded-r-md, .rounded-l-lg, .rounded-r-lg,
-  .rounded-l-xl, .rounded-r-xl
+  .rounded-l-xl, .rounded-r-xl, .rounded-l-2xl, .rounded-r-2xl
 ) {
   border-radius: 0.125rem;
 }

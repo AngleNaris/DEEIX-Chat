@@ -880,5 +880,26 @@
     "advisor": "Advisor",
     "toolSearchRegex": "Tool search (Regex)",
     "toolSearchBm25": "Tool search (BM25)"
+  },
+  "agentGroupRun": {
+    "group": "Agent group",
+    "prepare": "Preparing context",
+    "resuming": "Resuming run",
+    "waitingModel": "Waiting for model response",
+    "thinking": "Thinking",
+    "executingTool": "Running tools",
+    "assembling": "Assembling member results",
+    "done": "Done",
+    "failed": "Failed",
+    "paused": "Paused",
+    "blocked": "Blocked",
+    "canceled": "Canceled",
+    "interrupted": "Interrupted",
+    "attempt": "Attempt {attemptNumber}",
+    "waitingSeconds": "{seconds}s elapsed",
+    "retry": "Retry from here",
+    "stop": "Stop",
+    "abandon": "Abandon round",
+    "attemptHistory": "Attempt history"
   }
 }

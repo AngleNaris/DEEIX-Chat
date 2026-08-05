@@ -880,5 +880,26 @@
     "advisor": "Advisor",
     "toolSearchRegex": "工具搜索（Regex）",
     "toolSearchBm25": "工具搜索（BM25）"
+  },
+  "agentGroupRun": {
+    "group": "群组运行",
+    "prepare": "正在准备上下文",
+    "resuming": "正在恢复运行",
+    "waitingModel": "正在等待模型响应",
+    "thinking": "正在分析",
+    "executingTool": "正在执行工具",
+    "assembling": "正在整理成员结果",
+    "done": "已完成",
+    "failed": "执行失败",
+    "paused": "已暂停",
+    "blocked": "已阻塞",
+    "canceled": "已取消",
+    "interrupted": "已中断",
+    "attempt": "第 {attemptNumber} 次尝试",
+    "waitingSeconds": "已等待 {seconds} 秒",
+    "retry": "从此处重试",
+    "stop": "停止",
+    "abandon": "放弃本轮",
+    "attemptHistory": "尝试历史"
   }
 }

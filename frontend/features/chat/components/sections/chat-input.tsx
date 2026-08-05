@@ -75,6 +75,9 @@ import type { SendShortcut } from "@/features/settings/types/settings";
 import { isSendShortcutEvent } from "@/shared/lib/platform-shortcuts";
 import type { BillingDisplayCurrency } from "@/shared/lib/billing-display";
 
+/** 群组会话：@ 菜单不提供模型项，模型由群组配置决定（后端拒绝请求级覆盖）。 */
+const COMPOSER_MENTION_KINDS_WITHOUT_MODEL: readonly ChatMentionMenuKind[] = ["file", "tool", "skill", "prompt"];
+
 const FilePreviewDialog = dynamic(
   () => import("@/shared/components/file-preview/preview-dialog").then((module) => module.FilePreviewDialog),
   { ssr: false },
@@ -90,6 +93,8 @@ type ChatInputProps = {
   draft: string;
   loading: boolean;
   sending: boolean;
+  // §16.10 群组运行暂停/阻塞/重试中：输入框锁定，直到重试、停止或放弃。
+  groupRunLocked?: boolean;
   uploading: boolean;
   isConversationMode: boolean;
   maxFilesPerMessage: number;
@@ -117,6 +122,7 @@ type ChatInputProps = {
   modelOptionPolicy: ModelOptionPolicy | null;
   modelLoading: boolean;
   modelDisabled?: boolean;
+  hideModelPicker?: boolean;
   dropActive?: boolean;
   onDraftChange: (value: string) => void;
   onModelChange: (platformModelName: string) => void;
@@ -233,6 +239,7 @@ function ChatInputComponent({
   draft,
   loading,
   sending,
+  groupRunLocked = false,
   uploading,
   isConversationMode,
   fileMode,
@@ -259,6 +266,7 @@ function ChatInputComponent({
   modelOptionPolicy,
   modelLoading,
   modelDisabled = false,
+  hideModelPicker = false,
   dropActive = false,
   onDraftChange,
   onModelChange,
@@ -310,7 +318,7 @@ function ChatInputComponent({
   const [inputGroupHeight, setInputGroupHeight] = React.useState<number | null>(null);
   const hasDraftText = draft.trim().length > 0;
   const hasSubmitContent = hasDraftText || attachments.length > 0;
-  const canSend = hasSubmitContent && !loading && !uploading;
+  const canSend = hasSubmitContent && !loading && !uploading && !groupRunLocked;
   const showMarkdownPreview = markdownPreview && hasDraftText;
   const inputHeightClassName =
     inputHeight === "compact" ? "max-h-32" : inputHeight === "loose" ? "max-h-64" : "max-h-44";
@@ -416,6 +424,7 @@ function ChatInputComponent({
     defaultFileLabel: tComposer("mention.fileFallback"),
     disabled: loading || uploading || modelLoading || modelDisabled,
     draft,
+    enabledKinds: hideModelPicker ? COMPOSER_MENTION_KINDS_WITHOUT_MODEL : undefined,
     maxSelectedTools,
     maxSelectedSkills,
     modelOptions,
@@ -811,7 +820,7 @@ function ChatInputComponent({
           <InputGroupTextarea
             ref={textareaRef}
             value={draft}
-            disabled={loading || uploading}
+            disabled={loading || uploading || groupRunLocked}
             readOnly={speechInput.active}
             placeholder={dropActive ? tChat("attachments.dropTitle") : speechInput.placeholder}
             rows={1}
@@ -1052,23 +1061,25 @@ function ChatInputComponent({
                   </TooltipContent>
                 </Tooltip>
               ) : null}
-              <ChatModelPicker
-                modelOptions={modelOptions}
-                billingDisplayCurrency={billingDisplayCurrency}
-                billingDisplayUsdToCnyRate={billingDisplayUsdToCnyRate}
-                selectedPlatformModelName={selectedPlatformModelName}
-                loading={modelLoading}
-                disabled={modelDisabled}
-                onModelCatalogRefresh={onModelCatalogRefresh}
-                onModelChange={onModelChange}
-              />
+              {hideModelPicker ? null : (
+                <ChatModelPicker
+                  modelOptions={modelOptions}
+                  billingDisplayCurrency={billingDisplayCurrency}
+                  billingDisplayUsdToCnyRate={billingDisplayUsdToCnyRate}
+                  selectedPlatformModelName={selectedPlatformModelName}
+                  loading={modelLoading}
+                  disabled={modelDisabled}
+                  onModelCatalogRefresh={onModelCatalogRefresh}
+                  onModelChange={onModelChange}
+                />
+              )}
 
               <InputGroupButton
                 type="button"
                 variant="ghost"
                 size="icon-sm"
                 className="size-7 rounded-md text-muted-foreground hover:text-foreground sm:size-8"
-                disabled={loading || uploading || (!sending && !hasSubmitContent && !speechInput.supported)}
+                disabled={loading || uploading || groupRunLocked || (!sending && !hasSubmitContent && !speechInput.supported)}
                 onClick={hasSubmitContent ? onSendMessage : sending ? onStopMessage : speechInput.toggle}
                 onMouseEnter={() => setIsVoiceHovered(true)}
                 onMouseLeave={() => setIsVoiceHovered(false)}

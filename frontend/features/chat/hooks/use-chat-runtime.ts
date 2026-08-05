@@ -256,6 +256,7 @@ export function useChatRuntime({
     onGuideQueuedMessage: submitState.onGuideQueuedMessage,
     queuedMessages: submitState.queuedMessages,
     sending: submitState.sending || visibleResumeGenerationActive,
+    groupRunAwaitingAction: submitState.groupRunAwaitingAction,
     visibleMessageCount: branchState.visibleMessageCount,
     visibleMessages: branchState.visibleMessages,
     isConversationMode: showConversationLayout || branchState.visibleMessageCount > 0,

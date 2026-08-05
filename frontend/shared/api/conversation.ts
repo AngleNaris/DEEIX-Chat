@@ -47,6 +47,7 @@ import type {
   UpdateConversationLabelsRequest,
   UpdateConversationProjectRequest,
   StreamMessageEvent,
+  GroupStreamEvent,
   TraceBlockDTO,
 } from "@/shared/api/conversation.types";
 
@@ -146,6 +147,26 @@ function normalizeStreamEvent(rawEvent: unknown): StreamMessageEvent {
 
 function streamEventSeq(event: StreamMessageEvent): number {
   return typeof event.seq === "number" && Number.isFinite(event.seq) && event.seq > 0 ? event.seq : 0;
+}
+
+const GROUP_STREAM_EVENT_TYPES: ReadonlySet<string> = new Set([
+  "group_step_started",
+  "group_step_output_delta",
+  "group_step_completed",
+  "group_step_failed",
+  "group_step_retry_started",
+  "group_run_paused",
+  "group_run_completed",
+  "group_run_abandoned",
+]);
+
+export function isGroupStreamEvent(event: StreamMessageEvent): event is GroupStreamEvent {
+  return GROUP_STREAM_EVENT_TYPES.has(event.type);
+}
+
+// isGroupStreamAwareEvent 判断事件是否携带群组 Actor 元数据（§15：现有事件附加可选字段）。
+export function isGroupStreamAwareEvent(event: StreamMessageEvent): boolean {
+  return "groupRunID" in event && typeof event.groupRunID === "string" && event.groupRunID.trim() !== "";
 }
 
 function extractJSONDocuments(source: string): { documents: string[]; remainder: string } {
@@ -253,6 +274,30 @@ function handleStreamEvent(event: StreamMessageEvent, options: ConversationStrea
 
   if (event.type === "upstream_think_delta") {
     options.onUpstreamThinkDelta?.(event);
+    return null;
+  }
+
+  // 群组运行期间内部 Actor 回合转发的中间状态（方案 §15）：
+  // rag_search/file_proc 复用普通语义；其余状态事件透传给 onStatus。
+  if (event.type === "status") {
+    const message = event.message?.trim() || "";
+    if (event.status === "rag_search") {
+      options.onRagSearch?.(message);
+    } else if (event.status === "file_proc") {
+      options.onFileProc?.(message);
+    } else {
+      options.onStatus?.(event);
+    }
+    return null;
+  }
+
+  if (event.type === "tool_call" || event.type === "tool_result") {
+    options.onToolEvent?.(event);
+    return null;
+  }
+
+  if (isGroupStreamEvent(event)) {
+    options.onGroupEvent?.(event);
     return null;
   }
 
@@ -957,11 +1002,16 @@ export type ConversationStreamOptions = {
   onCompactDone?: (event: CompactDoneEvent) => void;
   onProcessUpdate?: (event: Extract<StreamMessageEvent, { type: "process_update" }>) => void;
   onUpstreamThinkDelta?: (event: Extract<StreamMessageEvent, { type: "upstream_think_delta" }>) => void;
+  onStatus?: (event: Extract<StreamMessageEvent, { type: "status" }>) => void;
+  onToolEvent?: (event: Extract<StreamMessageEvent, { type: "tool_call" | "tool_result" }>) => void;
+  onGroupEvent?: (event: GroupStreamEvent) => void;
   onUsage?: (event: Extract<StreamMessageEvent, { type: "usage" }>) => void;
   onInterrupted?: (event: Extract<StreamMessageEvent, { type: "error" }>) => void;
 };
 
-async function readConversationStream(
+// readConversationStream 消费 NDJSON 流：群组重试端点复用同一协议
+// （completed → 返回 data；error+data → onInterrupted 后返回 data；error 无 data → 抛 ApiError）。
+export async function readConversationStream(
   response: Response,
   options: ConversationStreamOptions,
 ): Promise<SendMessageResult | null> {

@@ -16,6 +16,7 @@ import (
 	appskill "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/skill"
 	appupload "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/upload"
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
+	domainagentgroup "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/agentgroup"
 	domainmcp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/mcp"
 	domainmemory "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/memory"
 	domainskill "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/skill"
@@ -62,6 +63,20 @@ type mcpToolResolver interface {
 	GetServer(ctx context.Context, serverID uint) (*domainmcp.Server, error)
 }
 
+// agentGroupResolver 解析会话绑定的 Agent 群组（由应用层注入）。
+type agentGroupResolver interface {
+	GetAgentGroupByPublicID(ctx context.Context, userID uint, publicID string) (*domainagentgroup.Group, error)
+	// CountAgentGroupReferencesByRole 统计引用角色的未移除群组成员关系数量（角色删除保护，§18）。
+	CountAgentGroupReferencesByRole(ctx context.Context, roleID uint) (int64, error)
+	// CountAgentGroupReferencesByProject 统计项目下群组数量（项目删除保护，§18）。
+	CountAgentGroupReferencesByProject(ctx context.Context, projectID uint) (int64, error)
+}
+
+// agentGroupSettingsReader 读取 agent_group 运行时设置（由 settings 服务注入）。
+type agentGroupSettingsReader interface {
+	RuntimeValuesByNamespace(ctx context.Context, namespace string) (map[string]string, error)
+}
+
 type auditWriter interface {
 	Write(ctx context.Context, requestID string, actorUserID uint, action string, resource string, resourceID string, ip string, userAgent string, detail interface{})
 }
@@ -81,6 +96,10 @@ type Service struct {
 	routeResolver     routeResolver
 	memoryRecorder    memoryRecorder
 	mcpRepo           mcpToolResolver
+	agentGroupRepo    agentGroupResolver
+	agentGroupRunStore    repository.AgentGroupRunRepository
+	agentGroupSettings    agentGroupSettingsReader
+	agentGroupRunLocks    sync.Map // conversationID (uint) → *sync.Mutex，同会话串行
 	llmClient         *llm.Client
 	mcpClient         *mcp.Client
 	uploadSvc         *appupload.Service
@@ -338,4 +357,19 @@ func (s *Service) SetObjectStoreProvider(provider appstorage.Provider) {
 // SetMCPRepository 注入会话运行所需的 MCP 工具查询能力。
 func (s *Service) SetMCPRepository(repo mcpToolResolver) {
 	s.mcpRepo = repo
+}
+
+// SetAgentGroupResolver 注入会话群组解析器。
+func (s *Service) SetAgentGroupResolver(resolver agentGroupResolver) {
+	s.agentGroupRepo = resolver
+}
+
+// SetAgentGroupRunStore 注入群组运行持久化仓储（nil 时群组会话走普通消息路径之外的能力受限）。
+func (s *Service) SetAgentGroupRunStore(store repository.AgentGroupRunRepository) {
+	s.agentGroupRunStore = store
+}
+
+// SetAgentGroupSettings 注入 agent_group 运行时设置读取器。
+func (s *Service) SetAgentGroupSettings(reader agentGroupSettingsReader) {
+	s.agentGroupSettings = reader
 }

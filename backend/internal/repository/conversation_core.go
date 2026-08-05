@@ -39,6 +39,20 @@ type ConversationMetadataPatch struct {
 	ReplaceableTitles []string
 }
 
+// ConversationRunPatch 定义会话运行日志的更新字段（群组重试/放弃推进顶层运行行）。
+type ConversationRunPatch struct {
+	Status           *string
+	ErrorCode        *string
+	ErrorMessage     *string
+	EndedAt          *time.Time
+	InputTokens      *int64
+	OutputTokens     *int64
+	CacheReadTokens  *int64
+	CacheWriteTokens *int64
+	ReasoningTokens  *int64
+	ToolCallsCount   *int
+}
+
 // ConversationMetadataRepository 封装会话元信息与用户访问能力。
 type ConversationMetadataRepository interface {
 	CreateConversation(ctx context.Context, item *domainconversation.Conversation) error
@@ -130,8 +144,13 @@ type ConversationTraceRepository interface {
 	ListConversationMessageTraceEventsByMessageIDs(ctx context.Context, messageIDs []uint) ([]domainconversation.MessageTraceEventRow, error)
 	CreateConversationToolCall(ctx context.Context, item *domainconversation.ToolCall) error
 	CreateConversationToolCalls(ctx context.Context, items []domainconversation.ToolCall) error
+	// ListConversationToolCallsByRunIDPrefix 按运行 ID 前缀查询工具调用行（EventScope=tool_call），
+	// 供群组重试时重建工具幂等账本（同一逻辑步骤的全部尝试共享前缀）。
+	ListConversationToolCallsByRunIDPrefix(ctx context.Context, userID uint, conversationID uint, runIDPrefix string) ([]domainconversation.ToolCall, error)
 	ListConversationRuns(ctx context.Context, userID uint, conversationID uint, offset int, limit int) ([]domainconversation.Run, int64, error)
 	ListConversationRunsByRunIDs(ctx context.Context, userID uint, conversationID uint, runIDs []string) ([]domainconversation.Run, error)
+	// UpdateConversationRun 按运行 ID 更新会话运行快照字段（群组重试/放弃时推进顶层运行行）。
+	UpdateConversationRun(ctx context.Context, userID uint, conversationID uint, runID string, patch ConversationRunPatch) (*domainconversation.Run, error)
 	ListConversationEventLogs(ctx context.Context, filter ConversationEventLogListFilter, offset int, limit int) ([]domainconversation.EventLog, int64, error)
 	GetConversationEventLog(ctx context.Context, eventID uint) (*domainconversation.EventLog, error)
 }

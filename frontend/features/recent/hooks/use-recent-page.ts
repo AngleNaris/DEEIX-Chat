@@ -63,6 +63,9 @@ function conversationMatchesRecentFilters(
   shareFilter: ConversationShareFilter,
   projectFilter: ConversationProjectFilter,
 ): boolean {
+  if (item.roleID) {
+    return false;
+  }
   if (statusFilter === "archived" && !isArchivedConversation(item)) {
     return false;
   }
@@ -234,7 +237,7 @@ export function useRecentPage() {
         return;
       }
 
-      const nextResults = data.results ?? [];
+      const nextResults = (data.results ?? []).filter((item) => !item.roleID);
       setItems((current) => (
         options?.replace ? sortByUpdatedAtDesc(nextResults) : mergeUniqueByPublicID(current, nextResults)
       ));

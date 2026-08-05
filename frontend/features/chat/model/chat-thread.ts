@@ -192,6 +192,7 @@ export function mapServerMessage(
     content: item.content,
     branchReason: item.branchReason || "default",
     status: item.status || "success",
+    errorCode: item.errorCode || undefined,
     runID: item.runID || undefined,
     platformModelName: item.platformModelName?.trim() || undefined,
     serverMessageID: item.id,

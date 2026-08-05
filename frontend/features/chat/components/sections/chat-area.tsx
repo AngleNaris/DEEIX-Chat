@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 
 import { ChatLabel } from "@/features/chat/components/sections/chat-label";
 import { useChatMessageFeedback } from "@/features/chat/hooks/use-chat-message-feedback";
+import { AgentGroupConfigButton } from "@/features/agent-groups/components/agent-group-config-button";
 import {
   AssistantMessageSkeleton,
   ChatInlineAlertCard,
@@ -118,6 +119,10 @@ type ChatAreaProps = {
   selectedPlatformModelName: string;
   onModelChange: (platformModelName: string) => void;
   onModelCatalogRefresh?: () => void | Promise<void>;
+  agentGroup?: {
+    publicID: string;
+    name?: string;
+  } | null;
   attachmentContentLoader?: (file: PreviewDialogFile) => Promise<FileContentResult>;
   onEditImageAttachment?: (attachment: MessageAttachment, sourceModelName?: string) => void;
   onOpenCodeArtifact?: (message: ChatAreaMessage, artifact: OpenCodeArtifactInput) => void;
@@ -281,6 +286,7 @@ const ChatMessageRow = React.memo(function ChatMessageRow({
   selectedPlatformModelName,
   onModelChange,
   onModelCatalogRefresh,
+  modelMenuDisabled = false,
   attachmentContentLoader,
   onEditImageAttachment,
   onCycleMessageBranch,
@@ -310,6 +316,7 @@ const ChatMessageRow = React.memo(function ChatMessageRow({
   selectedPlatformModelName: string;
   onModelChange: (platformModelName: string) => void;
   onModelCatalogRefresh?: () => void | Promise<void>;
+  modelMenuDisabled?: boolean;
   attachmentContentLoader?: (file: PreviewDialogFile) => Promise<FileContentResult>;
   onEditImageAttachment?: (attachment: MessageAttachment, sourceModelName?: string) => void;
   onCycleMessageBranch: (parentPublicID: string | null, direction: "previous" | "next") => void;
@@ -370,6 +377,7 @@ const ChatMessageRow = React.memo(function ChatMessageRow({
         selectedPlatformModelName={selectedPlatformModelName}
         onModelChange={onModelChange}
         onModelCatalogRefresh={onModelCatalogRefresh}
+        modelMenuDisabled={modelMenuDisabled}
         onCycleMessageBranch={onCycleMessageBranch}
         onCopy={() => void onCopy()}
         copySucceeded={isCopied(copyKey)}
@@ -463,6 +471,7 @@ export function ChatArea({
   onModelChange,
   onModelCatalogRefresh,
   attachmentContentLoader,
+  agentGroup = null,
   onEditImageAttachment,
   onOpenCodeArtifact,
   onCycleMessageBranch,
@@ -571,6 +580,12 @@ export function ChatArea({
             onScreenshotFull={onScreenshotFull}
             onScreenshotSelect={onScreenshotSelect}
           />
+          {agentGroup ? (
+            <AgentGroupConfigButton
+              groupPublicID={agentGroup.publicID}
+              groupName={agentGroup.name || ""}
+            />
+          ) : null}
           {canOperateConversation ? (
             <ConversationShareExportIconDropdown
               label={shareExportLabel}
@@ -650,6 +665,7 @@ export function ChatArea({
                       selectedPlatformModelName={selectedPlatformModelName}
                       onModelChange={stableOnModelChange}
                       onModelCatalogRefresh={onModelCatalogRefresh ? stableOnModelCatalogRefresh : undefined}
+                      modelMenuDisabled={Boolean(agentGroup)}
                       attachmentContentLoader={attachmentContentLoader}
                       onEditImageAttachment={editImageAttachmentHandler}
                       onCycleMessageBranch={stableOnCycleMessageBranch}

@@ -85,6 +85,12 @@ func (h *Handler) parseSendMessageInput(c *gin.Context) (appconversation.SendMes
 		return appconversation.SendMessageInput{}, nil, nil, err
 	}
 
+	// 群组会话的模型由群组成员覆盖与角色默认值决定，禁止请求级模型覆盖。
+	if conversation.AgentGroupID != nil && strings.TrimSpace(req.Model) != "" {
+		response.ErrorWithCode(c, http.StatusBadRequest, "agent_group.model_override_not_allowed", "model override not allowed in agent group conversation")
+		return appconversation.SendMessageInput{}, nil, nil, appconversation.ErrConversationModelNotAllowedWithGroup
+	}
+
 	input := appconversation.SendMessageInput{
 		UserID:                  userID,
 		ConversationID:          conversation.ID,
@@ -396,6 +402,16 @@ func handleSendMessageError(c *gin.Context, err error) {
 			return
 		}
 		response.Error(c, http.StatusBadGateway, mapClientErrorMessage(err))
+	case errors.Is(err, appconversation.ErrAgentGroupFeatureDisabled):
+		response.ErrorWithCode(c, http.StatusForbidden, "agent_group.feature_disabled", "agent group feature disabled")
+	case errors.Is(err, appconversation.ErrAgentGroupRunInProgress):
+		response.ErrorWithCode(c, http.StatusConflict, "agent_group.run_in_progress", "agent group run already in progress")
+	case errors.Is(err, appconversation.ErrAgentGroupRunPaused):
+		response.ErrorWithCode(c, http.StatusConflict, "agent_group.run_paused", "agent group run paused")
+	case errors.Is(err, appconversation.ErrAgentGroupRunBlocked):
+		response.ErrorWithCode(c, http.StatusConflict, "agent_group.run_blocked", "agent group run blocked")
+	case errors.Is(err, appconversation.ErrAgentGroupCASConflict):
+		response.ErrorWithCode(c, http.StatusConflict, "agent_group.run_state_conflict", "agent group run state conflict")
 	default:
 		response.Error(c, http.StatusInternalServerError, "send message failed")
 	}
@@ -455,6 +471,16 @@ func (h *Handler) SendMessage(c *gin.Context) {
 		return
 	}
 
+	// Agent 群组运行的计费发生在各内部 Attempt（逐次记入 BillingRef），顶层仅释放用量授权。
+	if !result.Billable {
+		if releaseErr := h.releaseSendMessageUsageAuthorization(authorization); releaseErr != nil {
+			handleSendMessageBillingError(c, releaseErr)
+			return
+		}
+		h.recordSendMessageAudit(c, conversation, req, result, "send_message")
+		response.Success(c, toSendMessageResponse(result))
+		return
+	}
 	if err := h.recordAndApplySendMessageBilling(c.Request.Context(), middleware.MustUserID(c), conversation, req, result, authorization); err != nil {
 		handleSendMessageBillingError(c, err)
 		return
@@ -583,6 +609,22 @@ func (h *Handler) StreamMessage(c *gin.Context) {
 		}
 		_ = flushStreamEvent(payload)
 		h.service.FinishMessageGeneration(input.ClientRunID)
+		return
+	}
+
+	// Agent 群组运行的计费发生在各内部 Attempt，顶层仅释放用量授权。
+	if !result.Billable {
+		if releaseErr := h.releaseSendMessageUsageAuthorization(authorization); releaseErr != nil {
+			_ = flushStreamEvent(billingStreamErrorPayload(releaseErr))
+			h.service.FinishMessageGeneration(input.ClientRunID)
+			return
+		}
+		_ = flushStreamEvent(map[string]interface{}{
+			"type": "completed",
+			"data": toSendMessageResponse(result),
+		})
+		h.service.FinishMessageGeneration(input.ClientRunID)
+		h.recordStreamSendMessageAuditAsync(c, conversation, req, result, "stream_message")
 		return
 	}
 

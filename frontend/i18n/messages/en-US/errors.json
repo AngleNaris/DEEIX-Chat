@@ -9,6 +9,21 @@
     "defaultPermissionGroupUsersImplicit": "Default permission group members are managed automatically.",
     "permissionGroupReferencedByPlan": "This permission group is referenced by a billing plan. Unbind it before deleting."
   },
+  "agentGroup": {
+    "casConflict": "The agent group configuration changed. Please refresh and try again.",
+    "featureDisabled": "Agent groups are not enabled.",
+    "modelOverrideNotAllowed": "Model cannot be overridden in an agent group conversation; models are determined by the group configuration.",
+    "runBlocked": "The agent group run is blocked; this action is unavailable.",
+    "runControlFailed": "Failed to control the agent group run. Please try again later.",
+    "runInProgress": "The agent group is currently running. Please wait.",
+    "runNotAbandonable": "This agent group run cannot be abandoned in its current state.",
+    "runNotCancelable": "This agent group run cannot be canceled in its current state.",
+    "runNotFound": "The agent group run does not exist.",
+    "runNotRetryable": "This step cannot be retried in its current state.",
+    "runPaused": "The agent group run is paused.",
+    "runStateConflict": "The agent group run state changed. Please refresh and try again.",
+    "runStateCorrupt": "The agent group run state is invalid. Please send a new message."
+  },
   "auth": {
     "adminRequired": "Administrator permission is required.",
     "authorizationCodeRequired": "Authorization code is required.",
@@ -120,7 +135,15 @@
   "config": {
     "invalidJson": "Invalid JSON configuration."
   },
+  "contextArtifact": {
+    "invalidId": "Invalid context artifact ID.",
+    "notFound": "Context artifact not found."
+  },
   "conversation": {
+    "agentGroupConstraintViolated": "The conversation violates agent group constraints.",
+    "agentGroupModelOverrideRejected": "Model override is not allowed in an agent group conversation.",
+    "agentGroupNotFound": "The agent group does not exist or has been deleted.",
+    "agentGroupProjectImmutable": "The project of an agent group conversation cannot be changed.",
     "invalidId": "Invalid conversation ID.",
     "invalidTitle": "Invalid conversation title.",
     "noTitleableContent": "This conversation has no content that can be used to generate a title.",
@@ -136,10 +159,6 @@
     "invalidId": "Invalid share ID.",
     "notFound": "Share not found.",
     "schemaOutdated": "Share schema is outdated. Rebuild the database."
-  },
-  "contextArtifact": {
-    "invalidId": "Invalid context artifact ID.",
-    "notFound": "Context artifact not found."
   },
   "cors": {
     "originForbidden": "This origin is not allowed."
@@ -168,9 +187,6 @@
   },
   "internal": {
     "error": "Internal server error. Please try again later."
-  },
-  "toolRun": {
-    "finalAnswerMissing": "The tool run reached its limit before the model produced a final answer. Retry or enable fewer tools for this message."
   },
   "llm": {
     "apiKeysRequired": "API keys are required.",
@@ -211,9 +227,6 @@
       "invalidId": "Invalid MCP tool ID."
     }
   },
-  "memory": {
-    "keyRequired": "Memory key is required."
-  },
   "media": {
     "imagePromptRequired": "Enter an image prompt.",
     "imageGenerationRejectsInputs": "Image generation does not accept input images. Remove attachments or choose image editing.",
@@ -223,6 +236,9 @@
     "imageStreamUnsupported": "Tips: The upstream may not support streaming responses. Ask an administrator to disable \"Image streaming call\" in model capabilities (set image.stream=false), then try again.",
     "routeProtocolMismatch": "The current model route protocol does not match this image task. Check the model binding.",
     "invalidTask": "Invalid image task parameters."
+  },
+  "memory": {
+    "keyRequired": "Memory key is required."
   },
   "message": {
     "feedbackTargetInvalid": "Invalid message feedback target.",
@@ -293,6 +309,9 @@
     "notFound": "Setting not found.",
     "serviceUnavailable": "Settings service is unavailable.",
     "smtpInvalid": "Invalid SMTP settings."
+  },
+  "toolRun": {
+    "finalAnswerMissing": "The tool run reached its limit before the model produced a final answer. Retry or enable fewer tools for this message."
   },
   "upstream": {
     "unavailable": "Upstream service is unavailable."

@@ -89,6 +89,9 @@ web_modules/
 /backend/config.yml
 !/config.example.yaml
 
+# Local runtime data (SQLite DB created by the dev container entrypoint)
+/backend/data/
+
 # parcel-bundler cache (https://parceljs.org/)
 .cache
 .parcel-cache

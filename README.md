@@ -37,6 +37,7 @@ The system is designed around simple deployment, efficient static delivery, and 
 | Area | Capabilities |
 | --- | --- |
 | Conversations | A multimodal chat interface for daily use, with streaming, branches, retries, edits, feedback, sharing, rich rendering, and traceable model execution metadata. |
+| Agent Groups | Multi-agent conversations with a supervisor and worker members, serial step execution, per-member model overrides, in-place step retry with attempt history, and crash recovery. See [Agent Groups guide](docs/AGENT_GROUPS.md). |
 | Models and routing | A platform-model layer for upstream channels, real models, route bindings, priority, weights, circuit breaking, vendor mapping, and capability configuration, reducing the cost of multi-provider operations. |
 | Protocols and adaptation | Unified support for OpenAI, Anthropic, Google/Gemini, xAI, OpenRouter, and OpenAI-compatible protocols across text, image, tools, and provider-native capability differences. |
 | Files and retrieval | File upload, preview, extraction, OCR, storage quota, full-context injection, chunking, embeddings, and semantic retrieval so file content can naturally enter the conversation context. |
@@ -410,6 +411,7 @@ When SSRF protection is enabled in production, the allowlist applies only to adm
 - [User Guide](https://deeix.com/docs/deeix-chat/new-chat)
 - [Admin Guide](https://deeix.com/docs/deeix-chat/admin-accounts)
 - [Advanced Guide](https://deeix.com/docs/deeix-chat/advanced-capabilities-passthrough-tools)
+- Agent Groups (enabling, usage, sharing, audit, deployment, rollback): [docs/AGENT_GROUPS.md](./docs/AGENT_GROUPS.md)
 - Backend guide: [backend/README.md](./backend/README.md)
 - Backend standards: [backend/docs/README.md](./backend/docs/README.md)
 - Frontend guide: [frontend/README.md](./frontend/README.md)

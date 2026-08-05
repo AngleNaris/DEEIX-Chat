@@ -168,6 +168,9 @@ func (r *Repo) ListConversationsByUser(
 	if err := r.hydrateConversationRoleSummaries(ctx, results); err != nil {
 		return nil, 0, err
 	}
+	if err := r.hydrateConversationAgentGroupSummaries(ctx, results); err != nil {
+		return nil, 0, err
+	}
 	return results, total, nil
 }
 
@@ -201,6 +204,9 @@ func (r *Repo) ListConversationsForSearch(
 		return nil, err
 	}
 	if err := r.hydrateConversationRoleSummaries(ctx, results); err != nil {
+		return nil, err
+	}
+	if err := r.hydrateConversationAgentGroupSummaries(ctx, results); err != nil {
 		return nil, err
 	}
 	return results, nil
@@ -429,6 +435,61 @@ func (r *Repo) hydrateConversationRoleSummary(ctx context.Context, item *domainc
 	return nil
 }
 
+func (r *Repo) hydrateConversationAgentGroupSummaries(ctx context.Context, items []domainconversation.Conversation) error {
+	if len(items) == 0 {
+		return nil
+	}
+	groupIDs := make([]uint, 0, len(items))
+	seen := make(map[uint]struct{}, len(items))
+	for _, item := range items {
+		if item.AgentGroupID == nil || *item.AgentGroupID == 0 {
+			continue
+		}
+		if _, exists := seen[*item.AgentGroupID]; exists {
+			continue
+		}
+		seen[*item.AgentGroupID] = struct{}{}
+		groupIDs = append(groupIDs, *item.AgentGroupID)
+	}
+	if len(groupIDs) == 0 {
+		return nil
+	}
+	groups := make([]models.AgentGroup, 0, len(groupIDs))
+	if err := r.db.WithContext(ctx).
+		Where("id IN ?", groupIDs).
+		Find(&groups).Error; err != nil {
+		return translateError(err)
+	}
+	byID := make(map[uint]models.AgentGroup, len(groups))
+	for _, group := range groups {
+		byID[group.ID] = group
+	}
+	for index := range items {
+		if items[index].AgentGroupID == nil {
+			continue
+		}
+		group, ok := byID[*items[index].AgentGroupID]
+		if !ok {
+			continue
+		}
+		items[index].AgentGroupPublicID = group.PublicID
+		items[index].AgentGroupName = group.Name
+	}
+	return nil
+}
+
+func (r *Repo) hydrateConversationAgentGroupSummary(ctx context.Context, item *domainconversation.Conversation) error {
+	if item == nil {
+		return nil
+	}
+	items := []domainconversation.Conversation{*item}
+	if err := r.hydrateConversationAgentGroupSummaries(ctx, items); err != nil {
+		return err
+	}
+	*item = items[0]
+	return nil
+}
+
 // GetConversationByUser 查询归属用户会话。
 func (r *Repo) GetConversationByUser(ctx context.Context, conversationID uint, userID uint) (*domainconversation.Conversation, error) {
 	var item models.Conversation
@@ -445,6 +506,9 @@ func (r *Repo) GetConversationByUser(ctx context.Context, conversationID uint, u
 		return nil, err
 	}
 	if err := r.hydrateConversationRoleSummary(ctx, &result); err != nil {
+		return nil, err
+	}
+	if err := r.hydrateConversationAgentGroupSummary(ctx, &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
@@ -466,6 +530,9 @@ func (r *Repo) GetConversationByPublicID(ctx context.Context, publicID string, u
 		return nil, err
 	}
 	if err := r.hydrateConversationRoleSummary(ctx, &result); err != nil {
+		return nil, err
+	}
+	if err := r.hydrateConversationAgentGroupSummary(ctx, &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
@@ -1903,6 +1970,87 @@ func (r *Repo) CreateConversationToolCalls(ctx context.Context, items []domainco
 		}
 	}
 	return nil
+}
+
+// ListConversationToolCallsByRunIDPrefix 按运行 ID 前缀查询工具调用行。
+// 群组重试时以 BillingRefStepPrefix(groupRunID, stepID)（形如 "runID:stepID:"）为前缀
+// 匹配同一逻辑步骤的全部尝试，仅 success/reused 行用于重建工具幂等账本。
+func (r *Repo) ListConversationToolCallsByRunIDPrefix(
+	ctx context.Context,
+	userID uint,
+	conversationID uint,
+	runIDPrefix string,
+) ([]domainconversation.ToolCall, error) {
+	prefix := strings.TrimSpace(runIDPrefix)
+	if prefix == "" {
+		return []domainconversation.ToolCall{}, nil
+	}
+	items := make([]models.ChatRunEvent, 0)
+	if err := r.db.WithContext(ctx).
+		Select(conversationEventDetailSelectColumns(r.db)).
+		Where("user_id = ? AND conversation_id = ? AND event_scope = ? AND run_id LIKE ?",
+			userID, conversationID, chatRunEventScopeToolCall, prefix+"%").
+		Order("id ASC").
+		Find(&items).Error; err != nil {
+		return nil, translateError(err)
+	}
+	rows := make([]domainconversation.ToolCall, 0, len(items))
+	for i := range items {
+		rows = append(rows, toConversationToolCallDomain(items[i]))
+	}
+	return rows, nil
+}
+
+// UpdateConversationRun 按运行 ID 更新会话运行快照字段（只更新非空字段）。
+func (r *Repo) UpdateConversationRun(
+	ctx context.Context,
+	userID uint,
+	conversationID uint,
+	runID string,
+	patch repository.ConversationRunPatch,
+) (*domainconversation.Run, error) {
+	fields := map[string]interface{}{}
+	if patch.Status != nil {
+		fields["status"] = *patch.Status
+	}
+	if patch.ErrorCode != nil {
+		fields["error_code"] = *patch.ErrorCode
+	}
+	if patch.ErrorMessage != nil {
+		fields["error_message"] = *patch.ErrorMessage
+	}
+	if patch.EndedAt != nil {
+		fields["ended_at"] = *patch.EndedAt
+	}
+	if patch.InputTokens != nil {
+		fields["input_tokens"] = *patch.InputTokens
+	}
+	if patch.OutputTokens != nil {
+		fields["output_tokens"] = *patch.OutputTokens
+	}
+	if patch.CacheReadTokens != nil {
+		fields["cache_read_tokens"] = *patch.CacheReadTokens
+	}
+	if patch.CacheWriteTokens != nil {
+		fields["cache_write_tokens"] = *patch.CacheWriteTokens
+	}
+	if patch.ReasoningTokens != nil {
+		fields["reasoning_tokens"] = *patch.ReasoningTokens
+	}
+	if patch.ToolCallsCount != nil {
+		fields["tool_calls_count"] = *patch.ToolCallsCount
+	}
+	query := r.db.WithContext(ctx).
+		Where("user_id = ? AND conversation_id = ? AND run_id = ?", userID, conversationID, runID)
+	if err := query.Model(&models.ConversationRun{}).Updates(fields).Error; err != nil {
+		return nil, translateError(err)
+	}
+	var entity models.ConversationRun
+	if err := query.First(&entity).Error; err != nil {
+		return nil, translateError(err)
+	}
+	run := toConversationRunDomain(entity)
+	return &run, nil
 }
 
 // ListConversationRuns 分页查询会话运行日志。
@@ -3506,6 +3654,7 @@ func toConversationDomain(item models.Conversation) domainconversation.Conversat
 		UserID:                item.UserID,
 		ProjectID:             item.ProjectID,
 		RoleID:                item.RoleID,
+		AgentGroupID:          item.AgentGroupID,
 		PublicID:              item.PublicID,
 		Title:                 item.Title,
 		LabelsJSON:            labelsJSON,
@@ -3565,6 +3714,7 @@ func toConversationModel(item *domainconversation.Conversation) models.Conversat
 		UserID:                item.UserID,
 		ProjectID:             item.ProjectID,
 		RoleID:                item.RoleID,
+		AgentGroupID:          item.AgentGroupID,
 		PublicID:              item.PublicID,
 		Title:                 item.Title,
 		LabelsJSON:            labelsJSON,
@@ -4009,6 +4159,26 @@ func toConversationToolCallModel(item *domainconversation.ToolCall) models.ChatR
 		OutputJSON:     item.OutputJSON,
 		ErrorJSON:      item.ErrorJSON,
 		StartedAt:      startedAt,
+	}
+}
+
+func toConversationToolCallDomain(item models.ChatRunEvent) domainconversation.ToolCall {
+	return domainconversation.ToolCall{
+		ID:             item.ID,
+		MessageID:      item.MessageID,
+		ConversationID: item.ConversationID,
+		UserID:         item.UserID,
+		RunID:          item.RunID,
+		ToolCallID:     item.ToolCallID,
+		ToolType:       item.EventType,
+		ToolName:       item.ToolName,
+		Status:         item.Status,
+		LatencyMS:      item.LatencyMS,
+		InputJSON:      item.InputJSON,
+		OutputJSON:     item.OutputJSON,
+		ErrorJSON:      item.ErrorJSON,
+		CreatedAt:      item.StartedAt,
+		UpdatedAt:      item.UpdatedAt,
 	}
 }
 

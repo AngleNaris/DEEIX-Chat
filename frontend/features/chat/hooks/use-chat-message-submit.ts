@@ -4,6 +4,11 @@ import * as React from "react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
+import {
+  ensureLiveGroupRunPlaceholder,
+  upsertGroupRunEvent,
+  upsertLiveGroupRunTool,
+} from "@/features/agent-groups/model/group-run-store";
 import type { ChatAreaMessage, ImageLoadingAspectRatio } from "@/features/chat/types/messages";
 import type {
   ChatModelOption,
@@ -14,6 +19,7 @@ import type {
 import type { ChatSubmitBlockReason } from "@/features/chat/model/chat-task";
 import { resolveChatSubmitDecision } from "@/features/chat/model/chat-task";
 import { useHiddenQueuedParentRuns } from "@/features/chat/hooks/use-hidden-queued-parent-runs";
+import { useLiveGroupRun } from "@/features/agent-groups/model/group-run-store";
 import {
   resolveDefaultSubmissionParentMessage,
   resolvePersistedPublicID,
@@ -41,6 +47,7 @@ import { notifyResponseCompletion } from "@/shared/lib/browser-notifications";
 import {
   cancelMessageGeneration,
   getConversation,
+  isGroupStreamAwareEvent,
   streamImageEdit,
   streamImageGeneration,
   streamMessage as streamConversationMessage,
@@ -594,6 +601,33 @@ export function useChatMessageSubmit({
     [activeRunRevision, conversationScopeKey, visibleBranchScopePath, visibleMessages],
   );
 
+  // §16.10 输入锁：群组会话中，最后一条可见消息是暂停/阻塞的 assistant 消息时禁止发送，
+  // 用户必须先完成重试、停止或放弃。会话内直接读实时运行状态（覆盖重试进行中的 running），
+  // 刷新恢复后回退到消息 DTO 的 errorCode。
+  const lastVisibleMessage = visibleMessages[visibleMessages.length - 1];
+  const lastAssistantRunID = lastVisibleMessage?.role === "assistant" ? lastVisibleMessage.runID : undefined;
+  const liveGroupRun = useLiveGroupRun(lastAssistantRunID);
+  const groupRunAwaitingAction = React.useMemo(() => {
+    if (!activeConversation?.agentGroupID?.trim()) {
+      return false;
+    }
+    const last = visibleMessages[visibleMessages.length - 1];
+    if (!last || last.role !== "assistant") {
+      return false;
+    }
+    if (last.errorCode === "agent_group_paused" || last.errorCode === "agent_group_blocked") {
+      return true;
+    }
+    const status = liveGroupRun?.status;
+    return (
+      status === "paused_retryable" ||
+      status === "blocked" ||
+      Boolean(liveGroupRun?.retrying)
+    );
+  }, [activeConversation?.agentGroupID, liveGroupRun, visibleMessages]);
+  const groupRunAwaitingActionRef = React.useRef(false);
+  groupRunAwaitingActionRef.current = groupRunAwaitingAction;
+
   const syncActiveRuns = React.useCallback(() => {
     setActiveRunRevision((current) => current + 1);
   }, []);
@@ -778,7 +812,8 @@ export function useChatMessageSubmit({
       if (
         (!content && currentAttachments.length === 0) ||
         (!queuedSubmission && uploading) ||
-        (!concurrentBranchRun && targetConversationHasActiveStream)
+        (!concurrentBranchRun && targetConversationHasActiveStream) ||
+        groupRunAwaitingActionRef.current
       ) {
         return false;
       }
@@ -877,6 +912,10 @@ export function useChatMessageSubmit({
         setAttachments([]);
       }
       startStream(exchangeKey, clientRunID);
+      // §16.8：群组会话在发送后立即创建占位运行，模型返回事件前显示真实阶段。
+      if (targetConversation?.agentGroupID?.trim()) {
+        ensureLiveGroupRunPlaceholder(clientRunID, { resuming: false });
+      }
       setPendingExchanges((current) => ({
         ...current,
         [exchangeKey]: {
@@ -1113,6 +1152,15 @@ export function useChatMessageSubmit({
           },
           onUpstreamThinkDelta: (event) => {
             enqueueUpstreamThinkDelta(exchangeKey, event);
+          },
+          onGroupEvent: (event) => {
+            upsertGroupRunEvent(clientRunID, event);
+          },
+          onToolEvent: (event) => {
+            // 群组内部 Actor 回合转发的工具调用（§15：tool_call/tool_result 带 Actor 元数据）。
+            if (isGroupStreamAwareEvent(event)) {
+              upsertLiveGroupRunTool(clientRunID, event);
+            }
           },
           onDelta: (delta) => {
             // Always clear assistantFileProc so batched React updates cannot keep the file_proc spinner alive.
@@ -2068,5 +2116,6 @@ export function useChatMessageSubmit({
         attachmentCount: item.attachments.length,
       })),
     sending,
+    groupRunAwaitingAction,
   };
 }

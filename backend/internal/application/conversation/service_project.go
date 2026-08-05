@@ -86,6 +86,11 @@ func (s *Service) ListConversationProjects(ctx context.Context, userID uint, sta
 	return s.repo.ListConversationProjects(ctx, userID, normalizeConversationProjectStatusFilter(statusFilter))
 }
 
+// GetConversationProject 查询当前用户单个项目分组。
+func (s *Service) GetConversationProject(ctx context.Context, userID uint, publicID string) (*model.ConversationProject, error) {
+	return s.repo.GetConversationProjectByPublicID(ctx, userID, strings.TrimSpace(publicID))
+}
+
 // UpdateConversationProject 更新当前用户项目分组。
 func (s *Service) UpdateConversationProject(
 	ctx context.Context,
@@ -138,6 +143,7 @@ func (s *Service) UpdateConversationProject(
 }
 
 // DeleteConversationProject 删除当前用户项目分组。
+// 项目下仍存在 Agent 群组时拒绝删除，避免群组配置快照引用悬空（§18 删除保护）。
 func (s *Service) DeleteConversationProject(
 	ctx context.Context,
 	userID uint,
@@ -145,10 +151,27 @@ func (s *Service) DeleteConversationProject(
 	deleteConversations bool,
 	options DeleteConversationOptions,
 ) (*DeleteConversationResult, error) {
+	normalizedID := strings.TrimSpace(publicID)
+	project, err := s.repo.GetConversationProjectByPublicID(ctx, userID, normalizedID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, ErrConversationProjectNotFound
+		}
+		return nil, err
+	}
+	if s.agentGroupRepo != nil {
+		count, err := s.agentGroupRepo.CountAgentGroupReferencesByProject(ctx, project.ID)
+		if err != nil {
+			return nil, err
+		}
+		if count > 0 {
+			return nil, ErrConversationProjectInUseByAgentGroup
+		}
+	}
 	cleanupFileIDs, err := s.repo.DeleteConversationProjectByPublicID(
 		ctx,
 		userID,
-		strings.TrimSpace(publicID),
+		normalizedID,
 		deleteConversations,
 		deleteConversations && options.DeleteFiles,
 	)
@@ -187,11 +210,22 @@ func (s *Service) SetConversationProject(
 	conversationPublicID string,
 	projectPublicID string,
 ) (*model.Conversation, error) {
+	// 群组会话的项目归属随群组冻结，禁止移动。
+	item, err := s.repo.GetConversationByPublicID(ctx, strings.TrimSpace(conversationPublicID), userID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, ErrConversationNotFound
+		}
+		return nil, err
+	}
+	if item.AgentGroupID != nil {
+		return nil, ErrConversationGroupImmutable
+	}
 	projectID, err := s.resolveConversationProjectID(ctx, userID, projectPublicID)
 	if err != nil {
 		return nil, err
 	}
-	item, err := s.repo.UpdateConversationProjectAssignmentByPublicID(ctx, userID, strings.TrimSpace(conversationPublicID), projectID)
+	item, err = s.repo.UpdateConversationProjectAssignmentByPublicID(ctx, userID, strings.TrimSpace(conversationPublicID), projectID)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
 			return nil, ErrConversationNotFound
@@ -211,6 +245,19 @@ func (s *Service) BatchSetConversationProject(
 	normalizedConversationIDs := normalizeProjectPublicIDs(conversationPublicIDs)
 	if len(normalizedConversationIDs) == 0 || len(normalizedConversationIDs) != len(conversationPublicIDs) {
 		return 0, ErrInvalidConversationProject
+	}
+	// 群组会话的项目归属冻结，批量移动整批拒绝以避免部分成功。
+	for _, conversationPublicID := range normalizedConversationIDs {
+		item, err := s.repo.GetConversationByPublicID(ctx, conversationPublicID, userID)
+		if err != nil {
+			if errors.Is(err, repository.ErrNotFound) {
+				return 0, ErrConversationNotFound
+			}
+			return 0, err
+		}
+		if item.AgentGroupID != nil {
+			return 0, ErrConversationGroupImmutable
+		}
 	}
 	projectID, err := s.resolveConversationProjectID(ctx, userID, projectPublicID)
 	if err != nil {

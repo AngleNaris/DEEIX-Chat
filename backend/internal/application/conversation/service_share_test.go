@@ -94,6 +94,55 @@ func TestSanitizeSharedTracePayloadJSONRemovesInternalFields(t *testing.T) {
 	}
 }
 
+// 纵深防御回归：即使库中存在异常诊断文本（注入/历史脏数据），
+// 群组会话的公开分享/导出也必须把错误消息收敛为通用文案，不泄露失败诊断。
+func TestSanitizeSharedMessagesForPublicNormalizesAgentGroupErrors(t *testing.T) {
+	messages := []model.Message{
+		{Role: "user", Content: "hello"},
+		{Role: "assistant", Content: "reply", ReasoningContent: "internal chain", ErrorCode: "agent_group_blocked", ErrorMessage: "upstream debug: api key sk-secret debug trace"},
+	}
+	sanitizeSharedMessagesForPublic(messages, true)
+	for _, msg := range messages {
+		if msg.ReasoningContent != "" {
+			t.Fatalf("agent group message reasoning content not stripped: %q", msg.ReasoningContent)
+		}
+		if msg.ProcessTrace != nil {
+			t.Fatal("agent group message process trace not stripped")
+		}
+		if msg.ErrorMessage != "agent group step failed" {
+			t.Fatalf("agent group error message not normalized: %q", msg.ErrorMessage)
+		}
+	}
+
+	// 非群组会话保持原错误消息与展示行为不变。
+	kept := []model.Message{{Role: "assistant", ErrorCode: "upstream_error", ErrorMessage: "timeout after 30s"}}
+	sanitizeSharedMessagesForPublic(kept, false)
+	if kept[0].ErrorMessage != "timeout after 30s" {
+		t.Fatalf("non-agent-group error message mutated: %q", kept[0].ErrorMessage)
+	}
+}
+
+func TestSanitizeSharedRunsForPublicNormalizesAgentGroupErrors(t *testing.T) {
+	runs := []model.Run{
+		{RunID: "run_1", TaskType: "agent_group", ErrorCode: "UPSTREAM_RETRYABLE", ErrorMessage: "upstream debug: sk-secret trace"},
+		{RunID: "run_2", TaskType: "chat", ErrorMessage: "plain chat error"},
+	}
+	sanitizeSharedRunsForPublic(runs, true)
+	if runs[0].ErrorMessage != "agent group step failed, retryable" {
+		t.Fatalf("agent group run error not normalized: %q", runs[0].ErrorMessage)
+	}
+	if runs[1].ErrorMessage != "plain chat error" {
+		t.Fatalf("non-agent-group run error mutated: %q", runs[1].ErrorMessage)
+	}
+
+	// 非群组会话不触碰运行记录。
+	kept := []model.Run{{RunID: "run_3", TaskType: "chat", ErrorMessage: "keep me"}}
+	sanitizeSharedRunsForPublic(kept, false)
+	if kept[0].ErrorMessage != "keep me" {
+		t.Fatalf("non-agent-group conversation run mutated: %q", kept[0].ErrorMessage)
+	}
+}
+
 func TestNormalizeMessagePublicIDsDeduplicatesAndKeepsOrder(t *testing.T) {
 	got := normalizeMessagePublicIDs([]string{"", " msg_a ", "msg_b", "msg_a", "\n"})
 	want := []string{"msg_a", "msg_b"}

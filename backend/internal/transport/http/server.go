@@ -15,6 +15,7 @@ import (
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/buildinfo"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/response"
 	adminhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/admin"
+	agentgrouphttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/agentgroup"
 	announcementhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/announcement"
 	authhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/auth"
 	billinghttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/billing"
@@ -54,6 +55,7 @@ type Modules struct {
 	AuthService  middleware.SessionValidator
 	Channel      *channelhttp.Module
 	Conversation *conversationhttp.Module
+	AgentGroup   *agentgrouphttp.Module
 	MCP          *mcphttp.Module
 	Memory       *memoryhttp.Module
 	Billing      *billinghttp.Module
@@ -141,6 +143,9 @@ func NewEngine(cfg *config.Runtime, log *zap.Logger, modules Modules, hc HealthC
 	}
 	if modules.Conversation != nil {
 		modules.Conversation.RegisterRoutes(authRequired)
+	}
+	if modules.AgentGroup != nil {
+		modules.AgentGroup.RegisterRoutes(authRequired)
 	}
 	if modules.Channel != nil {
 		modules.Channel.RegisterRoutes(authRequired)

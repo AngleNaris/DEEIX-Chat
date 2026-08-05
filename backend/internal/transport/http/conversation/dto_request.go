@@ -2,10 +2,11 @@ package conversation
 
 // CreateConversationRequest 创建会话请求。
 type CreateConversationRequest struct {
-	Title     string `json:"title,omitempty" binding:"max=255"`
-	Model     string `json:"model,omitempty" binding:"max=128"`
-	ProjectID string `json:"projectID,omitempty" binding:"omitempty,max=32"`
-	RoleID    string `json:"roleID,omitempty" binding:"omitempty,max=32"`
+	Title        string `json:"title,omitempty" binding:"max=255"`
+	Model        string `json:"model,omitempty" binding:"max=128"`
+	ProjectID    string `json:"projectID,omitempty" binding:"omitempty,max=32"`
+	RoleID       string `json:"roleID,omitempty" binding:"omitempty,max=32"`
+	AgentGroupID string `json:"agentGroupID,omitempty" binding:"omitempty,max=32"`
 }
 
 // CreateConversationProjectRequest 创建会话项目请求。

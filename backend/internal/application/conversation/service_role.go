@@ -2,9 +2,11 @@ package conversation
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 	"github.com/google/uuid"
 )
 
@@ -106,7 +108,24 @@ func (s *Service) UpdateConversationRole(ctx context.Context, userID uint, publi
 }
 
 // DeleteConversationRole 删除当前用户角色。
+// 角色仍被未移除的群组成员引用时拒绝删除，避免群组运行快照引用悬空（§18 删除保护）。
 func (s *Service) DeleteConversationRole(ctx context.Context, userID uint, publicID string) error {
+	role, err := s.repo.GetConversationRoleByPublicID(ctx, userID, strings.TrimSpace(publicID))
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return ErrConversationProjectNotFound
+		}
+		return err
+	}
+	if s.agentGroupRepo != nil {
+		count, err := s.agentGroupRepo.CountAgentGroupReferencesByRole(ctx, role.ID)
+		if err != nil {
+			return err
+		}
+		if count > 0 {
+			return ErrConversationRoleInUseByAgentGroup
+		}
+	}
 	return s.repo.DeleteConversationRoleByPublicID(ctx, userID, strings.TrimSpace(publicID))
 }
 

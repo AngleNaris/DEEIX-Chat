@@ -133,6 +133,7 @@ export type ChatAreaMessage = {
   content: string;
   branchReason: "default" | "retry" | "edit";
   status?: string;
+  errorCode?: string;
   runID?: string;
   platformModelName?: string;
   serverMessageID?: number;

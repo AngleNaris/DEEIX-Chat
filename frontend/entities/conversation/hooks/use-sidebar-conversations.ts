@@ -8,6 +8,7 @@ import { dispatchFileLibraryInvalidated } from "@/shared/events/file-library-eve
 import { runBulkActionInChunks } from "@/shared/lib/bulk-action";
 import { resolveConversationDefaultModel } from "@/shared/model/conversation-default-model";
 import { getConversationRole } from "@/shared/api/roles";
+import { getAgentGroup } from "@/shared/api/agent-groups";
 import {
   batchSetConversationProject,
   createConversation,
@@ -475,35 +476,56 @@ export function useSidebarConversationsController({
     await loadMore();
   }, [loadMore]);
 
-  const prependNewConversation = React.useCallback(async (platformModelName?: string, projectID?: string, roleID?: string): Promise<ConversationDTO | null> => {
-    const token = await resolveAccessToken();
-    if (!token) {
-      return null;
-    }
-    const explicitModel = platformModelName?.trim() || "";
-    const modelName = explicitModel || (await resolveConversationDefaultModel({ accessToken: token })).platformModelName;
-    let resolvedTitle = newConversationTitle;
-    if (roleID?.trim()) {
-      try {
-        const role = await getConversationRole(token, roleID.trim());
-        if (role?.name) {
-          resolvedTitle = role.name;
-        }
-      } catch {
-        // 角色查询失败时使用默认标题
+  const prependNewConversation = React.useCallback(
+    async (
+      platformModelName?: string,
+      projectID?: string,
+      roleID?: string,
+      agentGroupID?: string,
+    ): Promise<ConversationDTO | null> => {
+      const token = await resolveAccessToken();
+      if (!token) {
+        return null;
       }
-    }
+      const groupID = agentGroupID?.trim() || "";
+      // 群组会话禁止请求级模型与角色，模型由群组成员配置决定。
+      const explicitModel = groupID ? "" : platformModelName?.trim() || "";
+      const modelName =
+        explicitModel || (await resolveConversationDefaultModel({ accessToken: token })).platformModelName;
+      let resolvedTitle = newConversationTitle;
+      if (groupID) {
+        try {
+          const group = await getAgentGroup(token, groupID);
+          if (group?.name) {
+            resolvedTitle = group.name;
+          }
+        } catch {
+          // 群组查询失败时使用默认标题
+        }
+      } else if (roleID?.trim()) {
+        try {
+          const role = await getConversationRole(token, roleID.trim());
+          if (role?.name) {
+            resolvedTitle = role.name;
+          }
+        } catch {
+          // 角色查询失败时使用默认标题
+        }
+      }
 
-    const item = await createConversation(token, {
-      title: resolvedTitle,
-      model: modelName,
-      projectID: projectID?.trim() || "",
-      roleID: roleID?.trim() || "",
-    });
-    setRecentItems((prev) => mergeUniqueByPublicID([item], prev, sortByUpdatedAtDesc));
-    publishChange({ type: "upsert", publicID: item.publicID, item });
-    return item;
-  }, [newConversationTitle, publishChange]);
+      const item = await createConversation(token, {
+        title: resolvedTitle,
+        model: modelName,
+        projectID: projectID?.trim() || "",
+        roleID: roleID?.trim() || "",
+        agentGroupID: groupID || undefined,
+      });
+      setRecentItems((prev) => mergeUniqueByPublicID([item], prev, sortByUpdatedAtDesc));
+      publishChange({ type: "upsert", publicID: item.publicID, item });
+      return item;
+    },
+    [newConversationTitle, publishChange],
+  );
 
   const renameByPublicID = React.useCallback(
     async (publicID: string, title: string): Promise<ConversationDTO | null> => {

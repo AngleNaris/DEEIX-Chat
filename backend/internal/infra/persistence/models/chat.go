@@ -8,6 +8,7 @@ type Conversation struct {
 	UserID                uint       `gorm:"not null;index:idx_chat_conversations_user_id;comment:用户ID"`
 	ProjectID             *uint      `gorm:"index:idx_chat_conversations_project_id;comment:项目分组ID"`
 	RoleID                *uint      `gorm:"index:idx_chat_conversations_role_id;comment:角色ID"`
+	AgentGroupID          *uint      `gorm:"index:idx_chat_conversations_agent_group_id;comment:群组会话绑定"`
 	PublicID              string     `gorm:"size:32;not null;default:'';index:idx_chat_conversations_public_id;comment:公开会话ID"`
 	Title                 string     `gorm:"size:255;not null;default:'';comment:会话标题"`
 	LabelsJSON            string     `gorm:"type:text;not null;default:'[]';comment:会话标签JSON"`

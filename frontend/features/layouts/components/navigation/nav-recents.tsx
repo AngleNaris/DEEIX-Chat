@@ -188,12 +188,15 @@ export function NavRecents() {
   }, [activeConversationID, deleteByPublicID, deleteFiles, deleteTarget, router]);
 
   const visibleItemsSignature = React.useMemo(
-    () => recentItems.filter((item) => !item.projectID).map((item) => item.publicID).join("|"),
+    () => recentItems
+      .filter((item) => !item.projectID && !item.roleID)
+      .map((item) => item.publicID)
+      .join("|"),
     [recentItems],
   );
   const showInitialSkeleton = loadingInitial && recentItems.length === 0;
   const visibleRecentItems = React.useMemo(
-    () => recentItems.filter((item) => !item.projectID),
+    () => recentItems.filter((item) => !item.projectID && !item.roleID),
     [recentItems],
   );
   const timeGroups = React.useMemo(

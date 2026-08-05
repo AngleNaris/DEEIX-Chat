@@ -42,6 +42,12 @@ import {
   mergeLiveUpstreamThinkTrace,
   useLiveUpstreamThinkTrace,
 } from "@/features/chat/model/upstream-think-store";
+import { MessageAgentGroupTrace } from "@/features/agent-groups/components/message-agent-group-trace";
+import {
+  clearLiveGroupRun,
+  readLiveGroupRun,
+  useLiveGroupRun,
+} from "@/features/agent-groups/model/group-run-store";
 import type { BillingDisplayCurrency } from "@/shared/lib/billing-display";
 import { useBranding } from "@/shared/config/branding-provider";
 
@@ -214,6 +220,24 @@ export function ChatMessageBot({
       clearLiveUpstreamThinkTrace(item.runID);
     }
   }, [item.isStreaming, item.processTrace?.upstreamThink, item.runID]);
+  const liveGroupRun = useLiveGroupRun(item.runID);
+  React.useEffect(() => {
+    // 群组运行：流结束后运行仍停留在 pending/running（中断/取消）时清理占位；
+    // 终态运行（completed/abandoned/paused_retryable/blocked）保留时间线。
+    if (item.isStreaming) {
+      return;
+    }
+    const run = readLiveGroupRun(item.runID);
+    if (run && (run.status === "pending" || run.status === "running")) {
+      clearLiveGroupRun(item.runID);
+    }
+  }, [item.isStreaming, item.runID]);
+  React.useEffect(() => {
+    // 消息卸载时清理实时群组运行，避免跨会话泄漏。
+    return () => {
+      clearLiveGroupRun(item.runID);
+    };
+  }, [item.runID]);
   const upstreamThink = processTrace?.upstreamThink;
   const toolTrace = processTrace?.tools;
   const traceEvents = processTrace?.events ?? EMPTY_TRACE_EVENTS;
@@ -341,6 +365,7 @@ export function ChatMessageBot({
         messageStreaming={messageStreaming}
         autoCollapseReady={hasStreamdownContent || Boolean(item.inlineAlert)}
       />
+      <MessageAgentGroupTrace run={liveGroupRun} streaming={messageStreaming} clientRunID={item.runID} />
 
       <div
         className="w-full min-w-0 max-w-none overflow-hidden text-[15px] leading-8 text-foreground [overflow-wrap:anywhere]"

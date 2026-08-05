@@ -49,6 +49,15 @@ export interface ActiveSessionResponse {
   updatedAt: string;
 }
 
+export interface AddAgentGroupMemberRequest {
+  /** @maxLength 4000 */
+  dutyInstruction?: string;
+  /** @maxLength 128 */
+  modelOverride?: string;
+  /** @maxLength 32 */
+  rolePublicID: string;
+}
+
 export interface AdminAnnouncementListResponseDoc {
   data: {
     results: AnnouncementResponse[];
@@ -107,6 +116,150 @@ export interface AdminUserResponse {
   twoFactorRequired: boolean;
   updatedAt: string;
   username: string;
+}
+
+export interface AgentGroupFeatureResponse {
+  enabled: boolean;
+}
+
+export interface AgentGroupFeatureResponseDoc {
+  data: AgentGroupFeatureResponse;
+  errorMsg: string;
+}
+
+export interface AgentGroupListResponseDoc {
+  data: AgentGroupResponse[];
+  errorMsg: string;
+}
+
+export interface AgentGroupMemberRequest {
+  /** @maxLength 4000 */
+  dutyInstruction?: string;
+  /** @maxLength 128 */
+  modelOverride?: string;
+  /** @maxLength 32 */
+  rolePublicID: string;
+}
+
+export interface AgentGroupMemberResponse {
+  createdAt: string;
+  dutyInstruction: string;
+  enabled: boolean;
+  memberType: string;
+  modelOverride: string;
+  publicID: string;
+  roleColor: string;
+  roleIcon: string;
+  roleModel: string;
+  roleName: string;
+  roleProvider: string;
+  rolePublicID: string;
+  sortOrder: number;
+  updatedAt: string;
+}
+
+export interface AgentGroupResponse {
+  coordinationPrompt: string;
+  createdAt: string;
+  description: string;
+  members: AgentGroupMemberResponse[];
+  name: string;
+  projectID: string;
+  projectName: string;
+  publicID: string;
+  revision: number;
+  sortOrder: number;
+  status: string;
+  supervisorMemberID: string;
+  updatedAt: string;
+}
+
+export interface AgentGroupResponseDoc {
+  data: AgentGroupResponse;
+  errorMsg: string;
+}
+
+export interface AgentGroupRunAbandonResponse {
+  status: string;
+}
+
+export interface AgentGroupRunAbandonResponseDoc {
+  data: AgentGroupRunAbandonResponse;
+  errorMsg: string;
+}
+
+export interface AgentGroupRunCancelResponse {
+  canceled: boolean;
+}
+
+export interface AgentGroupRunCancelResponseDoc {
+  data: AgentGroupRunCancelResponse;
+  errorMsg: string;
+}
+
+export interface AgentGroupRunDetailResponse {
+  run: AgentGroupRunResponse;
+  steps: AgentGroupStepResponse[];
+}
+
+export interface AgentGroupRunDetailResponseDoc {
+  data: AgentGroupRunDetailResponse;
+  errorMsg: string;
+}
+
+export interface AgentGroupRunResponse {
+  clientRunID: string;
+  conversationID: number;
+  createdAt: string;
+  endedAt: string;
+  errorCode: string;
+  errorMessage: string;
+  groupPublicID: string;
+  publicID: string;
+  startedAt: string;
+  status: string;
+  updatedAt: string;
+}
+
+export interface AgentGroupStepAttemptResponse {
+  attemptNo: number;
+  createdAt: string;
+  endedAt: string;
+  errorCode: string;
+  errorMessage: string;
+  outputMarkdown: string;
+  publicID: string;
+  requestedModel: string;
+  resolvedModel: string;
+  startedAt: string;
+  status: string;
+}
+
+export interface AgentGroupStepResponse {
+  actorMemberPublicID: string;
+  actorNameSnapshot: string;
+  actorTypeSnapshot: string;
+  attempts: AgentGroupStepAttemptResponse[];
+  createdAt: string;
+  instruction: string;
+  publicID: string;
+  sequence: number;
+  status: string;
+  stepType: string;
+  updatedAt: string;
+}
+
+export interface AgentGroupStepRetryRequest {
+  /** @maxLength 64 */
+  retryRequestID: string;
+}
+
+export interface AgentgroupErrorDoc {
+  data: any;
+  details?: any;
+  errorCode?: string;
+  errorMsg: string;
+  requestId?: string;
 }
 
 export interface AnnouncementCloseDataResponse {
@@ -516,6 +669,11 @@ export interface BrandingResponseDoc {
   errorMsg: string;
 }
 
+export interface ChangeAgentGroupSupervisorRequest {
+  /** @maxLength 32 */
+  memberPublicID: string;
+}
+
 export interface ChannelErrorDoc {
   data: any;
   details?: any;
@@ -768,6 +926,8 @@ export interface ConversationProjectResponseDoc {
 }
 
 export interface ConversationResponse {
+  agentGroupID: string;
+  agentGroupName: string;
   contextPolicyJSON: string;
   createdAt: string;
   isStarred: boolean;
@@ -781,6 +941,8 @@ export interface ConversationResponse {
   projectName: string;
   provider: string;
   publicID: string;
+  roleID: string;
+  roleName: string;
   sessionKey: string;
   shareID: string;
   shareStatus: string;
@@ -790,6 +952,34 @@ export interface ConversationResponse {
   title: string;
   updatedAt: string;
   userID: number;
+}
+
+export interface ConversationRoleListResponseDoc {
+  data: ConversationRoleResponse[];
+  errorMsg: string;
+}
+
+export interface ConversationRoleResponse {
+  color: string;
+  createdAt: string;
+  defaultMCPToolIDs: number[];
+  defaultSkillIDs: number[];
+  description: string;
+  icon: string;
+  mcpDefaultMode: string;
+  model: string;
+  name: string;
+  provider: string;
+  publicID: string;
+  sortOrder: number;
+  status: string;
+  systemPrompt: string;
+  updatedAt: string;
+}
+
+export interface ConversationRoleResponseDoc {
+  data: ConversationRoleResponse;
+  errorMsg: string;
 }
 
 export interface ConversationRunListResponseDoc {
@@ -842,6 +1032,20 @@ export interface ConversationShareResponseDoc {
 export interface ConversationUpdateResponseDoc {
   data: ConversationResponse;
   errorMsg: string;
+}
+
+export interface CreateAgentGroupRequest {
+  /** @maxLength 12000 */
+  coordinationPrompt?: string;
+  /** @maxLength 255 */
+  description?: string;
+  /** @maxLength 80 */
+  name: string;
+  /** @maxLength 32 */
+  projectID: string;
+  supervisor: AgentGroupMemberRequest;
+  /** @maxItems 31 */
+  workers?: AgentGroupMemberRequest[];
 }
 
 export interface CreateAnnouncementRequest {
@@ -902,12 +1106,38 @@ export interface CreateConversationProjectRequest {
 }
 
 export interface CreateConversationRequest {
+  /** @maxLength 32 */
+  agentGroupID?: string;
   /** @maxLength 128 */
   model?: string;
   /** @maxLength 32 */
   projectID?: string;
+  /** @maxLength 32 */
+  roleID?: string;
   /** @maxLength 255 */
   title?: string;
+}
+
+export interface CreateConversationRoleRequest {
+  /** @maxLength 32 */
+  color?: string;
+  /** @maxItems 128 */
+  defaultMCPToolIDs?: number[];
+  /** @maxItems 128 */
+  defaultSkillIDs?: number[];
+  /** @maxLength 255 */
+  description?: string;
+  /** @maxLength 32 */
+  icon?: string;
+  mcpDefaultMode?: "inherit" | "custom";
+  /** @maxLength 128 */
+  model?: string;
+  /** @maxLength 80 */
+  name: string;
+  /** @maxLength 32 */
+  provider?: string;
+  /** @maxLength 12000 */
+  systemPrompt?: string;
 }
 
 export interface CreateConversationShareRequest {
@@ -2325,9 +2555,19 @@ export interface RenameConversationRequest {
   title: string;
 }
 
+export interface ReorderAgentGroupMembersRequest {
+  /** @maxItems 32 */
+  orderedPublicIDs: string[];
+}
+
 export interface ReorderConversationProjectsRequest {
   /** @maxItems 200 */
   projectIDs: string[];
+}
+
+export interface ReorderConversationRolesRequest {
+  /** @maxItems 200 */
+  roleIDs: string[];
 }
 
 export interface ReorderIdentityProvidersRequest {
@@ -2751,6 +2991,27 @@ export interface ToolResponseDoc {
   errorMsg: string;
 }
 
+export interface UpdateAgentGroupMemberRequest {
+  /** @maxLength 4000 */
+  dutyInstruction?: string;
+  enabled?: boolean;
+  /** @maxLength 128 */
+  modelOverride?: string;
+  /** @min 0 */
+  sortOrder?: number;
+}
+
+export interface UpdateAgentGroupRequest {
+  /** @maxLength 12000 */
+  coordinationPrompt?: string;
+  /** @maxLength 255 */
+  description?: string;
+  /** @maxLength 80 */
+  name?: string;
+  /** @min 0 */
+  sortOrder?: number;
+}
+
 export interface UpdateBillingAccountBalanceRequest {
   /** @min 0 */
   balanceUSD: number;
@@ -2800,6 +3061,29 @@ export interface UpdateConversationProjectRequest {
   mcpDefaultMode?: "inherit" | "custom";
   /** @maxLength 80 */
   name?: string;
+  status?: "active" | "archived";
+  /** @maxLength 12000 */
+  systemPrompt?: string;
+}
+
+export interface UpdateConversationRoleRequest {
+  /** @maxLength 32 */
+  color?: string;
+  /** @maxItems 128 */
+  defaultMCPToolIDs?: number[];
+  /** @maxItems 128 */
+  defaultSkillIDs?: number[];
+  /** @maxLength 255 */
+  description?: string;
+  /** @maxLength 32 */
+  icon?: string;
+  mcpDefaultMode?: "inherit" | "custom";
+  /** @maxLength 128 */
+  model?: string;
+  /** @maxLength 80 */
+  name?: string;
+  /** @maxLength 32 */
+  provider?: string;
   status?: "active" | "archived";
   /** @maxLength 12000 */
   systemPrompt?: string;
@@ -5831,6 +6115,67 @@ export namespace Admin {
   }
 }
 
+export namespace AgentGroupRuns {
+  /**
+   * @description 放弃已暂停或被阻塞的群组运行：消息标记结局，运行不再可重试
+   * @tags chat
+   * @name AbandonCreate
+   * @summary 放弃群组运行
+   * @request POST:/agent-group-runs/{run_id}/abandon
+   * @secure
+   */
+  export namespace AbandonCreate {
+    export type RequestParams = {
+      /** 运行 public_id */
+      runId: string;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = never;
+    export type RequestHeaders = {};
+    export type ResponseBody = AgentGroupRunAbandonResponseDoc;
+  }
+
+  /**
+   * @description 取消进行中的群组运行：中断当前 Attempt，运行回到 paused_retryable
+   * @tags chat
+   * @name CancelCreate
+   * @summary 取消群组运行
+   * @request POST:/agent-group-runs/{run_id}/cancel
+   * @secure
+   */
+  export namespace CancelCreate {
+    export type RequestParams = {
+      /** 运行 public_id */
+      runId: string;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = never;
+    export type RequestHeaders = {};
+    export type ResponseBody = AgentGroupRunCancelResponseDoc;
+  }
+
+  /**
+   * @description 从暂停的失败步骤原地重试：复用原配置快照，仅为该步骤追加一次新 Attempt，NDJSON 流式返回群组事件与正文增量
+   * @tags chat
+   * @name StepsRetryCreate
+   * @summary 重试失败步骤
+   * @request POST:/agent-group-runs/{run_id}/steps/{step_id}/retry
+   * @secure
+   */
+  export namespace StepsRetryCreate {
+    export type RequestParams = {
+      /** 运行 public_id */
+      runId: string;
+      /** 步骤 public_id */
+      stepId: string;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = AgentGroupStepRetryRequest;
+    export type RequestHeaders = {};
+    export type ResponseBody = string;
+  }
+}
+
 export namespace Announcements {
   /**
    * @description 登录用户获取当前可展示的站点公告列表
@@ -6326,6 +6671,257 @@ export namespace ContextArtifacts {
   }
 }
 
+export namespace ConversationAgentGroupRuns {
+  /**
+   * @description 前端消息只持有 clientRunID，刷新页面后据此恢复群组运行时间线（会话经公开 ID 解析）
+   * @tags chat
+   * @name LookupList
+   * @summary 按会话与流式运行 ID 查询运行详情
+   * @request GET:/conversation-agent-group-runs/lookup
+   * @secure
+   */
+  export namespace LookupList {
+    export type RequestParams = {};
+    export type RequestQuery = {
+      /** 父流式运行 ID */
+      clientRunID: string;
+      /** 会话公开 ID */
+      conversationID: string;
+    };
+    export type RequestBody = never;
+    export type RequestHeaders = {};
+    export type ResponseBody = AgentGroupRunDetailResponseDoc;
+  }
+
+  /**
+   * @description 查询群组运行及其步骤、尝试完整视图
+   * @tags chat
+   * @name ConversationAgentGroupRunsDetail
+   * @summary 运行详情
+   * @request GET:/conversation-agent-group-runs/{run_id}
+   * @secure
+   */
+  export namespace ConversationAgentGroupRunsDetail {
+    export type RequestParams = {
+      /** 运行 public_id */
+      runId: string;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = never;
+    export type RequestHeaders = {};
+    export type ResponseBody = AgentGroupRunDetailResponseDoc;
+  }
+}
+
+export namespace ConversationAgentGroups {
+  /**
+   * @description 查询当前用户项目下的 Agent 群组
+   * @tags chat
+   * @name ConversationAgentGroupsList
+   * @summary 群组列表
+   * @request GET:/conversation-agent-groups
+   * @secure
+   */
+  export namespace ConversationAgentGroupsList {
+    export type RequestParams = {};
+    export type RequestQuery = {
+      /** 项目 public_id */
+      projectID: string;
+    };
+    export type RequestBody = never;
+    export type RequestHeaders = {};
+    export type ResponseBody = AgentGroupListResponseDoc;
+  }
+
+  /**
+   * @description 创建 Agent 群组（主管 + 工作成员，成员从现有角色中选择）
+   * @tags chat
+   * @name ConversationAgentGroupsCreate
+   * @summary 创建群组
+   * @request POST:/conversation-agent-groups
+   * @secure
+   */
+  export namespace ConversationAgentGroupsCreate {
+    export type RequestParams = {};
+    export type RequestQuery = {};
+    export type RequestBody = CreateAgentGroupRequest;
+    export type RequestHeaders = {};
+    export type ResponseBody = AgentGroupResponseDoc;
+  }
+
+  /**
+   * @description 查询 Agent 群组功能是否启用
+   * @tags chat
+   * @name FeatureList
+   * @summary 群组功能开关
+   * @request GET:/conversation-agent-groups/feature
+   * @secure
+   */
+  export namespace FeatureList {
+    export type RequestParams = {};
+    export type RequestQuery = {};
+    export type RequestBody = never;
+    export type RequestHeaders = {};
+    export type ResponseBody = AgentGroupFeatureResponseDoc;
+  }
+
+  /**
+   * @description 查询单个 Agent 群组（含成员与角色摘要）
+   * @tags chat
+   * @name ConversationAgentGroupsDetail
+   * @summary 群组详情
+   * @request GET:/conversation-agent-groups/{id}
+   * @secure
+   */
+  export namespace ConversationAgentGroupsDetail {
+    export type RequestParams = {
+      /** 群组 public_id */
+      id: string;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = never;
+    export type RequestHeaders = {};
+    export type ResponseBody = AgentGroupResponseDoc;
+  }
+
+  /**
+   * @description 删除没有历史记录的 Agent 群组（存在会话或运行历史时拒绝）
+   * @tags chat
+   * @name ConversationAgentGroupsDelete
+   * @summary 删除群组
+   * @request DELETE:/conversation-agent-groups/{id}
+   * @secure
+   */
+  export namespace ConversationAgentGroupsDelete {
+    export type RequestParams = {
+      /** 群组 public_id */
+      id: string;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = never;
+    export type RequestHeaders = {};
+    export type ResponseBody = AgentgroupErrorDoc;
+  }
+
+  /**
+   * @description 更新群组名称、描述、协调提示词与排序
+   * @tags chat
+   * @name ConversationAgentGroupsPartialUpdate
+   * @summary 更新群组
+   * @request PATCH:/conversation-agent-groups/{id}
+   * @secure
+   */
+  export namespace ConversationAgentGroupsPartialUpdate {
+    export type RequestParams = {
+      /** 群组 public_id */
+      id: string;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = UpdateAgentGroupRequest;
+    export type RequestHeaders = {};
+    export type ResponseBody = AgentGroupResponseDoc;
+  }
+
+  /**
+   * @description 向群组添加工作成员（角色不可与现有成员重复）
+   * @tags chat
+   * @name MembersCreate
+   * @summary 添加成员
+   * @request POST:/conversation-agent-groups/{id}/members
+   * @secure
+   */
+  export namespace MembersCreate {
+    export type RequestParams = {
+      /** 群组 public_id */
+      id: string;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = AddAgentGroupMemberRequest;
+    export type RequestHeaders = {};
+    export type ResponseBody = AgentGroupResponseDoc;
+  }
+
+  /**
+   * @description 按传入顺序重排群组成员
+   * @tags chat
+   * @name MembersReorderCreate
+   * @summary 重排成员
+   * @request POST:/conversation-agent-groups/{id}/members/reorder
+   * @secure
+   */
+  export namespace MembersReorderCreate {
+    export type RequestParams = {
+      /** 群组 public_id */
+      id: string;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = ReorderAgentGroupMembersRequest;
+    export type RequestHeaders = {};
+    export type ResponseBody = AgentGroupResponseDoc;
+  }
+
+  /**
+   * @description 移除工作成员（主管须先更换）
+   * @tags chat
+   * @name MembersDelete
+   * @summary 移除成员
+   * @request DELETE:/conversation-agent-groups/{id}/members/{member_id}
+   * @secure
+   */
+  export namespace MembersDelete {
+    export type RequestParams = {
+      /** 群组 public_id */
+      id: string;
+      /** 成员 public_id */
+      memberId: string;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = never;
+    export type RequestHeaders = {};
+    export type ResponseBody = AgentGroupResponseDoc;
+  }
+
+  /**
+   * @description 更新成员启用状态、模型覆盖与职责指令（主管不可禁用）
+   * @tags chat
+   * @name MembersPartialUpdate
+   * @summary 更新成员
+   * @request PATCH:/conversation-agent-groups/{id}/members/{member_id}
+   * @secure
+   */
+  export namespace MembersPartialUpdate {
+    export type RequestParams = {
+      /** 群组 public_id */
+      id: string;
+      /** 成员 public_id */
+      memberId: string;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = UpdateAgentGroupMemberRequest;
+    export type RequestHeaders = {};
+    export type ResponseBody = AgentGroupResponseDoc;
+  }
+
+  /**
+   * @description 更换群组主管（原主管自动转为工作成员）
+   * @tags chat
+   * @name SupervisorCreate
+   * @summary 更换主管
+   * @request POST:/conversation-agent-groups/{id}/supervisor
+   * @secure
+   */
+  export namespace SupervisorCreate {
+    export type RequestParams = {
+      /** 群组 public_id */
+      id: string;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = ChangeAgentGroupSupervisorRequest;
+    export type RequestHeaders = {};
+    export type ResponseBody = AgentGroupResponseDoc;
+  }
+}
+
 export namespace ConversationProjects {
   /**
    * @description 查询当前用户的会话项目分组
@@ -6419,6 +7015,116 @@ export namespace ConversationProjects {
     export type RequestBody = UpdateConversationProjectRequest;
     export type RequestHeaders = {};
     export type ResponseBody = ConversationProjectResponseDoc;
+  }
+}
+
+export namespace ConversationRoles {
+  /**
+   * @description 查询当前用户的角色(助手)列表
+   * @tags chat
+   * @name ConversationRolesList
+   * @summary 角色列表
+   * @request GET:/conversation-roles
+   * @secure
+   */
+  export namespace ConversationRolesList {
+    export type RequestParams = {};
+    export type RequestQuery = {
+      /** 状态筛选: active|archived|all */
+      status?: string;
+    };
+    export type RequestBody = never;
+    export type RequestHeaders = {};
+    export type ResponseBody = ConversationRoleListResponseDoc;
+  }
+
+  /**
+   * @description 创建当前用户的角色(助手)
+   * @tags chat
+   * @name ConversationRolesCreate
+   * @summary 创建角色
+   * @request POST:/conversation-roles
+   * @secure
+   */
+  export namespace ConversationRolesCreate {
+    export type RequestParams = {};
+    export type RequestQuery = {};
+    export type RequestBody = CreateConversationRoleRequest;
+    export type RequestHeaders = {};
+    export type ResponseBody = ConversationRoleResponseDoc;
+  }
+
+  /**
+   * @description 更新当前用户角色展示顺序
+   * @tags chat
+   * @name ReorderCreate
+   * @summary 角色排序
+   * @request POST:/conversation-roles/reorder
+   * @secure
+   */
+  export namespace ReorderCreate {
+    export type RequestParams = {};
+    export type RequestQuery = {};
+    export type RequestBody = ReorderConversationRolesRequest;
+    export type RequestHeaders = {};
+    export type ResponseBody = ConversationErrorDoc;
+  }
+
+  /**
+   * @description 查询当前用户单个角色
+   * @tags chat
+   * @name ConversationRolesDetail
+   * @summary 角色详情
+   * @request GET:/conversation-roles/{id}
+   * @secure
+   */
+  export namespace ConversationRolesDetail {
+    export type RequestParams = {
+      /** 角色 public_id */
+      id: string;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = never;
+    export type RequestHeaders = {};
+    export type ResponseBody = ConversationRoleResponseDoc;
+  }
+
+  /**
+   * @description 删除当前用户的角色
+   * @tags chat
+   * @name ConversationRolesDelete
+   * @summary 删除角色
+   * @request DELETE:/conversation-roles/{id}
+   * @secure
+   */
+  export namespace ConversationRolesDelete {
+    export type RequestParams = {
+      /** 角色 public_id */
+      id: string;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = never;
+    export type RequestHeaders = {};
+    export type ResponseBody = ConversationErrorDoc;
+  }
+
+  /**
+   * @description 更新当前用户的角色
+   * @tags chat
+   * @name ConversationRolesPartialUpdate
+   * @summary 更新角色
+   * @request PATCH:/conversation-roles/{id}
+   * @secure
+   */
+  export namespace ConversationRolesPartialUpdate {
+    export type RequestParams = {
+      /** 角色 public_id */
+      id: string;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = UpdateConversationRoleRequest;
+    export type RequestHeaders = {};
+    export type ResponseBody = ConversationRoleResponseDoc;
   }
 }
 

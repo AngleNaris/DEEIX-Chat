@@ -5,8 +5,15 @@ import { useTranslations } from "next-intl";
 
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 import { cancelMessageGeneration, listMessagesPage, resumeMessageGenerationStream } from "@/shared/api/conversation";
+import {
+  ensureLiveGroupRunPlaceholder,
+  upsertGroupRunEvent,
+  upsertLiveGroupRunThink,
+  upsertLiveGroupRunTool,
+} from "@/features/agent-groups/model/group-run-store";
 import { buildMediaImagePreviewMarkdown } from "@/features/chat/model/media-image-preview";
 import { upsertLiveUpstreamThinkTrace } from "@/features/chat/model/upstream-think-store";
+import { isGroupStreamAwareEvent } from "@/shared/api/conversation";
 import type { MessageDTO } from "@/shared/api/conversation.types";
 
 const MESSAGE_PAGE_SIZE = 100;
@@ -75,9 +82,12 @@ export function useChatData(
   {
     activeGenerationRunsRef,
     failedGenerationRunsRef,
+    isGroupConversation,
   }: {
     activeGenerationRunsRef?: React.RefObject<Set<string>>;
     failedGenerationRunsRef?: React.RefObject<Set<string>>;
+    // 群组会话：刷新恢复时重建群组运行占位（§16.8 正在恢复运行）。
+    isGroupConversation?: boolean;
   } = {},
 ) {
   const t = useTranslations("chat.data");
@@ -453,7 +463,26 @@ export function useChatData(
             if (isResumeInactive()) {
               return;
             }
-            upsertLiveUpstreamThinkTrace(pendingRunID, event);
+            if (isGroupStreamAwareEvent(event)) {
+              upsertLiveGroupRunThink(pendingRunID, event);
+            } else {
+              upsertLiveUpstreamThinkTrace(pendingRunID, event);
+            }
+          },
+          onGroupEvent: (event) => {
+            if (isResumeInactive()) {
+              return;
+            }
+            upsertGroupRunEvent(pendingRunID, event);
+          },
+          onToolEvent: (event) => {
+            if (isResumeInactive()) {
+              return;
+            }
+            // 群组内部 Actor 回合转发的工具调用（§15：tool_call/tool_result 带 Actor 元数据）。
+            if (isGroupStreamAwareEvent(event)) {
+              upsertLiveGroupRunTool(pendingRunID, event);
+            }
           },
           onUsage: (event) => {
             updateResumeState((prev) => ({
@@ -500,6 +529,10 @@ export function useChatData(
       }
     }
 
+    // §16.8：群组会话恢复时先创建占位运行（正在恢复运行），事件重放到达后回填时间线。
+    if (isGroupConversation) {
+      ensureLiveGroupRunPlaceholder(pendingRunID, { resuming: true });
+    }
     void resume();
     return () => {
       closed = true;
@@ -514,6 +547,7 @@ export function useChatData(
     clearResumeCheckpoint,
     conversationID,
     failedGenerationRunsRef,
+    isGroupConversation,
     pendingRunID,
     reload,
     tSubmit,

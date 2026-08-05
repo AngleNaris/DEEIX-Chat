@@ -37,6 +37,7 @@ DEEIX Chat 是一款开源可部署的 AI 平台，面向需要长期、稳定�
 | 模块 | 能力 |
 | --- | --- |
 | 对话体验 | 面向日常高频使用的多模态对话界面，支持流式响应、多分支、重试、编辑、反馈、分享、富文本渲染和可追踪的模型执行信息。 |
+| Agent 群组 | 主管与工作成员协同的多智能体对话，支持串行步骤执行、成员级模型覆盖、原地重试与 Attempt 历史、崩溃恢复。参见 [Agent 群组指南](AGENT_GROUPS.md)。 |
 | 模型与路由 | 以平台模型为统一入口管理上游渠道、真实模型、路由绑定、优先级、权重、熔断、厂商映射和能力配置，降低多供应商接入后的维护成本。 |
 | 协议与适配 | 统一适配 OpenAI、Anthropic、Google/Gemini、xAI、OpenRouter 和 OpenAI 兼容协议，覆盖文本、图片、工具和不同厂商的原生能力差异。 |
 | 文件与检索 | 提供文件上传、预览、提取、OCR、存储配额、全文注入、分片、向量嵌入和语义检索能力，让文件内容自然进入对话上下文。 |
@@ -410,6 +411,7 @@ docker compose logs app
 - [用户指南](https://deeix.com/zh/docs/deeix-chat/new-chat)
 - [管理指南](https://deeix.com/zh/docs/deeix-chat/admin-accounts)
 - [进阶指南](https://deeix.com/zh/docs/deeix-chat/advanced-capabilities-passthrough-tools)
+- Agent 群组（启用、使用、分享与审计、部署与回滚）：[AGENT_GROUPS.md](AGENT_GROUPS.md)
 - 后端说明：[backend/README.md](../backend/README.md)
 - 后端规范：[backend/docs/README.md](../backend/docs/README.md)
 - 前端说明：[frontend/README.md](../frontend/README.md)

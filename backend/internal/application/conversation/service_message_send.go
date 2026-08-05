@@ -198,6 +198,11 @@ func (s *Service) sendMessageInternal(
 		return nil, ErrConversationNotFound
 	}
 
+	// Agent 群组会话走独立的串行编排器（主管/成员状态机，逐 Attempt 计费）。
+	if conversation.AgentGroupID != nil && s.agentGroupRunStore != nil {
+		return s.executeAgentGroupRun(ctx, input, onDelta, preferStream, conversation, runID, startedAt)
+	}
+
 	branchPreparation, err := s.prepareMessageSendBranch(ctx, &input)
 	if err != nil {
 		retErr = err
