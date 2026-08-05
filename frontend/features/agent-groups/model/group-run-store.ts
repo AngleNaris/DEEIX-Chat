@@ -601,6 +601,53 @@ export function readLiveGroupRun(clientRunID: string | null | undefined) {
   return runID ? runs.get(runID) : undefined;
 }
 
+// resolveRetryableGroupStep 返回当前可原地重试的步骤（运行暂停在 currentStepID 上）。
+export function resolveRetryableGroupStep(run: GroupRunState): GroupRunStepState | undefined {
+  return run.steps.find((step) => step.stepID === run.currentStepID && step.status !== "success");
+}
+
+// synthesizeGroupRunPausedState 在取消/中断的流未收到服务端终态事件时，本地镜像
+// 服务端结局（Cancelable 断开 → 当前 Attempt 中断 → 运行回到 paused_retryable），
+// 写入 store，避免 UI 停留在 running/pending 而丢失重试入口。
+// 仅当运行已获得真实 groupRunID（收到过步骤事件）时生效；占位符运行直接跳过。
+export function synthesizeGroupRunPausedState(clientRunID: string | null | undefined): void {
+  const run = readLiveGroupRun(clientRunID);
+  if (!run?.groupRunID) {
+    return;
+  }
+  const step = resolveRetryableGroupStep(run);
+  if (!step) {
+    return;
+  }
+  const attempt = step.attempts[step.attempts.length - 1];
+  if (attempt) {
+    upsertGroupRunEvent(clientRunID, {
+      type: "group_step_failed",
+      groupRunID: run.groupRunID,
+      stepID: step.stepID,
+      attemptID: attempt.attemptID,
+      attemptNumber: attempt.attemptNumber,
+      sequence: step.sequence,
+      stepType: step.stepType,
+      actorMemberID: step.actor.memberID,
+      actorName: step.actor.name,
+      actorType: step.actor.type,
+      actorIcon: step.actor.icon,
+      actorColor: step.actor.color,
+      model: step.actor.model,
+      status: "interrupted",
+      errorCode: "INTERRUPTED",
+      message: "agent group run interrupted",
+    } satisfies GroupStreamEvent);
+  }
+  upsertGroupRunEvent(clientRunID, {
+    type: "group_run_paused",
+    groupRunID: run.groupRunID,
+    status: "paused_retryable",
+    errorCode: "INTERRUPTED",
+  } satisfies GroupStreamEvent);
+}
+
 // setGroupRunRetrying 标记/清除重试流进行中（§16.10 输入锁：暂停→重试期间保持锁定）。
 export function setGroupRunRetrying(clientRunID: string | null | undefined, retrying: boolean) {
   const runID = normalizeRunID(clientRunID);

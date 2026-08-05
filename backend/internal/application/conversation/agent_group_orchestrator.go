@@ -518,6 +518,9 @@ func (st *agentGroupRunState) failAgentGroupStepAndPause(
 	code, retryable := classifyAgentGroupError(execErr)
 	message := genericAgentGroupErrorMessage(code)
 	now := time.Now()
+	// 用户停止/断连时 ctx 已被取消：终态 CAS 必须落到独立上下文，否则运行卡在 running。
+	persistCtx, cancelPersist := finalizePersistContext(ctx)
+	defer cancelPersist()
 
 	// 1. CAS attempt → 终态。
 	attemptStatus := domainagentgroup.AttemptStatusError
@@ -527,13 +530,13 @@ func (st *agentGroupRunState) failAgentGroupStepAndPause(
 	case domainagentgroup.ErrorCodeInterrupted:
 		attemptStatus = domainagentgroup.AttemptStatusInterrupted
 	}
-	ok, err := store.CASUpdateAgentGroupStepAttempt(ctx, attempt.ID, domainagentgroup.AttemptStatusRunning,
+	ok, err := store.CASUpdateAgentGroupStepAttempt(persistCtx, attempt.ID, domainagentgroup.AttemptStatusRunning,
 		domainagentgroup.AttemptPatch{Status: &attemptStatus, ErrorCode: &code, ErrorMessage: &message, EndedAt: &now})
 	if err != nil {
 		return err
 	}
 	if !ok {
-		return st.blockAgentGroupRun(ctx, step, domainagentgroup.ErrorCodeCASConflict,
+		return st.blockAgentGroupRun(persistCtx, step, domainagentgroup.ErrorCodeCASConflict,
 			genericAgentGroupErrorMessage(domainagentgroup.ErrorCodeCASConflict))
 	}
 
@@ -545,7 +548,7 @@ func (st *agentGroupRunState) failAgentGroupStepAndPause(
 	case domainagentgroup.ErrorCodeInterrupted:
 		stepStatus = domainagentgroup.StepStatusInterrupted
 	}
-	if err := store.UpdateAgentGroupStep(ctx, step.ID, map[string]interface{}{"status": stepStatus}); err != nil {
+	if err := store.UpdateAgentGroupStep(persistCtx, step.ID, map[string]interface{}{"status": stepStatus}); err != nil {
 		return err
 	}
 	step.Status = stepStatus
@@ -565,12 +568,12 @@ func (st *agentGroupRunState) failAgentGroupStepAndPause(
 	if st.assistantMessage != nil {
 		runPatch.AssistantMessageID = &st.assistantMessage.ID
 	}
-	ok, err = store.CASUpdateAgentGroupRun(ctx, st.run.ID, st.stateVersion, domainagentgroup.RunStatusRunning, runPatch)
+	ok, err = store.CASUpdateAgentGroupRun(persistCtx, st.run.ID, st.stateVersion, domainagentgroup.RunStatusRunning, runPatch)
 	if err != nil {
 		return err
 	}
 	if !ok {
-		return st.blockAgentGroupRun(ctx, step, domainagentgroup.ErrorCodeCASConflict,
+		return st.blockAgentGroupRun(persistCtx, step, domainagentgroup.ErrorCodeCASConflict,
 			genericAgentGroupErrorMessage(domainagentgroup.ErrorCodeCASConflict))
 	}
 	st.stateVersion++
@@ -600,13 +603,16 @@ func (st *agentGroupRunState) failAgentGroupStepAndPause(
 func (st *agentGroupRunState) blockAgentGroupRun(ctx context.Context, step *domainagentgroup.Step, code string, message string) error {
 	store := st.service.agentGroupRunStore
 	now := time.Now()
+	// 与 failAgentGroupStepAndPause 一致：断连场景用独立上下文保证终态落库。
+	persistCtx, cancelPersist := finalizePersistContext(ctx)
+	defer cancelPersist()
 	blocked := domainagentgroup.RunStatusBlocked
 	runPatch := domainagentgroup.RunPatch{Status: &blocked, ErrorCode: &code, ErrorMessage: &message, EndedAt: &now}
 	// 持久化 assistant 消息身份，供放弃时恢复顶层消息状态。
 	if st.assistantMessage != nil {
 		runPatch.AssistantMessageID = &st.assistantMessage.ID
 	}
-	ok, err := store.CASUpdateAgentGroupRun(ctx, st.run.ID, st.stateVersion, domainagentgroup.RunStatusRunning, runPatch)
+	ok, err := store.CASUpdateAgentGroupRun(persistCtx, st.run.ID, st.stateVersion, domainagentgroup.RunStatusRunning, runPatch)
 	if err != nil {
 		return err
 	}
@@ -715,12 +721,8 @@ func (st *agentGroupRunState) markGroupAssistantMessageState(ctx context.Context
 	}
 	message := genericAgentGroupErrorMessage(code)
 
-	persistCtx := ctx
-	var cancel context.CancelFunc
-	if persistCtx == nil || persistCtx.Err() != nil {
-		persistCtx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-	}
+	persistCtx, cancel := finalizePersistContext(ctx)
+	defer cancel()
 	if err := st.service.repo.UpdateMessageState(persistCtx, st.assistantMessage.ID, messageStatus, messageErrorCode, message); err != nil {
 		st.service.logger.Error("update_assistant_message_state_failed",
 			zap.String("trace_id", traceid.FromContext(ctx)),
@@ -822,7 +824,10 @@ func (st *agentGroupRunState) persistTopLevelRun(ctx context.Context, retErr err
 	if run.TotalLatencyMS < 0 {
 		run.TotalLatencyMS = 0
 	}
-	if err := st.service.repo.CreateConversationRun(ctx, run); err != nil {
+	// 断连场景 ctx 已取消：审计行用独立上下文落库（失败仅记日志，不影响运行终态）。
+	persistCtx, cancelPersist := finalizePersistContext(ctx)
+	defer cancelPersist()
+	if err := st.service.repo.CreateConversationRun(persistCtx, run); err != nil {
 		st.service.logger.Error("create_conversation_run_failed",
 			zap.String("trace_id", traceid.FromContext(ctx)),
 			zap.String("run_id", run.RunID),
@@ -1065,6 +1070,17 @@ func genericAgentGroupErrorMessage(code string) string {
 	default:
 		return "agent group step failed"
 	}
+}
+
+// finalizePersistContext 返回最终化持久化使用的上下文：
+// 请求 ctx 已取消（用户停止/客户端断连）时切换为独立的 5 秒后台上下文，
+// 保证 paused_retryable/blocked 等终态一定能写入 —— 否则运行会卡在 running，
+// 重试 API 永远返回 NotRetryable，生成中断后无法重试。
+func finalizePersistContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if ctx != nil && ctx.Err() == nil {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(context.Background(), 5*time.Second)
 }
 
 // marshalAgentGroupRunSnapshot 序列化配置快照（失败回落空对象，不允许影响运行）。

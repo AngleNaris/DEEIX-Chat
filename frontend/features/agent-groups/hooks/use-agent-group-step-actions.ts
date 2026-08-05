@@ -6,9 +6,9 @@ import type { GroupRunState, GroupRunStepState } from "@/features/agent-groups/m
 import {
   abortGroupRunRetry,
   notifyGroupRunSettled,
-  readLiveGroupRun,
   registerGroupRunRetryAbort,
   setGroupRunRetrying,
+  synthesizeGroupRunPausedState,
   upsertGroupRunEvent,
 } from "@/features/agent-groups/model/group-run-store";
 import {
@@ -17,48 +17,6 @@ import {
 } from "@/shared/api/agent-groups";
 import type { GroupStreamEvent } from "@/shared/api/conversation.types";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
-
-// synthesizeInterruptedPause 在重试流被用户停止后本地镜像服务端结局：
-// 服务端 Cancelable 流断开会把当前 Attempt 中断并回到 paused_retryable
-// （错误码 INTERRUPTED），此处同步写入 store，避免 UI 停留在 running。
-function synthesizeInterruptedPause(
-  clientRunID: string,
-  run: GroupRunState,
-  step: GroupRunStepState,
-) {
-  const currentRun = readLiveGroupRun(clientRunID);
-  if (!currentRun) {
-    return;
-  }
-  const currentStep = currentRun.steps.find((item) => item.stepID === step.stepID);
-  const attempt = currentStep?.attempts[currentStep.attempts.length - 1];
-  if (attempt) {
-    upsertGroupRunEvent(clientRunID, {
-      type: "group_step_failed",
-      groupRunID: currentRun.groupRunID || run.groupRunID,
-      stepID: step.stepID,
-      attemptID: attempt.attemptID,
-      attemptNumber: attempt.attemptNumber,
-      sequence: step.sequence,
-      stepType: step.stepType,
-      actorMemberID: step.actor.memberID,
-      actorName: step.actor.name,
-      actorType: step.actor.type,
-      actorIcon: step.actor.icon,
-      actorColor: step.actor.color,
-      model: step.actor.model,
-      status: "interrupted",
-      errorCode: "INTERRUPTED",
-      message: "agent group run interrupted",
-    } satisfies GroupStreamEvent);
-  }
-  upsertGroupRunEvent(clientRunID, {
-    type: "group_run_paused",
-    groupRunID: currentRun.groupRunID || run.groupRunID,
-    status: "paused_retryable",
-    errorCode: "INTERRUPTED",
-  } satisfies GroupStreamEvent);
-}
 
 // useAgentGroupStepActions 承载失败步骤的重试 / 停止 / 放弃交互（§16.10）。
 // 重试可从消息 meta 按钮或失败步骤 trace 发起，retrying 标记与 AbortController
@@ -121,7 +79,8 @@ export function useAgentGroupStepActions({
       }
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
-        synthesizeInterruptedPause(clientRunID, run, step);
+        // 停止重试：本地镜像服务端结局（Attempt 中断 → paused_retryable）。
+        synthesizeGroupRunPausedState(clientRunID);
       } else {
         setActionError(error instanceof Error ? error.message : "retry failed");
       }

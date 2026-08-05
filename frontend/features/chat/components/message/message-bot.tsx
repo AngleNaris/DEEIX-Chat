@@ -47,6 +47,7 @@ import { useAgentGroupStepActions } from "@/features/agent-groups/hooks/use-agen
 import {
   clearLiveGroupRun,
   readLiveGroupRun,
+  resolveRetryableGroupStep,
   useLiveGroupRun,
 } from "@/features/agent-groups/model/group-run-store";
 import type { BillingDisplayCurrency } from "@/shared/lib/billing-display";
@@ -225,9 +226,7 @@ export function ChatMessageBot({
     if (!liveGroupRun || liveGroupRun.status !== "paused_retryable") {
       return undefined;
     }
-    return liveGroupRun.steps.find(
-      (step) => step.stepID === liveGroupRun.currentStepID && step.status !== "success",
-    );
+    return resolveRetryableGroupStep(liveGroupRun);
   }, [liveGroupRun]);
   const groupStepActions = useAgentGroupStepActions({
     clientRunID: item.runID,

@@ -6,6 +6,7 @@ import { toast } from "sonner";
 
 import {
   ensureLiveGroupRunPlaceholder,
+  synthesizeGroupRunPausedState,
   upsertGroupRunEvent,
   upsertLiveGroupRunTool,
 } from "@/features/agent-groups/model/group-run-store";
@@ -1413,6 +1414,10 @@ export function useChatMessageSubmit({
         flushUpstreamThinkNow(exchangeKey);
         resetStreamBuffer(exchangeKey);
         if (streamAbortController.signal.aborted) {
+          // 群组运行：本地合成暂停终态（与服务端 Cancelable 断开的结局一致）。
+          // 否则 store 运行停留在 running，message-bot 清理 effect 会清掉它，
+          // assistantStatus 也停留在 pending，重试按钮随之消失。
+          synthesizeGroupRunPausedState(clientRunID);
           shouldKeepConversationLayout = true;
           releaseAttachments(effectiveAttachments);
           updatePendingExchange(exchangeKey, (current) => ({
@@ -1422,6 +1427,7 @@ export function useChatMessageSubmit({
             assistantFileProc: false,
             assistantActivityLabel: undefined,
             assistantProcessTrace: readLiveUpstreamThinkTrace(clientRunID) ?? current.assistantProcessTrace,
+            assistantStatus: "interrupted",
             assistantInlineAlert: undefined,
           }));
           return false;

@@ -588,12 +588,15 @@ func (st *agentGroupRunState) executeMemberStepAfterSupervisor(
 func (st *agentGroupRunState) blockPausedRetryableRun(ctx context.Context, step *domainagentgroup.Step, code string, message string) error {
 	store := st.service.agentGroupRunStore
 	now := time.Now()
+	// 与 failAgentGroupStepAndPause 一致：断连场景用独立上下文保证终态落库。
+	persistCtx, cancelPersist := finalizePersistContext(ctx)
+	defer cancelPersist()
 	blocked := domainagentgroup.RunStatusBlocked
 	runPatch := domainagentgroup.RunPatch{Status: &blocked, ErrorCode: &code, ErrorMessage: &message, EndedAt: &now}
 	if st.assistantMessage != nil {
 		runPatch.AssistantMessageID = &st.assistantMessage.ID
 	}
-	ok, err := store.CASUpdateAgentGroupRun(ctx, st.run.ID, st.stateVersion, domainagentgroup.RunStatusPausedRetryable, runPatch)
+	ok, err := store.CASUpdateAgentGroupRun(persistCtx, st.run.ID, st.stateVersion, domainagentgroup.RunStatusPausedRetryable, runPatch)
 	if err != nil {
 		return err
 	}
@@ -645,7 +648,10 @@ func (st *agentGroupRunState) updateTopLevelRun(ctx context.Context, retErr erro
 		ReasoningTokens:  &st.totalReasoningTokens,
 		ToolCallsCount:   &st.totalToolCalls,
 	}
-	if _, err := st.service.repo.UpdateConversationRun(ctx, st.input.UserID, st.input.ConversationID, st.runID, patch); err != nil {
+	// 断连场景 ctx 已取消：审计行用独立上下文落库（失败仅记日志，不影响运行终态）。
+	persistCtx, cancelPersist := finalizePersistContext(ctx)
+	defer cancelPersist()
+	if _, err := st.service.repo.UpdateConversationRun(persistCtx, st.input.UserID, st.input.ConversationID, st.runID, patch); err != nil {
 		st.service.logger.Error("update_conversation_run_failed",
 			zap.String("trace_id", traceid.FromContext(ctx)),
 			zap.String("run_id", st.runID),
