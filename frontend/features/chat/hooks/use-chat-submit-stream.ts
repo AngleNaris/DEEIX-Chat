@@ -4,24 +4,25 @@ import * as React from "react";
 
 import { useChatMessageSubmit } from "@/features/chat/hooks/use-chat-message-submit";
 import { useChatStreamBuffer } from "@/features/chat/hooks/use-chat-stream-buffer";
-import type { ChatAreaMessage } from "@/features/chat/types/messages";
 import type {
   ChatModelOption,
   PendingAttachment,
   PendingExchangeMap,
 } from "@/features/chat/types/chat-runtime";
+import type { ChatAreaMessage } from "@/features/chat/types/messages";
 import type {
   ConversationDTO,
   ConversationOptions,
   MessageDTO,
 } from "@/shared/api/conversation.types";
-import type { SkillSummaryDTO } from "@/shared/api/skills.types";
 import type { PromptPresetDTO } from "@/shared/api/prompt-presets.types";
+import type { SkillSummaryDTO } from "@/shared/api/skills.types";
 
 export function useChatSubmitStream({
   conversationID,
   conversationScopeKey,
   activeConversation,
+  isAgentGroupConversation,
   selectedPlatformModelName,
   modelOptions,
   selectedToolIDs,
@@ -61,6 +62,7 @@ export function useChatSubmitStream({
   conversationID: string | null;
   conversationScopeKey: string;
   activeConversation: ConversationDTO | null;
+  isAgentGroupConversation: boolean;
   selectedPlatformModelName: string;
   modelOptions: ChatModelOption[];
   selectedToolIDs: number[];
@@ -105,6 +107,7 @@ export function useChatSubmitStream({
     conversationID,
     conversationScopeKey,
     activeConversation,
+    isAgentGroupConversation,
     selectedPlatformModelName,
     modelOptions,
     selectedToolIDs,

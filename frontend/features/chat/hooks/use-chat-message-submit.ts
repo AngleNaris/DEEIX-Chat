@@ -1,26 +1,25 @@
 "use client";
 
-import * as React from "react";
 import { useTranslations } from "next-intl";
+import * as React from "react";
 import { toast } from "sonner";
-
 import {
   ensureLiveGroupRunPlaceholder,
   synthesizeGroupRunPausedState,
   upsertGroupRunEvent,
   upsertLiveGroupRunTool,
+  useLiveGroupRun,
 } from "@/features/agent-groups/model/group-run-store";
-import type { ChatAreaMessage, ImageLoadingAspectRatio } from "@/features/chat/types/messages";
-import type {
-  ChatModelOption,
-  PendingAttachment,
-  PendingExchange,
-  PendingExchangeMap,
-} from "@/features/chat/types/chat-runtime";
+import { useHiddenQueuedParentRuns } from "@/features/chat/hooks/use-hidden-queued-parent-runs";
 import type { ChatSubmitBlockReason } from "@/features/chat/model/chat-task";
 import { resolveChatSubmitDecision } from "@/features/chat/model/chat-task";
-import { useHiddenQueuedParentRuns } from "@/features/chat/hooks/use-hidden-queued-parent-runs";
-import { useLiveGroupRun } from "@/features/agent-groups/model/group-run-store";
+import {
+  buildChildrenIndex,
+  parseAttachments,
+  toBranchKey,
+} from "@/features/chat/model/chat-thread";
+import { sanitizeConversationOptions } from "@/features/chat/model/conversation-options";
+import { buildMediaImagePreviewMarkdown } from "@/features/chat/model/media-image-preview";
 import {
   resolveDefaultSubmissionParentMessage,
   resolvePersistedPublicID,
@@ -31,30 +30,28 @@ import {
   preserveRicherLiveUpstreamThinkTrace,
   readLiveUpstreamThinkTrace,
 } from "@/features/chat/model/upstream-think-store";
+import type {
+  ChatModelOption,
+  PendingAttachment,
+  PendingExchange,
+  PendingExchangeMap,
+} from "@/features/chat/types/chat-runtime";
+import type { ChatAreaMessage, ImageLoadingAspectRatio } from "@/features/chat/types/messages";
 import {
   resolveErrorDetails,
   resolveErrorMessage,
   resolveErrorSummary,
 } from "@/features/chat/utils/chat-runtime";
 import {
-  buildChildrenIndex,
-  parseAttachments,
-  toBranchKey,
-} from "@/features/chat/model/chat-thread";
-import { sanitizeConversationOptions } from "@/features/chat/model/conversation-options";
-import { buildMediaImagePreviewMarkdown } from "@/features/chat/model/media-image-preview";
-import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
-import { notifyResponseCompletion } from "@/shared/lib/browser-notifications";
-import {
+  type ConversationStreamOptions,
   cancelMessageGeneration,
   getConversation,
   isGroupStreamAwareEvent,
+  streamMessage as streamConversationMessage,
   streamImageEdit,
   streamImageGeneration,
-  streamMessage as streamConversationMessage,
   streamVideoGeneration,
   updateMessage,
-  type ConversationStreamOptions,
 } from "@/shared/api/conversation";
 import type {
   ConversationDTO,
@@ -67,8 +64,10 @@ import type {
   StreamMessageEvent,
 } from "@/shared/api/conversation.types";
 import { ApiError } from "@/shared/api/http-client";
-import type { SkillSummaryDTO } from "@/shared/api/skills.types";
 import type { PromptPresetDTO } from "@/shared/api/prompt-presets.types";
+import type { SkillSummaryDTO } from "@/shared/api/skills.types";
+import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
+import { notifyResponseCompletion } from "@/shared/lib/browser-notifications";
 
 function resolveComposerContent(draft: string, selectedPrompts: PromptPresetDTO[]): string {
   const promptText = (selectedPrompts ?? [])
@@ -470,6 +469,7 @@ export function useChatMessageSubmit({
   conversationID,
   conversationScopeKey,
   activeConversation,
+  isAgentGroupConversation,
   selectedPlatformModelName,
   modelOptions,
   selectedToolIDs,
@@ -515,6 +515,7 @@ export function useChatMessageSubmit({
   conversationID: string | null;
   conversationScopeKey: string;
   activeConversation: ConversationDTO | null;
+  isAgentGroupConversation: boolean;
   selectedPlatformModelName: string;
   modelOptions: ChatModelOption[];
   selectedToolIDs: number[];
@@ -848,8 +849,16 @@ export function useChatMessageSubmit({
           description: t("attachmentsTruncatedDescription", { count: maxFilesPerMessage }),
         });
       }
+      const modelGuardConversation = queuedSubmission?.conversation ?? activeConversationRef.current;
+      const isAgentGroupTarget = modelGuardConversation
+        ? Boolean(modelGuardConversation.agentGroupID?.trim())
+        : isAgentGroupConversation;
       const sanitizedOptions = sanitizeConversationOptions(requestOptions);
-      const submitDecision = resolveChatSubmitDecision(selectedModel, effectiveAttachments, sanitizedOptions);
+      const submitDecision = resolveChatSubmitDecision(
+        isAgentGroupTarget ? null : selectedModel,
+        effectiveAttachments,
+        isAgentGroupTarget ? undefined : sanitizedOptions,
+      );
       if (submitDecision.blockedReason) {
         toast.error(t("mediaInputUnsupported"), {
           description: resolveSubmitBlockDescription(submitDecision.blockedReason, t),
@@ -858,9 +867,7 @@ export function useChatMessageSubmit({
       }
       const submitTask = submitDecision.task;
       // 群组会话不校验请求级模型：模型由群组成员配置推断（后端编排器按成员执行）。
-      const modelGuardConversation = queuedSubmission?.conversation ?? activeConversationRef.current;
-      const isAgentGroupConversation = Boolean(modelGuardConversation?.agentGroupID?.trim());
-      if (!requestPlatformModelName && !isAgentGroupConversation) {
+      if (!requestPlatformModelName && !isAgentGroupTarget) {
         toast.error(t("noModel"), { description: t("selectModelFirst") });
         return false;
       }
@@ -930,7 +937,7 @@ export function useChatMessageSubmit({
           tempUserPublicID,
           tempAssistantPublicID,
           runID: clientRunID,
-          platformModelName: requestPlatformModelName,
+          platformModelName: isAgentGroupTarget ? "" : requestPlatformModelName,
           parentPublicID: pendingParentPublicID,
           sourcePublicID: resolvedSourcePublicID,
           branchReason: resolvedBranchReason,
@@ -1089,9 +1096,14 @@ export function useChatMessageSubmit({
           }
           touchByPublicID(targetConversationID, { title: optimisticTitle });
         }
+        const targetIsAgentGroupConversation =
+          isAgentGroupTarget || Boolean(targetConversation?.agentGroupID?.trim());
         const commonStreamPayload = {
-          model: requestPlatformModelName,
-          options: Object.keys(sanitizedOptions).length > 0 ? sanitizedOptions : undefined,
+          ...(targetIsAgentGroupConversation ? {} : { model: requestPlatformModelName }),
+          options:
+            !targetIsAgentGroupConversation && Object.keys(sanitizedOptions).length > 0
+              ? sanitizedOptions
+              : undefined,
           clientRunID: clientRunID,
           fileIDs: effectiveAttachments.length > 0 ? effectiveAttachments.map((item) => item.fileID) : undefined,
           parentMessagePublicID: resolvedParentPublicID || undefined,
@@ -1332,6 +1344,7 @@ export function useChatMessageSubmit({
             ? activeConversationRef.current
             : targetConversation;
         const shouldUpdateConversationModel =
+          !targetIsAgentGroupConversation &&
           modelRunSequence > (latestCompletedModelRunSequenceRef.current.get(targetConversationScopeKey) ?? 0);
         if (shouldUpdateConversationModel) {
           latestCompletedModelRunSequenceRef.current.set(targetConversationScopeKey, modelRunSequence);
@@ -1531,6 +1544,7 @@ export function useChatMessageSubmit({
       selectedSkills,
       selectedPrompts,
       htmlVisualPromptEnabled,
+      isAgentGroupConversation,
       selectedPlatformModelName,
       setAttachments,
       setBranchSelections,

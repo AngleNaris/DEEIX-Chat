@@ -751,6 +751,7 @@ export function AppChatArea() {
     resetToken: newConversationRevision,
     messages,
     activeConversation: currentConversation,
+    isAgentGroupConversation: Boolean(activeAgentGroup?.publicID),
     selectedPlatformModelName,
     modelOptions,
     selectedToolIDs,
