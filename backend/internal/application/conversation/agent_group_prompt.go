@@ -23,6 +23,11 @@ const (
 	agentGroupSupervisorActionFinish   = "finish"
 )
 
+// agentGroupSupervisorMaxCorrections 单次主管决策回合的自动纠错上限：
+// 决策无法解析或 delegate 校验失败时，把具体错误与有效成员清单回喂主管重新决策的次数
+// （超过后仍无效才失败暂停，重试路径同样受益）。
+const agentGroupSupervisorMaxCorrections = 2
+
 // agentGroupSupervisorJSONSchema 是主管输出的 JSON Schema（response_format json_schema 模式）。
 // 不开启 strict，兼容 anthropic 适配器。
 var agentGroupSupervisorJSONSchema = map[string]interface{}{
@@ -174,7 +179,8 @@ const agentGroupSupervisorOutputProtocol = `## 群组主管输出协议
 2. 不得指派主管自己，也不得指派清单以外的任何角色；
 3. 每次只指派一个成员，不允许同时安排多个成员；
 4. 指令必须明确具体、可独立完成，避免模糊或重复指令；
-5. 只有当全部需求都已被已完成步骤充分满足时，才允许输出 "finish" 并给出完整最终回答；否则继续 delegate。`
+5. 只有当全部需求都已被已完成步骤充分满足时，才允许输出 "finish" 并给出完整最终回答；否则继续 delegate。
+6. memberID 可直接填写清单中对应的 name（角色名，如 lyricist），系统可自动解析；严禁编造清单外的名称或 ID。`
 
 // agentGroupMemberOutputProtocol 约束成员的输出。
 const agentGroupMemberOutputProtocol = `## 群组成员输出协议
@@ -214,6 +220,8 @@ func agentGroupMemberUserContent(userRequirement string, decision *agentGroupSup
 }
 
 // agentGroupSnapshotMemberByID 在快照中按 memberID 查找成员（不存在返回 nil）。
+// 先按 PublicID（成员清单中的 memberID）精确匹配；
+// 再按 RoleName 大小写不敏感唯一匹配兜底（模型可能输出角色名而非 32 位 ID，重名歧义视为未找到）。
 func agentGroupSnapshotMemberByID(snapshot *domainagentgroup.RunSnapshot, memberID string) *domainagentgroup.RunSnapshotMember {
 	if snapshot == nil || strings.TrimSpace(memberID) == "" {
 		return nil
@@ -223,7 +231,36 @@ func agentGroupSnapshotMemberByID(snapshot *domainagentgroup.RunSnapshot, member
 			return &snapshot.Members[i]
 		}
 	}
-	return nil
+	lower := strings.ToLower(strings.TrimSpace(memberID))
+	var match *domainagentgroup.RunSnapshotMember
+	for i := range snapshot.Members {
+		if strings.ToLower(snapshot.Members[i].RoleName) == lower {
+			if match != nil {
+				return nil // 重名歧义：拒绝猜测
+			}
+			match = &snapshot.Members[i]
+		}
+	}
+	return match
+}
+
+// agentGroupSupervisorCorrectionHint 构造主管决策纠错提示：
+// 说明上一轮输出无效的具体原因，并重新给出可指派成员的 memberID → 角色名对照表，
+// 供自动纠错循环回喂给主管重新决策。
+func agentGroupSupervisorCorrectionHint(issue error, members []domainagentgroup.RunSnapshotMember) string {
+	var builder strings.Builder
+	builder.WriteString("<correction>\n")
+	fmt.Fprintf(&builder, "你上一轮输出的决策无效，原因：%s\n\n", xmlEscapeText(issue.Error()))
+	builder.WriteString("请忽略上一轮输出，重新输出一份完整的 JSON 决策。可指派成员（memberID 与 name 均可作为 memberID 使用）：\n")
+	for _, member := range members {
+		if member.MemberType != domainagentgroup.MemberTypeWorker || !member.Enabled {
+			continue
+		}
+		fmt.Fprintf(&builder, "- memberID: %s  name: %s\n", xmlEscapeText(member.PublicID), xmlEscapeText(member.RoleName))
+	}
+	builder.WriteString("若你认为任务已经完成，请输出 action=\"finish\" 并附上完整的最终 answer；否则必须 delegate 给清单中的一名成员。\n")
+	builder.WriteString("</correction>")
+	return builder.String()
 }
 
 // validateAgentGroupDelegation 校验主管 delegate 决策的成员目标（10.2）：

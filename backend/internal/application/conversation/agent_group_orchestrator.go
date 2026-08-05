@@ -229,18 +229,9 @@ func (st *agentGroupRunState) runSerial(ctx context.Context) error {
 			return err
 		}
 		st.emitAgentGroupStepStarted(ctx, supervisorStep, supervisorAttempt, &st.snapshot.Supervisor)
-		supervisorOutput, err := s.ExecuteAgentTurn(ctx, st.agentTurnInput(
-			supervisorStep, supervisorAttempt, &st.snapshot.Supervisor,
-			agentGroupSupervisorSystemPrompt(st.snapshot),
-			agentGroupSupervisorUserContent(st.input.Content, st.snapshot.Members, agentGroupContextBrief(st.summaries)),
-			agentGroupSupervisorOptions(nil),
-		))
+		decision, supervisorOutput, err := st.runSupervisorDecision(ctx, supervisorStep, supervisorAttempt, &st.snapshot.Supervisor)
 		if err != nil {
 			return st.failAgentGroupStepAndPause(ctx, supervisorStep, supervisorAttempt, &st.snapshot.Supervisor, err)
-		}
-		decision, err := resolveAgentGroupSupervisorDecision(supervisorOutput.Text)
-		if err != nil {
-			return st.failAgentGroupStepAndPause(ctx, supervisorStep, supervisorAttempt, &st.snapshot.Supervisor, ErrAgentGroupInvalidDecision)
 		}
 
 		if decision.Action == agentGroupSupervisorActionFinish {
@@ -254,11 +245,11 @@ func (st *agentGroupRunState) runSerial(ctx context.Context) error {
 			return st.completeAgentGroupRun(ctx)
 		}
 
-		// delegate：先校验成员（10.2），校验通过才最终化主管步骤。
-		if err := validateAgentGroupDelegation(st.snapshot, decision); err != nil {
+		// delegate：runSupervisorDecision 已校验成员（10.2），这里仅兜底解析。
+		member := agentGroupSnapshotMemberByID(st.snapshot, decision.MemberID)
+		if member == nil {
 			return st.failAgentGroupStepAndPause(ctx, supervisorStep, supervisorAttempt, &st.snapshot.Supervisor, ErrAgentGroupInvalidMember)
 		}
-		member := agentGroupSnapshotMemberByID(st.snapshot, decision.MemberID)
 		if err := st.finishAgentGroupStepSuccess(ctx, supervisorStep, supervisorAttempt, &st.snapshot.Supervisor, supervisorOutput); err != nil {
 			return err
 		}
@@ -284,6 +275,61 @@ func (st *agentGroupRunState) runSerial(ctx context.Context) error {
 		}
 		st.recordStepSummary(memberStep, member, decision.Instruction, memberOutput)
 	}
+}
+
+// runSupervisorDecision 执行一次主管决策回合并解析结构化输出，带有限自动纠错：
+// 决策无法解析或 delegate 校验失败时，把具体错误与有效成员清单回喂主管重新决策，
+// 至多 agentGroupSupervisorMaxCorrections 轮；纠错耗尽仍无效才返回错误
+// （解析失败 → ErrAgentGroupInvalidDecision；校验失败 → ErrAgentGroupInvalidMember）。
+// runSerial 与 executeRetryableStep（重试路径）共用，保证重试同样受益于自动纠错。
+// 中间纠错回合的用量一并累计，保证计费准确；最终输出由 finishAgentGroupStepSuccess 累计。
+func (st *agentGroupRunState) runSupervisorDecision(
+	ctx context.Context,
+	step *domainagentgroup.Step,
+	attempt *domainagentgroup.Attempt,
+	member *domainagentgroup.RunSnapshotMember,
+) (*agentGroupSupervisorDecision, *AgentTurnOutput, error) {
+	s := st.service
+	baseUser := agentGroupSupervisorUserContent(st.input.Content, st.snapshot.Members, agentGroupContextBrief(st.summaries))
+	output, err := s.ExecuteAgentTurn(ctx, st.agentTurnInput(
+		step, attempt, member,
+		agentGroupSupervisorSystemPrompt(st.snapshot),
+		baseUser,
+		agentGroupSupervisorOptions(nil),
+	))
+	if err != nil {
+		return nil, nil, err
+	}
+
+	for round := 0; round <= agentGroupSupervisorMaxCorrections; round++ {
+		decision, decisionErr := resolveAgentGroupSupervisorDecision(output.Text)
+		if decisionErr == nil && decision.Action == agentGroupSupervisorActionDelegate {
+			decisionErr = validateAgentGroupDelegation(st.snapshot, decision)
+		}
+		if decisionErr == nil {
+			return decision, output, nil
+		}
+		if round >= agentGroupSupervisorMaxCorrections {
+			// 纠错耗尽：归一化最终错误（解析失败 → InvalidDecision；校验失败 → InvalidMember）。
+			if errors.Is(decisionErr, ErrAgentGroupInvalidDecision) {
+				return nil, output, ErrAgentGroupInvalidDecision
+			}
+			return nil, output, ErrAgentGroupInvalidMember
+		}
+		// 回喂纠错提示重新决策；中间回合用量累计进总账。
+		st.accumulateUsage(output)
+		output, err = s.ExecuteAgentTurn(ctx, st.agentTurnInput(
+			step, attempt, member,
+			agentGroupSupervisorSystemPrompt(st.snapshot),
+			baseUser+"\n\n"+agentGroupSupervisorCorrectionHint(decisionErr, st.snapshot.Members),
+			agentGroupSupervisorOptions(nil),
+		))
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	// 不可达（循环内已返回）。
+	return nil, output, ErrAgentGroupInvalidDecision
 }
 
 // agentTurnInput 组装一次内部 Actor 回合输入。

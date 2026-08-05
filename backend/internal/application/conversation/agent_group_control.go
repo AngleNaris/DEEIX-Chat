@@ -501,18 +501,10 @@ func (st *agentGroupRunState) executeRetryableStep(
 	s := st.service
 	switch step.StepType {
 	case domainagentgroup.StepTypeSupervisorDecide:
-		output, err := s.ExecuteAgentTurn(ctx, st.agentTurnInput(
-			step, attempt, member,
-			agentGroupSupervisorSystemPrompt(st.snapshot),
-			agentGroupSupervisorUserContent(st.input.Content, st.snapshot.Members, agentGroupContextBrief(st.summaries)),
-			agentGroupSupervisorOptions(nil),
-		))
+		// 主管步骤重试走与首次执行相同的决策路径（含自动纠错），保证重试不重复失败。
+		decision, output, err := st.runSupervisorDecision(ctx, step, attempt, member)
 		if err != nil {
 			return st.failAgentGroupStepAndPause(ctx, step, attempt, member, err)
-		}
-		decision, err := resolveAgentGroupSupervisorDecision(output.Text)
-		if err != nil {
-			return st.failAgentGroupStepAndPause(ctx, step, attempt, member, ErrAgentGroupInvalidDecision)
 		}
 		if decision.Action == agentGroupSupervisorActionFinish {
 			st.finalAnswer = decision.Answer
@@ -524,10 +516,10 @@ func (st *agentGroupRunState) executeRetryableStep(
 			}
 			return st.completeAgentGroupRun(ctx)
 		}
-		if err := validateAgentGroupDelegation(st.snapshot, decision); err != nil {
+		target := agentGroupSnapshotMemberByID(st.snapshot, decision.MemberID)
+		if target == nil {
 			return st.failAgentGroupStepAndPause(ctx, step, attempt, member, ErrAgentGroupInvalidMember)
 		}
-		target := agentGroupSnapshotMemberByID(st.snapshot, decision.MemberID)
 		if err := st.finishAgentGroupStepSuccess(ctx, step, attempt, member, output); err != nil {
 			return err
 		}
