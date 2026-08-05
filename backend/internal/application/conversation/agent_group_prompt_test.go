@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	domainagentgroup "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/agentgroup"
+	domainconversation "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 )
 
 // agentGroupPromptTestSnapshot 构造测试快照：nWorkers 个启用的 worker 成员 + 一个主管。
@@ -113,5 +114,41 @@ func TestResolveAgentGroupSupervisorDecision_DelegateWithAnswerNull(t *testing.T
 	}
 	if decision.Action != agentGroupSupervisorActionDelegate || decision.MemberID != "lyricist" {
 		t.Fatalf("unexpected decision: %+v", decision)
+	}
+}
+
+// TestAgentGroupUserOnlyContext 验证群组内部回合上下文只保留用户消息：
+// assistant 历史回复（可能声称"无法调用其他成员"/伪造团队成果）必须被剔除，
+// 用户消息序列（意图来源）完整保留。
+func TestAgentGroupUserOnlyContext(t *testing.T) {
+	messages := []domainconversation.Message{
+		{Role: "user", Content: "看看流程是否正常"},
+		{Role: "assistant", Content: "流程正常"},
+		{Role: "user", Content: "先随便创作一首歌"},
+		{Role: "assistant", Content: "我无法调用其他独立成员，只能模拟团队分工"},
+		{Role: "user", Content: "你要实际走一遍调用群组成员的流程"},
+	}
+	filtered := agentGroupUserOnlyContext(messages)
+	if len(filtered) != 3 {
+		t.Fatalf("expected 3 user messages, got %d", len(filtered))
+	}
+	for _, message := range filtered {
+		if message.Role != "user" {
+			t.Fatalf("non-user message leaked into internal context: %+v", message)
+		}
+	}
+	if filtered[0].Content != "看看流程是否正常" || filtered[2].Content != "你要实际走一遍调用群组成员的流程" {
+		t.Fatalf("user message order/content changed: %+v", filtered)
+	}
+}
+
+// TestAgentGroupUserOnlyContext_EmptyAndAllAssistant 边界：空输入与全 assistant 输入。
+func TestAgentGroupUserOnlyContext_EmptyAndAllAssistant(t *testing.T) {
+	if got := agentGroupUserOnlyContext(nil); len(got) != 0 {
+		t.Fatalf("nil input should return empty, got %+v", got)
+	}
+	all := []domainconversation.Message{{Role: "assistant", Content: "a"}, {Role: "assistant", Content: "b"}}
+	if got := agentGroupUserOnlyContext(all); len(got) != 0 {
+		t.Fatalf("all-assistant input should return empty, got %+v", got)
 	}
 }

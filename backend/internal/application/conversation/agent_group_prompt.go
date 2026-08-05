@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	domainagentgroup "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/agentgroup"
+	domainconversation "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 )
 
 // agentGroupSupervisorDecision 是主管结构化输出（delegate/finish）的解析结果。
@@ -242,6 +243,22 @@ func agentGroupSnapshotMemberByID(snapshot *domainagentgroup.RunSnapshot, member
 		}
 	}
 	return match
+}
+
+// agentGroupUserOnlyContext 过滤群组内部回合的对话历史，仅保留用户消息。
+// 历史 assistant 回复是单模型对话产物：可能声称「无法调用其他成员」、
+// 伪造团队成果，或包含与本轮任务无关的旧答复 —— 回灌进 supervisor/成员
+// 回合会污染模型对自身角色的定位（成员误以为自己是历史里那个"模拟团队"
+// 的助手）。群组内部协作成果经 brief 摘要传递，无需携带历史回复；
+// 保留用户消息序列则让 supervisor/成员仍能理解用户意图（如"随便创作一首歌"）。
+func agentGroupUserOnlyContext(messages []domainconversation.Message) []domainconversation.Message {
+	filtered := make([]domainconversation.Message, 0, len(messages))
+	for _, message := range messages {
+		if message.Role == "user" {
+			filtered = append(filtered, message)
+		}
+	}
+	return filtered
 }
 
 // agentGroupSupervisorCorrectionHint 构造主管决策纠错提示：

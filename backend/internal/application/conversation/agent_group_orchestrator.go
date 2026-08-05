@@ -124,6 +124,9 @@ func (s *Service) executeAgentGroupRun(
 		}
 	}
 	contextMessages = recoverAssistantRetryUserStates(contextMessages)
+	// 群组内部回合专用上下文：仅保留用户消息（assistant 历史回复会带偏
+	// 成员/主管对自身角色的定位，详见 agentGroupUserOnlyContext）。
+	contextMessages = agentGroupUserOnlyContext(contextMessages)
 
 	// 创建运行（pending，StateVersion=1）。
 	run := &domainagentgroup.Run{
