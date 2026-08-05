@@ -614,6 +614,27 @@ export function setGroupRunRetrying(clientRunID: string | null | undefined, retr
   return next;
 }
 
+// 重试流的 AbortController 以 clientRunID 注册（§16.10）：重试可能从消息 meta 或
+// 失败步骤 trace 发起，停止按钮需要能中断在途流，无论发起方是谁。
+const retryAbortControllers = new Map<string, AbortController>();
+
+export function registerGroupRunRetryAbort(clientRunID: string | null | undefined, controller: AbortController | null) {
+  const runID = normalizeRunID(clientRunID);
+  if (!runID) {
+    return;
+  }
+  if (controller) {
+    retryAbortControllers.set(runID, controller);
+  } else {
+    retryAbortControllers.delete(runID);
+  }
+}
+
+export function abortGroupRunRetry(clientRunID: string | null | undefined) {
+  const runID = normalizeRunID(clientRunID);
+  retryAbortControllers.get(runID)?.abort();
+}
+
 export function clearLiveGroupRun(clientRunID: string | null | undefined) {
   const runID = normalizeRunID(clientRunID);
   if (!runID || !runs.delete(runID)) {

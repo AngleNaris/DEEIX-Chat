@@ -3,7 +3,6 @@
 import * as React from "react";
 
 import { ChevronDown } from "@/components/animate-ui/icons/chevron-down";
-import { RotateCcw } from "@/components/animate-ui/icons/rotate-ccw";
 import { X } from "@/components/animate-ui/icons/x";
 import {
   Accordion,
@@ -14,18 +13,14 @@ import {
 import { Button } from "@/components/ui/button";
 import { Marker, MarkerContent } from "@/components/ui/marker";
 import { Spinner } from "@/components/ui/spinner";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   useAgentGroupRunLabels,
   type AgentGroupRunLabels,
 } from "@/features/agent-groups/hooks/use-agent-group-run-labels";
-import {
-  notifyGroupRunSettled,
-  readLiveGroupRun,
-  setGroupRunRetrying,
-  upsertGroupRunEvent,
-  type GroupRunState,
-  type GroupRunStepState,
+import { useAgentGroupStepActions } from "@/features/agent-groups/hooks/use-agent-group-step-actions";
+import type {
+  GroupRunState,
+  GroupRunStepState,
 } from "@/features/agent-groups/model/group-run-store";
 import { MessageUpstreamThink } from "@/features/chat/components/message/message-thinking-trace";
 import {
@@ -35,21 +30,16 @@ import {
 import { TRACE_ROOT_CLASS } from "@/features/chat/components/shared/message-process-trace-shared";
 import type { TraceDisplayEvent } from "@/features/chat/model/message-process-trace";
 import { cn } from "@/lib/utils";
-import {
-  abandonAgentGroupRun,
-  retryAgentGroupRunStep,
-} from "@/shared/api/agent-groups";
-import type { GroupStreamEvent } from "@/shared/api/conversation.types";
-import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 import { StreamdownRender } from "@/shared/components/markdown/streamdown-render";
 
 // Agent 群组运行时间线（方案 §16.4-§16.10）。
 // 复用现有无边框 Trace 布局：每步一个独立 Accordion，内部复用 MessageUpstreamThink /
 // MessageToolChainTrace / StreamdownRender；当前运行与失败步骤自动展开，成功步骤在后续
 // 步骤开始时自动折叠为摘要；长等待按真实阶段 + 已等待时长显示（不展示虚假百分比）。
-// §16.10：失败步骤显示 Actor/模型/错误摘要/部分正文/工具调用/Attempt 编号，以及
-// “从此处重试”与“放弃本轮”按钮（点击后按钮进入 loading，携带 retryRequestID 防双击）；
-// 重试流事件写回实时状态，结束后 notifyGroupRunSettled 触发消息列表刷新。
+// §16.10：失败步骤显示 Actor/模型/错误摘要/部分正文/工具调用/Attempt 编号；
+// 重试统一由消息 meta 的重试按钮发起（暂停可重试时原地重试失败步骤），
+// 此处仅保留“停止重试”与“放弃本轮”操作；重试流事件写回实时状态，
+// 结束后 notifyGroupRunSettled 触发消息列表刷新。
 
 const WAITING_SECONDS_THRESHOLD = 5;
 const EMPTY_TRACE_EVENTS: TraceDisplayEvent[] = [];
@@ -145,147 +135,6 @@ function resolveStepStatusText(
   }
 }
 
-// synthesizeInterruptedPause 在重试流被用户停止后本地镜像服务端结局：
-// 服务端 Cancelable 流断开会把当前 Attempt 中断并回到 paused_retryable
-// （错误码 INTERRUPTED），此处同步写入 store，避免 UI 停留在 running。
-function synthesizeInterruptedPause(
-  clientRunID: string,
-  run: GroupRunState,
-  step: GroupRunStepState,
-) {
-  const currentRun = readLiveGroupRun(clientRunID);
-  if (!currentRun) {
-    return;
-  }
-  const currentStep = currentRun.steps.find((item) => item.stepID === step.stepID);
-  const attempt = currentStep?.attempts[currentStep.attempts.length - 1];
-  if (attempt) {
-    upsertGroupRunEvent(clientRunID, {
-      type: "group_step_failed",
-      groupRunID: currentRun.groupRunID || run.groupRunID,
-      stepID: step.stepID,
-      attemptID: attempt.attemptID,
-      attemptNumber: attempt.attemptNumber,
-      sequence: step.sequence,
-      stepType: step.stepType,
-      actorMemberID: step.actor.memberID,
-      actorName: step.actor.name,
-      actorType: step.actor.type,
-      actorIcon: step.actor.icon,
-      actorColor: step.actor.color,
-      model: step.actor.model,
-      status: "interrupted",
-      errorCode: "INTERRUPTED",
-      message: "agent group run interrupted",
-    } satisfies GroupStreamEvent);
-  }
-  upsertGroupRunEvent(clientRunID, {
-    type: "group_run_paused",
-    groupRunID: currentRun.groupRunID || run.groupRunID,
-    status: "paused_retryable",
-    errorCode: "INTERRUPTED",
-  } satisfies GroupStreamEvent);
-}
-
-// useGroupRunStepActions 承载单个失败步骤的重试 / 停止 / 放弃交互（§16.10）。
-function useGroupRunStepActions({
-  clientRunID,
-  run,
-  step,
-}: {
-  clientRunID: string;
-  run: GroupRunState;
-  step: GroupRunStepState;
-}) {
-  const [retrying, setRetrying] = React.useState(false);
-  const [abandoning, setAbandoning] = React.useState(false);
-  const [actionError, setActionError] = React.useState("");
-  const abortRef = React.useRef<AbortController | null>(null);
-  const retryRequestIDRef = React.useRef("");
-
-  // 清理：卸载时中断在途重试流（服务端 Cancelable 断开后自动回到 paused_retryable）。
-  React.useEffect(() => {
-    return () => {
-      abortRef.current?.abort();
-    };
-  }, []);
-
-  const handleRetry = React.useCallback(async () => {
-    setRetrying(true);
-    setActionError("");
-    const controller = new AbortController();
-    abortRef.current = controller;
-    retryRequestIDRef.current = window.crypto.randomUUID().replaceAll("-", "");
-    // §16.10 输入锁：重试进行中保持锁定，直到结算（成功/再次暂停/停止/放弃）。
-    setGroupRunRetrying(clientRunID, true);
-    let streamSettled = false;
-    try {
-      const accessToken = await resolveAccessToken();
-      const result = await retryAgentGroupRunStep(
-        accessToken,
-        run.groupRunID,
-        step.stepID,
-        retryRequestIDRef.current,
-        {
-          signal: controller.signal,
-          onGroupEvent: (event) => upsertGroupRunEvent(clientRunID, event),
-          // 最终答案由服务端写入顶层消息，结算后经 reload 展示，无需本地合并。
-          onDelta: () => {},
-          onStreamError: () => {},
-        },
-      );
-      streamSettled = true;
-      if (result.status === "error" && result.message) {
-        setActionError(result.message);
-      }
-    } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") {
-        synthesizeInterruptedPause(clientRunID, run, step);
-      } else {
-        setActionError(error instanceof Error ? error.message : "retry failed");
-      }
-    } finally {
-      abortRef.current = null;
-      setGroupRunRetrying(clientRunID, false);
-      setRetrying(false);
-      if (streamSettled) {
-        notifyGroupRunSettled(clientRunID);
-      }
-    }
-  }, [clientRunID, run, step]);
-
-  const handleStopRetry = React.useCallback(() => {
-    abortRef.current?.abort();
-  }, []);
-
-  const handleAbandon = React.useCallback(async () => {
-    setAbandoning(true);
-    setActionError("");
-    try {
-      const accessToken = await resolveAccessToken();
-      await abandonAgentGroupRun(accessToken, run.groupRunID);
-      upsertGroupRunEvent(clientRunID, {
-        type: "group_run_abandoned",
-        groupRunID: run.groupRunID,
-      } satisfies GroupStreamEvent);
-    } catch (error) {
-      setActionError(error instanceof Error ? error.message : "abandon failed");
-    } finally {
-      setAbandoning(false);
-      notifyGroupRunSettled(clientRunID);
-    }
-  }, [clientRunID, run.groupRunID]);
-
-  return {
-    retrying,
-    abandoning,
-    actionError,
-    handleRetry,
-    handleStopRetry,
-    handleAbandon,
-  };
-}
-
 function AgentGroupStepTrace({
   step,
   run,
@@ -326,13 +175,13 @@ function AgentGroupStepTrace({
   }, [attemptID]);
 
   // §16.10：只有被暂停/阻塞运行的最后一个未成功步骤可操作（其余成功步骤不可变）。
+  // 重试统一由消息 meta 的重试按钮发起，此处只保留“停止重试”与“放弃本轮”。
   const runActionable =
     (run.status === "paused_retryable" || run.status === "blocked") &&
     step.stepID === run.currentStepID &&
     step.status !== "success";
-  const canRetry = runActionable && run.status === "paused_retryable";
   const canAbandon = runActionable;
-  const { retrying, abandoning, actionError, handleRetry, handleStopRetry, handleAbandon } = useGroupRunStepActions({
+  const { retrying, abandoning, actionError, handleStopRetry, handleAbandon } = useAgentGroupStepActions({
     clientRunID,
     run,
     step,
@@ -348,7 +197,7 @@ function AgentGroupStepTrace({
   const actorIcon = step.actor.icon?.trim();
   const toolsActive = isRunning && hasActiveToolTraceCalls(latestAttempt.tools?.payloadJson);
   const output = latestAttempt.output?.trim() ?? "";
-  const showActions = canRetry || canAbandon || retrying;
+  const showActions = canAbandon || retrying;
   const priorAttempts = step.attempts.slice(0, -1);
 
   return (
@@ -429,25 +278,6 @@ function AgentGroupStepTrace({
           ) : null}
           {showActions ? (
             <div className="mt-2 flex flex-wrap items-center gap-1.5">
-              {canRetry ? (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="gap-1.5"
-                      disabled={retrying || abandoning}
-                      onClick={handleRetry}
-                    >
-                      {retrying ? <Spinner className="size-3.5" /> : <RotateCcw size={14} strokeWidth={1.8} />}
-                      {labels.retry}
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="top" className="text-xs">
-                    {labels.retry}
-                  </TooltipContent>
-                </Tooltip>
-              ) : null}
               {retrying ? (
                 <Button size="sm" variant="ghost" className="gap-1.5" onClick={handleStopRetry}>
                   <X className="size-3.5" />

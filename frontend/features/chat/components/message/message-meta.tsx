@@ -957,6 +957,7 @@ export function AssistantMessageMeta({
   readOnly = false,
   alwaysVisible = false,
   showBranchNavigator = true,
+  retryBusy = false,
 }: {
   item: ChatMetaMessage;
   busy: boolean;
@@ -977,6 +978,8 @@ export function AssistantMessageMeta({
   readOnly?: boolean;
   alwaysVisible?: boolean;
   showBranchNavigator?: boolean;
+  // 群组 step retry 进行中（§16.10）：重试按钮禁用，避免重复发起重试流。
+  retryBusy?: boolean;
 }) {
   const t = useTranslations("chat.messages");
   const timeT = useTranslations("common.time");
@@ -987,7 +990,7 @@ export function AssistantMessageMeta({
   );
   const messagePending = Boolean(isLive || item.status?.trim().toLowerCase() === "pending");
   const hasPersistedMessage = Boolean(resolvePersistedPublicID(item.publicID));
-  const canRetry = !readOnly && !messagePending && hasPersistedMessage;
+  const canRetry = !readOnly && !messagePending && hasPersistedMessage && !retryBusy;
   const canEdit = Boolean(canRetry && !busy && onEdit);
   const canContinue = Boolean(canRetry && !busy && item.status === "interrupted");
   const canShowBranchNavigator = Boolean(showBranchNavigator && item.branchNavigator);

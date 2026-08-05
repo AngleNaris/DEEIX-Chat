@@ -43,6 +43,7 @@ import {
   useLiveUpstreamThinkTrace,
 } from "@/features/chat/model/upstream-think-store";
 import { MessageAgentGroupTrace } from "@/features/agent-groups/components/message-agent-group-trace";
+import { useAgentGroupStepActions } from "@/features/agent-groups/hooks/use-agent-group-step-actions";
 import {
   clearLiveGroupRun,
   readLiveGroupRun,
@@ -186,9 +187,6 @@ export function ChatMessageBot({
   const submitT = useTranslations("chat.submit");
   const [isEditing, setIsEditing] = React.useState(false);
   const [editingValue, setEditingValue] = React.useState(item.content);
-  const onRetry = React.useCallback(() => {
-    void onRetryAssistantMessage(item);
-  }, [item, onRetryAssistantMessage]);
   const onContinue = React.useCallback(() => {
     void onContinueAssistantMessage?.(item);
   }, [item, onContinueAssistantMessage]);
@@ -221,6 +219,28 @@ export function ChatMessageBot({
     }
   }, [item.isStreaming, item.processTrace?.upstreamThink, item.runID]);
   const liveGroupRun = useLiveGroupRun(item.runID);
+  // 群组会话（§16.10）：运行暂停可重试时，meta 重试按钮原地重试失败步骤；
+  // 无目标步骤（非群组 / 运行未暂停）时回退到常规重试语义。
+  const retryableGroupStep = React.useMemo(() => {
+    if (!liveGroupRun || liveGroupRun.status !== "paused_retryable") {
+      return undefined;
+    }
+    return liveGroupRun.steps.find(
+      (step) => step.stepID === liveGroupRun.currentStepID && step.status !== "success",
+    );
+  }, [liveGroupRun]);
+  const groupStepActions = useAgentGroupStepActions({
+    clientRunID: item.runID,
+    run: liveGroupRun,
+    step: retryableGroupStep,
+  });
+  const onRetry = React.useCallback(() => {
+    if (retryableGroupStep) {
+      void groupStepActions.handleRetry();
+      return;
+    }
+    void onRetryAssistantMessage(item);
+  }, [groupStepActions.handleRetry, item, onRetryAssistantMessage, retryableGroupStep]);
   React.useEffect(() => {
     // 群组运行：流结束后运行仍停留在 pending/running（中断/取消）时清理占位；
     // 终态运行（completed/abandoned/paused_retryable/blocked）保留时间线。
@@ -432,6 +452,7 @@ export function ChatMessageBot({
         reaction={reaction}
         onCycleBranch={onCycleMessageBranch}
         onRetry={onRetry}
+        retryBusy={groupStepActions.retrying}
         onContinue={onContinueAssistantMessage ? onContinue : undefined}
         onEdit={() => setIsEditing(true)}
         onCopy={onCopy}
