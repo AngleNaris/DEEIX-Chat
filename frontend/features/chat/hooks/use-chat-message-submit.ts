@@ -856,7 +856,10 @@ export function useChatMessageSubmit({
         return false;
       }
       const submitTask = submitDecision.task;
-      if (!requestPlatformModelName) {
+      // 群组会话不校验请求级模型：模型由群组成员配置推断（后端编排器按成员执行）。
+      const modelGuardConversation = queuedSubmission?.conversation ?? activeConversationRef.current;
+      const isAgentGroupConversation = Boolean(modelGuardConversation?.agentGroupID?.trim());
+      if (!requestPlatformModelName && !isAgentGroupConversation) {
         toast.error(t("noModel"), { description: t("selectModelFirst") });
         return false;
       }
