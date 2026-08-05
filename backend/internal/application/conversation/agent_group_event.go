@@ -199,14 +199,28 @@ type agentGroupContextSummary struct {
 	outputSummary string
 }
 
+// agentGroupContextBriefMaxSteps 控制 brief 中保留的最近完成步骤数。
+// 超出部分明示省略：长运行（默认最多 64 步）若不设上限会把摘要灌爆上下文，
+// 且主管决策主要依赖最近几轮委派与产出的连续性（对齐任务板"仅展示最近活动"机制）。
+const agentGroupContextBriefMaxSteps = 24
+
 // agentGroupContextBrief 将已完成步骤摘要渲染为上下文文本。
+// 步骤包含主管决策（委派/完成记录）与成员执行（产出摘要），共同构成主管的
+// 跨轮次连续记忆：主管据此判断哪些任务已委派、产出是否合格、下一步该派给谁。
 func agentGroupContextBrief(summaries []agentGroupContextSummary) string {
 	if len(summaries) == 0 {
 		return ""
 	}
 	var builder strings.Builder
 	builder.WriteString("<completed_steps>\n")
-	for _, item := range summaries {
+	total := len(summaries)
+	start := 0
+	if total > agentGroupContextBriefMaxSteps {
+		start = total - agentGroupContextBriefMaxSteps
+		fmt.Fprintf(&builder, "  <!-- 本运行已完成 %d 步，以下仅展示最近 %d 步的委派与产出记录（更早步骤从略） -->\n",
+			total, agentGroupContextBriefMaxSteps)
+	}
+	for _, item := range summaries[start:] {
 		actorRole := "supervisor"
 		if item.stepType == domainagentgroup.StepTypeMemberExecute {
 			actorRole = "member"
@@ -220,6 +234,61 @@ func agentGroupContextBrief(summaries []agentGroupContextSummary) string {
 	}
 	builder.WriteString("</completed_steps>")
 	return builder.String()
+}
+
+// agentGroupBriefSnippet 压缩成员产出供 brief 复用：上限内优先保留开头与结尾的实质内容，
+// 中段省略并注明字数。长产出（如完整歌词、长报告）若仅截取开头会丢失核心成果
+// （模型输出常以客套话开头），导致主管误判任务未完成而重复委派。
+func agentGroupBriefSnippet(content string, maxLen int) string {
+	value := strings.Join(strings.Fields(strings.TrimSpace(content)), " ")
+	if value == "" {
+		return ""
+	}
+	if maxLen <= 0 {
+		maxLen = 512
+	}
+	runes := []rune(value)
+	if len(runes) <= maxLen {
+		return value
+	}
+	headLen := maxLen * 6 / 10
+	tailLen := maxLen - headLen
+	omitted := len(runes) - headLen - tailLen
+	return string(runes[:headLen]) + fmt.Sprintf("…[中略 %d 字]…", omitted) + string(runes[len(runes)-tailLen:])
+}
+
+// agentGroupDecisionHeading 渲染主管决策的标题（brief 中 step 的 instruction 属性）：
+// delegate 显示委派目标成员（模型原文，可能是中文角色名），finish 显示"完成"。
+func agentGroupDecisionHeading(decision *agentGroupSupervisorDecision) string {
+	if decision == nil {
+		return "委派决策"
+	}
+	if decision.Action == agentGroupSupervisorActionFinish {
+		return "完成（finish）"
+	}
+	member := strings.TrimSpace(decision.MemberID)
+	if member == "" {
+		return "委派"
+	}
+	return "委派：" + compactSnippet(member, 48)
+}
+
+// agentGroupDecisionBriefText 渲染主管决策的产出摘要（brief 中 step 的正文）：
+// 不暴露整段决策 JSON，只保留任务指令/最终回答的紧凑片段。
+func agentGroupDecisionBriefText(decision *agentGroupSupervisorDecision) string {
+	if decision == nil {
+		return ""
+	}
+	if decision.Action == agentGroupSupervisorActionFinish {
+		if text := strings.TrimSpace(decision.Answer); text != "" {
+			return "最终回答：" + compactSnippet(text, 240)
+		}
+		return "（无最终回答）"
+	}
+	if text := strings.TrimSpace(decision.Instruction); text != "" {
+		return "任务指令：" + compactSnippet(text, 240)
+	}
+	return "（无任务指令）"
 }
 
 // agentGroupMemberSummaries 渲染可指派成员清单。

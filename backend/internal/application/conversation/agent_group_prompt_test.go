@@ -152,3 +152,112 @@ func TestAgentGroupUserOnlyContext_EmptyAndAllAssistant(t *testing.T) {
 		t.Fatalf("all-assistant input should return empty, got %+v", got)
 	}
 }
+
+// TestAgentGroupBriefSnippet 验证成员产出头尾双摘：短文本全文保留；
+// 长文本保留开头与结尾实质内容并注明中略字数（避免单侧截断丢失核心成果）。
+func TestAgentGroupBriefSnippet(t *testing.T) {
+	if got := agentGroupBriefSnippet("", 512); got != "" {
+		t.Fatalf("empty content should return empty, got %q", got)
+	}
+	short := "简短产出"
+	if got := agentGroupBriefSnippet(short, 512); got != short {
+		t.Fatalf("short content should stay intact, got %q", got)
+	}
+	head := "好的，我马上开始创作这首歌的歌词。"
+	body := strings.Repeat("主歌部分月色照亮了窗台，", 100)
+	tail := "副歌：风经过的地方都留下我们的名字。"
+	long := head + body + tail
+	got := agentGroupBriefSnippet(long, 512)
+	if !strings.HasPrefix(got, head) {
+		t.Fatalf("brief snippet must keep head, got prefix %q", got[:20])
+	}
+	if !strings.HasSuffix(got, tail) {
+		t.Fatalf("brief snippet must keep tail, got suffix %q", got[len(got)-20:])
+	}
+	if !strings.Contains(got, "中略") {
+		t.Fatalf("brief snippet must annotate omitted middle, got %q", got)
+	}
+	// 内容压缩到上限内，中略标注（"…[中略 N 字]…"）本身有少量字符开销。
+	if len([]rune(got)) > 520+16 {
+		t.Fatalf("brief snippet exceeds cap, got %d runes", len([]rune(got)))
+	}
+}
+
+// TestAgentGroupContextBrief_IncludesSupervisorDecision 验证 brief 同时渲染
+// 主管决策步骤（委派/完成记录）与成员执行步骤：主管跨轮次决策依赖的
+// 委派历史不再缺失。
+func TestAgentGroupContextBrief_IncludesSupervisorDecision(t *testing.T) {
+	summaries := []agentGroupContextSummary{
+		{
+			sequence: 3, stepType: domainagentgroup.StepTypeSupervisorDecide,
+			actorName: "AI音乐团队主管", instruction: "委派：歌词创作专家",
+			outputSummary: "任务指令：请创作一首完整的歌词",
+		},
+		{
+			sequence: 4, stepType: domainagentgroup.StepTypeMemberExecute,
+			actorName: "歌词创作专家", instruction: "请创作一首完整的歌词",
+			outputSummary: "月色照亮了窗台……",
+		},
+	}
+	brief := agentGroupContextBrief(summaries)
+	for _, want := range []string{
+		`actor="AI音乐团队主管"`, `role="supervisor"`, `instruction="委派：歌词创作专家"`,
+		`actor="歌词创作专家"`, `role="member"`,
+		"任务指令：请创作一首完整的歌词", "月色照亮了窗台",
+	} {
+		if !strings.Contains(brief, want) {
+			t.Fatalf("brief missing %q:\n%s", want, brief)
+		}
+	}
+}
+
+// TestAgentGroupContextBrief_MaxStepsCap 验证超过 agentGroupContextBriefMaxSteps
+// 时仅展示最近步骤并明示省略（对齐任务板"Showing n of m"机制）。
+func TestAgentGroupContextBrief_MaxStepsCap(t *testing.T) {
+	summaries := make([]agentGroupContextSummary, 0, agentGroupContextBriefMaxSteps+6)
+	for i := 1; i <= agentGroupContextBriefMaxSteps+6; i++ {
+		summaries = append(summaries, agentGroupContextSummary{
+			sequence: i, stepType: domainagentgroup.StepTypeMemberExecute,
+			actorName: "成员", instruction: "任务", outputSummary: "产出",
+		})
+	}
+	brief := agentGroupContextBrief(summaries)
+	if !strings.Contains(brief, "已完成 30 步") {
+		t.Fatalf("brief must annotate total completed steps, got:\n%s", brief)
+	}
+	if !strings.Contains(brief, "仅展示最近 24 步") {
+		t.Fatalf("brief must annotate hidden steps, got:\n%s", brief)
+	}
+	// 最早 6 步必须隐藏：sequence=1 不再出现，sequence=25 起保留。
+	if strings.Contains(brief, `sequence="1"`) || strings.Contains(brief, `sequence="6"`) {
+		t.Fatalf("brief must hide oldest steps, got:\n%s", brief)
+	}
+	if !strings.Contains(brief, `sequence="25"`) || !strings.Contains(brief, `sequence="30"`) {
+		t.Fatalf("brief must keep newest steps, got:\n%s", brief)
+	}
+}
+
+// TestAgentGroupDecisionHeadingAndBriefText 验证主管决策的标题与正文渲染：
+// delegate 携带中文成员名与任务指令；finish 携带最终回答；nil 决策防御。
+func TestAgentGroupDecisionHeadingAndBriefText(t *testing.T) {
+	delegate := &agentGroupSupervisorDecision{
+		Action: agentGroupSupervisorActionDelegate, MemberID: "歌词创作专家",
+		Instruction: "请基于民谣风格创作完整歌词",
+	}
+	if got := agentGroupDecisionHeading(delegate); got != "委派：歌词创作专家" {
+		t.Fatalf("unexpected heading %q", got)
+	}
+	if got := agentGroupDecisionBriefText(delegate); got != "任务指令：请基于民谣风格创作完整歌词" {
+		t.Fatalf("unexpected brief text %q", got)
+	}
+	finish := &agentGroupSupervisorDecision{Action: agentGroupSupervisorActionFinish, Answer: "歌曲已完成：歌词见上。"}
+	if got := agentGroupDecisionHeading(finish); got != "完成（finish）" {
+		t.Fatalf("unexpected heading %q", got)
+	}
+	if got := agentGroupDecisionBriefText(finish); !strings.HasPrefix(got, "最终回答：") {
+		t.Fatalf("unexpected brief text %q", got)
+	}
+	if got := agentGroupDecisionBriefText(nil); got != "" {
+		t.Fatalf("nil decision should render empty, got %q", got)
+	}
+}

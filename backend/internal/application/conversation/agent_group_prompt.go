@@ -181,7 +181,8 @@ const agentGroupSupervisorOutputProtocol = `## 群组主管输出协议
 3. 每次只指派一个成员，不允许同时安排多个成员；
 4. 指令必须明确具体、可独立完成，避免模糊或重复指令；
 5. 只有当全部需求都已被已完成步骤充分满足时，才允许输出 "finish" 并给出完整最终回答；否则继续 delegate。
-6. memberID 必须逐字复制 <members> 清单中某个成员的 memberID（32 位十六进制）或 name（角色名），系统均可自动解析；name 为中文时必须原样输出中文，严禁将其翻译、意译、音译成其他语言，也严禁编造清单之外的任何名称或 ID。`
+6. memberID 必须逐字复制 <members> 清单中某个成员的 memberID（32 位十六进制）或 name（角色名），系统均可自动解析；name 为中文时必须原样输出中文，严禁将其翻译、意译、音译成其他语言，也严禁编造清单之外的任何名称或 ID。
+7. 委派前先对照 <completed_steps> 中的已完成步骤（含你自己的历次委派记录与成员产出）：若某项任务已委派过且产出已记录，严禁用相同指令重复委派同一成员 —— 这会陷入无限循环；应基于上次产出给出具体修改意见（明确指出缺什么、要改哪里），或推进到下一项尚未完成的需求；当全部需求均已被满足时输出 finish。`
 
 // agentGroupMemberOutputProtocol 约束成员的输出。
 const agentGroupMemberOutputProtocol = `## 群组成员输出协议

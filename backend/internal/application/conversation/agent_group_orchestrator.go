@@ -256,6 +256,8 @@ func (st *agentGroupRunState) runSerial(ctx context.Context) error {
 		if err := st.finishAgentGroupStepSuccess(ctx, supervisorStep, supervisorAttempt, &st.snapshot.Supervisor, supervisorOutput); err != nil {
 			return err
 		}
+		// 决策步骤同步进入上下文摘要（委派/完成记录），保证主管跨轮次连续记忆。
+		st.recordSupervisorDecisionSummary(supervisorStep, decision)
 
 		// 成员执行步骤。
 		memberStep, memberAttempt, err := st.createAgentGroupStepAndAttempt(
@@ -750,6 +752,7 @@ func (st *agentGroupRunState) markGroupAssistantMessageState(ctx context.Context
 }
 
 // recordStepSummary 记录已完成成员步骤摘要（供后续主管/成员上下文复用）。
+// 产出用 agentGroupBriefSnippet 头尾双摘，保证长产出的实质内容不被单侧截断吞掉。
 func (st *agentGroupRunState) recordStepSummary(
 	step *domainagentgroup.Step,
 	member *domainagentgroup.RunSnapshotMember,
@@ -758,7 +761,7 @@ func (st *agentGroupRunState) recordStepSummary(
 ) {
 	summary := ""
 	if output != nil {
-		summary = compactSnippet(output.Text, 512)
+		summary = agentGroupBriefSnippet(output.Text, 512)
 	}
 	st.summaries = append(st.summaries, agentGroupContextSummary{
 		sequence:      step.Sequence,
@@ -766,6 +769,30 @@ func (st *agentGroupRunState) recordStepSummary(
 		actorName:     member.RoleName,
 		instruction:   instruction,
 		outputSummary: summary,
+	})
+}
+
+// recordSupervisorDecisionSummary 记录主管决策步骤摘要（委派/完成记录）。
+// 主管决策步骤此前从不进入上下文摘要，导致主管看不到自己已经委派过什么任务、
+// 收到过什么产出 —— 没有连续记忆，只能重复委派第一个成员。记录后主管每轮
+// 都能在 <completed_steps> 中看到完整的委派链，据此决定推进或修正而非重复。
+func (st *agentGroupRunState) recordSupervisorDecisionSummary(step *domainagentgroup.Step, decision *agentGroupSupervisorDecision) {
+	headingDecision := decision
+	if decision != nil && decision.Action == agentGroupSupervisorActionDelegate {
+		// 运行时 decision.MemberID 已被校验归一化为 PublicID，解析回角色名，
+		// 与重建路径（解析模型原文）渲染一致，便于主管阅读委派记录。
+		if member := agentGroupSnapshotMemberByID(st.snapshot, decision.MemberID); member != nil {
+			copy := *decision
+			copy.MemberID = member.RoleName
+			headingDecision = &copy
+		}
+	}
+	st.summaries = append(st.summaries, agentGroupContextSummary{
+		sequence:      step.Sequence,
+		stepType:      step.StepType,
+		actorName:     st.snapshot.Supervisor.RoleName,
+		instruction:   agentGroupDecisionHeading(headingDecision),
+		outputSummary: agentGroupDecisionBriefText(headingDecision),
 	})
 }
 

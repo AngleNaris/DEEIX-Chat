@@ -411,8 +411,11 @@ func (s *Service) buildAgentGroupRunResumeState(
 	}, nil
 }
 
-// rebuildAgentGroupRunSummaries 重建成功成员步骤的上下文摘要与已完成步骤数。
-// 摘要取成功 Attempt 的 OutputMarkdown 压缩片段（compactSnippet 512），不暴露工具参数/失败诊断。
+// rebuildAgentGroupRunSummaries 重建成功步骤的上下文摘要与已完成步骤数。
+// 覆盖成员执行步骤（产出头尾双摘）与主管决策步骤（委派/完成记录）：
+// 主管决策历史是跨轮次连续记忆的核心，缺失会导致主管重复委派同一成员；
+// 成员产出只摘开头会丢失长产出的实质内容，导致主管误判任务未完成。
+// 不暴露工具参数/失败诊断。
 func (s *Service) rebuildAgentGroupRunSummaries(
 	ctx context.Context,
 	runID uint,
@@ -424,8 +427,7 @@ func (s *Service) rebuildAgentGroupRunSummaries(
 		if step.Status == domainagentgroup.StepStatusSuccess {
 			completed++
 		}
-		if step.StepType != domainagentgroup.StepTypeMemberExecute ||
-			step.Status != domainagentgroup.StepStatusSuccess || step.SuccessfulAttemptID == nil {
+		if step.SuccessfulAttemptID == nil {
 			continue
 		}
 		attempts, err := s.agentGroupRunStore.ListAttemptsByStep(ctx, step.ID)
@@ -439,13 +441,35 @@ func (s *Service) rebuildAgentGroupRunSummaries(
 				break
 			}
 		}
-		summaries = append(summaries, agentGroupContextSummary{
-			sequence:      step.Sequence,
-			stepType:      step.StepType,
-			actorName:     step.ActorNameSnapshot,
-			instruction:   step.Instruction,
-			outputSummary: compactSnippet(output, 512),
-		})
+		switch step.StepType {
+		case domainagentgroup.StepTypeMemberExecute:
+			summaries = append(summaries, agentGroupContextSummary{
+				sequence:      step.Sequence,
+				stepType:      step.StepType,
+				actorName:     step.ActorNameSnapshot,
+				instruction:   step.Instruction,
+				outputSummary: agentGroupBriefSnippet(output, 512),
+			})
+		case domainagentgroup.StepTypeSupervisorDecide:
+			// 决策步骤：解析成功则按委派/完成记录渲染；老数据无法解析时退化为原文片段。
+			if decision, parseErr := resolveAgentGroupSupervisorDecision(output); parseErr == nil {
+				summaries = append(summaries, agentGroupContextSummary{
+					sequence:      step.Sequence,
+					stepType:      step.StepType,
+					actorName:     step.ActorNameSnapshot,
+					instruction:   agentGroupDecisionHeading(decision),
+					outputSummary: agentGroupDecisionBriefText(decision),
+				})
+			} else {
+				summaries = append(summaries, agentGroupContextSummary{
+					sequence:      step.Sequence,
+					stepType:      step.StepType,
+					actorName:     step.ActorNameSnapshot,
+					instruction:   "委派决策",
+					outputSummary: compactSnippet(output, 240),
+				})
+			}
+		}
 	}
 	return summaries, completed, nil
 }
