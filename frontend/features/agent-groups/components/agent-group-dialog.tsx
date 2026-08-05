@@ -47,6 +47,7 @@ import type {
   AgentGroupMemberRequest,
 } from "@/shared/api/agent-groups.types";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
+import { ApiError, ApiNetworkError } from "@/shared/api/http-client";
 
 export type AgentGroupProjectOption = {
   publicID: string;
@@ -154,6 +155,28 @@ function toMemberRequest(member: AgentGroupMemberDraft): AgentGroupMemberRequest
     modelOverride: member.modelOverride || undefined,
     dutyInstruction: member.dutyInstruction || undefined,
   };
+}
+
+/** 保存群组失败的提示：尽量暴露后端具体原因（如功能未启用），而不是一律显示泛化文案。 */
+function agentGroupSaveErrorMessage(error: unknown): string {
+  if (error instanceof ApiError) {
+    if (error.errorCode === "FEATURE_DISABLED") {
+      return "群组功能未启用：请管理员在管理后台开启 agent_group.enabled 后重试";
+    }
+    if (error.status === 404) {
+      return "保存群组失败：所属项目或成员角色不存在，请刷新后重试";
+    }
+    if (error.status === 401) {
+      return "登录已过期，请重新登录后重试";
+    }
+    if (error.status === 400 && error.rawMessage) {
+      return `保存群组失败：${error.rawMessage}`;
+    }
+  }
+  if (error instanceof ApiNetworkError) {
+    return "保存群组失败：网络连接异常";
+  }
+  return "保存群组失败";
 }
 
 type SelectorOption = {
@@ -585,11 +608,14 @@ function AgentGroupForm({
             <Select
               value={draft.projectID}
               onValueChange={(projectID) => {
-                update("projectID", projectID);
+                // 合并为一次函数式更新：分两次 update 时第二次会基于旧 draft 展开，
+                // 把 projectID 覆盖回原值，导致选择项目后无效。
                 const project = projects.find((item) => item.publicID === projectID);
-                if (project) {
-                  update("projectName", project.name);
-                }
+                setDraft((prev) => ({
+                  ...prev,
+                  projectID,
+                  projectName: project?.name ?? prev.projectName,
+                }));
               }}
               disabled={submitting}
             >
@@ -903,8 +929,8 @@ export function AgentGroupDialog({
       }
       setDraft(null);
       await onSaved(group);
-    } catch {
-      toast.error("保存群组失败");
+    } catch (error) {
+      toast.error(agentGroupSaveErrorMessage(error));
     } finally {
       setSubmitting(false);
     }
