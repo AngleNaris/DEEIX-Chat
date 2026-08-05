@@ -57,6 +57,8 @@ var (
 	ErrAgentGroupInvalidDecision = errors.New("invalid supervisor decision")
 	// ErrAgentGroupInvalidMember 主管指派的成员不合法。
 	ErrAgentGroupInvalidMember = errors.New("invalid supervisor member target")
+	// ErrAgentGroupDuplicateDelegation 主管重复指派已成功完成的相同成员任务。
+	ErrAgentGroupDuplicateDelegation = errors.New("duplicate completed supervisor delegation")
 	// ErrInvalidConversationProject 会话项目请求不合法。
 	ErrInvalidConversationProject = errors.New("invalid conversation project")
 	// ErrInvalidFileReference 文件引用无效。

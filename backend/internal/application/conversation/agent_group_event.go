@@ -194,6 +194,7 @@ func (st *agentGroupRunState) forwardAgentGroupTurnEvent(step *domainagentgroup.
 type agentGroupContextSummary struct {
 	sequence      int
 	stepType      string
+	actorMemberID string
 	actorName     string
 	instruction   string
 	outputSummary string
@@ -203,6 +204,8 @@ type agentGroupContextSummary struct {
 // 超出部分明示省略：长运行（默认最多 64 步）若不设上限会把摘要灌爆上下文，
 // 且主管决策主要依赖最近几轮委派与产出的连续性（对齐任务板"仅展示最近活动"机制）。
 const agentGroupContextBriefMaxSteps = 24
+const agentGroupContextBriefMaxOutputRunes = 24000
+const agentGroupContextBriefMaxSingleOutputRunes = 8000
 
 // agentGroupContextBrief 将已完成步骤摘要渲染为上下文文本。
 // 步骤包含主管决策（委派/完成记录）与成员执行（产出摘要），共同构成主管的
@@ -220,15 +223,31 @@ func agentGroupContextBrief(summaries []agentGroupContextSummary) string {
 		fmt.Fprintf(&builder, "  <!-- 本运行已完成 %d 步，以下仅展示最近 %d 步的委派与产出记录（更早步骤从略） -->\n",
 			total, agentGroupContextBriefMaxSteps)
 	}
-	for _, item := range summaries[start:] {
+	selected := summaries[start:]
+	renderedOutputs := make([]string, len(selected))
+	remainingOutputRunes := agentGroupContextBriefMaxOutputRunes
+	for i := len(selected) - 1; i >= 0; i-- {
+		output := strings.TrimSpace(selected[i].outputSummary)
+		if output == "" {
+			continue
+		}
+		if remainingOutputRunes <= 0 {
+			renderedOutputs[i] = "（结果因上下文预算已省略；步骤状态仍为已完成）"
+			continue
+		}
+		outputLimit := min(agentGroupContextBriefMaxSingleOutputRunes, remainingOutputRunes)
+		renderedOutputs[i] = agentGroupBriefSnippet(output, outputLimit)
+		remainingOutputRunes -= len([]rune(renderedOutputs[i]))
+	}
+	for index, item := range selected {
 		actorRole := "supervisor"
 		if item.stepType == domainagentgroup.StepTypeMemberExecute {
 			actorRole = "member"
 		}
-		fmt.Fprintf(&builder, "  <step sequence=\"%d\" actor=\"%s\" role=\"%s\" instruction=\"%s\">\n",
+		fmt.Fprintf(&builder, "  <step sequence=\"%d\" status=\"completed\" actor=\"%s\" role=\"%s\" instruction=\"%s\">\n",
 			item.sequence, xmlEscapeText(item.actorName), actorRole, xmlEscapeText(item.instruction))
-		if text := strings.TrimSpace(item.outputSummary); text != "" {
-			builder.WriteString("    " + strings.TrimSpace(text) + "\n")
+		if text := strings.TrimSpace(renderedOutputs[index]); text != "" {
+			builder.WriteString("    <result>" + xmlEscapeText(text) + "</result>\n")
 		}
 		builder.WriteString("  </step>\n")
 	}
@@ -240,7 +259,7 @@ func agentGroupContextBrief(summaries []agentGroupContextSummary) string {
 // 中段省略并注明字数。长产出（如完整歌词、长报告）若仅截取开头会丢失核心成果
 // （模型输出常以客套话开头），导致主管误判任务未完成而重复委派。
 func agentGroupBriefSnippet(content string, maxLen int) string {
-	value := strings.Join(strings.Fields(strings.TrimSpace(content)), " ")
+	value := strings.TrimSpace(content)
 	if value == "" {
 		return ""
 	}

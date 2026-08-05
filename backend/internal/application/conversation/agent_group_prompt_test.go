@@ -1,6 +1,7 @@
 package conversation
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -34,9 +35,9 @@ func agentGroupPromptTestSnapshot(nWorkers int) *domainagentgroup.RunSnapshot {
 // 若清单中启用 worker 恰好唯一，采用该成员并归一化 decision.MemberID。
 func TestValidateAgentGroupDelegation_UniqueWorkerFallback(t *testing.T) {
 	decision := &agentGroupSupervisorDecision{
-		Action:       agentGroupSupervisorActionDelegate,
-		MemberID:     "lyricist", // 翻译名，不在清单中
-		Instruction:  "请创作一首中文流行歌曲歌词",
+		Action:          agentGroupSupervisorActionDelegate,
+		MemberID:        "lyricist", // 翻译名，不在清单中
+		Instruction:     "请创作一首中文流行歌曲歌词",
 		ExpectedOutcome: "完整的歌词文本",
 	}
 	if err := validateAgentGroupDelegation(agentGroupPromptTestSnapshot(1), decision); err != nil {
@@ -101,6 +102,42 @@ func TestAgentGroupSupervisorCorrectionHint_ContainsMemberList(t *testing.T) {
 		if !strings.Contains(hint, required) {
 			t.Fatalf("correction hint must contain %q", required)
 		}
+	}
+}
+
+func TestAgentGroupSupervisorCorrectionHint_DuplicateDelegation(t *testing.T) {
+	snapshot := agentGroupPromptTestSnapshot(1)
+	hint := agentGroupSupervisorCorrectionHint(ErrAgentGroupDuplicateDelegation, snapshot.Members)
+	for _, required := range []string{"已经成功完成", "<completed_steps>", "禁止再次提交相同委派", "finish"} {
+		if !strings.Contains(hint, required) {
+			t.Fatalf("duplicate correction hint must contain %q: %s", required, hint)
+		}
+	}
+}
+
+func TestValidateAgentGroupDelegationHistory_RejectsCompletedDuplicate(t *testing.T) {
+	memberID := strings.Repeat("a", 32)
+	summaries := []agentGroupContextSummary{{
+		sequence:      2,
+		stepType:      domainagentgroup.StepTypeMemberExecute,
+		actorMemberID: memberID,
+		actorName:     "歌词创作专家",
+		instruction:   "请创作一首完整歌词",
+		outputSummary: "完整歌词结果",
+	}}
+	duplicate := &agentGroupSupervisorDecision{
+		Action:      agentGroupSupervisorActionDelegate,
+		MemberID:    memberID,
+		Instruction: "  请创作一首完整歌词  ",
+	}
+	if err := validateAgentGroupDelegationHistory(summaries, duplicate); !errors.Is(err, ErrAgentGroupDuplicateDelegation) {
+		t.Fatalf("completed duplicate should be rejected, got %v", err)
+	}
+
+	revision := *duplicate
+	revision.Instruction = "请重写副歌，并增强押韵与记忆点"
+	if err := validateAgentGroupDelegationHistory(summaries, &revision); err != nil {
+		t.Fatalf("materially different revision instruction should be allowed: %v", err)
 	}
 }
 
@@ -201,12 +238,31 @@ func TestAgentGroupContextBrief_IncludesSupervisorDecision(t *testing.T) {
 	}
 	brief := agentGroupContextBrief(summaries)
 	for _, want := range []string{
-		`actor="AI音乐团队主管"`, `role="supervisor"`, `instruction="委派：歌词创作专家"`,
-		`actor="歌词创作专家"`, `role="member"`,
+		`status="completed"`, `actor="AI音乐团队主管"`, `role="supervisor"`, `instruction="委派：歌词创作专家"`,
+		`actor="歌词创作专家"`, `role="member"`, "<result>",
 		"任务指令：请创作一首完整的歌词", "月色照亮了窗台",
 	} {
 		if !strings.Contains(brief, want) {
 			t.Fatalf("brief missing %q:\n%s", want, brief)
+		}
+	}
+}
+
+func TestAgentGroupContextBrief_PreservesDetailedMemberResult(t *testing.T) {
+	detailedResult := strings.Repeat("前奏信息", 100) +
+		"\n关键结论：第一位成员已经完成数据库迁移设计，回滚步骤为 restore-v2。\n" +
+		strings.Repeat("验收信息", 100)
+	brief := agentGroupContextBrief([]agentGroupContextSummary{{
+		sequence:      2,
+		stepType:      domainagentgroup.StepTypeMemberExecute,
+		actorMemberID: strings.Repeat("a", 32),
+		actorName:     "后端工程师",
+		instruction:   "设计数据库迁移",
+		outputSummary: detailedResult,
+	}})
+	for _, want := range []string{"关键结论", "restore-v2", `status="completed"`} {
+		if !strings.Contains(brief, want) {
+			t.Fatalf("completed member result must preserve %q:\n%s", want, brief)
 		}
 	}
 }

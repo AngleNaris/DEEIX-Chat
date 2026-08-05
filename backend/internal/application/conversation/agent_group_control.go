@@ -328,7 +328,7 @@ func (s *Service) buildAgentGroupRunResumeState(
 	contextMessages = agentGroupUserOnlyContext(contextMessages)
 
 	// 步骤序列与成功摘要：Sequence 从现有步骤总数继续；
-	// 摘要只重建成功成员步骤（主管决定不进入上下文摘要）。
+	// 摘要重建全部成功成员结果与主管委派记录。
 	summaries, completedStepCount, err := s.rebuildAgentGroupRunSummaries(ctx, run.ID, steps)
 	if err != nil {
 		return nil, err
@@ -412,9 +412,9 @@ func (s *Service) buildAgentGroupRunResumeState(
 }
 
 // rebuildAgentGroupRunSummaries 重建成功步骤的上下文摘要与已完成步骤数。
-// 覆盖成员执行步骤（产出头尾双摘）与主管决策步骤（委派/完成记录）：
+// 覆盖成员执行步骤（完整成功结果）与主管决策步骤（委派/完成记录）：
 // 主管决策历史是跨轮次连续记忆的核心，缺失会导致主管重复委派同一成员；
-// 成员产出只摘开头会丢失长产出的实质内容，导致主管误判任务未完成。
+// 成员结果统一在 brief 渲染时按总预算裁剪，避免恢复路径提前丢失具体内容。
 // 不暴露工具参数/失败诊断。
 func (s *Service) rebuildAgentGroupRunSummaries(
 	ctx context.Context,
@@ -446,9 +446,10 @@ func (s *Service) rebuildAgentGroupRunSummaries(
 			summaries = append(summaries, agentGroupContextSummary{
 				sequence:      step.Sequence,
 				stepType:      step.StepType,
+				actorMemberID: step.ActorMemberPublicID,
 				actorName:     step.ActorNameSnapshot,
 				instruction:   step.Instruction,
-				outputSummary: agentGroupBriefSnippet(output, 512),
+				outputSummary: output,
 			})
 		case domainagentgroup.StepTypeSupervisorDecide:
 			// 决策步骤：解析成功则按委派/完成记录渲染；老数据无法解析时退化为原文片段。
@@ -456,6 +457,7 @@ func (s *Service) rebuildAgentGroupRunSummaries(
 				summaries = append(summaries, agentGroupContextSummary{
 					sequence:      step.Sequence,
 					stepType:      step.StepType,
+					actorMemberID: step.ActorMemberPublicID,
 					actorName:     step.ActorNameSnapshot,
 					instruction:   agentGroupDecisionHeading(decision),
 					outputSummary: agentGroupDecisionBriefText(decision),
@@ -464,6 +466,7 @@ func (s *Service) rebuildAgentGroupRunSummaries(
 				summaries = append(summaries, agentGroupContextSummary{
 					sequence:      step.Sequence,
 					stepType:      step.StepType,
+					actorMemberID: step.ActorMemberPublicID,
 					actorName:     step.ActorNameSnapshot,
 					instruction:   "委派决策",
 					outputSummary: compactSnippet(output, 240),
@@ -550,6 +553,7 @@ func (st *agentGroupRunState) executeRetryableStep(
 		if err := st.finishAgentGroupStepSuccess(ctx, step, attempt, member, output); err != nil {
 			return err
 		}
+		st.recordSupervisorDecisionSummary(step, decision)
 		return st.executeMemberStepAfterSupervisor(ctx, target, *decision)
 
 	case domainagentgroup.StepTypeMemberExecute:

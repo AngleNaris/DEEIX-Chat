@@ -1,39 +1,9 @@
 "use client";
 
-import * as React from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
+import * as React from "react";
 import { toast } from "sonner";
-
-import {
-  ConversationShareDialog,
-  sharePatchFromDTO,
-  useConversationExport,
-  useSidebarConversations,
-} from "@/entities/conversation";
-import { useGroupRunRecovery } from "@/features/agent-groups/hooks/use-group-run-recovery";
-import { subscribeGroupRunSettled } from "@/features/agent-groups/model/group-run-store";
-import { ChatArea, ChatAreaLoadError, ChatAreaSkeleton } from "@/features/chat/components/sections/chat-area";
-import { ChatArtifactWorkspace } from "@/features/chat/components/sections/chat-artifact";
-import { ChatEmptyState } from "@/features/chat/components/sections/chat-empty";
-import { useChatSession } from "@/features/chat/context/chat-session-context";
-import { useChatArtifacts } from "@/features/chat/hooks/use-chat-artifacts";
-import { useChatAttachments } from "@/features/chat/hooks/use-chat-attachments";
-import { useChatComposerState } from "@/features/chat/hooks/use-chat-composer-state";
-import { useChatComposerSelection } from "@/features/chat/hooks/use-chat-composer-selection";
-import type { PromptPresetDTO } from "@/shared/api/prompt-presets.types";
-import type { ChatAreaMessage, MessageAttachment } from "@/features/chat/types/messages";
-import { useChatModelOptions } from "@/features/chat/hooks/use-chat-model-options";
-import { useChatRuntime } from "@/features/chat/hooks/use-chat-runtime";
-import { useChatViewerProfile } from "@/features/chat/hooks/use-chat-viewer-profile";
-import { useChatScreenshot } from "@/features/chat/hooks/use-chat-screenshot";
-import { parseConversationLabelsJSON } from "@/shared/lib/conversation-labels";
-import { useChatVisualPrompt } from "@/features/chat/hooks/use-chat-visual-prompt";
-import { ChatInput } from "@/features/chat/components/sections/chat-input";
-import { ChatScreenshotPreviewDialog } from "@/features/chat/components/sections/chat-screenshot-preview-dialog";
-import { resolveChatContentWidthClassName } from "@/shared/model/chat-content-width";
-import { DeleteFilesOption } from "@/shared/components/delete-files-option";
-import { useSettingsChatPreferences } from "@/features/settings/hooks/use-settings-chat-preferences";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -45,27 +15,58 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import {
+  ConversationShareDialog,
+  sharePatchFromDTO,
+  useConversationExport,
+  useSidebarConversations,
+} from "@/entities/conversation";
+import { useGroupRunRecovery } from "@/features/agent-groups/hooks/use-group-run-recovery";
+import { subscribeGroupRunSettled } from "@/features/agent-groups/model/group-run-store";
+import { ChatArea, ChatAreaLoadError, ChatAreaSkeleton } from "@/features/chat/components/sections/chat-area";
+import { ChatArtifactWorkspace } from "@/features/chat/components/sections/chat-artifact";
+import { ChatEmptyState } from "@/features/chat/components/sections/chat-empty";
+import { ChatInput } from "@/features/chat/components/sections/chat-input";
+import { ChatScreenshotPreviewDialog } from "@/features/chat/components/sections/chat-screenshot-preview-dialog";
+import { useChatSession } from "@/features/chat/context/chat-session-context";
+import { useChatArtifacts } from "@/features/chat/hooks/use-chat-artifacts";
+import { useChatAttachments } from "@/features/chat/hooks/use-chat-attachments";
+import { useChatComposerSelection } from "@/features/chat/hooks/use-chat-composer-selection";
+import { useChatComposerState } from "@/features/chat/hooks/use-chat-composer-state";
+import { useChatData } from "@/features/chat/hooks/use-chat-data";
+import { useChatModelOptions } from "@/features/chat/hooks/use-chat-model-options";
+import { useChatRuntime } from "@/features/chat/hooks/use-chat-runtime";
+import { useChatScreenshot } from "@/features/chat/hooks/use-chat-screenshot";
+import { useChatViewerProfile } from "@/features/chat/hooks/use-chat-viewer-profile";
+import { useChatVisualPrompt } from "@/features/chat/hooks/use-chat-visual-prompt";
+import { useNewConversationDefaults } from "@/features/chat/hooks/use-new-conversation-defaults";
+import {
   cloneConversationOptions,
   isConversationOptionsObject,
   sanitizeConversationOptions,
 } from "@/features/chat/model/conversation-options";
-import { useChatData } from "@/features/chat/hooks/use-chat-data";
-import { useNewConversationDefaults } from "@/features/chat/hooks/use-new-conversation-defaults";
 import { toPendingAttachment } from "@/features/chat/model/message-submit";
+import type { ChatAreaMessage, MessageAttachment } from "@/features/chat/types/messages";
+import { useSettingsChatPreferences } from "@/features/settings/hooks/use-settings-chat-preferences";
+import { cn } from "@/lib/utils";
+import { getAgentGroup } from "@/shared/api/agent-groups";
+import type { AgentGroupDTO } from "@/shared/api/agent-groups.types";
 import { getConversation } from "@/shared/api/conversation";
-import { getConversationRole } from "@/shared/api/roles";
+import type { ConversationDTO, ConversationOptions } from "@/shared/api/conversation.types";
+import type { FileObjectDTO } from "@/shared/api/file.types";
 import { listAvailableMCPTools } from "@/shared/api/mcp";
+import type { MCPToolDTO } from "@/shared/api/mcp.types";
+import type { PromptPresetDTO } from "@/shared/api/prompt-presets.types";
+import { getConversationRole } from "@/shared/api/roles";
+import type { ConversationRoleDTO } from "@/shared/api/roles.types";
 import { getUserSettings, patchUserSettings } from "@/shared/api/user-settings";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
-import type { ConversationDTO, ConversationOptions } from "@/shared/api/conversation.types";
-import type { ConversationRoleDTO } from "@/shared/api/roles.types";
-import type { FileObjectDTO } from "@/shared/api/file.types";
-import type { MCPToolDTO } from "@/shared/api/mcp.types";
+import { DeleteFilesOption } from "@/shared/components/delete-files-option";
+import { parseConversationLabelsJSON } from "@/shared/lib/conversation-labels";
 import {
   hasMultipleImageAttachmentProcessors,
   normalizeImageAttachmentProcessorSelection,
 } from "@/shared/lib/mcp-tool-selection";
-import { cn } from "@/lib/utils";
+import { resolveChatContentWidthClassName } from "@/shared/model/chat-content-width";
 
 const MODEL_OPTIONS_STORAGE_PREFIX = "deeix-chat:chat-model-options:";
 const DEFAULT_MCP_TOOLS_SETTING_KEY = "chat.default_mcp_tool_ids";
@@ -177,10 +178,12 @@ export function AppChatArea() {
   const routeConversationID = searchParams.get("conversation_id")?.trim() || null;
   const routeProjectID = searchParams.get("project_id")?.trim() || null;
   const routeRoleID = searchParams.get("role_id")?.trim() || null;
+  const routeAgentGroupID = searchParams.get("agent_group_id")?.trim() || null;
   const {
     newConversationRevision,
     newConversationProjectID: requestedNewConversationProjectID,
     newConversationRoleID: requestedNewConversationRoleID,
+    newConversationAgentGroupID: requestedNewConversationAgentGroupID,
     requestNewConversation,
   } = useChatSession();
   const [locallyCreatedConversationID, setLocallyCreatedConversationID] = React.useState<string | null>(null);
@@ -220,15 +223,18 @@ export function AppChatArea() {
   const onNewConversationFromLoadError = React.useCallback(() => {
     const projectID = routeProjectID ?? "";
     const roleID = routeRoleID ?? "";
-    requestNewConversation({ projectID, roleID });
+    const agentGroupID = routeAgentGroupID ?? "";
+    requestNewConversation({ projectID, roleID, agentGroupID });
     router.push(
-      projectID
-        ? `/chat?project_id=${encodeURIComponent(projectID)}`
-        : roleID
-          ? `/chat?role_id=${encodeURIComponent(roleID)}`
-          : "/chat",
+      agentGroupID && projectID
+        ? `/chat?project_id=${encodeURIComponent(projectID)}&agent_group_id=${encodeURIComponent(agentGroupID)}`
+        : projectID
+          ? `/chat?project_id=${encodeURIComponent(projectID)}`
+          : roleID
+            ? `/chat?role_id=${encodeURIComponent(roleID)}`
+            : "/chat",
     );
-  }, [requestNewConversation, routeProjectID, routeRoleID, router]);
+  }, [requestNewConversation, routeAgentGroupID, routeProjectID, routeRoleID, router]);
   const activeGenerationRunsRef = React.useRef<Set<string>>(new Set());
   const failedGenerationRunsRef = React.useRef<Set<string>>(new Set());
   const {
@@ -317,7 +323,7 @@ export function AppChatArea() {
   }, [activeConversation?.publicID, conversationID]);
   const currentConversation =
     activeConversation ?? (loadedConversation?.publicID === conversationID ? loadedConversation : null);
-  const activeAgentGroup = React.useMemo(() => {
+  const currentAgentGroup = React.useMemo(() => {
     const groupID = currentConversation?.agentGroupID?.trim();
     if (!groupID) {
       return null;
@@ -374,14 +380,59 @@ export function AppChatArea() {
     }
     return activeRole;
   }, [activeRole, conversationID, newConversationRoleID]);
+  const newConversationAgentGroupID = !conversationID
+    ? routeAgentGroupID ?? requestedNewConversationAgentGroupID
+    : "";
+  const [activeRouteAgentGroup, setActiveRouteAgentGroup] = React.useState<AgentGroupDTO | null>(null);
+  React.useEffect(() => {
+    if (!newConversationAgentGroupID) {
+      setActiveRouteAgentGroup(null);
+      return;
+    }
+    setActiveRouteAgentGroup(null);
+    let cancelled = false;
+    async function loadAgentGroup() {
+      const token = await resolveAccessToken();
+      if (!token || cancelled) {
+        return;
+      }
+      try {
+        const group = await getAgentGroup(token, newConversationAgentGroupID);
+        if (!cancelled) {
+          setActiveRouteAgentGroup(group);
+        }
+      } catch {
+        if (!cancelled) {
+          setActiveRouteAgentGroup(null);
+        }
+      }
+    }
+    void loadAgentGroup();
+    return () => {
+      cancelled = true;
+    };
+  }, [newConversationAgentGroupID]);
+  const activeAgentGroup = React.useMemo(() => {
+    if (currentAgentGroup) {
+      return currentAgentGroup;
+    }
+    if (!newConversationAgentGroupID) {
+      return null;
+    }
+    return {
+      publicID: newConversationAgentGroupID,
+      name: activeRouteAgentGroup?.name?.trim() || "",
+    };
+  }, [activeRouteAgentGroup?.name, currentAgentGroup, newConversationAgentGroupID]);
   const prependNewConversationInContext = React.useCallback(
     (platformModelName?: string) =>
       prependNewConversation(
         platformModelName,
         newConversationProjectID || undefined,
         newConversationRoleID || undefined,
+        newConversationAgentGroupID || undefined,
       ),
-    [newConversationProjectID, newConversationRoleID, prependNewConversation],
+    [newConversationAgentGroupID, newConversationProjectID, newConversationRoleID, prependNewConversation],
   );
 
   const {
@@ -447,7 +498,7 @@ export function AppChatArea() {
   });
   const [selectedPrompts, setSelectedPrompts] = React.useState<PromptPresetDTO[]>([]);
   const [defaultToolIDs, setDefaultToolIDs] = React.useState<number[]>([]);
-  const newConversationSelectionKey = `${newConversationRevision}:${newConversationProjectID || "unassigned"}:${newConversationRoleID || "norole"}`;
+  const newConversationSelectionKey = `${newConversationRevision}:${newConversationProjectID || "unassigned"}:${newConversationRoleID || "norole"}:${newConversationAgentGroupID || "nogroup"}`;
   const newConversationDefaultMCPToolIDs = React.useMemo(
     () => normalizeImageAttachmentProcessorSelection(
       filterAvailableMCPToolIDs(
@@ -1303,9 +1354,23 @@ export function AppChatArea() {
       {shouldUseCenteredComposer ? (
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           <ChatEmptyState
-            greetingTitle={activeRouteRole?.name || activeRouteProject?.name || greetingTitle}
-            badgeLabel={activeRouteProject ? t("projectMode") : undefined}
-            badgeTooltip={activeRouteProject ? t("projectModeTooltip") : undefined}
+            greetingTitle={
+              activeRouteAgentGroup?.name || activeRouteRole?.name || activeRouteProject?.name || greetingTitle
+            }
+            badgeLabel={
+              newConversationAgentGroupID
+                ? t("agentGroupMode")
+                : activeRouteProject
+                  ? t("projectMode")
+                  : undefined
+            }
+            badgeTooltip={
+              newConversationAgentGroupID
+                ? t("agentGroupModeTooltip")
+                : activeRouteProject
+                  ? t("projectModeTooltip")
+                  : undefined
+            }
             contentWidthClassName={chatContentWidthClassName}
           >
             <ChatInput {...chatInputProps} />

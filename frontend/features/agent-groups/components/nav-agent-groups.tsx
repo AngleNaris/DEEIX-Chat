@@ -1,9 +1,9 @@
 "use client";
 
-import * as React from "react";
+import { ChevronDown, PencilLine, Trash2, Users } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import * as React from "react";
 import { toast } from "sonner";
-
 import { Ellipsis } from "@/components/animate-ui/icons/ellipsis";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
@@ -27,12 +27,12 @@ import {
 import { useSidebarConversations } from "@/entities/conversation";
 import {
   AgentGroupDialog,
+  type AgentGroupDraft,
   agentGroupDraftFromDTO,
   emptyAgentGroupDraft,
-  type AgentGroupDraft,
 } from "@/features/agent-groups/components/agent-group-dialog";
+import { useChatSession } from "@/features/chat/context/chat-session-context";
 import { cn } from "@/lib/utils";
-import { ChevronDown, PencilLine, Trash2, Users } from "lucide-react";
 import { deleteAgentGroup, listAgentGroups } from "@/shared/api/agent-groups";
 import type { AgentGroupDTO } from "@/shared/api/agent-groups.types";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
@@ -45,7 +45,8 @@ export function NavAgentGroups() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const { items, prependNewConversation, projects, lastChange } = useSidebarConversations();
+  const { items, projects, lastChange } = useSidebarConversations();
+  const { requestNewConversation } = useChatSession();
   const [groupsOpen, setGroupsOpen] = useStoredBoolean(AGENT_GROUPS_OPEN_STORAGE_KEY, true);
   const [groups, setGroups] = React.useState<AgentGroupDTO[]>([]);
   const [loadingGroups, setLoadingGroups] = React.useState(false);
@@ -54,7 +55,6 @@ export function NavAgentGroups() {
   const [hoveredMenuID, setHoveredMenuID] = React.useState<string | null>(null);
   const [focusedRowID, setFocusedRowID] = React.useState<string | null>(null);
   const [deletingGroupID, setDeletingGroupID] = React.useState<string | null>(null);
-  const [startingGroupID, setStartingGroupID] = React.useState<string | null>(null);
   const [hoveredCreateID, setHoveredCreateID] = React.useState<string | null>(null);
 
   const activeProjectID =
@@ -114,28 +114,19 @@ export function NavAgentGroups() {
   }, []);
 
   const startGroupChat = React.useCallback(
-    async (group: AgentGroupDTO) => {
-      if (startingGroupID) {
-        return;
-      }
-      setStartingGroupID(group.publicID);
-      try {
-        const item = await prependNewConversation(undefined, group.projectID, undefined, group.publicID);
-        if (item?.publicID) {
-          router.push(`/chat?conversation_id=${item.publicID}`);
-          if (isMobile) {
-            setOpenMobile(false);
-          }
-        } else {
-          toast.error("创建对话失败");
-        }
-      } catch {
-        toast.error("创建对话失败");
-      } finally {
-        setStartingGroupID(null);
+    (group: AgentGroupDTO) => {
+      requestNewConversation({
+        projectID: group.projectID,
+        agentGroupID: group.publicID,
+      });
+      router.push(
+        `/chat?project_id=${encodeURIComponent(group.projectID)}&agent_group_id=${encodeURIComponent(group.publicID)}`,
+      );
+      if (isMobile) {
+        setOpenMobile(false);
       }
     },
-    [isMobile, prependNewConversation, router, setOpenMobile, startingGroupID],
+    [isMobile, requestNewConversation, router, setOpenMobile],
   );
 
   const removeGroup = React.useCallback(
@@ -208,7 +199,6 @@ export function NavAgentGroups() {
                     const menuHovered = hoveredMenuID === group.publicID;
                     const rowFocused = focusedRowID === group.publicID;
                     const deleting = deletingGroupID === group.publicID;
-                    const starting = startingGroupID === group.publicID;
                     const createHovered = hoveredCreateID === group.publicID;
                     const conversationCount = items.filter(
                       (item) => item.agentGroupID === group.publicID,
@@ -263,7 +253,6 @@ export function NavAgentGroups() {
                             aria-label={`以「${group.name}」开始群组对话`}
                             title={`以「${group.name}」开始群组对话`}
                             tabIndex={showActions ? undefined : -1}
-                            disabled={Boolean(startingGroupID)}
                             className={cn(
                               "absolute top-0 right-8 z-10 h-8 w-8 text-sidebar-foreground/45 opacity-0 transition-[color,opacity] duration-150 hover:bg-transparent hover:text-sidebar-foreground group-hover/agent-group-row:opacity-100 dark:hover:bg-transparent",
                               showActions && "opacity-100",
@@ -276,18 +265,12 @@ export function NavAgentGroups() {
                               void startGroupChat(group);
                             }}
                           >
-                            {starting ? (
-                              <span className="relative flex size-4 items-center justify-center">
-                                <span className="absolute size-3 animate-spin rounded-full border border-current border-t-transparent" />
-                              </span>
-                            ) : (
-                              <PlusIcon
-                                aria-hidden
-                                size={16}
-                                strokeWidth={1.6}
-                                animate={createHovered ? "default" : undefined}
-                              />
-                            )}
+                            <PlusIcon
+                              aria-hidden
+                              size={16}
+                              strokeWidth={1.6}
+                              animate={createHovered ? "default" : undefined}
+                            />
                           </Button>
                           <DropdownMenu
                             modal={false}

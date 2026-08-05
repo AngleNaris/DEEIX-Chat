@@ -5,6 +5,8 @@
   "placeholder": "发送消息给 DEEIX Chat",
   "projectMode": "项目模式",
   "projectModeTooltip": "在此模式下，新会话会创建到当前项目。项目提示词仅对聊天模型请求生效；图像生成、图像编辑等非聊天能力不会应用。",
+  "agentGroupMode": "群组模式",
+  "agentGroupModeTooltip": "首条消息发送后创建群组会话，由群组主管按成员职责串行协调执行。",
   "send": "发送",
   "stop": "停止",
   "shareConversation": "分享此对话",

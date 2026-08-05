@@ -269,7 +269,11 @@ func agentGroupSupervisorCorrectionHint(issue error, members []domainagentgroup.
 	var builder strings.Builder
 	builder.WriteString("<correction>\n")
 	fmt.Fprintf(&builder, "你上一轮输出的决策无效，原因：%s\n\n", xmlEscapeText(issue.Error()))
-	builder.WriteString("你上一轮填写的 memberID 不在成员清单中，不要重复使用它；清单中不存在任何英文或翻译后的角色名。\n")
+	if errors.Is(issue, ErrAgentGroupDuplicateDelegation) {
+		builder.WriteString("该成员已经成功完成过相同任务，完成状态和具体结果都在 <completed_steps> 中。禁止再次提交相同委派；请检查该结果后直接 finish、推进下一项未完成需求，或给出内容实质不同的返工指令。\n")
+	} else {
+		builder.WriteString("你上一轮填写的 memberID 不在成员清单中，不要重复使用它；清单中不存在任何英文或翻译后的角色名。\n")
+	}
 	builder.WriteString("请忽略上一轮输出，重新输出一份完整的 JSON 决策。可指派成员（请逐字复制某一行中的 memberID 或 name，name 为中文时原样输出，禁止翻译）：\n")
 	for _, member := range members {
 		if member.MemberType != domainagentgroup.MemberTypeWorker || !member.Enabled {
@@ -280,6 +284,35 @@ func agentGroupSupervisorCorrectionHint(issue error, members []domainagentgroup.
 	builder.WriteString("若你认为任务已经完成，请输出 action=\"finish\" 并附上完整的最终 answer；否则必须 delegate 给清单中的一名成员。\n")
 	builder.WriteString("</correction>")
 	return builder.String()
+}
+
+func normalizeAgentGroupDelegationInstruction(instruction string) string {
+	return strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(instruction)), " "))
+}
+
+// validateAgentGroupDelegationHistory 拒绝把已成功完成的相同任务再次交给同一成员。
+// 返工仍然允许，但主管必须给出内容实质不同的指令，明确说明缺什么、改哪里。
+func validateAgentGroupDelegationHistory(
+	summaries []agentGroupContextSummary,
+	decision *agentGroupSupervisorDecision,
+) error {
+	if decision == nil || decision.Action != agentGroupSupervisorActionDelegate {
+		return nil
+	}
+	instruction := normalizeAgentGroupDelegationInstruction(decision.Instruction)
+	if instruction == "" {
+		return nil
+	}
+	for _, summary := range summaries {
+		if summary.stepType != domainagentgroup.StepTypeMemberExecute ||
+			summary.actorMemberID != decision.MemberID {
+			continue
+		}
+		if normalizeAgentGroupDelegationInstruction(summary.instruction) == instruction {
+			return ErrAgentGroupDuplicateDelegation
+		}
+	}
+	return nil
 }
 
 // uniqueEnabledWorker 返回快照中唯一启用的 worker 成员；不存在或不止一个时返回 nil。

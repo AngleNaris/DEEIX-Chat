@@ -153,11 +153,11 @@ func (s *Service) executeAgentGroupRun(
 		Resource:   "agent_group_run",
 		ResourceID: run.PublicID,
 		Detail: map[string]interface{}{
-			"conversation_id":  input.ConversationID,
-			"group_public_id":  run.GroupPublicID,
-			"group_revision":   run.GroupRevision,
-			"client_run_id":    runID,
-			"status":           run.Status,
+			"conversation_id": input.ConversationID,
+			"group_public_id": run.GroupPublicID,
+			"group_revision":  run.GroupRevision,
+			"client_run_id":   runID,
+			"status":          run.Status,
 		},
 	})
 
@@ -310,6 +310,9 @@ func (st *agentGroupRunState) runSupervisorDecision(
 		decision, decisionErr := resolveAgentGroupSupervisorDecision(output.Text)
 		if decisionErr == nil && decision.Action == agentGroupSupervisorActionDelegate {
 			decisionErr = validateAgentGroupDelegation(st.snapshot, decision)
+			if decisionErr == nil {
+				decisionErr = validateAgentGroupDelegationHistory(st.summaries, decision)
+			}
 		}
 		if decisionErr == nil {
 			return decision, output, nil
@@ -318,6 +321,9 @@ func (st *agentGroupRunState) runSupervisorDecision(
 			// 纠错耗尽：归一化最终错误（解析失败 → InvalidDecision；校验失败 → InvalidMember）。
 			if errors.Is(decisionErr, ErrAgentGroupInvalidDecision) {
 				return nil, output, ErrAgentGroupInvalidDecision
+			}
+			if errors.Is(decisionErr, ErrAgentGroupDuplicateDelegation) {
+				return nil, output, ErrAgentGroupDuplicateDelegation
 			}
 			return nil, output, ErrAgentGroupInvalidMember
 		}
@@ -751,8 +757,8 @@ func (st *agentGroupRunState) markGroupAssistantMessageState(ctx context.Context
 	}
 }
 
-// recordStepSummary 记录已完成成员步骤摘要（供后续主管/成员上下文复用）。
-// 产出用 agentGroupBriefSnippet 头尾双摘，保证长产出的实质内容不被单侧截断吞掉。
+// recordStepSummary 记录已完成成员步骤结果（供后续主管/成员上下文复用）。
+// 内存中保留完整成功结果，统一在 agentGroupContextBrief 渲染时按总预算裁剪。
 func (st *agentGroupRunState) recordStepSummary(
 	step *domainagentgroup.Step,
 	member *domainagentgroup.RunSnapshotMember,
@@ -761,11 +767,12 @@ func (st *agentGroupRunState) recordStepSummary(
 ) {
 	summary := ""
 	if output != nil {
-		summary = agentGroupBriefSnippet(output.Text, 512)
+		summary = strings.TrimSpace(output.Text)
 	}
 	st.summaries = append(st.summaries, agentGroupContextSummary{
 		sequence:      step.Sequence,
 		stepType:      step.StepType,
+		actorMemberID: member.PublicID,
 		actorName:     member.RoleName,
 		instruction:   instruction,
 		outputSummary: summary,
@@ -790,6 +797,7 @@ func (st *agentGroupRunState) recordSupervisorDecisionSummary(step *domainagentg
 	st.summaries = append(st.summaries, agentGroupContextSummary{
 		sequence:      step.Sequence,
 		stepType:      step.StepType,
+		actorMemberID: st.snapshot.Supervisor.PublicID,
 		actorName:     st.snapshot.Supervisor.RoleName,
 		instruction:   agentGroupDecisionHeading(headingDecision),
 		outputSummary: agentGroupDecisionBriefText(headingDecision),
@@ -1070,7 +1078,8 @@ func classifyAgentGroupError(err error) (code string, retryable bool) {
 		return domainagentgroup.ErrorCodeCanceled, true
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		return domainagentgroup.ErrorCodeInterrupted, true
-	case errors.Is(err, ErrAgentGroupInvalidMember), errors.Is(err, ErrAgentGroupInvalidDecision):
+	case errors.Is(err, ErrAgentGroupInvalidMember), errors.Is(err, ErrAgentGroupInvalidDecision),
+		errors.Is(err, ErrAgentGroupDuplicateDelegation):
 		return domainagentgroup.ErrorCodeInvalidMemberSchedule, true
 	case errors.Is(err, ErrUpstreamRequestFailed), errors.Is(err, ErrUpstreamEmptyResponse),
 		errors.Is(err, ErrToolRunFinalAnswerMissing):
