@@ -186,6 +186,12 @@ func defaultSettings() []domainsettings.SystemSetting {
 		{Namespace: "circuit", Key: "channel_failure_threshold", Value: "3", ValueType: "int", Description: "熔断触发次数"},
 		{Namespace: "circuit", Key: "channel_failure_window_seconds", Value: "120", ValueType: "int", Description: "计数窗口(秒)"},
 		{Namespace: "circuit", Key: "channel_circuit_open_seconds", Value: "60", ValueType: "int", Description: "熔断持续时间(秒)"},
+
+		// Agent 群组配置
+		{Namespace: "agent_group", Key: "enabled", Value: "false", ValueType: "bool", Description: "是否启用 Agent 群组功能"},
+		{Namespace: "agent_group", Key: "max_steps_per_run", Value: "64", ValueType: "int", Description: "Agent 群组单次运行最大决策步骤数"},
+		{Namespace: "agent_group", Key: "max_attempts_per_step", Value: "8", ValueType: "int", Description: "Agent 群组单步最大尝试次数"},
+		{Namespace: "agent_group", Key: "attempt_lease_seconds", Value: "600", ValueType: "int", Description: "Agent 群组运行尝试租约时长(秒)，崩溃恢复窗口"},
 	}
 }
 

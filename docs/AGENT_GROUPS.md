@@ -12,6 +12,31 @@ Agent Groups are controlled by a runtime business setting (Feature Flag), stored
 | --- | --- | --- | --- |
 | `agent_group` | `enabled` | off | Master switch for the whole feature. |
 
+> **Note**: the flag defaults to **off**. On fresh installs you must enable it before users can create groups — otherwise the create dialog fails with "save failed" (API returns `403 FEATURE_DISABLED`).
+
+### How to enable
+
+1. **Admin console (recommended)**: sign in as an admin, open **Admin → Agent Groups**, flip *Enable agent groups* to on, and save. The same page also exposes the three runtime limits below.
+2. **Admin API**: `PATCH /api/v1/admin/settings` with an admin bearer token:
+
+   ```json
+   {
+     "items": [
+       { "namespace": "agent_group", "key": "enabled", "value": "true" }
+     ]
+   }
+   ```
+
+3. **Direct SQL** (only when the API is unreachable, e.g. during bootstrap):
+
+   ```sql
+   INSERT INTO system_settings (namespace, setting_key, setting_value, value_type, description, created_at, updated_at)
+   VALUES ('agent_group', 'enabled', 'true', 'bool', 'Enable agent groups', now(), now())
+   ON CONFLICT (namespace, setting_key) DO UPDATE SET setting_value = 'true', updated_at = now();
+   ```
+
+   The exact column names depend on the configured storage backend; adapt to your schema if needed.
+
 When the flag is off:
 
 - Backend rejects creating or modifying groups, creating group conversations, sending new group messages, and retrying steps.
@@ -21,7 +46,7 @@ When the flag is off:
 - After re-enabling, the run can be resumed from that checkpoint with a retry.
 - Regular conversations are unaffected.
 
-Additional runtime settings (same `agent_group` namespace, admin console):
+Additional runtime settings (same `agent_group` namespace, admin console → Agent Groups):
 
 | Key | Default | Meaning |
 | --- | --- | --- |

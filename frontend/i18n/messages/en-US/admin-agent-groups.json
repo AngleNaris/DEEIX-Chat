@@ -1,0 +1,39 @@
+{
+  "pageTitle": "Agent group settings",
+  "feature": {
+    "title": "Feature toggle",
+    "description": "Agent groups are disabled by default on fresh installs. Enable the feature before users can create groups."
+  },
+  "runtime": {
+    "title": "Runtime limits",
+    "description": "Limits applied to every agent group run."
+  },
+  "fields": {
+    "enabled": {
+      "label": "Enable agent groups",
+      "description": "Allow creating agent groups (1 supervisor + up to 31 workers)."
+    },
+    "maxStepsPerRun": {
+      "label": "Max decision steps per run",
+      "description": "Maximum number of decision steps for a single run before it is force-stopped."
+    },
+    "maxAttemptsPerStep": {
+      "label": "Max attempts per step",
+      "description": "How many times a step may be retried before the run fails."
+    },
+    "attemptLeaseSeconds": {
+      "label": "Attempt lease (seconds)",
+      "description": "How long an in-flight attempt may hold its lease before it is considered crashed and reclaimed."
+    }
+  },
+  "actions": {
+    "save": "Save changes"
+  },
+  "toast": {
+    "loadFailed": "Failed to load agent group settings",
+    "saveFailed": "Failed to save agent group settings",
+    "updated": "Agent group settings saved",
+    "sessionExpired": "Session expired",
+    "signInAgain": "Please sign in again"
+  }
+}

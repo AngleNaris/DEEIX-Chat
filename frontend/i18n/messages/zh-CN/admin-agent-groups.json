@@ -1,0 +1,39 @@
+{
+  "pageTitle": "Agent 群组设置",
+  "feature": {
+    "title": "功能开关",
+    "description": "全新部署默认关闭 Agent 群组功能，开启后用户才能创建群组。"
+  },
+  "runtime": {
+    "title": "运行参数",
+    "description": "应用于每次 Agent 群组运行的限制。"
+  },
+  "fields": {
+    "enabled": {
+      "label": "启用 Agent 群组",
+      "description": "允许创建 Agent 群组（1 个主管 + 最多 31 个成员）。"
+    },
+    "maxStepsPerRun": {
+      "label": "单次运行最大决策步数",
+      "description": "群组单次运行允许的最大决策步骤数，达到后强制停止。"
+    },
+    "maxAttemptsPerStep": {
+      "label": "单步最大尝试次数",
+      "description": "每一步最多可尝试次数，超出后该次运行失败。"
+    },
+    "attemptLeaseSeconds": {
+      "label": "尝试租约时长（秒）",
+      "description": "进行中的尝试持有租约的最长时间，超时视为崩溃并回收。"
+    }
+  },
+  "actions": {
+    "save": "保存更改"
+  },
+  "toast": {
+    "loadFailed": "加载 Agent 群组设置失败",
+    "saveFailed": "保存 Agent 群组设置失败",
+    "updated": "Agent 群组设置已保存",
+    "sessionExpired": "登录已过期",
+    "signInAgain": "请重新登录"
+  }
+}

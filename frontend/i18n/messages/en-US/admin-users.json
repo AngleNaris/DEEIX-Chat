@@ -13,6 +13,7 @@
     "loginSettings": "Sign-in & auth",
     "conversationSettings": "Conversation",
     "chatFiles": "Files & retrieval",
+    "agentGroups": "Agent Groups",
     "about": "About"
   },
   "aboutPage": {
