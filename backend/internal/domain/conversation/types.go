@@ -93,6 +93,7 @@ type ConversationRole struct {
 	DefaultSkillIDs   []uint
 	Color             string
 	Icon              string
+	GroupName         string
 	SortOrder         int
 	Status            string
 	CreatedAt         time.Time
@@ -111,6 +112,7 @@ type ConversationRolePatch struct {
 	DefaultSkillIDs   *[]uint
 	Color             *string
 	Icon              *string
+	GroupName         *string
 	Status            *string
 }
 

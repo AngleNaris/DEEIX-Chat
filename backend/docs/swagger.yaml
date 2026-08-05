@@ -2363,6 +2363,8 @@ definitions:
         type: array
       description:
         type: string
+      groupName:
+        type: string
       icon:
         type: string
       mcpDefaultMode:
@@ -2389,6 +2391,7 @@ definitions:
     - defaultMCPToolIDs
     - defaultSkillIDs
     - description
+    - groupName
     - icon
     - mcpDefaultMode
     - model
@@ -2703,6 +2706,9 @@ definitions:
         type: array
       description:
         maxLength: 255
+        type: string
+      groupName:
+        maxLength: 80
         type: string
       icon:
         maxLength: 32
@@ -6941,6 +6947,9 @@ definitions:
         type: array
       description:
         maxLength: 255
+        type: string
+      groupName:
+        maxLength: 80
         type: string
       icon:
         maxLength: 32

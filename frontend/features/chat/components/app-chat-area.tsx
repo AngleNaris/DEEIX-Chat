@@ -53,10 +53,12 @@ import { useChatData } from "@/features/chat/hooks/use-chat-data";
 import { useNewConversationDefaults } from "@/features/chat/hooks/use-new-conversation-defaults";
 import { toPendingAttachment } from "@/features/chat/model/message-submit";
 import { getConversation } from "@/shared/api/conversation";
+import { getConversationRole } from "@/shared/api/roles";
 import { listAvailableMCPTools } from "@/shared/api/mcp";
 import { getUserSettings, patchUserSettings } from "@/shared/api/user-settings";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 import type { ConversationDTO, ConversationOptions } from "@/shared/api/conversation.types";
+import type { ConversationRoleDTO } from "@/shared/api/roles.types";
 import type { FileObjectDTO } from "@/shared/api/file.types";
 import type { MCPToolDTO } from "@/shared/api/mcp.types";
 import {
@@ -174,7 +176,13 @@ export function AppChatArea() {
   const searchParams = useSearchParams();
   const routeConversationID = searchParams.get("conversation_id")?.trim() || null;
   const routeProjectID = searchParams.get("project_id")?.trim() || null;
-  const { newConversationRevision, newConversationProjectID: requestedNewConversationProjectID, requestNewConversation } = useChatSession();
+  const routeRoleID = searchParams.get("role_id")?.trim() || null;
+  const {
+    newConversationRevision,
+    newConversationProjectID: requestedNewConversationProjectID,
+    newConversationRoleID: requestedNewConversationRoleID,
+    requestNewConversation,
+  } = useChatSession();
   const [locallyCreatedConversationID, setLocallyCreatedConversationID] = React.useState<string | null>(null);
   const [newConversationOverride, setNewConversationOverride] = React.useState<{
     ignoredConversationID: string | null;
@@ -211,9 +219,16 @@ export function AppChatArea() {
       : resolvedRouteConversationID;
   const onNewConversationFromLoadError = React.useCallback(() => {
     const projectID = routeProjectID ?? "";
-    requestNewConversation({ projectID });
-    router.push(projectID ? `/chat?project_id=${encodeURIComponent(projectID)}` : "/chat");
-  }, [requestNewConversation, routeProjectID, router]);
+    const roleID = routeRoleID ?? "";
+    requestNewConversation({ projectID, roleID });
+    router.push(
+      projectID
+        ? `/chat?project_id=${encodeURIComponent(projectID)}`
+        : roleID
+          ? `/chat?role_id=${encodeURIComponent(roleID)}`
+          : "/chat",
+    );
+  }, [requestNewConversation, routeProjectID, routeRoleID, router]);
   const activeGenerationRunsRef = React.useRef<Set<string>>(new Set());
   const failedGenerationRunsRef = React.useRef<Set<string>>(new Set());
   const {
@@ -323,9 +338,50 @@ export function AppChatArea() {
     () => projects.find((item) => item.publicID === newConversationProjectID) ?? null,
     [newConversationProjectID, projects],
   );
+  const newConversationRoleID = !conversationID ? routeRoleID ?? requestedNewConversationRoleID : "";
+  const [activeRole, setActiveRole] = React.useState<ConversationRoleDTO | null>(null);
+  React.useEffect(() => {
+    if (!newConversationRoleID) {
+      setActiveRole(null);
+      return;
+    }
+    let cancelled = false;
+    async function loadRole() {
+      const token = await resolveAccessToken();
+      if (!token || cancelled) {
+        return;
+      }
+      try {
+        const role = await getConversationRole(token, newConversationRoleID);
+        if (!cancelled) {
+          setActiveRole(role);
+        }
+      } catch {
+        // 角色可能已被删除或无权访问，静默忽略。
+        if (!cancelled) {
+          setActiveRole(null);
+        }
+      }
+    }
+    void loadRole();
+    return () => {
+      cancelled = true;
+    };
+  }, [newConversationRoleID]);
+  const activeRouteRole = React.useMemo(() => {
+    if (!newConversationRoleID || conversationID) {
+      return null;
+    }
+    return activeRole;
+  }, [activeRole, conversationID, newConversationRoleID]);
   const prependNewConversationInContext = React.useCallback(
-    (platformModelName?: string) => prependNewConversation(platformModelName, newConversationProjectID || undefined),
-    [newConversationProjectID, prependNewConversation],
+    (platformModelName?: string) =>
+      prependNewConversation(
+        platformModelName,
+        newConversationProjectID || undefined,
+        newConversationRoleID || undefined,
+      ),
+    [newConversationProjectID, newConversationRoleID, prependNewConversation],
   );
 
   const {
@@ -353,6 +409,7 @@ export function AppChatArea() {
   } = useChatModelOptions({
     conversationPublicID: conversationID,
     conversationModel: currentConversation?.model ?? null,
+    initialModel: activeRouteRole?.model ?? null,
     resetToken: newConversationRevision,
   });
   const {
@@ -390,7 +447,7 @@ export function AppChatArea() {
   });
   const [selectedPrompts, setSelectedPrompts] = React.useState<PromptPresetDTO[]>([]);
   const [defaultToolIDs, setDefaultToolIDs] = React.useState<number[]>([]);
-  const newConversationSelectionKey = `${newConversationRevision}:${newConversationProjectID || "unassigned"}`;
+  const newConversationSelectionKey = `${newConversationRevision}:${newConversationProjectID || "unassigned"}:${newConversationRoleID || "norole"}`;
   const newConversationDefaultMCPToolIDs = React.useMemo(
     () => normalizeImageAttachmentProcessorSelection(
       filterAvailableMCPToolIDs(
@@ -1246,7 +1303,7 @@ export function AppChatArea() {
       {shouldUseCenteredComposer ? (
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           <ChatEmptyState
-            greetingTitle={activeRouteProject?.name || greetingTitle}
+            greetingTitle={activeRouteRole?.name || activeRouteProject?.name || greetingTitle}
             badgeLabel={activeRouteProject ? t("projectMode") : undefined}
             badgeTooltip={activeRouteProject ? t("projectModeTooltip") : undefined}
             contentWidthClassName={chatContentWidthClassName}

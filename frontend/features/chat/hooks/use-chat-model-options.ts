@@ -323,10 +323,12 @@ function toChatModelOption(item: PublicModelDTO): ChatModelOption {
 export function useChatModelOptions({
   conversationPublicID,
   conversationModel,
+  initialModel,
   resetToken,
 }: {
   conversationPublicID: string | null;
   conversationModel?: string | null;
+  initialModel?: string | null;
   resetToken?: number;
 }) {
   const t = useTranslations("chat.models");
@@ -540,6 +542,17 @@ export function useChatModelOptions({
       if (!token || cancelled || userSelectedModelRef.current) {
         return;
       }
+      // 新会话且指定了角色时，优先采用角色的默认模型（角色模型预选）。
+      const roleInitialModel = initialModel?.trim() || "";
+      if (
+        roleInitialModel &&
+        availableModels.some((item) => item.platformModelName === roleInitialModel)
+      ) {
+        if (!cancelled && !userSelectedModelRef.current) {
+          setSelectedPlatformModelName(roleInitialModel);
+        }
+        return;
+      }
       const result = await resolveConversationDefaultModel({
         accessToken: token,
         availableModels,
@@ -552,13 +565,18 @@ export function useChatModelOptions({
 
     void applyDefaultModel().catch(() => {
       if (!cancelled && !userSelectedModelRef.current) {
-        setSelectedPlatformModelName(availableModels[0]?.platformModelName ?? "");
+        const roleInitialModel = initialModel?.trim() || "";
+        setSelectedPlatformModelName(
+          roleInitialModel && availableModels.some((item) => item.platformModelName === roleInitialModel)
+            ? roleInitialModel
+            : availableModels[0]?.platformModelName ?? "",
+        );
       }
     });
     return () => {
       cancelled = true;
     };
-  }, [availableModels, conversationPublicID, resetToken, userDefaultModel]);
+  }, [availableModels, conversationPublicID, initialModel, resetToken, userDefaultModel]);
 
   const modelOptions = React.useMemo<ChatModelOption[]>(
     () =>

@@ -15923,6 +15923,7 @@
                 "defaultMCPToolIDs",
                 "defaultSkillIDs",
                 "description",
+                "groupName",
                 "icon",
                 "mcpDefaultMode",
                 "model",
@@ -15954,6 +15955,9 @@
                     }
                 },
                 "description": {
+                    "type": "string"
+                },
+                "groupName": {
                     "type": "string"
                 },
                 "icon": {
@@ -16417,6 +16421,10 @@
                 "description": {
                     "type": "string",
                     "maxLength": 255
+                },
+                "groupName": {
+                    "type": "string",
+                    "maxLength": 80
                 },
                 "icon": {
                     "type": "string",
@@ -22453,6 +22461,10 @@
                 "description": {
                     "type": "string",
                     "maxLength": 255
+                },
+                "groupName": {
+                    "type": "string",
+                    "maxLength": 80
                 },
                 "icon": {
                     "type": "string",

@@ -17,6 +17,7 @@ const (
 	conversationRoleModelMaxChars        = 128
 	conversationRoleProviderMaxChars     = 32
 	conversationRoleMetaMaxChars         = 32
+	conversationRoleGroupNameMaxChars    = 80
 )
 
 // ConversationRoleInput 定义新建角色输入。
@@ -31,6 +32,7 @@ type ConversationRoleInput struct {
 	DefaultSkillIDs   []uint
 	Color             string
 	Icon              string
+	GroupName         string
 }
 
 // ConversationRolePatchInput 定义角色局部更新输入。
@@ -45,6 +47,7 @@ type ConversationRolePatchInput struct {
 	DefaultSkillIDs   *[]uint
 	Color             *string
 	Icon              *string
+	GroupName         *string
 	Status            *string
 }
 
@@ -67,6 +70,7 @@ func (s *Service) CreateConversationRole(ctx context.Context, userID uint, input
 		DefaultSkillIDs:   normalized.DefaultSkillIDs,
 		Color:             normalized.Color,
 		Icon:              normalized.Icon,
+		GroupName:         normalized.GroupName,
 		Status:            "active",
 	}
 	if err = s.repo.CreateConversationRole(ctx, item); err != nil {
@@ -102,6 +106,7 @@ func (s *Service) UpdateConversationRole(ctx context.Context, userID uint, publi
 		DefaultSkillIDs:   normalized.DefaultSkillIDs,
 		Color:             normalized.Color,
 		Icon:              normalized.Icon,
+		GroupName:         normalized.GroupName,
 		Status:            normalized.Status,
 	}
 	return s.repo.UpdateConversationRoleByPublicID(ctx, userID, strings.TrimSpace(publicID), domainPatch)
@@ -157,6 +162,7 @@ func normalizeConversationRoleInput(input ConversationRoleInput) (ConversationRo
 		DefaultSkillIDs:   dedupeIDs(input.DefaultSkillIDs),
 		Color:             truncateRunes(strings.TrimSpace(input.Color), conversationRoleMetaMaxChars),
 		Icon:              truncateRunes(strings.TrimSpace(input.Icon), conversationRoleMetaMaxChars),
+		GroupName:         truncateRunes(strings.TrimSpace(input.GroupName), conversationRoleGroupNameMaxChars),
 	}, nil
 }
 
@@ -198,6 +204,10 @@ func normalizeConversationRolePatchInput(input ConversationRolePatchInput) (Conv
 	if input.Icon != nil {
 		value := truncateRunes(strings.TrimSpace(*input.Icon), conversationRoleMetaMaxChars)
 		input.Icon = &value
+	}
+	if input.GroupName != nil {
+		value := truncateRunes(strings.TrimSpace(*input.GroupName), conversationRoleGroupNameMaxChars)
+		input.GroupName = &value
 	}
 	if input.DefaultMCPToolIDs != nil {
 		value := dedupeIDs(*input.DefaultMCPToolIDs)

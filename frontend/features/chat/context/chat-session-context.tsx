@@ -5,17 +5,19 @@ import * as React from "react";
 type ChatSessionContextValue = {
   newConversationRevision: number;
   newConversationProjectID: string;
-  requestNewConversation: (options?: { projectID?: string }) => void;
+  newConversationRoleID: string;
+  requestNewConversation: (options?: { projectID?: string; roleID?: string }) => void;
 };
 
 const ChatSessionContext = React.createContext<ChatSessionContextValue | null>(null);
 
 export function ChatSessionProvider({ children }: { children: React.ReactNode }) {
-  const [state, setState] = React.useState({ revision: 0, projectID: "" });
-  const requestNewConversation = React.useCallback((options?: { projectID?: string }) => {
+  const [state, setState] = React.useState({ revision: 0, projectID: "", roleID: "" });
+  const requestNewConversation = React.useCallback((options?: { projectID?: string; roleID?: string }) => {
     setState((prev) => ({
       revision: prev.revision + 1,
       projectID: options?.projectID?.trim() ?? "",
+      roleID: options?.roleID?.trim() ?? "",
     }));
   }, []);
 
@@ -23,9 +25,10 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     () => ({
       newConversationRevision: state.revision,
       newConversationProjectID: state.projectID,
+      newConversationRoleID: state.roleID,
       requestNewConversation,
     }),
-    [requestNewConversation, state.projectID, state.revision],
+    [requestNewConversation, state.projectID, state.revision, state.roleID],
   );
 
   return <ChatSessionContext.Provider value={value}>{children}</ChatSessionContext.Provider>;

@@ -14,6 +14,7 @@ type ConversationRole struct {
 	MCPDefaultMode string `gorm:"size:16;not null;default:'inherit';comment:MCP默认模式(inherit/custom)"`
 	Color          string `gorm:"size:32;not null;default:'';comment:角色颜色"`
 	Icon           string `gorm:"size:32;not null;default:'';comment:角色图标"`
+	GroupName      string `gorm:"size:80;not null;default:'';comment:分组名称"`
 	SortOrder      int    `gorm:"not null;default:0;index:idx_chat_roles_sort_order;comment:展示顺序"`
 	Status         string `gorm:"size:32;not null;default:'active';index:idx_chat_roles_status;comment:角色状态(active/archived)"`
 }

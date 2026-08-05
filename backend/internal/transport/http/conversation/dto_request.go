@@ -51,6 +51,7 @@ type CreateConversationRoleRequest struct {
 	DefaultSkillIDs   []uint `json:"defaultSkillIDs,omitempty" binding:"max=128"`
 	Color             string `json:"color,omitempty" binding:"max=32"`
 	Icon              string `json:"icon,omitempty" binding:"max=32"`
+	GroupName         string `json:"groupName,omitempty" binding:"max=80"`
 }
 
 // UpdateConversationRoleRequest 更新角色请求。
@@ -66,6 +67,7 @@ type UpdateConversationRoleRequest struct {
 	Color             *string `json:"color,omitempty" binding:"omitempty,max=32"`
 	Icon              *string `json:"icon,omitempty" binding:"omitempty,max=32"`
 	Status            *string `json:"status,omitempty" binding:"omitempty,oneof=active archived"`
+	GroupName         *string `json:"groupName,omitempty" binding:"omitempty,max=80"`
 }
 
 // ReorderConversationRolesRequest 更新角色排序请求。

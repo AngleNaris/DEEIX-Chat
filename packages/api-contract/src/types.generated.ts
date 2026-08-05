@@ -965,6 +965,7 @@ export interface ConversationRoleResponse {
   defaultMCPToolIDs: number[];
   defaultSkillIDs: number[];
   description: string;
+  groupName: string;
   icon: string;
   mcpDefaultMode: string;
   model: string;
@@ -1127,6 +1128,8 @@ export interface CreateConversationRoleRequest {
   defaultSkillIDs?: number[];
   /** @maxLength 255 */
   description?: string;
+  /** @maxLength 80 */
+  groupName?: string;
   /** @maxLength 32 */
   icon?: string;
   mcpDefaultMode?: "inherit" | "custom";
@@ -3075,6 +3078,8 @@ export interface UpdateConversationRoleRequest {
   defaultSkillIDs?: number[];
   /** @maxLength 255 */
   description?: string;
+  /** @maxLength 80 */
+  groupName?: string;
   /** @maxLength 32 */
   icon?: string;
   mcpDefaultMode?: "inherit" | "custom";

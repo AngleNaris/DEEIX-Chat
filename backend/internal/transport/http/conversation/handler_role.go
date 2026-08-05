@@ -65,6 +65,7 @@ func (h *Handler) CreateConversationRole(c *gin.Context) {
 		DefaultSkillIDs:   req.DefaultSkillIDs,
 		Color:             req.Color,
 		Icon:              req.Icon,
+		GroupName:         req.GroupName,
 	})
 	if err != nil {
 		if errors.Is(err, appconversation.ErrInvalidConversationProject) {
@@ -153,6 +154,7 @@ func (h *Handler) UpdateConversationRole(c *gin.Context) {
 		Color:             req.Color,
 		Icon:              req.Icon,
 		Status:            req.Status,
+		GroupName:         req.GroupName,
 	})
 	if err != nil {
 		if errors.Is(err, appconversation.ErrConversationProjectNotFound) {

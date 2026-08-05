@@ -15930,6 +15930,7 @@ const docTemplate = `{
                 "defaultMCPToolIDs",
                 "defaultSkillIDs",
                 "description",
+                "groupName",
                 "icon",
                 "mcpDefaultMode",
                 "model",
@@ -15961,6 +15962,9 @@ const docTemplate = `{
                     }
                 },
                 "description": {
+                    "type": "string"
+                },
+                "groupName": {
                     "type": "string"
                 },
                 "icon": {
@@ -16424,6 +16428,10 @@ const docTemplate = `{
                 "description": {
                     "type": "string",
                     "maxLength": 255
+                },
+                "groupName": {
+                    "type": "string",
+                    "maxLength": 80
                 },
                 "icon": {
                     "type": "string",
@@ -22460,6 +22468,10 @@ const docTemplate = `{
                 "description": {
                     "type": "string",
                     "maxLength": 255
+                },
+                "groupName": {
+                    "type": "string",
+                    "maxLength": 80
                 },
                 "icon": {
                     "type": "string",

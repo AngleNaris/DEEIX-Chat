@@ -256,6 +256,7 @@ type ConversationRoleResponse struct {
 	DefaultSkillIDs   []uint    `json:"defaultSkillIDs"`
 	Color             string    `json:"color"`
 	Icon              string    `json:"icon"`
+	GroupName         string    `json:"groupName"`
 	SortOrder         int       `json:"sortOrder"`
 	Status            string    `json:"status"`
 	CreatedAt         time.Time `json:"createdAt"`
@@ -278,6 +279,7 @@ func toConversationRoleResponse(item *model.ConversationRole) ConversationRoleRe
 		DefaultSkillIDs:   append([]uint{}, item.DefaultSkillIDs...),
 		Color:             item.Color,
 		Icon:              item.Icon,
+		GroupName:         item.GroupName,
 		SortOrder:         item.SortOrder,
 		Status:            item.Status,
 		CreatedAt:         item.CreatedAt,

@@ -12,6 +12,7 @@ export type ConversationRoleDTO = {
   defaultSkillIDs: number[];
   color: string;
   icon: string;
+  groupName: string;
   sortOrder: number;
   status: string;
   createdAt: string;
@@ -29,6 +30,7 @@ export type CreateConversationRoleRequest = {
   defaultSkillIDs?: number[];
   color?: string;
   icon?: string;
+  groupName?: string;
 };
 
 export type UpdateConversationRoleRequest = {
@@ -43,6 +45,7 @@ export type UpdateConversationRoleRequest = {
   color?: string;
   icon?: string;
   status?: "active" | "archived";
+  groupName?: string;
 };
 
 export type ReorderConversationRolesRequest = {

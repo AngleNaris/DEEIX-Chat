@@ -14,6 +14,7 @@ import {
   Check,
   ChevronDown,
   CopyPlus,
+  FolderClosed,
   Globe2,
   SlidersHorizontal,
   Sparkles,
@@ -53,6 +54,7 @@ export type RoleDraft = {
   defaultSkillIDs: number[];
   color: string;
   icon: string;
+  groupName: string;
 };
 
 export const EMPTY_ROLE_DRAFT: RoleDraft = {
@@ -65,6 +67,7 @@ export const EMPTY_ROLE_DRAFT: RoleDraft = {
   defaultSkillIDs: [],
   color: "",
   icon: "",
+  groupName: "",
 };
 
 type RoleSelectorOption = {
@@ -153,6 +156,7 @@ function RoleForm({
   mcpTools,
   skills,
   projects,
+  groupOptions,
   submitting,
 }: {
   draft: RoleDraft;
@@ -161,6 +165,7 @@ function RoleForm({
   mcpTools: MCPToolDTO[];
   skills: SkillSummaryDTO[];
   projects: ConversationProjectDTO[];
+  groupOptions: string[];
   submitting: boolean;
 }) {
   const update = <K extends keyof RoleDraft>(key: K, value: RoleDraft[K]) => {
@@ -183,6 +188,19 @@ function RoleForm({
     });
   };
   const [iconPickerOpen, setIconPickerOpen] = React.useState(false);
+  const [creatingGroup, setCreatingGroup] = React.useState(false);
+  const [newGroupName, setNewGroupName] = React.useState("");
+  const confirmNewGroup = () => {
+    const name = newGroupName.trim();
+    setCreatingGroup(false);
+    if (name) {
+      update("groupName", name);
+    }
+  };
+  const cancelNewGroup = () => {
+    setCreatingGroup(false);
+    setNewGroupName("");
+  };
 
   return (
     <div className="min-h-0 space-y-4 overflow-y-auto px-0.5">
@@ -243,6 +261,65 @@ function RoleForm({
           onChange={(event) => update("systemPrompt", event.target.value)}
           disabled={submitting}
         />
+      </div>
+      <div className="space-y-1">
+        <Label className="text-xs text-muted-foreground">分组</Label>
+        {creatingGroup ? (
+          <div className="flex items-center gap-1">
+            <Input
+              autoFocus
+              value={newGroupName}
+              maxLength={80}
+              placeholder="新分组名称"
+              disabled={submitting}
+              onChange={(event) => setNewGroupName(event.target.value)}
+              onKeyDown={(event) => {
+                event.stopPropagation();
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  confirmNewGroup();
+                } else if (event.key === "Escape") {
+                  event.preventDefault();
+                  cancelNewGroup();
+                }
+              }}
+            />
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              className="size-8 shrink-0"
+              aria-label="确认新建分组"
+              disabled={submitting}
+              onClick={confirmNewGroup}
+            >
+              <Check className="size-4" strokeWidth={1.8} />
+            </Button>
+          </div>
+        ) : (
+          <RoleSingleSelector
+            value={draft.groupName}
+            placeholder="未分组"
+            icon={FolderClosed}
+            loading={submitting}
+            disabled={false}
+            options={[
+              { value: "", label: "未分组" },
+              ...groupOptions
+                .filter((name) => name.trim() && name !== draft.groupName)
+                .map((name) => ({ value: name, label: name })),
+              { value: "__new__", label: "新建分组…" },
+            ]}
+            onChange={(value) => {
+              if (value === "__new__") {
+                setCreatingGroup(true);
+                setNewGroupName("");
+              } else {
+                update("groupName", value);
+              }
+            }}
+          />
+        )}
       </div>
       <div className="space-y-1">
         <Label className="text-xs text-muted-foreground">默认模型</Label>
@@ -425,11 +502,13 @@ export function RoleDialog({
   setDraft,
   onOpenChange,
   onSubmit,
+  groupOptions,
 }: {
   draft: RoleDraft | null;
   setDraft: React.Dispatch<React.SetStateAction<RoleDraft | null>>;
   onOpenChange: (open: boolean) => void;
   onSubmit: () => void | Promise<void>;
+  groupOptions: string[];
 }) {
   const t = useTranslations("recent.projects");
   const [models, setModels] = React.useState<PublicModelDTO[]>([]);
@@ -504,6 +583,7 @@ export function RoleDialog({
               mcpTools={mcpTools}
               skills={skills}
               projects={projects}
+              groupOptions={groupOptions}
               submitting={submitting}
             />
             <DialogFooter>
