@@ -180,7 +180,7 @@ const agentGroupSupervisorOutputProtocol = `## 群组主管输出协议
 3. 每次只指派一个成员，不允许同时安排多个成员；
 4. 指令必须明确具体、可独立完成，避免模糊或重复指令；
 5. 只有当全部需求都已被已完成步骤充分满足时，才允许输出 "finish" 并给出完整最终回答；否则继续 delegate。
-6. memberID 可直接填写清单中对应的 name（角色名，如 lyricist），系统可自动解析；严禁编造清单外的名称或 ID。`
+6. memberID 必须逐字复制 <members> 清单中某个成员的 memberID（32 位十六进制）或 name（角色名），系统均可自动解析；name 为中文时必须原样输出中文，严禁将其翻译、意译、音译成其他语言，也严禁编造清单之外的任何名称或 ID。`
 
 // agentGroupMemberOutputProtocol 约束成员的输出。
 const agentGroupMemberOutputProtocol = `## 群组成员输出协议
@@ -251,7 +251,8 @@ func agentGroupSupervisorCorrectionHint(issue error, members []domainagentgroup.
 	var builder strings.Builder
 	builder.WriteString("<correction>\n")
 	fmt.Fprintf(&builder, "你上一轮输出的决策无效，原因：%s\n\n", xmlEscapeText(issue.Error()))
-	builder.WriteString("请忽略上一轮输出，重新输出一份完整的 JSON 决策。可指派成员（memberID 与 name 均可作为 memberID 使用）：\n")
+	builder.WriteString("你上一轮填写的 memberID 不在成员清单中，不要重复使用它；清单中不存在任何英文或翻译后的角色名。\n")
+	builder.WriteString("请忽略上一轮输出，重新输出一份完整的 JSON 决策。可指派成员（请逐字复制某一行中的 memberID 或 name，name 为中文时原样输出，禁止翻译）：\n")
 	for _, member := range members {
 		if member.MemberType != domainagentgroup.MemberTypeWorker || !member.Enabled {
 			continue
@@ -263,16 +264,43 @@ func agentGroupSupervisorCorrectionHint(issue error, members []domainagentgroup.
 	return builder.String()
 }
 
+// uniqueEnabledWorker 返回快照中唯一启用的 worker 成员；不存在或不止一个时返回 nil。
+func uniqueEnabledWorker(snapshot *domainagentgroup.RunSnapshot) *domainagentgroup.RunSnapshotMember {
+	if snapshot == nil {
+		return nil
+	}
+	var found *domainagentgroup.RunSnapshotMember
+	for i := range snapshot.Members {
+		member := &snapshot.Members[i]
+		if member.MemberType != domainagentgroup.MemberTypeWorker || !member.Enabled {
+			continue
+		}
+		if found != nil {
+			return nil
+		}
+		found = member
+	}
+	return found
+}
+
 // validateAgentGroupDelegation 校验主管 delegate 决策的成员目标（10.2）：
 // 成员属快照、非主管本人（worker）、启用、instruction 非空。
+// memberID 无法解析时，若快照中启用 worker 恰好唯一，则直接采用该成员
+// （模型可能把中文角色名翻译成英文导致解析失败，唯一候选不会误指派）。
 func validateAgentGroupDelegation(snapshot *domainagentgroup.RunSnapshot, decision *agentGroupSupervisorDecision) error {
 	if decision == nil || decision.Action != agentGroupSupervisorActionDelegate {
 		return errors.New("invalid supervisor decision")
 	}
 	member := agentGroupSnapshotMemberByID(snapshot, decision.MemberID)
 	if member == nil || member.MemberType != domainagentgroup.MemberTypeWorker {
-		return fmt.Errorf("supervisor delegated to invalid member %q", decision.MemberID)
+		if unique := uniqueEnabledWorker(snapshot); unique != nil {
+			member = unique
+		} else {
+			return fmt.Errorf("supervisor delegated to invalid member %q", decision.MemberID)
+		}
 	}
+	// 归一化：后续环节一律使用清单中的 PublicID，避免原始名称（含翻译名）被再次解析。
+	decision.MemberID = member.PublicID
 	if !member.Enabled {
 		return fmt.Errorf("supervisor delegated to disabled member %q", decision.MemberID)
 	}
