@@ -7,7 +7,6 @@ import { readAccessToken } from "@/shared/auth/session";
 import { dispatchFileLibraryInvalidated } from "@/shared/events/file-library-events";
 import { runBulkActionInChunks } from "@/shared/lib/bulk-action";
 import { resolveConversationDefaultModel } from "@/shared/model/conversation-default-model";
-import { getConversationRole } from "@/shared/api/roles";
 import { getAgentGroup } from "@/shared/api/agent-groups";
 import {
   batchSetConversationProject,
@@ -490,8 +489,10 @@ export function useSidebarConversationsController({
       const groupID = agentGroupID?.trim() || "";
       // 群组会话禁止请求级模型与角色，模型由群组成员配置决定。
       const explicitModel = groupID ? "" : platformModelName?.trim() || "";
-      const modelName =
-        explicitModel || (await resolveConversationDefaultModel({ accessToken: token })).platformModelName;
+      // 群组会话不解析默认模型（由群组成员配置推断），普通会话才兜底默认模型。
+      const modelName = groupID
+        ? ""
+        : explicitModel || (await resolveConversationDefaultModel({ accessToken: token })).platformModelName;
       let resolvedTitle = newConversationTitle;
       if (groupID) {
         try {
@@ -502,16 +503,8 @@ export function useSidebarConversationsController({
         } catch {
           // 群组查询失败时使用默认标题
         }
-      } else if (roleID?.trim()) {
-        try {
-          const role = await getConversationRole(token, roleID.trim());
-          if (role?.name) {
-            resolvedTitle = role.name;
-          }
-        } catch {
-          // 角色查询失败时使用默认标题
-        }
       }
+      // 角色对话与项目对话一致：不预填角色名，标题随首条消息自动重命名。
 
       const item = await createConversation(token, {
         title: resolvedTitle,
