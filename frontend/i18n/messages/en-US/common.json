@@ -150,5 +150,12 @@
   "appVersion": {
     "title": "New version available",
     "description": "Refresh the page to use the latest version."
+  },
+  "errorPage": {
+    "title": "Something went wrong",
+    "prefix": "An error occurred while rendering this page. You can",
+    "retry": "retry",
+    "or": "or",
+    "backToChat": "go back to chat"
   }
 }

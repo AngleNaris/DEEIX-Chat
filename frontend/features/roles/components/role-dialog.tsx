@@ -211,7 +211,7 @@ function RoleForm({
   };
 
   return (
-    <div className="min-h-0 space-y-4 overflow-y-auto px-0.5">
+    <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-2">
       {projects.length > 0 ? (
         <div className="space-y-1 rounded-md border border-border/60 bg-muted/20 p-2.5">
           <Label className="text-xs text-muted-foreground">从项目复制配置</Label>
@@ -586,10 +586,10 @@ export function RoleDialog({
         }
       }}
     >
-      <DialogContent className="overflow-hidden sm:max-w-2xl">
+      <DialogContent className="flex max-h-[min(86vh,760px)] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl">
         {draft ? (
           <>
-            <DialogHeader>
+            <DialogHeader className="shrink-0 px-5 pb-3 pt-5">
               <DialogTitle>{draft.publicID ? "编辑角色" : "新建角色"}</DialogTitle>
               <DialogDescription>
                 角色自带提示词、默认模型与图标；保存后可在左侧角色区直接开始对话
@@ -605,7 +605,7 @@ export function RoleDialog({
               groupOptions={groupOptions}
               submitting={submitting}
             />
-            <DialogFooter>
+            <DialogFooter className="shrink-0 px-5 py-3">
               <Button type="button" variant="ghost" onClick={() => setDraft(null)} disabled={submitting}>
                 取消
               </Button>

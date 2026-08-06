@@ -155,14 +155,14 @@ export function ProjectDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="overflow-hidden sm:max-w-xl">
+      <DialogContent className="flex max-h-[min(86vh,760px)] flex-col gap-0 overflow-hidden p-0 sm:max-w-xl">
         <form className="contents" onSubmit={handleSubmit}>
-          <DialogHeader>
+          <DialogHeader className="shrink-0 px-5 pb-3 pt-5">
             <DialogTitle>{stableDraft?.publicID ? t("editTitle") : t("createTitle")}</DialogTitle>
             <DialogDescription>{stableDraft?.publicID ? t("editDescription") : t("createDescription")}</DialogDescription>
           </DialogHeader>
 
-          <div className="min-h-0 space-y-4 overflow-y-auto px-0.5">
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-2">
             <div className="space-y-1">
               <label htmlFor={nameInputID} className="text-xs text-muted-foreground">
                 {t("nameLabel")}
@@ -302,7 +302,7 @@ export function ProjectDialog({
             </div>
           </div>
 
-          <DialogFooter>
+          <DialogFooter className="shrink-0 px-5 py-3">
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={submitting}>
               {t("cancel")}
             </Button>

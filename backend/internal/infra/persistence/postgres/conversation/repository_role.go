@@ -110,6 +110,9 @@ func (r *Repo) UpdateConversationRoleByPublicID(
 	if patch.Icon != nil {
 		updates["icon"] = *patch.Icon
 	}
+	if patch.GroupName != nil {
+		updates["group_name"] = *patch.GroupName
+	}
 	if patch.Status != nil {
 		updates["status"] = *patch.Status
 	}
@@ -210,6 +213,7 @@ func toConversationRoleDomain(item models.ConversationRole) domainconversation.C
 		MCPDefaultMode:  mcpDefaultMode,
 		Color:           item.Color,
 		Icon:            item.Icon,
+		GroupName:       item.GroupName,
 		SortOrder:       item.SortOrder,
 		Status:          item.Status,
 		CreatedAt:       item.CreatedAt,
@@ -241,6 +245,7 @@ func toConversationRoleModel(item *domainconversation.ConversationRole) models.C
 		MCPDefaultMode:  item.MCPDefaultMode,
 		Color:           item.Color,
 		Icon:            item.Icon,
+		GroupName:       item.GroupName,
 		SortOrder:       item.SortOrder,
 		Status:          item.Status,
 	}

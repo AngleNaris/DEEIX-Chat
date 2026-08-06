@@ -111,7 +111,7 @@ export function MCPToolEditDialog({
 
   return (
     <Dialog open={Boolean(form)} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="overflow-hidden sm:max-w-[520px]">
+      <DialogContent className="flex max-h-[min(86vh,760px)] flex-col gap-0 overflow-hidden p-0 sm:max-w-[520px]">
         <form
           className="contents"
           onSubmit={(event) => {
@@ -119,12 +119,12 @@ export function MCPToolEditDialog({
             onSave();
           }}
         >
-          <DialogHeader>
+          <DialogHeader className="shrink-0 px-5 pb-3 pt-5">
             <DialogTitle>{t("title")}</DialogTitle>
             <DialogDescription className="sr-only">{t("description")}</DialogDescription>
           </DialogHeader>
 
-          <div className="min-h-0 space-y-4 overflow-y-auto px-0.5">
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-2">
             <div className="space-y-1">
               <p className="text-xs text-muted-foreground">{t("displayName")}</p>
               <Input
@@ -302,7 +302,7 @@ export function MCPToolEditDialog({
             </div>
           </div>
 
-          <DialogFooter>
+          <DialogFooter className="shrink-0 px-5 py-3">
             <Button type="button" variant="ghost" onClick={onClose} disabled={saving}>
               {tActions("cancel")}
             </Button>

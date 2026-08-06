@@ -123,6 +123,7 @@ type ChatAreaProps = {
   agentGroup?: {
     publicID: string;
     name?: string;
+    contextLabel?: string;
   } | null;
   attachmentContentLoader?: (file: PreviewDialogFile) => Promise<FileContentResult>;
   onEditImageAttachment?: (attachment: MessageAttachment, sourceModelName?: string) => void;
@@ -585,9 +586,14 @@ export function ChatArea({
             <Badge
               variant="outline"
               className="min-w-0 shrink-0 cursor-default border-border/70 bg-background/60 px-1.5 py-0 text-[9px] font-medium text-muted-foreground"
-              title={`${t("agentGroupMode")} · ${agentGroup.name}`}
+              title={`${t("agentGroupMode")}${agentGroup.contextLabel ? ` · ${agentGroup.contextLabel}` : ""} · ${agentGroup.name}`}
             >
-              <span className="truncate">{t("agentGroupMode")} · {agentGroup.name}</span>
+              <span className="truncate">
+                {t("agentGroupMode")}
+                {agentGroup.contextLabel ? ` · ${agentGroup.contextLabel}` : ""}
+                {" · "}
+                {agentGroup.name}
+              </span>
             </Badge>
           ) : null}
           {agentGroup ? (

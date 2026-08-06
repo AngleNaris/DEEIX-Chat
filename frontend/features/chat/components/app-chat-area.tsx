@@ -451,6 +451,19 @@ export function AppChatArea() {
       name: activeRouteAgentGroup?.name?.trim() || "",
     };
   }, [activeRouteAgentGroup?.name, currentAgentGroup, newConversationAgentGroupID]);
+  // 群组模式 badge 的上下文标签：已有会话显示其绑定的角色/项目（服务端随会话填充），新会话显示当前路由/请求上下文中的角色/项目。
+  const groupModeContextLabel = React.useMemo(() => {
+    const conversationRoleName = currentConversation?.roleName?.trim();
+    const conversationProjectName = currentConversation?.projectName?.trim();
+    const routeRoleName = activeRouteRole?.name?.trim();
+    const routeProjectName = newConversationProject?.name?.trim();
+    return conversationRoleName || conversationProjectName || routeRoleName || routeProjectName || "";
+  }, [
+    activeRouteRole?.name,
+    currentConversation?.projectName,
+    currentConversation?.roleName,
+    newConversationProject?.name,
+  ]);
   const prependNewConversationInContext = React.useCallback(
     (platformModelName?: string) =>
       prependNewConversation(
@@ -1408,7 +1421,9 @@ export function AppChatArea() {
             }
             badgeLabel={
               newConversationAgentGroupID
-                ? t("agentGroupMode")
+                ? groupModeContextLabel
+                  ? `${t("agentGroupMode")} · ${groupModeContextLabel}`
+                  : t("agentGroupMode")
                 : activeRouteProject
                   ? t("projectMode")
                   : undefined
@@ -1461,7 +1476,11 @@ export function AppChatArea() {
                   selectedPlatformModelName={selectedPlatformModelName}
                   onModelChange={setSelectedPlatformModelName}
                   onModelCatalogRefresh={refreshModelCatalogForComposer}
-                  agentGroup={activeAgentGroup}
+                  agentGroup={
+                    activeAgentGroup
+                      ? { ...activeAgentGroup, contextLabel: groupModeContextLabel }
+                      : null
+                  }
                   onEditImageAttachment={onEditGeneratedImageAttachment}
                   onOpenCodeArtifact={artifactWorkspace.openArtifact}
                   onCycleMessageBranch={onCycleMessageBranch}

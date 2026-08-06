@@ -984,10 +984,10 @@ export function AgentGroupDialog({
         }
       }}
     >
-      <DialogContent className="flex max-h-[calc(100svh-2rem)] flex-col overflow-hidden p-0 sm:max-w-2xl">
+      <DialogContent className="flex max-h-[min(86svh,760px)] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl">
         {draft ? (
           <>
-            <DialogHeader className="px-5 pt-5">
+            <DialogHeader className="shrink-0 px-5 pb-3 pt-5">
               <DialogTitle>{createMode ? "新建群组" : `编辑群组：${draft.name}`}</DialogTitle>
               <DialogDescription>
                 群组由主管与若干成员协作完成对话；成员可独立启用、覆盖模型并说明职责
@@ -1001,7 +1001,7 @@ export function AgentGroupDialog({
               setDraft={setDraft}
               submitting={submitting || loading}
             />
-            <DialogFooter className="items-center gap-2 px-5 pb-5">
+            <DialogFooter className="shrink-0 items-center gap-2 px-5 py-3">
               {!createMode && draft.publicID ? (
                 <Button
                   type="button"
