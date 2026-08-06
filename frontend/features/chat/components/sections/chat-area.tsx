@@ -7,6 +7,7 @@ import { useTranslations } from "next-intl";
 import { ChatLabel } from "@/features/chat/components/sections/chat-label";
 import { useChatMessageFeedback } from "@/features/chat/hooks/use-chat-message-feedback";
 import { AgentGroupConfigButton } from "@/features/agent-groups/components/agent-group-config-button";
+import { Badge } from "@/components/ui/badge";
 import {
   AssistantMessageSkeleton,
   ChatInlineAlertCard,
@@ -580,6 +581,15 @@ export function ChatArea({
             onScreenshotFull={onScreenshotFull}
             onScreenshotSelect={onScreenshotSelect}
           />
+          {agentGroup ? (
+            <Badge
+              variant="outline"
+              className="min-w-0 shrink-0 cursor-default border-border/70 bg-background/60 px-1.5 py-0 text-[9px] font-medium text-muted-foreground"
+              title={`${t("agentGroupMode")} · ${agentGroup.name}`}
+            >
+              <span className="truncate">{t("agentGroupMode")} · {agentGroup.name}</span>
+            </Badge>
+          ) : null}
           {agentGroup ? (
             <AgentGroupConfigButton
               groupPublicID={agentGroup.publicID}

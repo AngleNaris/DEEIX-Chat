@@ -313,9 +313,9 @@ function RoleForm({
             disabled={false}
             options={[
               { value: "", label: "未分组" },
-              ...groupOptions
-                .filter((name) => name.trim() && name !== draft.groupName)
-                .map((name) => ({ value: name, label: name })),
+              ...Array.from(
+                new Set([draft.groupName, ...groupOptions].filter((name) => name.trim())),
+              ).map((name) => ({ value: name, label: name })),
               { value: "__new__", label: "新建分组…" },
             ]}
             onChange={(value) => {

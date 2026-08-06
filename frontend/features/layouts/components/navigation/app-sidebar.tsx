@@ -14,7 +14,6 @@ import { NavControl } from "@/features/layouts/components/navigation/nav-control
 import { NavMain } from "@/features/layouts/components/navigation/nav-main";
 import { NavProjects } from "@/features/layouts/components/navigation/nav-projects";
 import { NavRoles } from "@/features/layouts/components/navigation/nav-roles";
-import { NavAgentGroups } from "@/features/agent-groups/components/nav-agent-groups";
 import { NavRecents } from "@/features/layouts/components/navigation/nav-recents";
 import { NavStarred } from "@/features/layouts/components/navigation/nav-starred";
 import { NavUser } from "@/features/layouts/components/navigation/nav-user";
@@ -59,7 +58,6 @@ export function AppSidebar({
         >
           <LayoutGroup id="sidebar-conversations">
             <NavRoles />
-            <NavAgentGroups />
             <NavProjects />
             <NavStarred />
             <NavRecents />
