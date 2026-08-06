@@ -1012,7 +1012,8 @@ export function useChatMessageSubmit({
         };
 
         if (!targetConversationID) {
-          const created = await prependNewConversation(requestPlatformModelName);
+          // 群组会话创建时不携带请求级模型：模型由群组成员配置推断（与发送消息一致），后端禁止请求级覆盖。
+          const created = await prependNewConversation(isAgentGroupTarget ? "" : requestPlatformModelName);
           if (streamAbortController.signal.aborted) {
             throw new DOMException("Aborted", "AbortError");
           }
