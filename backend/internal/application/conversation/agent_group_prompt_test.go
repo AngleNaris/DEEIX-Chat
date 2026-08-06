@@ -1,12 +1,16 @@
 package conversation
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
 
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/channel"
 	domainagentgroup "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/agentgroup"
 	domainconversation "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/llm"
 )
 
 // agentGroupPromptTestSnapshot 构造测试快照：nWorkers 个启用的 worker 成员 + 一个主管。
@@ -187,6 +191,62 @@ func TestAgentGroupUserOnlyContext_EmptyAndAllAssistant(t *testing.T) {
 	all := []domainconversation.Message{{Role: "assistant", Content: "a"}, {Role: "assistant", Content: "b"}}
 	if got := agentGroupUserOnlyContext(all); len(got) != 0 {
 		t.Fatalf("all-assistant input should return empty, got %+v", got)
+	}
+}
+
+// TestAgentGroupHistoricalUserContext_PreservesSupervisorBriefInLatestUserPrompt
+// 回归真实组装链路：本次原始用户消息若残留在 DomainMessages，
+// buildMessageRoutePrompt 会跳过专用 UserContent，导致主管看不到成员结果。
+func TestAgentGroupHistoricalUserContext_PreservesSupervisorBriefInLatestUserPrompt(t *testing.T) {
+	const currentUserMessageID = 12
+	contextMessages := agentGroupHistoricalUserContext([]domainconversation.Message{
+		{ID: 10, Role: "user", Content: "先制定执行计划"},
+		{ID: 11, Role: "assistant", Content: "旧的普通会话回答"},
+		{ID: currentUserMessageID, Role: "user", Content: "完成整个任务"},
+	}, currentUserMessageID)
+	if len(contextMessages) != 1 || contextMessages[0].ID != 10 {
+		t.Fatalf("expected only historical user messages, got %+v", contextMessages)
+	}
+
+	memberResult := "成员已经完成数据库迁移设计，回滚命令为 restore-v2。"
+	supervisorUserContent := agentGroupSupervisorUserContent(
+		"完成整个任务",
+		agentGroupPromptTestSnapshot(1).Members,
+		agentGroupContextBrief([]agentGroupContextSummary{{
+			sequence:      2,
+			stepType:      domainagentgroup.StepTypeMemberExecute,
+			actorMemberID: strings.Repeat("a", 32),
+			actorName:     "歌词创作专家",
+			instruction:   "设计数据库迁移",
+			outputSummary: memberResult,
+		}}),
+	)
+	service := &Service{}
+	plan, err := service.buildMessageRoutePrompt(context.Background(), &channel.ResolvedRoute{
+		Protocol:      llm.AdapterOpenAIChatCompletions,
+		UpstreamModel: "test-model",
+	}, messageRoutePromptInput{
+		UserContent:       supervisorUserContent,
+		AppendUserContent: true,
+		DomainMessages:    contextMessages,
+		Config: config.Config{
+			ContextMaxInputTokens: 32000,
+		},
+	})
+	if err != nil {
+		t.Fatalf("build supervisor prompt: %v", err)
+	}
+	if len(plan.Messages) != 2 {
+		t.Fatalf("expected historical user + supervisor user content, got %+v", plan.Messages)
+	}
+	latest := plan.Messages[len(plan.Messages)-1]
+	if latest.Role != "user" {
+		t.Fatalf("latest prompt message must be user, got %+v", latest)
+	}
+	for _, want := range []string{"<completed_steps>", memberResult, "<members>"} {
+		if !strings.Contains(latest.Content, want) {
+			t.Fatalf("latest supervisor prompt missing %q:\n%s", want, latest.Content)
+		}
 	}
 }
 

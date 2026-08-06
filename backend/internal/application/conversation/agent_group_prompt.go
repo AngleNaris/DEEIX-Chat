@@ -262,6 +262,25 @@ func agentGroupUserOnlyContext(messages []domainconversation.Message) []domainco
 	return filtered
 }
 
+// agentGroupHistoricalUserContext 构造内部 Actor 回合的历史用户消息。
+// 内部 Actor 会显式追加专用 UserContent，因此必须剔除本次 GroupRun 的原始
+// 用户消息，避免同一需求重复，并确保成员清单、<completed_steps> 与成员结果
+// 始终位于模型收到的最新 user 消息中。
+func agentGroupHistoricalUserContext(messages []domainconversation.Message, currentUserMessageID uint) []domainconversation.Message {
+	userMessages := agentGroupUserOnlyContext(messages)
+	if currentUserMessageID == 0 {
+		return userMessages
+	}
+	filtered := make([]domainconversation.Message, 0, len(userMessages))
+	for _, message := range userMessages {
+		if message.ID == currentUserMessageID {
+			continue
+		}
+		filtered = append(filtered, message)
+	}
+	return filtered
+}
+
 // agentGroupSupervisorCorrectionHint 构造主管决策纠错提示：
 // 说明上一轮输出无效的具体原因，并重新给出可指派成员的 memberID → 角色名对照表，
 // 供自动纠错循环回喂给主管重新决策。

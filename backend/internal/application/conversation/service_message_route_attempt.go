@@ -10,7 +10,10 @@ import (
 )
 
 type messageRoutePromptInput struct {
-	UserContent              string
+	UserContent string
+	// AppendUserContent 用于 DomainMessages 只包含历史消息的内部 Actor 回合；
+	// 普通消息路径的 DomainMessages 已包含当前用户消息，保持 false 避免重复。
+	AppendUserContent        bool
 	ProjectSystemPrompt      string
 	HTMLVisualPromptEnabled  bool
 	ReasoningContentPassback bool
@@ -63,7 +66,7 @@ func (s *Service) buildMessageRoutePrompt(ctx context.Context, route *channel.Re
 			return PromptPlan{}, err
 		}
 	}
-	if len(historyMessages) == 0 {
+	if len(historyMessages) == 0 || input.AppendUserContent {
 		historyMessages = append(historyMessages, llm.Message{Role: "user", Content: input.UserContent})
 	}
 

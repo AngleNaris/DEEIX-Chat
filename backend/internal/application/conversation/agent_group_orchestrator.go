@@ -124,9 +124,11 @@ func (s *Service) executeAgentGroupRun(
 		}
 	}
 	contextMessages = recoverAssistantRetryUserStates(contextMessages)
-	// 群组内部回合专用上下文：仅保留用户消息（assistant 历史回复会带偏
-	// 成员/主管对自身角色的定位，详见 agentGroupUserOnlyContext）。
-	contextMessages = agentGroupUserOnlyContext(contextMessages)
+	// 群组内部回合专用上下文：仅保留历史用户消息，并剔除本次用户行。
+	// 本次需求由 AgentTurnInput.UserContent 携带，其中还包含成员清单与
+	// <completed_steps>；若把本次原始用户行留在 DomainMessages 中，
+	// buildMessageRoutePrompt 会误判最新 user 已存在并丢弃专用 UserContent。
+	contextMessages = agentGroupHistoricalUserContext(contextMessages, pair.user.ID)
 
 	// 创建运行（pending，StateVersion=1）。
 	run := &domainagentgroup.Run{

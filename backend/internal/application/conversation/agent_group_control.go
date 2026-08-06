@@ -323,9 +323,9 @@ func (s *Service) buildAgentGroupRunResumeState(
 		}
 	}
 	contextMessages = recoverAssistantRetryUserStates(contextMessages)
-	// 群组内部回合专用上下文：仅保留用户消息（assistant 历史回复会带偏
-	// 成员/主管对自身角色的定位，详见 agentGroupUserOnlyContext）。
-	contextMessages = agentGroupUserOnlyContext(contextMessages)
+	// 与首次运行保持一致：只保留历史用户消息并剔除本次 GroupRun 用户行，
+	// 让重试回合的专用 UserContent（含 <completed_steps>）成为最新 user 消息。
+	contextMessages = agentGroupHistoricalUserContext(contextMessages, userMessage.ID)
 
 	// 步骤序列与成功摘要：Sequence 从现有步骤总数继续；
 	// 摘要重建全部成功成员结果与主管委派记录。
