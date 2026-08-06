@@ -85,6 +85,15 @@ const COMPOSER_MENTION_KINDS_WITHOUT_MODEL: readonly ChatMentionMenuKind[] = [
   "group",
 ];
 
+/** 角色上下文：@ 菜单不提供群组项，角色对话框禁止召唤群组（群组运行不使用角色提示词）。 */
+const COMPOSER_MENTION_KINDS_WITHOUT_GROUP: readonly ChatMentionMenuKind[] = [
+  "model",
+  "file",
+  "tool",
+  "skill",
+  "prompt",
+];
+
 const FilePreviewDialog = dynamic(
   () => import("@/shared/components/file-preview/preview-dialog").then((module) => module.FilePreviewDialog),
   { ssr: false },
@@ -130,6 +139,8 @@ type ChatInputProps = {
   modelLoading: boolean;
   modelDisabled?: boolean;
   hideModelPicker?: boolean;
+  /** 角色上下文禁止召唤群组：隐藏 @菜单 群组项并忽略群组选择（群组运行不使用角色提示词）。 */
+  disableGroupSummon?: boolean;
   dropActive?: boolean;
   onDraftChange: (value: string) => void;
   onModelChange: (platformModelName: string) => void;
@@ -275,6 +286,7 @@ function ChatInputComponent({
   modelLoading,
   modelDisabled = false,
   hideModelPicker = false,
+  disableGroupSummon = false,
   dropActive = false,
   onDraftChange,
   onModelChange,
@@ -433,7 +445,11 @@ function ChatInputComponent({
     defaultFileLabel: tComposer("mention.fileFallback"),
     disabled: loading || uploading || modelLoading || modelDisabled,
     draft,
-    enabledKinds: hideModelPicker ? COMPOSER_MENTION_KINDS_WITHOUT_MODEL : undefined,
+    enabledKinds: hideModelPicker
+      ? COMPOSER_MENTION_KINDS_WITHOUT_MODEL
+      : disableGroupSummon
+        ? COMPOSER_MENTION_KINDS_WITHOUT_GROUP
+        : undefined,
     maxSelectedTools,
     maxSelectedSkills,
     modelOptions,
@@ -446,7 +462,7 @@ function ChatInputComponent({
     toolsDisabled: isMediaMode,
     onDraftChange,
     onFileSelect: onAttachExistingFile,
-    onGroupSelect: onSelectAgentGroup,
+    onGroupSelect: disableGroupSummon ? undefined : onSelectAgentGroup,
     onModelCatalogRefresh,
     onModelChange,
     onSelectedPromptsChange,

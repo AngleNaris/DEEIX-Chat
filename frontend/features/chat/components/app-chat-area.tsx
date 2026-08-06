@@ -464,6 +464,23 @@ export function AppChatArea() {
     currentConversation?.roleName,
     newConversationProject?.name,
   ]);
+  // 角色上下文禁止召唤群组：群组运行不使用角色提示词（成员仅绑定角色作模型兜底），
+  // 因此角色对话框（新会话处于角色位置 / 已有会话绑定角色）隐藏 @群组 召唤项，
+  // 仅允许在项目位置进入群组模式；已存在的群组会话（含历史角色绑定）保持可切换。
+  const agentGroupSummonDisabled = React.useMemo(() => {
+    if (conversationID) {
+      const roleID = currentConversation?.roleID?.trim() ?? "";
+      const groupID = currentConversation?.agentGroupID?.trim() ?? "";
+      return roleID !== "" && groupID === "";
+    }
+    return newConversationRoleID.trim() !== "" && newConversationAgentGroupID.trim() === "";
+  }, [
+    conversationID,
+    currentConversation?.agentGroupID,
+    currentConversation?.roleID,
+    newConversationAgentGroupID,
+    newConversationRoleID,
+  ]);
   const prependNewConversationInContext = React.useCallback(
     (platformModelName?: string) =>
       prependNewConversation(
@@ -1369,6 +1386,7 @@ export function AppChatArea() {
     modelOptionPolicy,
     modelLoading: modelsLoading,
     hideModelPicker: Boolean(activeAgentGroup),
+    disableGroupSummon: agentGroupSummonDisabled,
     dropActive: fileDragActive,
     onDraftChange: setDraft,
     onModelChange: setSelectedPlatformModelName,
