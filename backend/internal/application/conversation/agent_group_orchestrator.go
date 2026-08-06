@@ -937,13 +937,15 @@ func (s *Service) buildAgentGroupRunSnapshot(ctx context.Context, input SendMess
 		return nil, err
 	}
 
-	project, err := s.GetConversationProject(ctx, input.UserID, conversation.ProjectPublicID)
-	if err != nil {
-		return nil, err
-	}
-
-	snapshot := &domainagentgroup.RunSnapshot{
-		Project: domainagentgroup.RunSnapshotProject{
+	// 群组已从项目绑定中拆除（§C1）：会话在项目位置创建时继承项目系统提示词与工具，
+	// 否则项目快照为空（SystemPrompt 为空时 prompt 组装自动跳过项目注入）。
+	var snapshotProject domainagentgroup.RunSnapshotProject
+	if conversation.ProjectPublicID != "" {
+		project, err := s.GetConversationProject(ctx, input.UserID, conversation.ProjectPublicID)
+		if err != nil {
+			return nil, err
+		}
+		snapshotProject = domainagentgroup.RunSnapshotProject{
 			ProjectID:      project.ID,
 			PublicID:       project.PublicID,
 			Name:           project.Name,
@@ -951,7 +953,11 @@ func (s *Service) buildAgentGroupRunSnapshot(ctx context.Context, input SendMess
 			MCPDefaultMode: project.MCPDefaultMode,
 			MCPToolIDs:     append([]uint(nil), project.DefaultMCPToolIDs...),
 			SkillIDs:       append([]uint(nil), project.DefaultSkillIDs...),
-		},
+		}
+	}
+
+	snapshot := &domainagentgroup.RunSnapshot{
+		Project: snapshotProject,
 		Group: domainagentgroup.RunSnapshotGroup{
 			GroupID:            group.ID,
 			PublicID:           group.PublicID,

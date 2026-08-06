@@ -444,7 +444,8 @@
         "tool": "MCP",
         "model": "Models",
         "skill": "Skills",
-        "prompt": "Prompts"
+        "prompt": "Prompts",
+        "group": "Agent Groups"
       }
     },
     "mediaMode": {

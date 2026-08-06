@@ -7,6 +7,8 @@ import {
   searchMentionFiles,
 } from "@/features/chat/model/mention-file-search";
 import type { ChatModelOption, PendingAttachment } from "@/features/chat/types/chat-runtime";
+import { listAgentGroups } from "@/shared/api/agent-groups";
+import type { AgentGroupDTO } from "@/shared/api/agent-groups.types";
 import type { FileObjectDTO } from "@/shared/api/file.types";
 import type { MCPToolDTO } from "@/shared/api/mcp.types";
 import { listVisiblePromptPresets } from "@/shared/api/prompt-presets";
@@ -27,9 +29,16 @@ const MENTION_MENU_VIEWPORT_GUTTER = 16;
 const MENTION_MENU_OFFSET = 8;
 const MENTION_MENU_FILE_QUERY_DELAY_MS = 180;
 const MENTION_MENU_PROMPT_QUERY_DELAY_MS = 180;
-const DEFAULT_MENTION_MENU_KINDS: readonly ChatMentionMenuKind[] = ["model", "file", "tool", "skill", "prompt"];
+const DEFAULT_MENTION_MENU_KINDS: readonly ChatMentionMenuKind[] = [
+  "model",
+  "file",
+  "tool",
+  "skill",
+  "prompt",
+  "group",
+];
 
-export type ChatMentionMenuKind = "file" | "tool" | "model" | "skill" | "prompt";
+export type ChatMentionMenuKind = "file" | "tool" | "model" | "skill" | "prompt" | "group";
 
 type ChatMentionFileMenuItem = {
   id: string;
@@ -76,12 +85,22 @@ type ChatMentionSkillMenuItem = {
   selected: boolean;
 };
 
+type ChatMentionGroupMenuItem = {
+  id: string;
+  kind: "group";
+  label: string;
+  description: string;
+  group: AgentGroupDTO;
+  selected: boolean;
+};
+
 export type ChatMentionMenuItem =
   | ChatMentionFileMenuItem
   | ChatMentionToolMenuItem
   | ChatMentionModelMenuItem
   | ChatMentionSkillMenuItem
-  | ChatMentionPromptMenuItem;
+  | ChatMentionPromptMenuItem
+  | ChatMentionGroupMenuItem;
 
 export type ChatMentionMenuSection = {
   kind: ChatMentionMenuKind;
@@ -119,6 +138,7 @@ type ChatMentionMenuControllerArgs = {
   onDraftChange: (value: string) => void;
   enabledKinds?: readonly ChatMentionMenuKind[];
   onFileSelect: (file: FileObjectDTO) => void | Promise<void>;
+  onGroupSelect?: (group: AgentGroupDTO) => void;
   onModelChange: (platformModelName: string) => void;
   onSelectedPromptsChange?: (prompts: PromptPresetDTO[]) => void;
   onSelectedSkillsChange?: (skills: SkillSummaryDTO[]) => void;
@@ -288,17 +308,6 @@ function removeTriggerRange(value: string, range: ChatMentionTriggerQuery["range
   };
 }
 
-function replaceTriggerRange(value: string, range: ChatMentionTriggerQuery["range"], content: string): {
-  caretIndex: number;
-  value: string;
-} {
-  const nextContent = content.trim();
-  return {
-    caretIndex: range.start + nextContent.length,
-    value: `${value.slice(0, range.start)}${nextContent}${value.slice(range.end)}`,
-  };
-}
-
 function itemMatchesQuery(values: Array<string | undefined>, query: string): boolean {
   const normalizedQuery = query.trim().toLowerCase();
   if (!normalizedQuery) {
@@ -357,6 +366,19 @@ function skillsToItems(skills: SkillSummaryDTO[], selectedSkills: SkillSummaryDT
   }));
 }
 
+function groupsToItems(groups: AgentGroupDTO[], query: string): ChatMentionGroupMenuItem[] {
+  return groups
+    .filter((group) => itemMatchesQuery([group.name, group.description], query))
+    .map((group) => ({
+      id: `group:${group.publicID}`,
+      kind: "group" as const,
+      label: group.name,
+      description: group.description,
+      group,
+      selected: false,
+    }));
+}
+
 function filterTools(
   availableTools: MCPToolDTO[],
   query: string,
@@ -400,6 +422,8 @@ function buildSections({
   files,
   filesQuery,
   fileLoading,
+  groups,
+  groupLoading,
   promptLoading,
   skillLoading,
   modelOptions,
@@ -419,6 +443,8 @@ function buildSections({
   files: FileObjectDTO[];
   filesQuery: string;
   fileLoading: boolean;
+  groups: AgentGroupDTO[];
+  groupLoading: boolean;
   modelOptions: ChatModelOption[];
   prompts: PromptPresetDTO[];
   promptLoading: boolean;
@@ -449,6 +475,13 @@ function buildSections({
       const promptItems = promptLoading ? [] : promptsToItems(prompts);
       if (promptItems.length > 0) {
         sections.push({ kind: "prompt" as const, items: promptItems });
+      }
+    }
+    if (enabledKinds.has("group")) {
+      // 群组选择只切换模式（不插入输入内容），与 Skills/Prompts 并列展示。
+      const groupItems = groupLoading ? [] : groupsToItems(groups, query);
+      if (groupItems.length > 0) {
+        sections.push({ kind: "group" as const, items: groupItems });
       }
     }
     if (sections.length === 0) {
@@ -586,6 +619,7 @@ export function useChatMentionMenu({
   textareaRef,
   toolsDisabled,
   onDraftChange,
+  onGroupSelect,
   onSelectedPromptsChange,
   onSelectedSkillsChange,
   enabledKinds = DEFAULT_MENTION_MENU_KINDS,
@@ -611,6 +645,8 @@ export function useChatMentionMenu({
   const [promptsLoading, setPromptsLoading] = React.useState(false);
   const [skills, setSkills] = React.useState<SkillSummaryDTO[]>([]);
   const [skillsLoading, setSkillsLoading] = React.useState(false);
+  const [groups, setGroups] = React.useState<AgentGroupDTO[]>([]);
+  const [groupsLoading, setGroupsLoading] = React.useState(false);
   const [selection, setSelection] = React.useState<ChatMentionSelection>(() => ({
     end: draft.length,
     start: draft.length,
@@ -781,6 +817,45 @@ export function useChatMentionMenu({
     };
   }, [disabled, enabledKindSet, promptQuery]);
 
+  React.useEffect(() => {
+    if (promptQuery === null || disabled || !enabledKindSet.has("group")) {
+      setGroups([]);
+      setGroupsLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      setGroupsLoading(true);
+      void (async () => {
+        try {
+          const token = await resolveAccessToken();
+          if (!token || controller.signal.aborted) {
+            return;
+          }
+          // 群组列表接口不支持服务端查询，拉取全量后在 buildSections 内按输入过滤。
+          const data = await listAgentGroups(token);
+          if (!controller.signal.aborted) {
+            setGroups(data);
+          }
+        } catch {
+          if (!controller.signal.aborted) {
+            setGroups([]);
+          }
+        } finally {
+          if (!controller.signal.aborted) {
+            setGroupsLoading(false);
+          }
+        }
+      })();
+    }, MENTION_MENU_PROMPT_QUERY_DELAY_MS);
+
+    return () => {
+      controller.abort();
+      window.clearTimeout(timer);
+    };
+  }, [disabled, enabledKindSet, promptQuery]);
+
   const sections = React.useMemo(
     () =>
       buildSections({
@@ -790,6 +865,8 @@ export function useChatMentionMenu({
         files,
         filesQuery,
         fileLoading: filesLoading,
+        groups,
+        groupLoading: groupsLoading,
         modelOptions,
         prompts,
         promptLoading: promptsLoading,
@@ -810,6 +887,8 @@ export function useChatMentionMenu({
       files,
       filesQuery,
       filesLoading,
+      groups,
+      groupsLoading,
       modelOptions,
       prompts,
       promptsLoading,
@@ -957,6 +1036,13 @@ export function useChatMentionMenu({
         return;
       }
 
+      if (item.kind === "group") {
+        // 选择群组仅切换模式：不插入输入内容，会话在真正发送时创建。
+        onGroupSelect?.(item.group);
+        finishSelection();
+        return;
+      }
+
       void onFileSelect(item.file);
       finishSelection();
     },
@@ -965,6 +1051,7 @@ export function useChatMentionMenu({
       maxSelectedSkills,
       maxSelectedTools,
       onFileSelect,
+      onGroupSelect,
       onDraftChange,
       onModelChange,
       onSelectedPromptsChange,

@@ -2,7 +2,6 @@ package agentgroup
 
 import (
 	"net/http"
-	"strings"
 
 	appagentgroup "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/agentgroup"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/response"
@@ -12,26 +11,18 @@ import (
 
 // ListAgentGroups godoc
 // @Summary 群组列表
-// @Description 查询当前用户项目下的 Agent 群组
+// @Description 查询当前用户全部 Agent 群组
 // @Tags chat
 // @Accept json
 // @Produce json
 // @Security BearerAuth
-// @Param projectID query string true "项目 public_id"
 // @Success 200 {object} AgentGroupListResponseDoc
 // @Failure 403 {object} ErrorDoc
 // @Failure 500 {object} ErrorDoc
 // @Router /conversation-agent-groups [get]
 func (h *Handler) ListAgentGroups(c *gin.Context) {
 	userID := middleware.MustUserID(c)
-	// projectID 是 query 参数（前端 listAgentGroups 以 ?projectID= 传递），
-	// 不能用读取路由路径参数的 stringParam。
-	projectID := strings.TrimSpace(c.Query("projectID"))
-	if projectID == "" {
-		response.Error(c, http.StatusBadRequest, "invalid project id")
-		return
-	}
-	groups, err := h.service.ListAgentGroups(c.Request.Context(), userID, projectID)
+	groups, err := h.service.ListAgentGroups(c.Request.Context(), userID)
 	if err != nil {
 		resolveError(c, err, http.StatusInternalServerError, "list agent groups failed")
 		return
@@ -109,13 +100,13 @@ func (h *Handler) CreateAgentGroup(c *gin.Context) {
 			DutyInstruction: worker.DutyInstruction,
 		})
 	}
-	group, err := h.service.CreateAgentGroup(c.Request.Context(), userID, req.ProjectID, input)
+	group, err := h.service.CreateAgentGroup(c.Request.Context(), userID, input)
 	if err != nil {
 		resolveError(c, err, http.StatusInternalServerError, "create agent group failed")
 		return
 	}
 	h.recordAudit(c, "create_agent_group", "agent_group", group.PublicID,
-		map[string]string{"project_id": req.ProjectID})
+		map[string]string{"name": req.Name})
 	response.Success(c, toAgentGroupResponse(group))
 }
 

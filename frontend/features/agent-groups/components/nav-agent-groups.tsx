@@ -45,7 +45,7 @@ export function NavAgentGroups() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const { items, projects, lastChange } = useSidebarConversations();
+  const { items, lastChange } = useSidebarConversations();
   const { requestNewConversation } = useChatSession();
   const [groupsOpen, setGroupsOpen] = useStoredBoolean(AGENT_GROUPS_OPEN_STORAGE_KEY, true);
   const [groups, setGroups] = React.useState<AgentGroupDTO[]>([]);
@@ -66,48 +66,33 @@ export function NavAgentGroups() {
       return;
     }
     try {
-      const results = await Promise.all(projects.map((project) => listAgentGroups(token, project.publicID)));
-      const merged = results
-        .flat()
-        .slice()
-        .sort((a, b) => a.sortOrder - b.sortOrder || a.createdAt.localeCompare(b.createdAt));
-      setGroups(merged);
+      // 群组已全局化：单次拉取当前用户全部群组，不再按项目遍历。
+      const groups = await listAgentGroups(token);
+      setGroups(
+        groups.slice().sort((a, b) => a.sortOrder - b.sortOrder || a.createdAt.localeCompare(b.createdAt)),
+      );
     } catch {
       // 群组列表加载失败不影响侧边栏
     } finally {
       setLoadingGroups(false);
     }
-  }, [projects]);
+  }, []);
 
   React.useEffect(() => {
-    if (projects.length > 0) {
-      setLoadingGroups(true);
-      void loadGroups();
-    } else {
-      setGroups([]);
-    }
-  }, [loadGroups, projects.length]);
+    setLoadingGroups(true);
+    void loadGroups();
+  }, [loadGroups]);
 
   // 会话变化（新建/重命名）后刷新群组列表，保持成员数与配置同步。
   React.useEffect(() => {
-    if (projects.length > 0 && lastChange !== null) {
+    if (lastChange !== null) {
       void loadGroups();
     }
-  }, [lastChange, loadGroups, projects.length]);
-
-  const projectOptions = React.useMemo(
-    () => projects.map((project) => ({ publicID: project.publicID, name: project.name })),
-    [projects],
-  );
+  }, [lastChange, loadGroups]);
 
   const onCreate = React.useCallback(() => {
-    if (projects.length === 0) {
-      toast.error("请先创建项目");
-      return;
-    }
-    const project = projects.find((item) => item.publicID === activeProjectID) ?? projects[0];
-    setDraft(emptyAgentGroupDraft(project.publicID, project.name));
-  }, [activeProjectID, projects]);
+    setDraft(emptyAgentGroupDraft());
+  }, []);
 
   const openEdit = React.useCallback((group: AgentGroupDTO) => {
     setDraft(agentGroupDraftFromDTO(group));
@@ -115,18 +100,27 @@ export function NavAgentGroups() {
 
   const startGroupChat = React.useCallback(
     (group: AgentGroupDTO) => {
-      requestNewConversation({
-        projectID: group.projectID,
-        agentGroupID: group.publicID,
-      });
-      router.push(
-        `/chat?project_id=${encodeURIComponent(group.projectID)}&agent_group_id=${encodeURIComponent(group.publicID)}`,
-      );
+      // 群组会话创建到当前所在位置：角色下继承 role_id，项目下继承 project_id，否则无位置。
+      const roleID = searchParams.get("role_id")?.trim() || "";
+      if (roleID) {
+        requestNewConversation({ roleID, agentGroupID: group.publicID });
+        router.push(
+          `/chat?role_id=${encodeURIComponent(roleID)}&agent_group_id=${encodeURIComponent(group.publicID)}`,
+        );
+      } else if (activeProjectID) {
+        requestNewConversation({ projectID: activeProjectID, agentGroupID: group.publicID });
+        router.push(
+          `/chat?project_id=${encodeURIComponent(activeProjectID)}&agent_group_id=${encodeURIComponent(group.publicID)}`,
+        );
+      } else {
+        requestNewConversation({ agentGroupID: group.publicID });
+        router.push(`/chat?agent_group_id=${encodeURIComponent(group.publicID)}`);
+      }
       if (isMobile) {
         setOpenMobile(false);
       }
     },
-    [isMobile, requestNewConversation, router, setOpenMobile],
+    [activeProjectID, isMobile, requestNewConversation, router, searchParams, setOpenMobile],
   );
 
   const removeGroup = React.useCallback(
@@ -186,9 +180,7 @@ export function NavAgentGroups() {
               </SidebarGroupAction>
             </div>
             <CollapsibleContent>
-              {projects.length === 0 ? (
-                <div className="px-2 py-1 text-xs text-sidebar-foreground/55">请先创建项目</div>
-              ) : loadingGroups ? (
+              {loadingGroups ? (
                 <div className="px-2 py-1 text-xs text-sidebar-foreground/55">加载中…</div>
               ) : groups.length === 0 ? (
                 <div className="px-2 py-1 text-xs text-sidebar-foreground/55">暂无群组</div>
@@ -209,7 +201,7 @@ export function NavAgentGroups() {
                       <SidebarMenuItem key={group.publicID}>
                         <div
                           className="group/agent-group-row relative"
-                          title={`${group.name}（${group.projectName}）`}
+                          title={group.name}
                           onFocus={(event) => {
                             setFocusedRowID(
                               event.target instanceof HTMLElement && event.target.matches(":focus-visible")
@@ -335,7 +327,6 @@ export function NavAgentGroups() {
         onOpenChange={(open) => !open && setDraft(null)}
         onSaved={() => void loadGroups()}
         onDeleted={() => void loadGroups()}
-        projects={projectOptions}
       />
     </>
   );

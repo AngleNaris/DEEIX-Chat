@@ -283,7 +283,7 @@ func NewApp() (*App, error) {
 	memoryService.SetCacheInvalidator(conversationService.InvalidateMemoryCache)
 	conversationHandler := conversationhttp.NewHandler(conversationService, runtimeCfg)
 	conversationModule := conversationhttp.NewModule(conversationHandler)
-	agentGroupService := agentgroup.NewService(agentGroupRepo, conversationService, conversationService, settingsService, log)
+	agentGroupService := agentgroup.NewService(agentGroupRepo, conversationService, settingsService, log)
 	agentGroupService.SetAuditWriter(auditService)
 	agentGroupHandler := agentgrouphttp.NewHandler(agentGroupService, conversationService)
 	agentGroupModule := agentgrouphttp.NewModule(agentGroupHandler)

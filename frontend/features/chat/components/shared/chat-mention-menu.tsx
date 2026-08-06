@@ -3,7 +3,7 @@
 import * as React from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "motion/react";
-import { Box, Check, FileText, ScrollText, Wrench } from "lucide-react";
+import { Box, Check, FileText, ScrollText, Users, Wrench } from "lucide-react";
 
 import type {
   ChatMentionMenuItem,
@@ -61,6 +61,10 @@ function ChatMentionMenuItemButton({
       ) : item.kind === "skill" ? (
         <span className="flex size-4 shrink-0 items-center justify-center rounded-sm text-muted-foreground">
           <Box className="size-3.5" strokeWidth={1.7} />
+        </span>
+      ) : item.kind === "group" ? (
+        <span className="flex size-4 shrink-0 items-center justify-center rounded-sm text-muted-foreground">
+          <Users className="size-3.5" strokeWidth={1.7} />
         </span>
       ) : (
         <span className="flex size-4 shrink-0 items-center justify-center rounded-sm text-muted-foreground">

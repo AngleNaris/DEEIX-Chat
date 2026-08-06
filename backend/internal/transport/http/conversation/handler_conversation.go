@@ -49,9 +49,7 @@ func (h *Handler) CreateConversation(c *gin.Context) {
 			response.Error(c, http.StatusNotFound, "conversation agent group not found")
 			return
 		}
-		if errors.Is(err, appconversation.ErrConversationRoleNotAllowedWithGroup) ||
-			errors.Is(err, appconversation.ErrConversationModelNotAllowedWithGroup) ||
-			errors.Is(err, appconversation.ErrConversationGroupProjectMismatch) {
+		if errors.Is(err, appconversation.ErrConversationModelNotAllowedWithGroup) {
 			response.Error(c, http.StatusBadRequest, "agent group conversation constraints violated")
 			return
 		}

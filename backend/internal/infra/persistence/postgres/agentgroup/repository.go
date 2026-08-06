@@ -314,11 +314,11 @@ func now() time.Time {
 	return time.Now().UTC()
 }
 
-// groupQuery 构造群组与项目摘要的联查。
+// groupQuery 构造群组与项目摘要的联查（群组已全局化，项目可空；未绑定时项目字段为空串）。
 func groupQuery(db *gorm.DB) *gorm.DB {
 	return db.Table("chat_agent_groups AS groups").
 		Select("groups.*, projects.public_id AS project_public_id, projects.name AS project_name").
-		Joins("JOIN chat_conversation_projects AS projects ON projects.id = groups.project_id")
+		Joins("LEFT JOIN chat_conversation_projects AS projects ON projects.id = groups.project_id")
 }
 
 // runQuery 构造运行与群组摘要的联查。
@@ -328,12 +328,16 @@ func runQuery(db *gorm.DB) *gorm.DB {
 		Joins("JOIN chat_agent_groups AS groups ON groups.id = runs.group_id")
 }
 
-// ListAgentGroupsByProject 查询项目内群组（含成员与角色摘要）。
-func (r *Repo) ListAgentGroupsByProject(ctx context.Context, userID uint, projectID uint) ([]domainagentgroup.Group, error) {
+// ListAgentGroups 查询当前用户全部群组（含成员与角色摘要）。
+// projectID 为 0 时不过滤项目（群组已全局化）；否则仅返回指定项目内群组（兼容历史调用）。
+func (r *Repo) ListAgentGroups(ctx context.Context, userID uint, projectID uint) ([]domainagentgroup.Group, error) {
 	var rows []groupRow
-	if err := groupQuery(r.db.WithContext(ctx)).
-		Where("groups.user_id = ? AND groups.project_id = ?", userID, projectID).
-		Order("groups.sort_order ASC, groups.id ASC").
+	query := groupQuery(r.db.WithContext(ctx)).
+		Where("groups.user_id = ?", userID)
+	if projectID != 0 {
+		query = query.Where("groups.project_id = ?", projectID)
+	}
+	if err := query.Order("groups.sort_order ASC, groups.id ASC").
 		Scan(&rows).Error; err != nil {
 		return nil, translateError(err)
 	}

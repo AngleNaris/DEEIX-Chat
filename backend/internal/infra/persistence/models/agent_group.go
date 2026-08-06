@@ -2,12 +2,13 @@ package model
 
 import "time"
 
-// AgentGroup 存储项目内 Agent 群组配置（chat_agent_groups）。
+// AgentGroup 存储 Agent 群组配置（chat_agent_groups）。
+// 群组已从项目绑定中拆除（§C1），ProjectID 仅保留历史字段，0=未绑定。
 type AgentGroup struct {
 	BaseModel
 	UserID             uint   `gorm:"not null;index:idx_chat_agent_groups_user_id;comment:用户ID"`
 	PublicID           string `gorm:"size:32;not null;default:'';uniqueIndex:idx_chat_agent_groups_public_id;comment:公开群组ID"`
-	ProjectID          uint   `gorm:"not null;index:idx_chat_agent_groups_project_id;comment:所属项目ID"`
+	ProjectID          uint   `gorm:"index:idx_chat_agent_groups_project_id;comment:所属项目ID(0=未绑定)"`
 	Name               string `gorm:"size:80;not null;default:'';comment:群组名称"`
 	Description        string `gorm:"size:255;not null;default:'';comment:群组描述"`
 	CoordinationPrompt string `gorm:"type:text;not null;default:'';comment:仅提供给主管的群组协调提示词"`

@@ -7,13 +7,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -52,11 +45,6 @@ import { ReasoningEffortSelector } from "@/shared/components/reasoning-effort-se
 import { parseProtocolsJSON } from "@/shared/lib/model-protocols";
 import { isReasoningEffortLevel, resolveReasoningEffortForProtocols } from "@/shared/lib/reasoning-effort";
 
-export type AgentGroupProjectOption = {
-  publicID: string;
-  name: string;
-};
-
 export type AgentGroupMemberDraft = {
   /** 本地列表渲染键；已持久化成员与 publicID 对应，新建成员仅本地存在。 */
   key: string;
@@ -76,8 +64,6 @@ export type AgentGroupMemberDraft = {
 
 export type AgentGroupDraft = {
   publicID?: string;
-  projectID: string;
-  projectName: string;
   name: string;
   description: string;
   coordinationPrompt: string;
@@ -114,8 +100,6 @@ export function agentGroupDraftFromDTO(group: AgentGroupDTO): AgentGroupDraft {
   const supervisor = group.members.find((member) => member.memberType === "supervisor") ?? null;
   return {
     publicID: group.publicID,
-    projectID: group.projectID,
-    projectName: group.projectName,
     name: group.name,
     description: group.description,
     coordinationPrompt: group.coordinationPrompt,
@@ -143,10 +127,8 @@ export function emptyAgentGroupMemberDraft(role: ConversationRoleDTO): AgentGrou
   };
 }
 
-export function emptyAgentGroupDraft(projectID: string, projectName: string): AgentGroupDraft {
+export function emptyAgentGroupDraft(): AgentGroupDraft {
   return {
-    projectID,
-    projectName,
     name: "",
     description: "",
     coordinationPrompt: "",
@@ -614,7 +596,6 @@ function AgentGroupForm({
   createMode,
   draft,
   models,
-  projects,
   roles,
   setDraft,
   submitting,
@@ -622,7 +603,6 @@ function AgentGroupForm({
   createMode: boolean;
   draft: AgentGroupDraft;
   models: PublicModelDTO[];
-  projects?: AgentGroupProjectOption[];
   roles: ConversationRoleDTO[];
   setDraft: React.Dispatch<React.SetStateAction<AgentGroupDraft>>;
   submitting: boolean;
@@ -662,40 +642,6 @@ function AgentGroupForm({
           disabled={submitting}
         />
       </div>
-      {createMode ? (
-        <div className="space-y-1">
-          <Label className="text-xs text-muted-foreground">所属项目</Label>
-          {projects && projects.length > 1 ? (
-            <Select
-              value={draft.projectID}
-              onValueChange={(projectID) => {
-                // 合并为一次函数式更新：分两次 update 时第二次会基于旧 draft 展开，
-                // 把 projectID 覆盖回原值，导致选择项目后无效。
-                const project = projects.find((item) => item.publicID === projectID);
-                setDraft((prev) => ({
-                  ...prev,
-                  projectID,
-                  projectName: project?.name ?? prev.projectName,
-                }));
-              }}
-              disabled={submitting}
-            >
-              <SelectTrigger className="h-8 text-xs">
-                <SelectValue placeholder="选择项目" />
-              </SelectTrigger>
-              <SelectContent>
-                {projects.map((project) => (
-                  <SelectItem key={project.publicID} value={project.publicID}>
-                    {project.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          ) : (
-            <p className="px-1 text-xs text-muted-foreground">{draft.projectName}</p>
-          )}
-        </div>
-      ) : null}
       <div className="space-y-1">
         <Label className="text-xs text-muted-foreground">群组协调提示词</Label>
         <Textarea
@@ -906,14 +852,12 @@ export function AgentGroupDialog({
   onOpenChange,
   onSaved,
   onDeleted,
-  projects,
 }: {
   draft: AgentGroupDraft | null;
   setDraft: React.Dispatch<React.SetStateAction<AgentGroupDraft | null>>;
   onOpenChange: (open: boolean) => void;
   onSaved: (group: AgentGroupDTO) => void | Promise<void>;
   onDeleted: (groupPublicID: string) => void | Promise<void>;
-  projects?: AgentGroupProjectOption[];
 }) {
   const [roles, setRoles] = React.useState<ConversationRoleDTO[]>([]);
   const [models, setModels] = React.useState<PublicModelDTO[]>([]);
@@ -991,7 +935,6 @@ export function AgentGroupDialog({
         toast.success("群组已更新");
       } else {
         group = await createAgentGroup(token, {
-          projectID: draft.projectID,
           name: draft.name.trim(),
           description: draft.description,
           coordinationPrompt: draft.coordinationPrompt,
@@ -1054,7 +997,6 @@ export function AgentGroupDialog({
               createMode={createMode}
               draft={draft}
               models={models}
-              projects={projects}
               roles={roles}
               setDraft={setDraft}
               submitting={submitting || loading}

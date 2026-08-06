@@ -1,8 +1,8 @@
 package agentgroup
 
 // CreateAgentGroupRequest 创建群组请求。
+// 群组已从项目绑定中拆除（§C1），不再接收 projectID；项目归属由会话创建时所在位置决定。
 type CreateAgentGroupRequest struct {
-	ProjectID          string                    `json:"projectID" binding:"required,max=32"`
 	Name               string                    `json:"name" binding:"required,max=80"`
 	Description        string                    `json:"description,omitempty" binding:"max=255"`
 	CoordinationPrompt string                    `json:"coordinationPrompt,omitempty" binding:"max=12000"`

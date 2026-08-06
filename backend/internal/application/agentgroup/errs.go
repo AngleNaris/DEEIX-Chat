@@ -5,9 +5,6 @@ import "errors"
 var (
 	// ErrAgentGroupNotFound 群组不存在或无权限。
 	ErrAgentGroupNotFound = errors.New("agent group not found")
-
-// ErrAgentGroupProjectNotFound 项目不存在或不属于当前用户。
-ErrAgentGroupProjectNotFound = errors.New("agent group project not found")
 	// ErrAgentGroupFeatureDisabled Agent 群组功能未启用。
 	ErrAgentGroupFeatureDisabled = errors.New("agent group feature disabled")
 	// ErrInvalidAgentGroupName 群组名称不合法。

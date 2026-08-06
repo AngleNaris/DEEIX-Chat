@@ -444,7 +444,8 @@
         "tool": "MCP",
         "model": "模型",
         "skill": "Skills",
-        "prompt": "Prompts"
+        "prompt": "Prompts",
+        "group": "群组"
       }
     },
     "mediaMode": {

@@ -15,17 +15,11 @@ import type {
 } from "@/shared/api/agent-groups.types";
 import type { GroupStreamEvent, StreamMessageEvent } from "@/shared/api/conversation.types";
 
-export async function listAgentGroups(
-  accessToken: string,
-  projectPublicID: string,
-): Promise<AgentGroupDTO[]> {
-  return authedRequest<AgentGroupDTO[]>(
-    `/api/v1/conversation-agent-groups?projectID=${encodeURIComponent(projectPublicID)}`,
-    {
-      accessToken,
-    },
-    true,
-  );
+// listAgentGroups 查询当前用户全部群组（群组已全局化，不再按项目过滤）。
+export async function listAgentGroups(accessToken: string): Promise<AgentGroupDTO[]> {
+  return authedRequest<AgentGroupDTO[]>(`/api/v1/conversation-agent-groups`, {
+    accessToken,
+  }, true);
 }
 
 export async function getAgentGroup(

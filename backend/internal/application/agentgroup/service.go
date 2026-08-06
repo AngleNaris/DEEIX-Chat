@@ -21,11 +21,6 @@ type roleReader interface {
 	GetConversationRole(ctx context.Context, userID uint, publicID string) (*domainconversation.ConversationRole, error)
 }
 
-// projectReader 提供项目查询的窄接口（由 conversation 服务实现）。
-type projectReader interface {
-	GetConversationProject(ctx context.Context, userID uint, publicID string) (*domainconversation.ConversationProject, error)
-}
-
 // settingsReader 提供运行时系统设置读取的窄接口（由 settings 服务实现）。
 type settingsReader interface {
 	RuntimeValuesByNamespace(ctx context.Context, namespace string) (map[string]string, error)
@@ -38,20 +33,18 @@ type auditWriter interface {
 
 // Service 封装 Agent 群组业务能力。
 type Service struct {
-	repo          repository.AgentGroupRepository
-	roleReader    roleReader
-	projectReader projectReader
-	settings      settingsReader
-	logger        *zap.Logger
-	now           func() time.Time
-	auditWriter   auditWriter
+	repo        repository.AgentGroupRepository
+	roleReader  roleReader
+	settings    settingsReader
+	logger      *zap.Logger
+	now         func() time.Time
+	auditWriter auditWriter
 }
 
 // NewService 创建群组服务。
 func NewService(
 	repo repository.AgentGroupRepository,
 	roleReader roleReader,
-	projectReader projectReader,
 	settings settingsReader,
 	logger *zap.Logger,
 ) *Service {
@@ -59,12 +52,11 @@ func NewService(
 		logger = zap.NewNop()
 	}
 	return &Service{
-		repo:          repo,
-		roleReader:    roleReader,
-		projectReader: projectReader,
-		settings:      settings,
-		logger:        logger,
-		now:           time.Now,
+		repo:        repo,
+		roleReader:  roleReader,
+		settings:    settings,
+		logger:      logger,
+		now:         time.Now,
 	}
 }
 

@@ -25,12 +25,8 @@ var (
 	ErrConversationRoleInUseByAgentGroup = errors.New("conversation role is in use by agent group member")
 	// ErrConversationProjectInUseByAgentGroup 项目下仍存在群组，禁止删除（§18 删除保护）。
 	ErrConversationProjectInUseByAgentGroup = errors.New("conversation project is in use by agent group")
-	// ErrConversationRoleNotAllowedWithGroup 群组会话禁止绑定单个角色。
-	ErrConversationRoleNotAllowedWithGroup = errors.New("conversation role not allowed with agent group")
 	// ErrConversationModelNotAllowedWithGroup 群组会话禁止请求级模型覆盖。
 	ErrConversationModelNotAllowedWithGroup = errors.New("conversation model override not allowed with agent group")
-	// ErrConversationGroupProjectMismatch 群组所属项目与会话项目不一致。
-	ErrConversationGroupProjectMismatch = errors.New("conversation agent group project mismatch")
 	// ErrConversationGroupImmutable 群组会话的绑定不可变更。
 	ErrConversationGroupImmutable = errors.New("conversation agent group binding is immutable")
 	// ErrAgentGroupFeatureDisabled 群组功能未启用。

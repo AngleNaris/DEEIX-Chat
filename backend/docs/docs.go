@@ -7953,7 +7953,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "查询当前用户项目下的 Agent 群组",
+                "description": "查询当前用户全部 Agent 群组",
                 "consumes": [
                     "application/json"
                 ],
@@ -7964,15 +7964,6 @@ const docTemplate = `{
                     "chat"
                 ],
                 "summary": "群组列表",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "项目 public_id",
-                        "name": "projectID",
-                        "in": "query",
-                        "required": true
-                    }
-                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -16227,7 +16218,6 @@ const docTemplate = `{
             "type": "object",
             "required": [
                 "name",
-                "projectID",
                 "supervisor"
             ],
             "properties": {
@@ -16242,10 +16232,6 @@ const docTemplate = `{
                 "name": {
                     "type": "string",
                     "maxLength": 80
-                },
-                "projectID": {
-                    "type": "string",
-                    "maxLength": 32
                 },
                 "supervisor": {
                     "$ref": "#/definitions/AgentGroupMemberRequest"

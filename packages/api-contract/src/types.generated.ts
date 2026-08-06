@@ -1046,8 +1046,6 @@ export interface CreateAgentGroupRequest {
   description?: string;
   /** @maxLength 80 */
   name: string;
-  /** @maxLength 32 */
-  projectID: string;
   supervisor: AgentGroupMemberRequest;
   /** @maxItems 31 */
   workers?: AgentGroupMemberRequest[];
@@ -6727,7 +6725,7 @@ export namespace ConversationAgentGroupRuns {
 
 export namespace ConversationAgentGroups {
   /**
-   * @description 查询当前用户项目下的 Agent 群组
+   * @description 查询当前用户全部 Agent 群组
    * @tags chat
    * @name ConversationAgentGroupsList
    * @summary 群组列表
@@ -6736,10 +6734,7 @@ export namespace ConversationAgentGroups {
    */
   export namespace ConversationAgentGroupsList {
     export type RequestParams = {};
-    export type RequestQuery = {
-      /** 项目 public_id */
-      projectID: string;
-    };
+    export type RequestQuery = {};
     export type RequestBody = never;
     export type RequestHeaders = {};
     export type ResponseBody = AgentGroupListResponseDoc;

@@ -16,8 +16,8 @@ type AgentGroupRepository interface {
 
 // AgentGroupQueryRepository 群组与成员查询。
 type AgentGroupQueryRepository interface {
-	// ListAgentGroupsByProject 分页查询项目内群组（含成员与角色摘要）。
-	ListAgentGroupsByProject(ctx context.Context, userID uint, projectID uint) ([]domainagentgroup.Group, error)
+	// ListAgentGroups 查询当前用户全部群组（projectID 为 0 时不过滤项目；含成员与角色摘要）。
+	ListAgentGroups(ctx context.Context, userID uint, projectID uint) ([]domainagentgroup.Group, error)
 	// GetAgentGroupByPublicID 查询单个群组（含成员与角色摘要）。
 	GetAgentGroupByPublicID(ctx context.Context, userID uint, publicID string) (*domainagentgroup.Group, error)
 	// GetAgentGroupMemberByPublicID 查询群组成员（含角色摘要）。

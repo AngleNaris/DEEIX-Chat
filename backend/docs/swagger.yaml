@@ -2572,9 +2572,6 @@ definitions:
       name:
         maxLength: 80
         type: string
-      projectID:
-        maxLength: 32
-        type: string
       supervisor:
         $ref: '#/definitions/AgentGroupMemberRequest'
       workers:
@@ -2584,7 +2581,6 @@ definitions:
         type: array
     required:
     - name
-    - projectID
     - supervisor
     type: object
   CreateAnnouncementRequest:
@@ -13677,13 +13673,7 @@ paths:
     get:
       consumes:
       - application/json
-      description: 查询当前用户项目下的 Agent 群组
-      parameters:
-      - description: 项目 public_id
-        in: query
-        name: projectID
-        required: true
-        type: string
+      description: 查询当前用户全部 Agent 群组
       produces:
       - application/json
       responses:

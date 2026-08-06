@@ -44,7 +44,6 @@ export type AgentGroupMemberRequest = {
 };
 
 export type CreateAgentGroupRequest = {
-  projectID: string;
   name: string;
   description?: string;
   coordinationPrompt?: string;

@@ -170,3 +170,6 @@ docker-compose.local.yml
 .DS_Store
 .idea
 .pnpm-store
+
+# Local agent workspace (never commit)
+.zcode/

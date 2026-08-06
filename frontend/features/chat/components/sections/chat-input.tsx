@@ -67,6 +67,7 @@ import { StreamdownRender } from "@/shared/components/markdown/streamdown-render
 import { cn } from "@/lib/utils";
 import type { ConversationOptions } from "@/shared/api/conversation.types";
 import type { FileObjectDTO } from "@/shared/api/file.types";
+import type { AgentGroupDTO } from "@/shared/api/agent-groups.types";
 import type { MCPToolDTO } from "@/shared/api/mcp.types";
 import type { PromptPresetDTO } from "@/shared/api/prompt-presets.types";
 import type { SkillSummaryDTO } from "@/shared/api/skills.types";
@@ -76,7 +77,13 @@ import { isSendShortcutEvent } from "@/shared/lib/platform-shortcuts";
 import type { BillingDisplayCurrency } from "@/shared/lib/billing-display";
 
 /** 群组会话：@ 菜单不提供模型项，模型由群组配置决定（后端拒绝请求级覆盖）。 */
-const COMPOSER_MENTION_KINDS_WITHOUT_MODEL: readonly ChatMentionMenuKind[] = ["file", "tool", "skill", "prompt"];
+const COMPOSER_MENTION_KINDS_WITHOUT_MODEL: readonly ChatMentionMenuKind[] = [
+  "file",
+  "tool",
+  "skill",
+  "prompt",
+  "group",
+];
 
 const FilePreviewDialog = dynamic(
   () => import("@/shared/components/file-preview/preview-dialog").then((module) => module.FilePreviewDialog),
@@ -139,6 +146,7 @@ type ChatInputProps = {
   onUploadFiles: (files: File[]) => void | Promise<void>;
   onCaptureScreenshot: () => void | Promise<void>;
   onRemoveAttachment: (fileID: string) => void;
+  onSelectAgentGroup?: (group: AgentGroupDTO) => void;
   onSendMessage: () => void | Promise<void>;
   onStopMessage: () => void;
   onDeleteQueuedMessage: (id: string) => void;
@@ -283,6 +291,7 @@ function ChatInputComponent({
   onUploadFiles,
   onCaptureScreenshot,
   onRemoveAttachment,
+  onSelectAgentGroup,
   onSendMessage,
   onStopMessage,
   onDeleteQueuedMessage,
@@ -437,6 +446,7 @@ function ChatInputComponent({
     toolsDisabled: isMediaMode,
     onDraftChange,
     onFileSelect: onAttachExistingFile,
+    onGroupSelect: onSelectAgentGroup,
     onModelCatalogRefresh,
     onModelChange,
     onSelectedPromptsChange,

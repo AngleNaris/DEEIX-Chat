@@ -2,7 +2,6 @@
 
 import * as React from "react";
 import { PencilLine, Users } from "lucide-react";
-import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -12,12 +11,10 @@ import {
   AgentGroupDialog,
   agentGroupDraftFromDTO,
   type AgentGroupDraft,
-  type AgentGroupProjectOption,
 } from "@/features/agent-groups/components/agent-group-dialog";
 import { cn } from "@/lib/utils";
 import { getAgentGroup } from "@/shared/api/agent-groups";
 import type { AgentGroupDTO, AgentGroupMemberDTO } from "@/shared/api/agent-groups.types";
-import { listConversationProjects } from "@/shared/api/conversation";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 import { useIsMobile } from "@/shared/hooks/use-mobile";
 
@@ -181,7 +178,6 @@ export function AgentGroupConfigButton({
   const [loading, setLoading] = React.useState(false);
   const [failed, setFailed] = React.useState(false);
   const [draft, setDraft] = React.useState<AgentGroupDraft | null>(null);
-  const [projects, setProjects] = React.useState<AgentGroupProjectOption[]>([]);
 
   React.useEffect(() => {
     if (!open) {
@@ -218,20 +214,9 @@ export function AgentGroupConfigButton({
     };
   }, [open, groupPublicID]);
 
-  const openEdit = React.useCallback(async () => {
+  const openEdit = React.useCallback(() => {
     if (!group) {
       return;
-    }
-    try {
-      const token = await resolveAccessToken();
-      if (!token) {
-        toast.error("加载项目失败");
-        return;
-      }
-      const items = await listConversationProjects(token);
-      setProjects(items.map((item) => ({ publicID: item.publicID, name: item.name })));
-    } catch {
-      // 项目列表加载失败时仍可打开编辑对话框（仅无法切换所属项目）
     }
     setDraft(agentGroupDraftFromDTO(group));
   }, [group]);
@@ -290,7 +275,6 @@ export function AgentGroupConfigButton({
         onOpenChange={(nextOpen) => !nextOpen && setDraft(null)}
         onSaved={(saved) => setGroup((current) => (current?.publicID === saved.publicID ? saved : current))}
         onDeleted={() => undefined}
-        projects={projects}
       />
     </>
   );

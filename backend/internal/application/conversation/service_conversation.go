@@ -93,26 +93,12 @@ func (s *Service) CreateConversation(ctx context.Context, userID uint, title str
 			}
 			return nil, err
 		}
-		// 群组会话的成员由群组编排决定，禁止同时绑定单个角色。
-		if roleID != nil {
-			return nil, ErrConversationRoleNotAllowedWithGroup
-		}
 		// 群组会话的模型由成员覆盖与角色默认值决定，禁止请求级模型覆盖。
 		if normalizedModel != "" {
 			return nil, ErrConversationModelNotAllowedWithGroup
 		}
-		// 群组所属项目必须与会话项目一致；未指定项目时沿用群组项目。
-		if projectID != nil && *projectID != resolvedGroup.ProjectID {
-			return nil, ErrConversationGroupProjectMismatch
-		}
-		if projectID == nil && resolvedGroup.ProjectID != 0 {
-			projectID = &resolvedGroup.ProjectID
-			project = &model.ConversationProject{
-				ID:       resolvedGroup.ProjectID,
-				PublicID: resolvedGroup.ProjectPublicID,
-				Name:     resolvedGroup.ProjectName,
-			}
-		}
+		// 群组已从项目绑定中拆除（§C1）：群组会话可无项目；
+		// 在项目位置创建时由请求 projectID 继承（上方已解析），群组自身不再决定项目。
 		agentGroupID = &resolvedGroup.ID
 		agentGroupPublicIDNormalized = resolvedGroup.PublicID
 		agentGroupName = resolvedGroup.Name

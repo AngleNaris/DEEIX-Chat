@@ -12,15 +12,9 @@ import (
 )
 
 // CreateAgentGroup 创建群组（主管 + 工作成员原子落库）。
-func (s *Service) CreateAgentGroup(ctx context.Context, userID uint, projectPublicID string, input CreateGroupInput) (*domainagentgroup.Group, error) {
+// 群组已从项目绑定中拆除：项目归属由创建时所在位置决定（会话创建时继承），群组自身不落项目。
+func (s *Service) CreateAgentGroup(ctx context.Context, userID uint, input CreateGroupInput) (*domainagentgroup.Group, error) {
 	if err := s.requireEnabled(ctx); err != nil {
-		return nil, err
-	}
-	project, err := s.projectReader.GetConversationProject(ctx, userID, projectPublicID)
-	if err != nil {
-		if errors.Is(err, repository.ErrNotFound) {
-			return nil, ErrAgentGroupProjectNotFound
-		}
 		return nil, err
 	}
 	normalized := CreateGroupInput{
@@ -68,7 +62,7 @@ func (s *Service) CreateAgentGroup(ctx context.Context, userID uint, projectPubl
 
 	group := &domainagentgroup.Group{
 		UserID:             userID,
-		ProjectID:          project.ID,
+		ProjectID:          0,
 		PublicID:           newPublicID(),
 		Name:               normalized.Name,
 		Description:        normalized.Description,
@@ -81,19 +75,12 @@ func (s *Service) CreateAgentGroup(ctx context.Context, userID uint, projectPubl
 	return s.repo.GetAgentGroupByPublicID(ctx, userID, group.PublicID)
 }
 
-// ListAgentGroups 查询项目内群组。
-func (s *Service) ListAgentGroups(ctx context.Context, userID uint, projectPublicID string) ([]domainagentgroup.Group, error) {
+// ListAgentGroups 查询当前用户全部群组。
+func (s *Service) ListAgentGroups(ctx context.Context, userID uint) ([]domainagentgroup.Group, error) {
 	if err := s.requireEnabled(ctx); err != nil {
 		return nil, err
 	}
-	project, err := s.projectReader.GetConversationProject(ctx, userID, projectPublicID)
-	if err != nil {
-		if errors.Is(err, repository.ErrNotFound) {
-			return nil, ErrAgentGroupProjectNotFound
-		}
-		return nil, err
-	}
-	return s.repo.ListAgentGroupsByProject(ctx, userID, project.ID)
+	return s.repo.ListAgentGroups(ctx, userID, 0)
 }
 
 // GetAgentGroup 查询单个群组。

@@ -42,8 +42,7 @@ func resolveError(c *gin.Context, err error, defaultStatus int, defaultMsg strin
 		response.ErrorWithCode(c, http.StatusForbidden, "FEATURE_DISABLED", "agent group feature disabled")
 	case errors.Is(err, appagentgroup.ErrAgentGroupNotFound),
 		errors.Is(err, appagentgroup.ErrAgentGroupRunNotFound),
-		errors.Is(err, appagentgroup.ErrAgentGroupRoleNotFound),
-		errors.Is(err, appagentgroup.ErrAgentGroupProjectNotFound):
+		errors.Is(err, appagentgroup.ErrAgentGroupRoleNotFound):
 		response.Error(c, http.StatusNotFound, "agent group not found")
 	case errors.Is(err, appagentgroup.ErrAgentGroupHistoryExists),
 		errors.Is(err, appagentgroup.ErrAgentGroupRunActive),

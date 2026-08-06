@@ -487,7 +487,7 @@ export function useSidebarConversationsController({
         return null;
       }
       const groupID = agentGroupID?.trim() || "";
-      // 群组会话禁止请求级模型与角色，模型由群组成员配置决定。
+      // 群组会话禁止请求级模型（模型由群组成员配置决定）；角色允许随所在位置继承（群组已全局化）。
       const explicitModel = groupID ? "" : platformModelName?.trim() || "";
       // 群组会话不解析默认模型（由群组成员配置推断），普通会话才兜底默认模型。
       const modelName = groupID

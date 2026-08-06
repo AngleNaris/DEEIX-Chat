@@ -231,16 +231,36 @@ export function AppChatArea() {
     const roleID = routeRoleID ?? "";
     const agentGroupID = routeAgentGroupID ?? "";
     requestNewConversation({ projectID, roleID, agentGroupID });
-    router.push(
-      agentGroupID && projectID
-        ? `/chat?project_id=${encodeURIComponent(projectID)}&agent_group_id=${encodeURIComponent(agentGroupID)}`
-        : projectID
-          ? `/chat?project_id=${encodeURIComponent(projectID)}`
-          : roleID
-            ? `/chat?role_id=${encodeURIComponent(roleID)}`
-            : "/chat",
-    );
+    const params = new URLSearchParams();
+    if (projectID) {
+      params.set("project_id", projectID);
+    }
+    if (roleID) {
+      params.set("role_id", roleID);
+    }
+    if (agentGroupID) {
+      params.set("agent_group_id", agentGroupID);
+    }
+    router.push(params.size > 0 ? `/chat?${params.toString()}` : "/chat");
   }, [requestNewConversation, routeAgentGroupID, routeProjectID, routeRoleID, router]);
+  // 输入框 / 选择群组：仅切换模式（继承当前位置），不创建会话；真正发送时走 prependNewConversation 创建。
+  const onSelectAgentGroup = React.useCallback(
+    (group: AgentGroupDTO) => {
+      const projectID = routeProjectID ?? "";
+      const roleID = routeRoleID ?? "";
+      requestNewConversation({ projectID, roleID, agentGroupID: group.publicID });
+      const params = new URLSearchParams();
+      if (projectID) {
+        params.set("project_id", projectID);
+      }
+      if (roleID) {
+        params.set("role_id", roleID);
+      }
+      params.set("agent_group_id", group.publicID);
+      router.push(`/chat?${params.toString()}`);
+    },
+    [requestNewConversation, routeProjectID, routeRoleID, router],
+  );
   const activeGenerationRunsRef = React.useRef<Set<string>>(new Set());
   const failedGenerationRunsRef = React.useRef<Set<string>>(new Set());
   const {
@@ -1353,6 +1373,7 @@ export function AppChatArea() {
     onUploadFiles,
     onCaptureScreenshot,
     onRemoveAttachment,
+    onSelectAgentGroup,
     onSendMessage: handleSendMessage,
     onStopMessage: onStopActiveMessage,
     onDeleteQueuedMessage,
