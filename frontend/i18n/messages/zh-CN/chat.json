@@ -265,6 +265,7 @@
     "retrievingContent": "正在检索相关内容…",
     "retryLater": "请稍后重试。",
     "concurrentGenerationLimit": "最多同时进行 {count} 个生成任务，请等待当前生成完成。",
+    "groupRunAwaitingAction": "群组运行已暂停，请先重试失败步骤或放弃本轮。",
     "imagePreviewAlt": "生成图片预览",
     "mediaInputUnsupported": "当前输入无法使用所选模型",
     "mediaInputBlocked": {

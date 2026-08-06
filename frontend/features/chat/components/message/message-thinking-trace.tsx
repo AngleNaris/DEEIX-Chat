@@ -271,20 +271,21 @@ export function MessageUpstreamThink({
             />
           </AccordionTrigger>
           <AccordionContent className="px-0 pb-0 pt-1.5 duration-[350ms] ease-in-out">
-            {contentSegments.length > 0 ? (
-              <div className="space-y-3">
-                {contentSegments.map((content, index) => (
+            {/* 思维过程内容设最大高度并滚动，避免长思考将页面撑得过长 */}
+            <div className="max-h-80 space-y-3 overflow-y-auto pr-1">
+              {contentSegments.length > 0 ? (
+                contentSegments.map((content, index) => (
                   <StreamdownRender
                     key={`${index}-${content.slice(0, 24)}`}
                     content={content}
                     streaming={Boolean(streaming && index === contentSegments.length - 1)}
                     variant="thinking"
                   />
-                ))}
-              </div>
-            ) : (
-              <StreamdownRender content={block.contentMarkdown} streaming={Boolean(streaming)} variant="thinking" />
-            )}
+                ))
+              ) : (
+                <StreamdownRender content={block.contentMarkdown} streaming={Boolean(streaming)} variant="thinking" />
+              )}
+            </div>
           </AccordionContent>
         </AccordionItem>
       </Accordion>

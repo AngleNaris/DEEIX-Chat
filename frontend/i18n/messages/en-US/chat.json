@@ -265,6 +265,7 @@
     "retrievingContent": "Retrieving relevant content...",
     "retryLater": "Please try again later.",
     "concurrentGenerationLimit": "Up to {count} generations can run at once. Wait for an active generation to finish.",
+    "groupRunAwaitingAction": "The agent group run is paused. Retry the failed step or abandon this run first.",
     "imagePreviewAlt": "Generated image preview",
     "mediaInputUnsupported": "The selected model cannot process this input",
     "mediaInputBlocked": {

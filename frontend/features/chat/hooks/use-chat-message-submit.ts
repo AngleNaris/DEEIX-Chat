@@ -817,6 +817,11 @@ export function useChatMessageSubmit({
         (!concurrentBranchRun && targetConversationHasActiveStream) ||
         groupRunAwaitingActionRef.current
       ) {
+        if (groupRunAwaitingActionRef.current && (content || currentAttachments.length > 0)) {
+          // §16.10 输入锁：群组运行暂停/阻塞时禁止发送；给出可见指引，
+          // 避免「重试无反应」——失败步骤的原地重试入口在消息 meta 上。
+          toast.error(t("groupRunAwaitingAction"));
+        }
         return false;
       }
       if (activeStreamsRef.current.size >= MAX_CONCURRENT_RUNS) {

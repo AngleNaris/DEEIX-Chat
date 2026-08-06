@@ -4,7 +4,7 @@ import * as React from "react";
 
 import {
   importGroupRunDetail,
-  readLiveGroupRun,
+  useLiveGroupRun,
 } from "@/features/agent-groups/model/group-run-store";
 import { getAgentGroupRunDetailByClientRunID } from "@/shared/api/agent-groups";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
@@ -13,20 +13,23 @@ import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 // 群组会话加载后，若最后一条 assistant 消息的运行不在实时 store 中（页面刷新导致
 // 内存状态丢失），通过 lookup 端点重建时间线，使暂停/阻塞步骤恢复“重试 / 放弃”操作。
 // 实时 store 已有运行（本会话内的事件流）时跳过，避免用无思考内容的 DTO 覆盖在途/终态时间线。
+// 通过 useLiveGroupRun 订阅 store：消息组件重挂载清空运行后（卸载清理）liveRun 变为
+// undefined，依赖变化自动重新 lookup，保证刷新/重挂载后重试入口始终可用（§16.10）。
 export function useGroupRunRecovery(options: {
   conversationPublicID?: string;
   isGroupConversation: boolean;
   lastAssistantRunID?: string;
 }) {
   const { conversationPublicID, isGroupConversation, lastAssistantRunID } = options;
+  const runID = lastAssistantRunID?.trim() || "";
+  const liveRun = useLiveGroupRun(runID);
   const [recoveredRunID, setRecoveredRunID] = React.useState<string | null>(null);
 
   React.useEffect(() => {
-    const runID = lastAssistantRunID?.trim();
     if (!isGroupConversation || !runID || !conversationPublicID?.trim()) {
       return;
     }
-    if (readLiveGroupRun(runID)) {
+    if (liveRun) {
       return;
     }
     let cancelled = false;
@@ -50,7 +53,7 @@ export function useGroupRunRecovery(options: {
     return () => {
       cancelled = true;
     };
-  }, [conversationPublicID, isGroupConversation, lastAssistantRunID]);
+  }, [conversationPublicID, isGroupConversation, runID, liveRun]);
 
   return { recoveredRunID };
 }
