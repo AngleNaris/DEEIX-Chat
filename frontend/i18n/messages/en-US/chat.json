@@ -903,6 +903,12 @@
     "retry": "Retry from here",
     "stop": "Stop",
     "abandon": "Abandon round",
-    "attemptHistory": "Attempt history"
+    "attemptHistory": "Attempt history",
+    "decisionDelegate": "Delegate",
+    "decisionFinish": "Finish",
+    "decisionTargetMember": "Target member",
+    "decisionInstruction": "Instruction",
+    "decisionExpectedOutcome": "Expected outcome",
+    "decisionAnswer": "Final answer"
   }
 }

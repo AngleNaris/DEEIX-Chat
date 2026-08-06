@@ -21,6 +21,12 @@ export type AgentGroupRunLabels = {
   stop: string;
   abandon: string;
   attemptHistory: string;
+  decisionDelegate: string;
+  decisionFinish: string;
+  decisionTargetMember: string;
+  decisionInstruction: string;
+  decisionExpectedOutcome: string;
+  decisionAnswer: string;
   attempt: (attemptNumber: number) => string;
   waitingSeconds: (seconds: number) => string;
 };
@@ -47,6 +53,12 @@ export function useAgentGroupRunLabels(): AgentGroupRunLabels {
       stop: t("stop"),
       abandon: t("abandon"),
       attemptHistory: t("attemptHistory"),
+      decisionDelegate: t("decisionDelegate"),
+      decisionFinish: t("decisionFinish"),
+      decisionTargetMember: t("decisionTargetMember"),
+      decisionInstruction: t("decisionInstruction"),
+      decisionExpectedOutcome: t("decisionExpectedOutcome"),
+      decisionAnswer: t("decisionAnswer"),
       attempt: (attemptNumber: number) => t("attempt", { attemptNumber }),
       waitingSeconds: (seconds: number) => t("waitingSeconds", { seconds }),
     }),

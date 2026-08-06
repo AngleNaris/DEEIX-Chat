@@ -464,6 +464,13 @@ html[data-branding-pending] body {
 ) {
   border-radius: 0.125rem;
 }
+/* cobalt & artilus: 开关组件跟随方形风格（base 类为 rounded-full，需单独压平） */
+[data-theme="cobalt"] [data-slot="switch"],
+[data-theme="cobalt"] [data-slot="switch-thumb"],
+[data-theme="artilus"] [data-slot="switch"],
+[data-theme="artilus"] [data-slot="switch-thumb"] {
+  border-radius: 0.125rem;
+}
 
 :root[data-theme="graphite"] {
   --background: oklch(0.9900 0 0);

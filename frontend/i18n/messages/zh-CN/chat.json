@@ -903,6 +903,12 @@
     "retry": "从此处重试",
     "stop": "停止",
     "abandon": "放弃本轮",
-    "attemptHistory": "尝试历史"
+    "attemptHistory": "尝试历史",
+    "decisionDelegate": "委派任务",
+    "decisionFinish": "完成任务",
+    "decisionTargetMember": "目标成员",
+    "decisionInstruction": "任务指令",
+    "decisionExpectedOutcome": "预期产出",
+    "decisionAnswer": "最终回答"
   }
 }

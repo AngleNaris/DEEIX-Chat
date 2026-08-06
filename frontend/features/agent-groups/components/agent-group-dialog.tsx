@@ -364,57 +364,54 @@ function WorkerRow({
     >
       <div className="flex items-center gap-2">
         <RoleChip color={member.roleColor} icon={member.roleIcon} name={member.roleName} />
-        <div className="ml-auto flex shrink-0 items-center gap-0.5">
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="size-6"
-            aria-label="上移"
-            title="上移"
-            disabled={disabled || index === 0}
-            onClick={onMove.bind(null, -1)}
-          >
-            <ChevronUp className="size-3.5" strokeWidth={1.7} />
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="size-6"
-            aria-label="下移"
-            title="下移"
-            disabled={disabled || index === total - 1}
-            onClick={onMove.bind(null, 1)}
-          >
-            <ChevronDown className="size-3.5" strokeWidth={1.7} />
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="size-6 text-muted-foreground hover:text-destructive"
-            aria-label="移除成员"
-            title="移除成员"
-            disabled={disabled}
-            onClick={onRemove}
-          >
-            <Trash2 className="size-3.5" strokeWidth={1.7} />
-          </Button>
-        </div>
-      </div>
-      <div className="flex items-center gap-2">
-        <div className="flex items-center gap-1.5">
+        <div className="ml-auto flex shrink-0 items-center gap-1.5">
           <Switch
             checked={member.enabled}
             disabled={disabled}
             aria-label="启用成员"
             onCheckedChange={onEnabledChange}
           />
-          <span className="text-[11px] text-muted-foreground">{member.enabled ? "启用" : "停用"}</span>
+          <div className="flex shrink-0 items-center gap-0.5">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="size-6"
+              aria-label="上移"
+              title="上移"
+              disabled={disabled || index === 0}
+              onClick={onMove.bind(null, -1)}
+            >
+              <ChevronUp className="size-3.5" strokeWidth={1.7} />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="size-6"
+              aria-label="下移"
+              title="下移"
+              disabled={disabled || index === total - 1}
+              onClick={onMove.bind(null, 1)}
+            >
+              <ChevronDown className="size-3.5" strokeWidth={1.7} />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="size-6 text-muted-foreground hover:text-destructive"
+              aria-label="移除成员"
+              title="移除成员"
+              disabled={disabled}
+              onClick={onRemove}
+            >
+              <Trash2 className="size-3.5" strokeWidth={1.7} />
+            </Button>
+          </div>
         </div>
-        <ModelOverrideSelector disabled={disabled} member={member} models={models} onModelChange={onModelChange} />
       </div>
+      <ModelOverrideSelector disabled={disabled} member={member} models={models} onModelChange={onModelChange} />
       <MemberDutyInput disabled={disabled} member={member} onDutyChange={onDutyChange} />
     </div>
   );
@@ -579,7 +576,7 @@ function AgentGroupForm({
   const availableRoles = roles.filter((role) => !usedRoleIDs.has(role.publicID));
 
   return (
-    <div className="min-h-0 space-y-4 overflow-y-auto px-0.5">
+    <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5">
       <div className="space-y-1">
         <Label className="text-xs text-muted-foreground">名称</Label>
         <Input
@@ -968,10 +965,10 @@ export function AgentGroupDialog({
         }
       }}
     >
-      <DialogContent className="overflow-hidden sm:max-w-2xl">
+      <DialogContent className="flex max-h-[calc(100svh-2rem)] flex-col overflow-hidden p-0 sm:max-w-2xl">
         {draft ? (
           <>
-            <DialogHeader>
+            <DialogHeader className="px-5 pt-5">
               <DialogTitle>{createMode ? "新建群组" : `编辑群组：${draft.name}`}</DialogTitle>
               <DialogDescription>
                 群组由主管与若干成员协作完成对话；成员可独立启用、覆盖模型并说明职责
@@ -986,7 +983,7 @@ export function AgentGroupDialog({
               setDraft={setDraft}
               submitting={submitting || loading}
             />
-            <DialogFooter className="items-center gap-2">
+            <DialogFooter className="items-center gap-2 px-5 pb-5">
               {!createMode && draft.publicID ? (
                 <Button
                   type="button"

@@ -44,6 +44,100 @@ import { StreamdownRender } from "@/shared/components/markdown/streamdown-render
 const WAITING_SECONDS_THRESHOLD = 5;
 const EMPTY_TRACE_EVENTS: TraceDisplayEvent[] = [];
 
+// 主管结构化决策输出（对应后端 agentGroupSupervisorDecision）：
+// {"action":"delegate","memberID":"...","instruction":"...","expectedOutcome":"...","answer":""}
+// 或 {"action":"finish","answer":"..."}，action 仅 delegate/finish。
+type SupervisorDecision = {
+  action: string;
+  memberID?: string;
+  instruction?: string;
+  expectedOutcome?: string;
+  answer?: string;
+};
+
+// 防御性剥离 markdown fence（与后端 stripMarkdownJSONFence 行为一致），
+// 解析失败返回 null，由调用方回落 StreamdownRender。
+function tryParseSupervisorDecision(raw: string): SupervisorDecision | null {
+  let text = raw.trim();
+  const fenceMatch = text.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+  if (fenceMatch) {
+    text = fenceMatch[1].trim();
+  }
+  if (!text.startsWith("{") || !text.endsWith("}")) {
+    return null;
+  }
+  try {
+    const parsed: unknown = JSON.parse(text);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      return null;
+    }
+    const record = parsed as Record<string, unknown>;
+    if (typeof record.action !== "string" || record.action.trim() === "") {
+      return null;
+    }
+    const decision: SupervisorDecision = { action: record.action };
+    for (const key of ["memberID", "instruction", "expectedOutcome", "answer"] as const) {
+      const value = record[key];
+      if (typeof value === "string" && value.trim() !== "") {
+        decision[key] = value;
+      }
+    }
+    return decision;
+  } catch {
+    return null;
+  }
+}
+
+// 主管决策的优雅格式化展示：action 徽章 + 目标成员反查 + 指令/预期产出/最终回答分区。
+function SupervisorDecisionView({
+  decision,
+  memberNameByID,
+  labels,
+}: {
+  decision: SupervisorDecision;
+  memberNameByID: ReadonlyMap<string, string>;
+  labels: AgentGroupRunLabels;
+}) {
+  const isDelegate = decision.action === "delegate";
+  const memberName = decision.memberID ? memberNameByID.get(decision.memberID) : undefined;
+  const fields: Array<{ label: string; value: string }> = [];
+  if (decision.instruction) {
+    fields.push({ label: labels.decisionInstruction, value: decision.instruction });
+  }
+  if (decision.expectedOutcome) {
+    fields.push({ label: labels.decisionExpectedOutcome, value: decision.expectedOutcome });
+  }
+  if (decision.answer) {
+    fields.push({ label: labels.decisionAnswer, value: decision.answer });
+  }
+
+  return (
+    <div className="space-y-1.5 rounded-md border border-border/60 bg-muted/20 p-2.5">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <span
+          className={cn(
+            "inline-flex items-center rounded-sm px-1.5 py-0.5 text-[11px] font-medium leading-4",
+            isDelegate ? "bg-primary/12 text-primary" : "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
+          )}
+        >
+          {isDelegate ? labels.decisionDelegate : labels.decisionFinish}
+        </span>
+        {memberName ? (
+          <span className="text-[11px] font-medium text-muted-foreground/80">
+            {labels.decisionTargetMember} · {memberName}
+          </span>
+        ) : null}
+      </div>
+      {fields.map((field) => (
+        <div key={field.label} className="space-y-0.5">
+          <p className="text-[11px] font-medium text-muted-foreground/80">{field.label}</p>
+          <p className="break-words whitespace-pre-wrap text-[12px] leading-5 text-foreground/90">{field.value}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function nowTimestamp() {
   return typeof performance !== "undefined" ? performance.now() : Date.now();
 }
@@ -141,12 +235,14 @@ function AgentGroupStepTrace({
   seconds,
   labels,
   clientRunID,
+  memberNameByID,
 }: {
   step: GroupRunStepState;
   run: GroupRunState;
   seconds: number;
   labels: AgentGroupRunLabels;
   clientRunID: string;
+  memberNameByID: ReadonlyMap<string, string>;
 }) {
   const isRunning = step.status === "running";
   const isFailed = step.status === "failed" || step.status === "error";
@@ -197,6 +293,9 @@ function AgentGroupStepTrace({
   const actorIcon = step.actor.icon?.trim();
   const toolsActive = isRunning && hasActiveToolTraceCalls(latestAttempt.tools?.payloadJson);
   const output = latestAttempt.output?.trim() ?? "";
+  // §16.x：主管决策回合结束后（非流式）尝试优雅格式化；流式中 JSON 不完整，
+  // 以及解析失败（模型输出非结构化文本）时回落 StreamdownRender。
+  const supervisorDecision = !isRunning ? tryParseSupervisorDecision(output) : null;
   const showActions = canAbandon || retrying;
   const priorAttempts = step.attempts.slice(0, -1);
 
@@ -272,7 +371,17 @@ function AgentGroupStepTrace({
               autoCollapseReady={!isRunning}
             />
           ) : null}
-          {output ? <StreamdownRender content={latestAttempt.output} streaming={Boolean(isRunning)} /> : null}
+          {output ? (
+            supervisorDecision ? (
+              <SupervisorDecisionView
+                decision={supervisorDecision}
+                memberNameByID={memberNameByID}
+                labels={labels}
+              />
+            ) : (
+              <StreamdownRender content={latestAttempt.output} streaming={Boolean(isRunning)} />
+            )
+          ) : null}
           {isFailed && latestAttempt.errorMessage?.trim() ? (
             <p className="mt-1.5 text-[12px] leading-5 text-destructive/85">{latestAttempt.errorMessage}</p>
           ) : null}
@@ -344,6 +453,19 @@ export function MessageAgentGroupTrace({
   const labels = useAgentGroupRunLabels();
   const seconds = useElapsedSeconds(run);
 
+  // memberID → 成员名 反查映射（主管决策 JSON 中 memberID 是成员 ID，展示时转成名字）。
+  const memberNameByID = React.useMemo(() => {
+    const map = new Map<string, string>();
+    for (const step of run?.steps ?? []) {
+      const memberID = step.actor.memberID?.trim();
+      const name = step.actor.name?.trim();
+      if (memberID && name && !map.has(memberID)) {
+        map.set(memberID, name);
+      }
+    }
+    return map;
+  }, [run]);
+
   if (!run) {
     return null;
   }
@@ -375,6 +497,7 @@ export function MessageAgentGroupTrace({
             seconds={seconds}
             labels={labels}
             clientRunID={clientRunID}
+            memberNameByID={memberNameByID}
           />
         ))}
         {run.status === "paused_retryable" || run.status === "blocked" ? (

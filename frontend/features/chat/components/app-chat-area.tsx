@@ -4,6 +4,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import * as React from "react";
 import { toast } from "sonner";
+import { motion } from "motion/react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -1353,7 +1354,13 @@ export function AppChatArea() {
       onDrop={onFileDrop}
     >
       {shouldUseCenteredComposer ? (
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <motion.div
+          key="centered-composer"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+          className="flex min-h-0 flex-1 flex-col overflow-hidden"
+        >
           <ChatEmptyState
             greetingTitle={
               activeRouteAgentGroup?.name || activeRouteRole?.name || activeRouteProject?.name || greetingTitle
@@ -1376,7 +1383,7 @@ export function AppChatArea() {
           >
             <ChatInput {...chatInputProps} />
           </ChatEmptyState>
-        </div>
+        </motion.div>
       ) : (
         <div
           ref={workspaceRef}
