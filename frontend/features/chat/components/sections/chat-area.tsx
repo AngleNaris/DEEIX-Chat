@@ -7,7 +7,6 @@ import { useTranslations } from "next-intl";
 import { ChatLabel } from "@/features/chat/components/sections/chat-label";
 import { useChatMessageFeedback } from "@/features/chat/hooks/use-chat-message-feedback";
 import { AgentGroupConfigButton } from "@/features/agent-groups/components/agent-group-config-button";
-import { Badge } from "@/components/ui/badge";
 import {
   AssistantMessageSkeleton,
   ChatInlineAlertCard,
@@ -563,7 +562,7 @@ export function ChatArea({
   return (
     <>
       <div className={cn("px-3 py-2.5 md:pl-0", splitRightInset ? "md:pr-4" : "md:pr-0")}>
-        <div className="flex w-full items-center justify-between gap-3">
+        <div className="relative flex w-full items-center justify-between gap-3">
           <ChatLabel
             title={title}
             starred={starred}
@@ -583,39 +582,37 @@ export function ChatArea({
             onScreenshotSelect={onScreenshotSelect}
           />
           {agentGroup ? (
-            <Badge
-              variant="outline"
-              className="min-w-0 shrink-0 cursor-default border-border/70 bg-background/60 px-1.5 py-0 text-[9px] font-medium text-muted-foreground"
-              title={`${t("agentGroupMode")}${agentGroup.contextLabel ? ` · ${agentGroup.contextLabel}` : ""} · ${agentGroup.name}`}
-            >
-              <span className="truncate">
-                {t("agentGroupMode")}
-                {agentGroup.contextLabel ? ` · ${agentGroup.contextLabel}` : ""}
-                {" · "}
+            <div className="pointer-events-none absolute inset-x-0 flex justify-center px-24">
+              <span
+                className="min-w-0 truncate text-[13px] font-medium text-muted-foreground"
+                title={agentGroup.name}
+              >
                 {agentGroup.name}
               </span>
-            </Badge>
+            </div>
           ) : null}
-          {agentGroup ? (
-            <AgentGroupConfigButton
-              groupPublicID={agentGroup.publicID}
-              groupName={agentGroup.name || ""}
-            />
-          ) : null}
-          {canOperateConversation ? (
-            <ConversationShareExportIconDropdown
-              label={shareExportLabel}
-              shareLabel={shareLabel}
-              exportLabel={t("labelMenu.exportJSON")}
-              active={shareActive}
-              onShare={onShare}
-              onExport={onExport}
-              screenshotFullLabel={tScreenshot("captureFull")}
-              screenshotSelectLabel={tScreenshot("captureSelect")}
-              onScreenshotFull={onScreenshotFull}
-              onScreenshotSelect={onScreenshotSelect}
-            />
-          ) : null}
+          <div className="flex shrink-0 items-center gap-1.5">
+            {agentGroup ? (
+              <AgentGroupConfigButton
+                groupPublicID={agentGroup.publicID}
+                groupName={agentGroup.name || ""}
+              />
+            ) : null}
+            {canOperateConversation ? (
+              <ConversationShareExportIconDropdown
+                label={shareExportLabel}
+                shareLabel={shareLabel}
+                exportLabel={t("labelMenu.exportJSON")}
+                active={shareActive}
+                onShare={onShare}
+                onExport={onExport}
+                screenshotFullLabel={tScreenshot("captureFull")}
+                screenshotSelectLabel={tScreenshot("captureSelect")}
+                onScreenshotFull={onScreenshotFull}
+                onScreenshotSelect={onScreenshotSelect}
+              />
+            ) : null}
+          </div>
         </div>
       </div>
 

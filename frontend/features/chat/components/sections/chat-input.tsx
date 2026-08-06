@@ -34,6 +34,12 @@ import { ChatMentionMenuPortal } from "@/features/chat/components/shared/chat-me
 import { ChatMCP } from "@/features/chat/components/sections/chat-mcp";
 import { ChatModelPicker } from "@/features/chat/components/sections/chat-model-picker";
 import { ChatModelConfig } from "@/features/chat/components/sections/chat-model-config";
+import { ReasoningEffortSelector } from "@/shared/components/reasoning-effort-selector";
+import {
+  getReasoningEffortOptionValue,
+  resolveReasoningEffortProtocol,
+  setReasoningEffortOptionValue,
+} from "@/shared/lib/reasoning-effort";
 import { formatBytes, resolveFileExtension, resolveFileIcon } from "@/shared/lib/file-display";
 import type { ChatSubmitDecision } from "@/features/chat/model/chat-task";
 import { isMediaSubmitTask, resolveChatSubmitDecision } from "@/features/chat/model/chat-task";
@@ -313,6 +319,7 @@ function ChatInputComponent({
   const tChat = useTranslations("chat");
   const tComposer = useTranslations("chat.composer");
   const tFileStatus = useTranslations("files.status");
+  const tReasoningEffort = useTranslations("chat.reasoningEffort");
   const [isBlocksHovered, setIsBlocksHovered] = React.useState(false);
   const [isVoiceHovered, setIsVoiceHovered] = React.useState(false);
   const [toolsMenuHovered, setToolsMenuHovered] = React.useState(false);
@@ -414,6 +421,19 @@ function ChatInputComponent({
   );
   const selectedProtocol = selectedModel?.protocols[0]?.trim() ?? "";
   const selectedModelName = selectedModel?.platformModelName || selectedPlatformModelName;
+  const reasoningEffortProtocol = resolveReasoningEffortProtocol(selectedModel?.protocols ?? []);
+  const reasoningEffortValue = reasoningEffortProtocol
+    ? getReasoningEffortOptionValue(reasoningEffortProtocol, options)
+    : "";
+  const onReasoningEffortChange = React.useCallback(
+    (level: string) => {
+      if (!reasoningEffortProtocol) {
+        return;
+      }
+      onOptionsChange(setReasoningEffortOptionValue(reasoningEffortProtocol, options, level));
+    },
+    [onOptionsChange, options, reasoningEffortProtocol],
+  );
   const submitDecision = resolveChatSubmitDecision(selectedModel, attachments, options);
   const submitTask = submitDecision.task;
   const isMediaMode = isMediaSubmitTask(submitTask);
@@ -985,7 +1005,6 @@ function ChatInputComponent({
                   modelOptionPolicy={modelOptionPolicy}
                   selectedProtocol={selectedProtocol}
                   selectedModelName={selectedModelName}
-                  modelProtocols={selectedModel?.protocols ?? []}
                   onOptionsChange={onOptionsChange}
                   onOptionsReset={onOptionsReset}
                   onDefaultOptionsRestore={onOptionsDefaultRestore}
@@ -1085,6 +1104,24 @@ function ChatInputComponent({
                   </TooltipTrigger>
                   <TooltipContent side="top" align="end" className="max-w-72 text-xs leading-5">
                     {composerModeIndicator.intro} {composerModeIndicator.description}
+                  </TooltipContent>
+                </Tooltip>
+              ) : null}
+              {reasoningEffortProtocol ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="inline-flex shrink-0">
+                      <ReasoningEffortSelector
+                        protocols={selectedModel?.protocols ?? []}
+                        value={reasoningEffortValue}
+                        disabled={loading || uploading || modelLoading}
+                        className="h-7 max-w-28 rounded-md sm:h-8"
+                        onChange={onReasoningEffortChange}
+                      />
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" align="end" className="max-w-72 text-xs leading-5">
+                    {tReasoningEffort("title")}：{tReasoningEffort("description")}
                   </TooltipContent>
                 </Tooltip>
               ) : null}

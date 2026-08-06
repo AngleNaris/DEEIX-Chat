@@ -38,13 +38,7 @@ import { JsonCodeEditor } from "@/shared/components/json-code-editor";
 import type { ModelNativeToolConfig, ModelOptionPolicy, NativeToolDefinition } from "@/shared/lib/model-option-policy";
 import { isModelOptionPathFiltered, resolveModelOptionPolicyProtocol } from "@/shared/lib/model-option-policy";
 import { localizedNativeToolText } from "@/shared/lib/native-tool-i18n";
-import {
-  getReasoningEffortOptionValue,
-  resolveReasoningEffortForProtocols,
-  resolveReasoningEffortProtocol,
-  setReasoningEffortOptionValue,
-} from "@/shared/lib/reasoning-effort";
-import { ReasoningEffortSelector } from "@/shared/components/reasoning-effort-selector";
+import { REASONING_EFFORT_PROTOCOL_PATHS } from "@/shared/lib/reasoning-effort";
 
 type EditableOptionValue = string | number | boolean | null;
 type VisualOptionKind = "boolean" | "number" | "select" | "text";
@@ -89,8 +83,6 @@ type ChatModelConfigProps = {
   modelOptionPolicy: ModelOptionPolicy | null;
   selectedProtocol: string;
   selectedModelName: string;
-  /** 当前模型的协议列表（决定思考强度选择器是否显示及可选档位）。 */
-  modelProtocols?: string[];
   onOptionsChange: React.Dispatch<React.SetStateAction<ConversationOptions>>;
   onOptionsReset: (defaults?: ConversationOptions) => void;
   onDefaultOptionsRestore: () => Promise<ConversationOptions | null>;
@@ -363,7 +355,6 @@ const NESTED_VISUAL_OPTION_PATHS = [
   ["thinkingConfig", "includeThoughts"],
   ["thinkingConfig", "thinkingBudget"],
   ["thinkingConfig", "thinkingLevel"],
-  ["reasoning", "effort"],
   ["reasoning", "summary"],
   ["output_config", "effort"],
   ["output_config", "format", "type"],
@@ -388,10 +379,17 @@ const NESTED_VISUAL_OPTION_PATHS = [
   ["imageConfig", "imageSize"],
   ["generationConfig", "thinkingConfig", "includeThoughts"],
   ["generationConfig", "thinkingConfig", "thinkingBudget"],
-  ["generationConfig", "thinkingConfig", "thinkingLevel"],
   ["tool_config", "functionCallingConfig", "mode"],
   ["toolConfig", "functionCallingConfig", "mode"],
 ];
+
+// 思考强度档位已由模型选择行旁的 ReasoningEffortSelector 统一管理，
+// 视觉配置不再展示这些底层技术字段（reasoning_effort / reasoning.effort / thinking_level 等），
+// 避免与友好选择器重复或冲突；JSON 视图仍可手动编辑。
+const REASONING_EFFORT_OPTION_KEYS = new Set<string>([
+  ...Object.values(REASONING_EFFORT_PROTOCOL_PATHS).map((mapping) => mapping.path),
+  "generationConfig.thinkingConfig.thinkingLevel",
+]);
 
 const PROTOCOL_LABELS: Record<string, string> = {
   anthropic_messages: "Messages",
@@ -737,6 +735,9 @@ function visualOptionsFromOptions(
     if (isReservedConversationOptionKey(path[0] ?? "")) {
       return [];
     }
+    if (REASONING_EFFORT_OPTION_KEYS.has(optionPathKey(path))) {
+      return [];
+    }
     const value = getOptionAtPath(options, path);
     if (!isEditableOptionValue(value)) {
       return [];
@@ -745,6 +746,9 @@ function visualOptionsFromOptions(
   });
   const topLevelOptions = Object.entries(options).flatMap(([key, value]): VisualOption[] => {
     if (isReservedConversationOptionKey(key)) {
+      return [];
+    }
+    if (REASONING_EFFORT_OPTION_KEYS.has(key)) {
       return [];
     }
     if (isEditableOptionValue(value)) {
@@ -757,6 +761,9 @@ function visualOptionsFromOptions(
   const visibleKeys = new Set(editableOptions.map((item) => item.key));
   const ignoredOptions = optionValueEntriesFromOptions(options).flatMap((entry): VisualOption[] => {
     if (visibleKeys.has(entry.key)) {
+      return [];
+    }
+    if (REASONING_EFFORT_OPTION_KEYS.has(entry.key)) {
       return [];
     }
     if (entry.key === "tools") {
@@ -815,6 +822,9 @@ function visualOptionsFromControls(
     if (path.length === 0 || isReservedConversationOptionKey(path[0] ?? "")) {
       return [];
     }
+    if (REASONING_EFFORT_OPTION_KEYS.has(optionPathKey(path))) {
+      return [];
+    }
     const key = optionPathKey(path);
     const hasLockedDefault = Boolean(control.locked && hasOptionAtPath(defaultOptions, path));
     const value = hasLockedDefault
@@ -844,18 +854,13 @@ function hasVisualConfigurationContent({
   options,
   policy,
   protocol,
-  supportsReasoningEffort,
 }: {
   nativeToolDefinitions: NativeToolDefinition[];
   optionControls: ModelOptionControl[];
   options: ConversationOptions;
   policy: ModelOptionPolicy | null;
   protocol: string;
-  supportsReasoningEffort: boolean;
 }): boolean {
-  if (supportsReasoningEffort) {
-    return true;
-  }
   if (nativeToolDefinitions.length > 0) {
     return true;
   }
@@ -1003,7 +1008,6 @@ export function ChatModelConfig({
   modelOptionPolicy,
   selectedProtocol,
   selectedModelName,
-  modelProtocols = [],
   onOptionsChange,
   onOptionsReset,
   onDefaultOptionsRestore,
@@ -1012,7 +1016,6 @@ export function ChatModelConfig({
   const tComposer = useTranslations("chat.composer");
   const tOptionLabels = useTranslations("chat.optionLabels");
   const tOptionDescriptions = useTranslations("chat.optionDescriptions");
-  const tReasoningEffort = useTranslations("chat.reasoningEffort");
   const messages = useMessages();
   const [hovered, setHovered] = React.useState(false);
   const [dialogOpen, setDialogOpen] = React.useState(false);
@@ -1024,10 +1027,6 @@ export function ChatModelConfig({
   const optionsObjectRef = React.useRef<ConversationOptions>({});
   const effectiveDefaultOptions = restoredDefaultOptions ?? defaultOptions;
   const selectedProtocolLabel = selectedProtocol ? resolveProtocolLabel(selectedProtocol) : "";
-  const modelProtocolsResolved = modelProtocols.length > 0 ? modelProtocols : (selectedProtocol ? [selectedProtocol] : []);
-  const effortMapping = resolveReasoningEffortForProtocols(modelProtocolsResolved);
-  const effortProtocol = resolveReasoningEffortProtocol(modelProtocolsResolved);
-  const effortValue = effortProtocol ? getReasoningEffortOptionValue(effortProtocol, optionsObject) : "";
   const nativeToolVisualOptions = React.useMemo(
     () => nativeToolDefinitionsFromConfigs(nativeTools, nativeToolKeys, modelOptionPolicy?.nativeTools ?? [], selectedProtocol),
     [modelOptionPolicy?.nativeTools, nativeToolKeys, nativeTools, selectedProtocol],
@@ -1083,7 +1082,6 @@ export function ChatModelConfig({
       options: sanitized,
       policy: modelOptionPolicy,
       protocol: selectedProtocol,
-      supportsReasoningEffort: effortMapping !== null,
     });
     optionsObjectRef.current = sanitized;
     setOptionsObject(sanitized);
@@ -1284,31 +1282,9 @@ export function ChatModelConfig({
           </TooltipContent>
         </Tooltip>
       </div>
-      {hasRecognizedOptions || effortMapping ? (
+      {hasRecognizedOptions ? (
         <div className="min-h-0 flex-1 overflow-y-auto pr-1">
           <div className="space-y-2 md:space-y-2.5">
-            {effortMapping && effortProtocol ? (
-              <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)] items-center gap-2 rounded-md px-2 py-1.5 sm:gap-3">
-                <div className="min-w-0">
-                  <p className="truncate text-xs text-foreground/80">{tReasoningEffort("title")}</p>
-                  <p
-                    className="truncate text-[11px] leading-4 text-muted-foreground"
-                    title={tReasoningEffort("description")}
-                  >
-                    {tReasoningEffort("description")}
-                  </p>
-                </div>
-                <ReasoningEffortSelector
-                  protocols={modelProtocolsResolved}
-                  value={effortValue}
-                  onChange={(level) => {
-                    replaceRawOptionsDraft(
-                      setReasoningEffortOptionValue(effortProtocol, optionsObjectRef.current, level),
-                    );
-                  }}
-                />
-              </div>
-            ) : null}
             {nativeToolGroup ? (
               <div className="space-y-1.5 px-2 py-1.5">
                 <div className="min-w-0">

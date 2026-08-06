@@ -68,6 +68,7 @@ import {
   normalizeImageAttachmentProcessorSelection,
 } from "@/shared/lib/mcp-tool-selection";
 import {
+  getReasoningEffortOptionValue,
   isReasoningEffortLevel,
   resolveReasoningEffortProtocol,
   setReasoningEffortOptionValue,
@@ -651,7 +652,15 @@ export function AppChatArea() {
       initializedOptionsModelRef.current = platformModelName;
       selectedModelDefaultOptionsRef.current = defaultOptionsWithEffort;
       const cachedOptions = reuseModelOptions ? readCachedModelOptions(platformModelName) : null;
-      setOptions(cloneConversationOptions(cachedOptions ?? defaultOptionsWithEffort));
+      // 缓存优先，但缓存未设置思考强度时补注入默认档位（否则全局/角色默认会被缓存静默忽略）。
+      let initialOptions = cachedOptions ?? defaultOptionsWithEffort;
+      if (cachedOptions && isReasoningEffortLevel(reasoningEffortLevel) && reasoningEffortLevel) {
+        const effortProtocol = resolveReasoningEffortProtocol(selectedModel.protocols);
+        if (effortProtocol && !getReasoningEffortOptionValue(effortProtocol, cachedOptions)) {
+          initialOptions = setReasoningEffortOptionValue(effortProtocol, cachedOptions, reasoningEffortLevel);
+        }
+      }
+      setOptions(cloneConversationOptions(initialOptions));
       return;
     }
     selectedModelDefaultOptionsRef.current = defaultOptionsWithEffort;
@@ -1437,22 +1446,8 @@ export function AppChatArea() {
             greetingTitle={
               activeRouteAgentGroup?.name || activeRouteRole?.name || activeRouteProject?.name || greetingTitle
             }
-            badgeLabel={
-              newConversationAgentGroupID
-                ? groupModeContextLabel
-                  ? `${t("agentGroupMode")} · ${groupModeContextLabel}`
-                  : t("agentGroupMode")
-                : activeRouteProject
-                  ? t("projectMode")
-                  : undefined
-            }
-            badgeTooltip={
-              newConversationAgentGroupID
-                ? t("agentGroupModeTooltip")
-                : activeRouteProject
-                  ? t("projectModeTooltip")
-                  : undefined
-            }
+            badgeLabel={activeRouteProject ? t("projectMode") : undefined}
+            badgeTooltip={activeRouteProject ? t("projectModeTooltip") : undefined}
             contentWidthClassName={chatContentWidthClassName}
           >
             <ChatInput {...chatInputProps} />
