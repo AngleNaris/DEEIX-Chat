@@ -98,6 +98,9 @@ func (r *Repo) UpdateConversationRoleByPublicID(
 	if patch.Provider != nil {
 		updates["provider"] = *patch.Provider
 	}
+	if patch.ReasoningEffort != nil {
+		updates["reasoning_effort"] = *patch.ReasoningEffort
+	}
 	if patch.MCPDefaultMode != nil {
 		updates["mcp_default_mode"] = *patch.MCPDefaultMode
 	}
@@ -195,21 +198,22 @@ func toConversationRoleDomain(item models.ConversationRole) domainconversation.C
 		mcpDefaultMode = domainconversation.ConversationProjectMCPDefaultModeInherit
 	}
 	return domainconversation.ConversationRole{
-		ID:             item.ID,
-		UserID:         item.UserID,
-		PublicID:       item.PublicID,
-		Name:           item.Name,
-		Description:    item.Description,
-		SystemPrompt:   item.SystemPrompt,
-		Model:          item.Model,
-		Provider:       item.Provider,
-		MCPDefaultMode: mcpDefaultMode,
-		Color:          item.Color,
-		Icon:           item.Icon,
-		SortOrder:      item.SortOrder,
-		Status:         item.Status,
-		CreatedAt:      item.CreatedAt,
-		UpdatedAt:      item.UpdatedAt,
+		ID:              item.ID,
+		UserID:          item.UserID,
+		PublicID:        item.PublicID,
+		Name:            item.Name,
+		Description:     item.Description,
+		SystemPrompt:    item.SystemPrompt,
+		Model:           item.Model,
+		Provider:        item.Provider,
+		ReasoningEffort: item.ReasoningEffort,
+		MCPDefaultMode:  mcpDefaultMode,
+		Color:           item.Color,
+		Icon:            item.Icon,
+		SortOrder:       item.SortOrder,
+		Status:          item.Status,
+		CreatedAt:       item.CreatedAt,
+		UpdatedAt:       item.UpdatedAt,
 	}
 }
 
@@ -226,18 +230,19 @@ func toConversationRoleModel(item *domainconversation.ConversationRole) models.C
 		return models.ConversationRole{}
 	}
 	return models.ConversationRole{
-		UserID:         item.UserID,
-		PublicID:       item.PublicID,
-		Name:           item.Name,
-		Description:    item.Description,
-		SystemPrompt:   item.SystemPrompt,
-		Model:          item.Model,
-		Provider:       item.Provider,
-		MCPDefaultMode: item.MCPDefaultMode,
-		Color:          item.Color,
-		Icon:           item.Icon,
-		SortOrder:      item.SortOrder,
-		Status:         item.Status,
+		UserID:          item.UserID,
+		PublicID:        item.PublicID,
+		Name:            item.Name,
+		Description:     item.Description,
+		SystemPrompt:    item.SystemPrompt,
+		Model:           item.Model,
+		Provider:        item.Provider,
+		ReasoningEffort: item.ReasoningEffort,
+		MCPDefaultMode:  item.MCPDefaultMode,
+		Color:           item.Color,
+		Icon:            item.Icon,
+		SortOrder:       item.SortOrder,
+		Status:          item.Status,
 	}
 }
 

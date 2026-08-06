@@ -46,6 +46,7 @@ type CreateConversationRoleRequest struct {
 	SystemPrompt      string `json:"systemPrompt,omitempty" binding:"max=12000"`
 	Model             string `json:"model,omitempty" binding:"max=128"`
 	Provider          string `json:"provider,omitempty" binding:"max=32"`
+	ReasoningEffort   string `json:"reasoningEffort,omitempty" binding:"omitempty,oneof= low medium high xhigh"`
 	MCPDefaultMode    string `json:"mcpDefaultMode,omitempty" binding:"omitempty,oneof=inherit custom"`
 	DefaultMCPToolIDs []uint `json:"defaultMCPToolIDs,omitempty" binding:"max=128"`
 	DefaultSkillIDs   []uint `json:"defaultSkillIDs,omitempty" binding:"max=128"`
@@ -61,6 +62,7 @@ type UpdateConversationRoleRequest struct {
 	SystemPrompt      *string `json:"systemPrompt,omitempty" binding:"omitempty,max=12000"`
 	Model             *string `json:"model,omitempty" binding:"omitempty,max=128"`
 	Provider          *string `json:"provider,omitempty" binding:"omitempty,max=32"`
+	ReasoningEffort   *string `json:"reasoningEffort,omitempty" binding:"omitempty,oneof= low medium high xhigh"`
 	MCPDefaultMode    *string `json:"mcpDefaultMode,omitempty" binding:"omitempty,oneof=inherit custom"`
 	DefaultMCPToolIDs *[]uint `json:"defaultMCPToolIDs,omitempty" binding:"omitempty,max=128"`
 	DefaultSkillIDs   *[]uint `json:"defaultSkillIDs,omitempty" binding:"omitempty,max=128"`

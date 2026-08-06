@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/conversation"
 	domainagentgroup "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/agentgroup"
 	domainconversation "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
@@ -229,6 +230,13 @@ func (s *Service) UpdateAgentGroupMember(ctx context.Context, userID uint, group
 		}
 		patch.ModelOverride = &value
 	}
+	if input.ReasoningEffort != nil {
+		value := strings.TrimSpace(*input.ReasoningEffort)
+		if !conversation.ReasoningEffortValid(value) {
+			return nil, ErrInvalidReasoningEffort
+		}
+		patch.ReasoningEffort = &value
+	}
 	if input.DutyInstruction != nil {
 		value := strings.TrimSpace(*input.DutyInstruction)
 		if exceedsRuneLimit(value, domainagentgroup.MaxDutyInstructionRunes) {
@@ -348,6 +356,9 @@ func validateMemberInput(input MemberCreateInput, index int) error {
 	if exceedsRuneLimit(input.ModelOverride, 128) {
 		return ErrInvalidAgentGroupModelOverride
 	}
+	if !conversation.ReasoningEffortValid(input.ReasoningEffort) {
+		return ErrInvalidReasoningEffort
+	}
 	if exceedsRuneLimit(input.DutyInstruction, domainagentgroup.MaxDutyInstructionRunes) {
 		return ErrInvalidDutyInstruction
 	}
@@ -361,6 +372,7 @@ func normalizeMemberCreateInput(input MemberCreateInput) MemberCreateInput {
 		RolePublicID:    strings.TrimSpace(input.RolePublicID),
 		MemberType:      strings.TrimSpace(input.MemberType),
 		ModelOverride:   strings.TrimSpace(input.ModelOverride),
+		ReasoningEffort: strings.TrimSpace(input.ReasoningEffort),
 		DutyInstruction: strings.TrimSpace(input.DutyInstruction),
 	}
 }
@@ -379,6 +391,7 @@ func buildMember(role *domainconversation.ConversationRole, input MemberCreateIn
 		MemberType:      memberType,
 		Enabled:         true,
 		ModelOverride:   input.ModelOverride,
+		ReasoningEffort: input.ReasoningEffort,
 		DutyInstruction: input.DutyInstruction,
 		SortOrder:       sortOrder,
 	}

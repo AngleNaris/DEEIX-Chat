@@ -88,6 +88,8 @@ type ConversationRole struct {
 	SystemPrompt      string
 	Model             string
 	Provider          string
+	// ReasoningEffort 是角色默认思考强度语义档位（""/low/medium/high/xhigh），空串=继承用户全局默认。
+	ReasoningEffort   string
 	MCPDefaultMode    string
 	DefaultMCPToolIDs []uint
 	DefaultSkillIDs   []uint
@@ -107,6 +109,7 @@ type ConversationRolePatch struct {
 	SystemPrompt      *string
 	Model             *string
 	Provider          *string
+	ReasoningEffort   *string
 	MCPDefaultMode    *string
 	DefaultMCPToolIDs *[]uint
 	DefaultSkillIDs   *[]uint

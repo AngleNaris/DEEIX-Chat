@@ -11,6 +11,7 @@ type ConversationRole struct {
 	SystemPrompt   string `gorm:"type:text;not null;default:'';comment:角色系统提示词"`
 	Model          string `gorm:"size:128;not null;default:'';comment:默认模型"`
 	Provider       string `gorm:"size:32;not null;default:'';comment:默认模型供应商"`
+	ReasoningEffort string `gorm:"size:16;not null;default:'';comment:默认思考强度档位(low/medium/high/xhigh，空=继承用户全局默认)"`
 	MCPDefaultMode string `gorm:"size:16;not null;default:'inherit';comment:MCP默认模式(inherit/custom)"`
 	Color          string `gorm:"size:32;not null;default:'';comment:角色颜色"`
 	Icon           string `gorm:"size:32;not null;default:'';comment:角色图标"`

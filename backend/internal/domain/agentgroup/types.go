@@ -146,6 +146,8 @@ type Member struct {
 	MemberType      string
 	Enabled         bool
 	ModelOverride   string
+	// ReasoningEffort 是思考强度语义档位（""/low/medium/high/xhigh），空串=继承用户全局默认。
+	ReasoningEffort string
 	DutyInstruction string
 	SortOrder       int
 	CreatedAt       time.Time
@@ -157,6 +159,7 @@ type MemberCreate struct {
 	RolePublicID    string
 	MemberType      string
 	ModelOverride   string
+	ReasoningEffort string
 	DutyInstruction string
 }
 
@@ -164,6 +167,7 @@ type MemberCreate struct {
 type MemberPatch struct {
 	Enabled         *bool
 	ModelOverride   *string
+	ReasoningEffort *string
 	DutyInstruction *string
 	SortOrder       *int
 }

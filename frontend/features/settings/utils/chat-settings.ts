@@ -10,6 +10,7 @@ const SEND_SHORTCUTS: SendShortcut[] = ["enter", "ctrl_enter", "meta_enter"];
 
 export const DEFAULT_CHAT_SETTINGS: ChatSettings = {
   defaultModel: "",
+  defaultReasoningEffort: "",
   sendShortcut: "enter",
   showTokenUsage: true,
   showModelInfo: true,
@@ -37,6 +38,7 @@ export function parseChatSettings(map: UserSettingsMap): ChatSettings {
 
   return {
     defaultModel: map["chat.default_model"] ?? "",
+    defaultReasoningEffort: map["chat.default_reasoning_effort"] ?? "",
     sendShortcut: parseSendShortcut(sendShortcut),
     showTokenUsage: map["chat.show_token_usage"] !== "false",
     showModelInfo: map["chat.show_model_info"] !== "false",

@@ -28,6 +28,7 @@ var allowedKeys = map[string]string{
 	"chat.show_latency":                         "true",
 	"chat.show_billing_cost":                    "true",
 	"chat.default_model":                        "",
+	"chat.default_reasoning_effort":             "",
 	"chat.auto_generate_title":                  "true",
 	"chat.auto_generate_labels":                 "true",
 	"chat.delete_conversation_files_by_default": "false",
@@ -65,6 +66,9 @@ var enumKeys = map[string]map[string]bool{
 	"chat.send_on_enter": {"enter": true, "ctrl_enter": true, "meta_enter": true},
 	"chat.input_height":  {"compact": true, "standard": true, "loose": true},
 	"chat.content_width": {"compact": true, "standard": true, "wide": true},
+	"chat.default_reasoning_effort": {
+		"": true, "low": true, "medium": true, "high": true, "xhigh": true,
+	},
 }
 
 // validateValue 校验 key 对应 value 的合法性。

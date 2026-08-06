@@ -348,7 +348,9 @@
       "autoTitle": "Auto-generate titles",
       "autoTitleDescription": "When disabled, new chats use the first 16 characters of the first message as the title.",
       "autoLabels": "Auto-generate labels",
-      "autoLabelsDescription": "When disabled, conversation labels are no longer generated automatically, reducing auxiliary model calls and their associated token usage."
+      "autoLabelsDescription": "When disabled, conversation labels are no longer generated automatically, reducing auxiliary model calls and their associated token usage.",
+      "defaultReasoningEffortTitle": "Default reasoning effort",
+      "defaultReasoningEffortDescription": "Default level used when a new conversation's model supports reasoning effort; can be overridden per conversation."
     },
     "input": {
       "sectionTitle": "Input and sending",

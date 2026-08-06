@@ -51,6 +51,7 @@ import {
   SettingsSectionSeparator,
 } from "@/shared/components/settings-layout";
 import { resolveModelOptionIconUrl, resolveModelOptionLabel } from "@/shared/lib/model-option-display";
+import { REASONING_EFFORT_LEVELS } from "@/shared/lib/reasoning-effort";
 import { parseKindsJSON } from "@/shared/model/llm-schema";
 import { platformModifierLabel, platformSendShortcut } from "@/shared/lib/platform-shortcuts";
 import type { SendShortcut } from "@/features/settings/types/settings";
@@ -421,6 +422,7 @@ function PreferenceMemorySection() {
 
 export function SettingsChat() {
   const t = useTranslations("settings.chatPage");
+  const reasoningEffortLevelsT = useTranslations("chat.reasoningEffort.levels");
   const {
     settings,
     loading,
@@ -497,6 +499,32 @@ export function SettingsChat() {
                 onChange={handleDefaultModel}
                 disabled={loading}
               />
+            )}
+          </SettingsFieldRow>
+          <SettingsFieldRow
+            title={t("defaultModel.defaultReasoningEffortTitle")}
+            description={t("defaultModel.defaultReasoningEffortDescription")}
+          >
+            {loading ? (
+              <Skeleton className="h-8 w-full rounded-md" />
+            ) : (
+              <Select
+                value={settings.defaultReasoningEffort}
+                onValueChange={handleEnum("chat.default_reasoning_effort", "defaultReasoningEffort")}
+                disabled={loading}
+              >
+                <SelectTrigger size="sm" className="text-left md:text-right *:data-[slot=select-value]:flex-1 *:data-[slot=select-value]:justify-start md:*:data-[slot=select-value]:justify-end">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent align="start">
+                  <SelectItem value="">{reasoningEffortLevelsT("default")}</SelectItem>
+                  {REASONING_EFFORT_LEVELS.map((level) => (
+                    <SelectItem key={level} value={level}>
+                      {reasoningEffortLevelsT(level)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             )}
           </SettingsFieldRow>
           <div className="space-y-4 pt-4">

@@ -1,5 +1,7 @@
 export type AgentGroupMemberType = "supervisor" | "worker";
 
+export type AgentGroupMemberReasoningEffort = "low" | "medium" | "high" | "xhigh";
+
 export type AgentGroupMemberDTO = {
   publicID: string;
   rolePublicID: string;
@@ -12,6 +14,7 @@ export type AgentGroupMemberDTO = {
   enabled: boolean;
   modelOverride: string;
   dutyInstruction: string;
+  reasoningEffort: string;
   sortOrder: number;
   createdAt: string;
   updatedAt: string;
@@ -37,6 +40,7 @@ export type AgentGroupMemberRequest = {
   rolePublicID: string;
   modelOverride?: string;
   dutyInstruction?: string;
+  reasoningEffort?: AgentGroupMemberReasoningEffort;
 };
 
 export type CreateAgentGroupRequest = {
@@ -61,6 +65,7 @@ export type UpdateAgentGroupMemberRequest = {
   enabled?: boolean;
   modelOverride?: string;
   dutyInstruction?: string;
+  reasoningEffort?: AgentGroupMemberReasoningEffort;
   sortOrder?: number;
 };
 

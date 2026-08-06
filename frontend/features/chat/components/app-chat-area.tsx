@@ -67,6 +67,11 @@ import {
   hasMultipleImageAttachmentProcessors,
   normalizeImageAttachmentProcessorSelection,
 } from "@/shared/lib/mcp-tool-selection";
+import {
+  isReasoningEffortLevel,
+  resolveReasoningEffortProtocol,
+  setReasoningEffortOptionValue,
+} from "@/shared/lib/reasoning-effort";
 import { resolveChatContentWidthClassName } from "@/shared/model/chat-content-width";
 
 const MODEL_OPTIONS_STORAGE_PREFIX = "deeix-chat:chat-model-options:";
@@ -240,6 +245,7 @@ export function AppChatArea() {
   const failedGenerationRunsRef = React.useRef<Set<string>>(new Set());
   const {
     autoGenerateLabels,
+    defaultReasoningEffort,
     deleteFilesByDefault,
     loaded: chatPreferencesLoaded,
     reuseModelOptions,
@@ -576,17 +582,31 @@ export function AppChatArea() {
       return;
     }
     const nextDefaultOptions = cloneConversationOptions(selectedModel.defaultOptions);
+    // 新会话注入默认思考强度（角色默认 > 用户全局默认；模型端点不支持时跳过）。
+    // 已有会话不注入，避免覆盖其保存的 options。
+    const reasoningEffortLevel = !conversationID
+      ? (activeRouteRole?.reasoningEffort ?? "") || defaultReasoningEffort || ""
+      : "";
+    const defaultOptionsWithEffort =
+      isReasoningEffortLevel(reasoningEffortLevel) && reasoningEffortLevel
+        ? (() => {
+            const effortProtocol = resolveReasoningEffortProtocol(selectedModel.protocols);
+            return effortProtocol
+              ? setReasoningEffortOptionValue(effortProtocol, nextDefaultOptions, reasoningEffortLevel)
+              : nextDefaultOptions;
+          })()
+        : nextDefaultOptions;
     const previousDefaultOptions = selectedModelDefaultOptionsRef.current;
     if (initializedOptionsModelRef.current !== platformModelName) {
       initializedOptionsModelRef.current = platformModelName;
-      selectedModelDefaultOptionsRef.current = nextDefaultOptions;
+      selectedModelDefaultOptionsRef.current = defaultOptionsWithEffort;
       const cachedOptions = reuseModelOptions ? readCachedModelOptions(platformModelName) : null;
-      setOptions(cloneConversationOptions(cachedOptions ?? nextDefaultOptions));
+      setOptions(cloneConversationOptions(cachedOptions ?? defaultOptionsWithEffort));
       return;
     }
-    selectedModelDefaultOptionsRef.current = nextDefaultOptions;
+    selectedModelDefaultOptionsRef.current = defaultOptionsWithEffort;
     const previousDefaultOptionsJSON = JSON.stringify(previousDefaultOptions);
-    if (previousDefaultOptionsJSON === JSON.stringify(nextDefaultOptions)) {
+    if (previousDefaultOptionsJSON === JSON.stringify(defaultOptionsWithEffort)) {
       return;
     }
     setOptions((currentOptions) => {
@@ -594,9 +614,9 @@ export function AppChatArea() {
         return currentOptions;
       }
       removeCachedModelOptions(platformModelName);
-      return cloneConversationOptions(nextDefaultOptions);
+      return cloneConversationOptions(defaultOptionsWithEffort);
     });
-  }, [chatPreferencesLoaded, reuseModelOptions, selectedModel]);
+  }, [activeRouteRole?.reasoningEffort, chatPreferencesLoaded, conversationID, defaultReasoningEffort, reuseModelOptions, selectedModel]);
 
   const setModelOptions = React.useCallback(
     (action: React.SetStateAction<ConversationOptions>) => {

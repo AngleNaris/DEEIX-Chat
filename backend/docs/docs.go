@@ -12785,6 +12785,15 @@ const docTemplate = `{
                     "type": "string",
                     "maxLength": 128
                 },
+                "reasoningEffort": {
+                    "type": "string",
+                    "enum": [
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh"
+                    ]
+                },
                 "rolePublicID": {
                     "type": "string",
                     "maxLength": 32
@@ -13080,6 +13089,15 @@ const docTemplate = `{
                     "type": "string",
                     "maxLength": 128
                 },
+                "reasoningEffort": {
+                    "type": "string",
+                    "enum": [
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh"
+                    ]
+                },
                 "rolePublicID": {
                     "type": "string",
                     "maxLength": 32
@@ -13095,6 +13113,7 @@ const docTemplate = `{
                 "memberType",
                 "modelOverride",
                 "publicID",
+                "reasoningEffort",
                 "roleColor",
                 "roleIcon",
                 "roleModel",
@@ -13121,6 +13140,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "publicID": {
+                    "type": "string"
+                },
+                "reasoningEffort": {
                     "type": "string"
                 },
                 "roleColor": {
@@ -15937,6 +15959,7 @@ const docTemplate = `{
                 "name",
                 "provider",
                 "publicID",
+                "reasoningEffort",
                 "sortOrder",
                 "status",
                 "systemPrompt",
@@ -15983,6 +16006,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "publicID": {
+                    "type": "string"
+                },
+                "reasoningEffort": {
                     "type": "string"
                 },
                 "sortOrder": {
@@ -16455,6 +16481,15 @@ const docTemplate = `{
                 "provider": {
                     "type": "string",
                     "maxLength": 32
+                },
+                "reasoningEffort": {
+                    "type": "string",
+                    "enum": [
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh"
+                    ]
                 },
                 "systemPrompt": {
                     "type": "string",
@@ -22281,6 +22316,15 @@ const docTemplate = `{
                     "type": "string",
                     "maxLength": 128
                 },
+                "reasoningEffort": {
+                    "type": "string",
+                    "enum": [
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh"
+                    ]
+                },
                 "sortOrder": {
                     "type": "integer",
                     "minimum": 0
@@ -22495,6 +22539,15 @@ const docTemplate = `{
                 "provider": {
                     "type": "string",
                     "maxLength": 32
+                },
+                "reasoningEffort": {
+                    "type": "string",
+                    "enum": [
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh"
+                    ]
                 },
                 "status": {
                     "type": "string",

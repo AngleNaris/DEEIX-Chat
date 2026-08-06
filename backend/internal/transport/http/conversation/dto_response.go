@@ -251,6 +251,7 @@ type ConversationRoleResponse struct {
 	SystemPrompt      string    `json:"systemPrompt"`
 	Model             string    `json:"model"`
 	Provider          string    `json:"provider"`
+	ReasoningEffort   string    `json:"reasoningEffort"`
 	MCPDefaultMode    string    `json:"mcpDefaultMode"`
 	DefaultMCPToolIDs []uint    `json:"defaultMCPToolIDs"`
 	DefaultSkillIDs   []uint    `json:"defaultSkillIDs"`
@@ -274,6 +275,7 @@ func toConversationRoleResponse(item *model.ConversationRole) ConversationRoleRe
 		SystemPrompt:      item.SystemPrompt,
 		Model:             item.Model,
 		Provider:          item.Provider,
+		ReasoningEffort:   item.ReasoningEffort,
 		MCPDefaultMode:    item.MCPDefaultMode,
 		DefaultMCPToolIDs: append([]uint{}, item.DefaultMCPToolIDs...),
 		DefaultSkillIDs:   append([]uint{}, item.DefaultSkillIDs...),

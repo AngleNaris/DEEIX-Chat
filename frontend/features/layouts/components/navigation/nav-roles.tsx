@@ -90,6 +90,7 @@ import {
 import type { ConversationRoleDTO } from "@/shared/api/roles.types";
 import type { ConversationDTO } from "@/shared/api/conversation.types";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
+import { isReasoningEffortLevel } from "@/shared/lib/reasoning-effort";
 
 const ROLES_OPEN_STORAGE_KEY = "deeix-roles-open";
 const ROLE_EXPANDED_IDS_STORAGE_KEY = "deeix.sidebar.roles.expanded";
@@ -651,6 +652,10 @@ export function NavRoles() {
         color: draft.color,
         icon: draft.icon,
         groupName: draft.groupName,
+        reasoningEffort:
+          isReasoningEffortLevel(draft.reasoningEffort) && draft.reasoningEffort
+            ? draft.reasoningEffort
+            : undefined,
       };
       if (draft.publicID) {
         await updateConversationRole(token, draft.publicID, payload);
@@ -932,6 +937,7 @@ export function NavRoles() {
                                                     color: role.color,
                                                     icon: role.icon,
                                                     groupName: role.groupName ?? "",
+                                                    reasoningEffort: role.reasoningEffort ?? "",
                                                   });
                                                 }}
                                               >

@@ -123,6 +123,13 @@ definitions:
       modelOverride:
         maxLength: 128
         type: string
+      reasoningEffort:
+        enum:
+        - low
+        - medium
+        - high
+        - xhigh
+        type: string
       rolePublicID:
         maxLength: 32
         type: string
@@ -336,6 +343,13 @@ definitions:
       modelOverride:
         maxLength: 128
         type: string
+      reasoningEffort:
+        enum:
+        - low
+        - medium
+        - high
+        - xhigh
+        type: string
       rolePublicID:
         maxLength: 32
         type: string
@@ -355,6 +369,8 @@ definitions:
       modelOverride:
         type: string
       publicID:
+        type: string
+      reasoningEffort:
         type: string
       roleColor:
         type: string
@@ -379,6 +395,7 @@ definitions:
     - memberType
     - modelOverride
     - publicID
+    - reasoningEffort
     - roleColor
     - roleIcon
     - roleModel
@@ -2377,6 +2394,8 @@ definitions:
         type: string
       publicID:
         type: string
+      reasoningEffort:
+        type: string
       sortOrder:
         type: integer
       status:
@@ -2398,6 +2417,7 @@ definitions:
     - name
     - provider
     - publicID
+    - reasoningEffort
     - sortOrder
     - status
     - systemPrompt
@@ -2726,6 +2746,13 @@ definitions:
         type: string
       provider:
         maxLength: 32
+        type: string
+      reasoningEffort:
+        enum:
+        - low
+        - medium
+        - high
+        - xhigh
         type: string
       systemPrompt:
         maxLength: 12000
@@ -6812,6 +6839,13 @@ definitions:
       modelOverride:
         maxLength: 128
         type: string
+      reasoningEffort:
+        enum:
+        - low
+        - medium
+        - high
+        - xhigh
+        type: string
       sortOrder:
         minimum: 0
         type: integer
@@ -6967,6 +7001,13 @@ definitions:
         type: string
       provider:
         maxLength: 32
+        type: string
+      reasoningEffort:
+        enum:
+        - low
+        - medium
+        - high
+        - xhigh
         type: string
       status:
         enum:

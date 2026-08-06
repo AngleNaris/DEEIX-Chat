@@ -910,5 +910,16 @@
     "decisionInstruction": "任务指令",
     "decisionExpectedOutcome": "预期产出",
     "decisionAnswer": "最终回答"
+  },
+  "reasoningEffort": {
+    "title": "思考强度",
+    "description": "控制模型在推理时的思考投入程度。",
+    "levels": {
+      "default": "默认",
+      "low": "低",
+      "medium": "中",
+      "high": "高",
+      "xhigh": "最高"
+    }
   }
 }

@@ -12778,6 +12778,15 @@
                     "type": "string",
                     "maxLength": 128
                 },
+                "reasoningEffort": {
+                    "type": "string",
+                    "enum": [
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh"
+                    ]
+                },
                 "rolePublicID": {
                     "type": "string",
                     "maxLength": 32
@@ -13073,6 +13082,15 @@
                     "type": "string",
                     "maxLength": 128
                 },
+                "reasoningEffort": {
+                    "type": "string",
+                    "enum": [
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh"
+                    ]
+                },
                 "rolePublicID": {
                     "type": "string",
                     "maxLength": 32
@@ -13088,6 +13106,7 @@
                 "memberType",
                 "modelOverride",
                 "publicID",
+                "reasoningEffort",
                 "roleColor",
                 "roleIcon",
                 "roleModel",
@@ -13114,6 +13133,9 @@
                     "type": "string"
                 },
                 "publicID": {
+                    "type": "string"
+                },
+                "reasoningEffort": {
                     "type": "string"
                 },
                 "roleColor": {
@@ -15930,6 +15952,7 @@
                 "name",
                 "provider",
                 "publicID",
+                "reasoningEffort",
                 "sortOrder",
                 "status",
                 "systemPrompt",
@@ -15976,6 +15999,9 @@
                     "type": "string"
                 },
                 "publicID": {
+                    "type": "string"
+                },
+                "reasoningEffort": {
                     "type": "string"
                 },
                 "sortOrder": {
@@ -16448,6 +16474,15 @@
                 "provider": {
                     "type": "string",
                     "maxLength": 32
+                },
+                "reasoningEffort": {
+                    "type": "string",
+                    "enum": [
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh"
+                    ]
                 },
                 "systemPrompt": {
                     "type": "string",
@@ -22274,6 +22309,15 @@
                     "type": "string",
                     "maxLength": 128
                 },
+                "reasoningEffort": {
+                    "type": "string",
+                    "enum": [
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh"
+                    ]
+                },
                 "sortOrder": {
                     "type": "integer",
                     "minimum": 0
@@ -22488,6 +22532,15 @@
                 "provider": {
                     "type": "string",
                     "maxLength": 32
+                },
+                "reasoningEffort": {
+                    "type": "string",
+                    "enum": [
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh"
+                    ]
                 },
                 "status": {
                     "type": "string",

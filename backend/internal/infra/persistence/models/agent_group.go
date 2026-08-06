@@ -32,6 +32,7 @@ type AgentGroupMember struct {
 	MemberType      string `gorm:"size:16;not null;default:'worker';comment:成员类型(supervisor/worker)"`
 	Enabled         bool   `gorm:"not null;default:true;comment:是否允许主管调度"`
 	ModelOverride   string `gorm:"size:128;not null;default:'';comment:当前群组内的模型覆盖"`
+	ReasoningEffort string `gorm:"size:16;not null;default:'';comment:思考强度(low/medium/high/xhigh，空=继承用户全局默认)"`
 	DutyInstruction string `gorm:"type:text;not null;default:'';comment:当前群组内的职责说明"`
 	SortOrder       int    `gorm:"not null;default:0;comment:成员排序"`
 }

@@ -48,6 +48,9 @@ import type {
 } from "@/shared/api/agent-groups.types";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 import { ApiError, ApiNetworkError } from "@/shared/api/http-client";
+import { ReasoningEffortSelector } from "@/shared/components/reasoning-effort-selector";
+import { parseProtocolsJSON } from "@/shared/lib/model-protocols";
+import { isReasoningEffortLevel, resolveReasoningEffortForProtocols } from "@/shared/lib/reasoning-effort";
 
 export type AgentGroupProjectOption = {
   publicID: string;
@@ -68,6 +71,7 @@ export type AgentGroupMemberDraft = {
   enabled: boolean;
   modelOverride: string;
   dutyInstruction: string;
+  reasoningEffort: string;
 };
 
 export type AgentGroupDraft = {
@@ -102,6 +106,7 @@ function agentGroupMemberDraftFromDTO(item: AgentGroupMemberDTO): AgentGroupMemb
     enabled: item.enabled,
     modelOverride: item.modelOverride,
     dutyInstruction: item.dutyInstruction,
+    reasoningEffort: item.reasoningEffort ?? "",
   };
 }
 
@@ -134,6 +139,7 @@ export function emptyAgentGroupMemberDraft(role: ConversationRoleDTO): AgentGrou
     enabled: true,
     modelOverride: "",
     dutyInstruction: "",
+    reasoningEffort: role.reasoningEffort ?? "",
   };
 }
 
@@ -154,6 +160,9 @@ function toMemberRequest(member: AgentGroupMemberDraft): AgentGroupMemberRequest
     rolePublicID: member.rolePublicID,
     modelOverride: member.modelOverride || undefined,
     dutyInstruction: member.dutyInstruction || undefined,
+    reasoningEffort: isReasoningEffortLevel(member.reasoningEffort) && member.reasoningEffort
+      ? member.reasoningEffort
+      : undefined,
   };
 }
 
@@ -311,6 +320,43 @@ function ModelOverrideSelector({
   );
 }
 
+/** 成员思考强度字段：生效模型 = modelOverride || roleModel；模型端点不支持时隐藏。 */
+function MemberReasoningEffortField({
+  disabled,
+  member,
+  models,
+  onReasoningEffortChange,
+}: {
+  disabled: boolean;
+  member: AgentGroupMemberDraft;
+  models: PublicModelDTO[];
+  onReasoningEffortChange: (reasoningEffort: string) => void;
+}) {
+  const effectiveModel = member.modelOverride || member.roleModel;
+  const effectiveModelProtocols = React.useMemo(() => {
+    const model = models.find((item) => item.platformModelName === effectiveModel);
+    return model ? parseProtocolsJSON(model.protocolsJSON) : [];
+  }, [models, effectiveModel]);
+
+  if (!resolveReasoningEffortForProtocols(effectiveModelProtocols)) {
+    return null;
+  }
+
+  return (
+    <div className="min-w-0 flex-1">
+      <ReasoningEffortSelector
+        protocols={effectiveModelProtocols}
+        value={member.reasoningEffort}
+        disabled={disabled}
+        onChange={onReasoningEffortChange}
+      />
+      <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
+        {member.reasoningEffort ? `自定义：${member.reasoningEffort}` : "继承角色默认 / 用户全局默认"}
+      </p>
+    </div>
+  );
+}
+
 function MemberDutyInput({
   disabled,
   member,
@@ -341,6 +387,7 @@ function WorkerRow({
   onDutyChange,
   onModelChange,
   onMove,
+  onReasoningEffortChange,
   onRemove,
   total,
 }: {
@@ -352,6 +399,7 @@ function WorkerRow({
   onDutyChange: (dutyInstruction: string) => void;
   onModelChange: (modelOverride: string) => void;
   onMove: (direction: -1 | 1) => void;
+  onReasoningEffortChange: (reasoningEffort: string) => void;
   onRemove: () => void;
   total: number;
 }) {
@@ -411,7 +459,15 @@ function WorkerRow({
           </div>
         </div>
       </div>
-      <ModelOverrideSelector disabled={disabled} member={member} models={models} onModelChange={onModelChange} />
+      <div className="flex items-start gap-2">
+        <ModelOverrideSelector disabled={disabled} member={member} models={models} onModelChange={onModelChange} />
+        <MemberReasoningEffortField
+          disabled={disabled}
+          member={member}
+          models={models}
+          onReasoningEffortChange={onReasoningEffortChange}
+        />
+      </div>
       <MemberDutyInput disabled={disabled} member={member} onDutyChange={onDutyChange} />
     </div>
   );
@@ -483,7 +539,15 @@ function SupervisorSection({
               />
             </div>
           </div>
-          <ModelOverrideSelector disabled={disabled} member={supervisor} models={models} onModelChange={(value) => update({ modelOverride: value })} />
+          <div className="flex items-start gap-2">
+            <ModelOverrideSelector disabled={disabled} member={supervisor} models={models} onModelChange={(value) => update({ modelOverride: value })} />
+            <MemberReasoningEffortField
+              disabled={disabled}
+              member={supervisor}
+              models={models}
+              onReasoningEffortChange={(value) => update({ reasoningEffort: value })}
+            />
+          </div>
           <MemberDutyInput disabled={disabled} member={supervisor} onDutyChange={(value) => update({ dutyInstruction: value })} />
         </div>
       ) : (
@@ -719,6 +783,14 @@ function AgentGroupForm({
                     workers: prev.workers.map((item) => (item.key === member.key ? { ...item, modelOverride } : item)),
                   }))
                 }
+                onReasoningEffortChange={(reasoningEffort) =>
+                  setDraft((prev) => ({
+                    ...prev,
+                    workers: prev.workers.map((item) =>
+                      item.key === member.key ? { ...item, reasoningEffort } : item,
+                    ),
+                  }))
+                }
                 onMove={(direction) =>
                   setDraft((prev) => {
                     const from = prev.workers.findIndex((item) => item.key === member.key);
@@ -748,7 +820,8 @@ function agentGroupMemberDraftEquals(a: AgentGroupMemberDraft, b: AgentGroupMemb
   return (
     a.enabled === b.enabled &&
     a.modelOverride === b.modelOverride &&
-    a.dutyInstruction === b.dutyInstruction
+    a.dutyInstruction === b.dutyInstruction &&
+    a.reasoningEffort === b.reasoningEffort
   );
 }
 
@@ -805,6 +878,9 @@ async function saveExistingAgentGroup(
       enabled: member.enabled,
       modelOverride: member.modelOverride || undefined,
       dutyInstruction: member.dutyInstruction || undefined,
+      reasoningEffort: isReasoningEffortLevel(member.reasoningEffort) && member.reasoningEffort
+        ? member.reasoningEffort
+        : undefined,
     });
   }
 

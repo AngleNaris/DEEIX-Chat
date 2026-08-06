@@ -54,6 +54,7 @@ export interface AddAgentGroupMemberRequest {
   dutyInstruction?: string;
   /** @maxLength 128 */
   modelOverride?: string;
+  reasoningEffort?: "low" | "medium" | "high" | "xhigh";
   /** @maxLength 32 */
   rolePublicID: string;
 }
@@ -137,6 +138,7 @@ export interface AgentGroupMemberRequest {
   dutyInstruction?: string;
   /** @maxLength 128 */
   modelOverride?: string;
+  reasoningEffort?: "low" | "medium" | "high" | "xhigh";
   /** @maxLength 32 */
   rolePublicID: string;
 }
@@ -148,6 +150,7 @@ export interface AgentGroupMemberResponse {
   memberType: string;
   modelOverride: string;
   publicID: string;
+  reasoningEffort: string;
   roleColor: string;
   roleIcon: string;
   roleModel: string;
@@ -972,6 +975,7 @@ export interface ConversationRoleResponse {
   name: string;
   provider: string;
   publicID: string;
+  reasoningEffort: string;
   sortOrder: number;
   status: string;
   systemPrompt: string;
@@ -1139,6 +1143,7 @@ export interface CreateConversationRoleRequest {
   name: string;
   /** @maxLength 32 */
   provider?: string;
+  reasoningEffort?: "low" | "medium" | "high" | "xhigh";
   /** @maxLength 12000 */
   systemPrompt?: string;
 }
@@ -3000,6 +3005,7 @@ export interface UpdateAgentGroupMemberRequest {
   enabled?: boolean;
   /** @maxLength 128 */
   modelOverride?: string;
+  reasoningEffort?: "low" | "medium" | "high" | "xhigh";
   /** @min 0 */
   sortOrder?: number;
 }
@@ -3089,6 +3095,7 @@ export interface UpdateConversationRoleRequest {
   name?: string;
   /** @maxLength 32 */
   provider?: string;
+  reasoningEffort?: "low" | "medium" | "high" | "xhigh";
   status?: "active" | "archived";
   /** @maxLength 12000 */
   systemPrompt?: string;

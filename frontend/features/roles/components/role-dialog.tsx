@@ -42,6 +42,8 @@ import type { ConversationProjectDTO } from "@/shared/api/conversation.types";
 import { listVisibleSkills } from "@/shared/api/skills";
 import type { SkillSummaryDTO } from "@/shared/api/skills.types";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
+import { ReasoningEffortSelector } from "@/shared/components/reasoning-effort-selector";
+import { parseProtocolsJSON } from "@/shared/lib/model-protocols";
 
 export type RoleDraft = {
   publicID?: string;
@@ -55,6 +57,7 @@ export type RoleDraft = {
   color: string;
   icon: string;
   groupName: string;
+  reasoningEffort: string;
 };
 
 export const EMPTY_ROLE_DRAFT: RoleDraft = {
@@ -68,6 +71,7 @@ export const EMPTY_ROLE_DRAFT: RoleDraft = {
   color: "",
   icon: "",
   groupName: "",
+  reasoningEffort: "",
 };
 
 type RoleSelectorOption = {
@@ -171,6 +175,10 @@ function RoleForm({
   const update = <K extends keyof RoleDraft>(key: K, value: RoleDraft[K]) => {
     setDraft({ ...draft, [key]: value });
   };
+  const selectedModelProtocols = React.useMemo(() => {
+    const model = models.find((item) => item.platformModelName === draft.model);
+    return model ? parseProtocolsJSON(model.protocolsJSON) : [];
+  }, [models, draft.model]);
   const importFromProject = (project: ConversationProjectDTO | null) => {
     if (!project) {
       return;
@@ -338,6 +346,17 @@ function RoleForm({
           ]}
           onChange={(value) => update("model", value)}
         />
+      </div>
+      <div className="space-y-1">
+        <Label className="text-xs text-muted-foreground">默认思考强度</Label>
+        <ReasoningEffortSelector
+          protocols={selectedModelProtocols}
+          value={draft.reasoningEffort}
+          onChange={(level) => update("reasoningEffort", level)}
+        />
+        <p className="text-[11px] leading-4 text-muted-foreground">
+          所选模型端点不支持思考强度时隐藏；留空则跟随用户全局默认
+        </p>
       </div>
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1">

@@ -14,6 +14,7 @@ type MemberCreateInput struct {
 	RolePublicID    string
 	MemberType      string
 	ModelOverride   string
+	ReasoningEffort string
 	DutyInstruction string
 }
 
@@ -29,6 +30,7 @@ type UpdateGroupInput struct {
 type UpdateMemberInput struct {
 	Enabled         *bool
 	ModelOverride   *string
+	ReasoningEffort *string
 	DutyInstruction *string
 	SortOrder       *int
 }

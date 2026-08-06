@@ -910,5 +910,16 @@
     "decisionInstruction": "Instruction",
     "decisionExpectedOutcome": "Expected outcome",
     "decisionAnswer": "Final answer"
+  },
+  "reasoningEffort": {
+    "title": "Reasoning effort",
+    "description": "Controls how much the model thinks before responding.",
+    "levels": {
+      "default": "Default",
+      "low": "Low",
+      "medium": "Medium",
+      "high": "High",
+      "xhigh": "Highest"
+    }
   }
 }

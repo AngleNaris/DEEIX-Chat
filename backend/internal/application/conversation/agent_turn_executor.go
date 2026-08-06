@@ -56,6 +56,9 @@ type AgentTurnInput struct {
 	ActorColor  string
 	// PlatformModelName 是最终生效的模型（成员覆盖 > 角色默认 > 平台默认由编排器解析）。
 	PlatformModelName string
+	// ReasoningEffort 是思考强度语义档位（""/low/medium/high/xhigh）。
+	// 空串表示继承用户全局默认（chat.default_reasoning_effort）；协议不支持时不注入。
+	ReasoningEffort string
 	// SystemPrompt 只包含项目级提示词层（项目提示词 + 角色提示词 + 群组协调协议），
 	// 平台级与模型级规则由本执行器内部经 resolveMessageSystemPromptInjection 注入，避免重复。
 	SystemPrompt string
@@ -289,7 +292,8 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 	llmMessages := promptPlan.Messages
 	attributionReferer, attributionTitle := s.llmAttribution()
 	routeConfig := messageRouteConfig(route, attributionReferer, attributionTitle)
-	filteredOptions := filterModelOptions(input.Options, route.Protocol, modelOptionPolicyConfig{
+	optionsWithReasoningEffort := s.injectReasoningEffortOptions(ctx, input.UserID, input.ReasoningEffort, route, input.Options)
+	filteredOptions := filterModelOptions(optionsWithReasoningEffort, route.Protocol, modelOptionPolicyConfig{
 		Mode:                  cfg.ModelOptionPolicyMode,
 		AllowedPathsJSON:      cfg.ModelOptionAllowedPaths,
 		DeniedPathsJSON:       cfg.ModelOptionDeniedPaths,
@@ -536,7 +540,8 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 		reasoningContentPassback = nextReasoningContentPassback
 		llmMessages = promptPlan.Messages
 		routeConfig = messageRouteConfig(route, attributionReferer, attributionTitle)
-		filteredOptions = filterModelOptions(input.Options, route.Protocol, modelOptionPolicyConfig{
+		optionsWithReasoningEffort := s.injectReasoningEffortOptions(ctx, input.UserID, input.ReasoningEffort, route, input.Options)
+		filteredOptions = filterModelOptions(optionsWithReasoningEffort, route.Protocol, modelOptionPolicyConfig{
 			Mode:                  cfg.ModelOptionPolicyMode,
 			AllowedPathsJSON:      cfg.ModelOptionAllowedPaths,
 			DeniedPathsJSON:       cfg.ModelOptionDeniedPaths,

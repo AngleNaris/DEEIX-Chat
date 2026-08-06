@@ -36,6 +36,8 @@ ErrAgentGroupProjectNotFound = errors.New("agent group project not found")
 	ErrAgentGroupSupervisorProtected = errors.New("agent group supervisor protected")
 	// ErrInvalidAgentGroupModelOverride 模型覆盖不合法。
 	ErrInvalidAgentGroupModelOverride = errors.New("invalid agent group model override")
+	// ErrInvalidReasoningEffort 思考强度档位不合法。
+	ErrInvalidReasoningEffort = errors.New("invalid reasoning effort")
 	// ErrAgentGroupInvalidMemberOrder 成员排序输入不合法。
 	ErrAgentGroupInvalidMemberOrder = errors.New("invalid agent group member order")
 	// ErrAgentGroupHistoryExists 群组存在会话或运行历史，不可删除。

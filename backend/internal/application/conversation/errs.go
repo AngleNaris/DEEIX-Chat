@@ -127,6 +127,8 @@ var (
 	ErrMessageGenerationCanceled = errors.New("message generation canceled")
 	// ErrInvalidMediaGenerationTask 媒体生成任务类型或输入不合法。
 	ErrInvalidMediaGenerationTask = errors.New("invalid media generation task")
+	// ErrInvalidReasoningEffort 思考强度档位不合法。
+	ErrInvalidReasoningEffort = errors.New("invalid reasoning effort")
 	// ErrMediaImagePromptRequired 图片任务提示词不能为空。
 	ErrMediaImagePromptRequired = errors.New("image prompt is required")
 	// ErrMediaImageGenerationRejectsInputs 图片生成任务不能携带输入图。

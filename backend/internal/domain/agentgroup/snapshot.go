@@ -49,6 +49,8 @@ type RunSnapshotMember struct {
 	Icon             string
 	Color            string
 	DutyInstruction  string
+	// ReasoningEffort 是成员配置的思考强度档位（""/low/medium/high/xhigh），空串=继承用户全局默认。
+	ReasoningEffort  string
 	RoleDefaultModel string
 	ModelOverride    string
 	EffectiveModel   string

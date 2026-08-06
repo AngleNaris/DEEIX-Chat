@@ -18,6 +18,7 @@ type AgentGroupMemberResponse struct {
 	MemberType      string    `json:"memberType"`
 	Enabled         bool      `json:"enabled"`
 	ModelOverride   string    `json:"modelOverride"`
+	ReasoningEffort string    `json:"reasoningEffort"`
 	DutyInstruction string    `json:"dutyInstruction"`
 	SortOrder       int       `json:"sortOrder"`
 	CreatedAt       time.Time `json:"createdAt"`
@@ -36,6 +37,7 @@ func toAgentGroupMemberResponse(item domainagentgroup.Member) AgentGroupMemberRe
 		MemberType:      item.MemberType,
 		Enabled:         item.Enabled,
 		ModelOverride:   item.ModelOverride,
+		ReasoningEffort: item.ReasoningEffort,
 		DutyInstruction: item.DutyInstruction,
 		SortOrder:       item.SortOrder,
 		CreatedAt:       item.CreatedAt,

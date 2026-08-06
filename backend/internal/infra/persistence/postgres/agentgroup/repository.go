@@ -107,6 +107,7 @@ func toMemberModel(item domainagentgroup.Member) models.AgentGroupMember {
 		MemberType:      item.MemberType,
 		Enabled:         item.Enabled,
 		ModelOverride:   item.ModelOverride,
+		ReasoningEffort: item.ReasoningEffort,
 		DutyInstruction: item.DutyInstruction,
 		SortOrder:       item.SortOrder,
 	}
@@ -128,6 +129,7 @@ func toMemberDomain(row memberRow) domainagentgroup.Member {
 		MemberType:      entity.MemberType,
 		Enabled:         entity.Enabled,
 		ModelOverride:   entity.ModelOverride,
+		ReasoningEffort: entity.ReasoningEffort,
 		DutyInstruction: entity.DutyInstruction,
 		SortOrder:       entity.SortOrder,
 		CreatedAt:       entity.CreatedAt,

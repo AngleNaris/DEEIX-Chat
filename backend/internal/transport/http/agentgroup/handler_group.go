@@ -97,6 +97,7 @@ func (h *Handler) CreateAgentGroup(c *gin.Context) {
 		Supervisor: appagentgroup.MemberCreateInput{
 			RolePublicID:    req.Supervisor.RolePublicID,
 			ModelOverride:   req.Supervisor.ModelOverride,
+			ReasoningEffort: req.Supervisor.ReasoningEffort,
 			DutyInstruction: req.Supervisor.DutyInstruction,
 		},
 	}
@@ -104,6 +105,7 @@ func (h *Handler) CreateAgentGroup(c *gin.Context) {
 		input.Workers = append(input.Workers, appagentgroup.MemberCreateInput{
 			RolePublicID:    worker.RolePublicID,
 			ModelOverride:   worker.ModelOverride,
+			ReasoningEffort: worker.ReasoningEffort,
 			DutyInstruction: worker.DutyInstruction,
 		})
 	}
@@ -217,6 +219,7 @@ func (h *Handler) AddAgentGroupMember(c *gin.Context) {
 	group, err := h.service.AddAgentGroupMember(c.Request.Context(), userID, groupPublicID, appagentgroup.MemberCreateInput{
 		RolePublicID:    req.RolePublicID,
 		ModelOverride:   req.ModelOverride,
+		ReasoningEffort: req.ReasoningEffort,
 		DutyInstruction: req.DutyInstruction,
 	})
 	if err != nil {
@@ -263,6 +266,7 @@ func (h *Handler) UpdateAgentGroupMember(c *gin.Context) {
 	group, err := h.service.UpdateAgentGroupMember(c.Request.Context(), userID, groupPublicID, memberPublicID, appagentgroup.UpdateMemberInput{
 		Enabled:         req.Enabled,
 		ModelOverride:   req.ModelOverride,
+		ReasoningEffort: req.ReasoningEffort,
 		DutyInstruction: req.DutyInstruction,
 		SortOrder:       req.SortOrder,
 	})

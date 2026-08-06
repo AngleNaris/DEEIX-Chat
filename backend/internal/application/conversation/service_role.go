@@ -27,6 +27,7 @@ type ConversationRoleInput struct {
 	SystemPrompt      string
 	Model             string
 	Provider          string
+	ReasoningEffort   string
 	MCPDefaultMode    string
 	DefaultMCPToolIDs []uint
 	DefaultSkillIDs   []uint
@@ -42,6 +43,7 @@ type ConversationRolePatchInput struct {
 	SystemPrompt      *string
 	Model             *string
 	Provider          *string
+	ReasoningEffort   *string
 	MCPDefaultMode    *string
 	DefaultMCPToolIDs *[]uint
 	DefaultSkillIDs   *[]uint
@@ -65,6 +67,7 @@ func (s *Service) CreateConversationRole(ctx context.Context, userID uint, input
 		SystemPrompt:      normalized.SystemPrompt,
 		Model:             normalized.Model,
 		Provider:          normalized.Provider,
+		ReasoningEffort:   normalized.ReasoningEffort,
 		MCPDefaultMode:    normalized.MCPDefaultMode,
 		DefaultMCPToolIDs: normalized.DefaultMCPToolIDs,
 		DefaultSkillIDs:   normalized.DefaultSkillIDs,
@@ -101,6 +104,7 @@ func (s *Service) UpdateConversationRole(ctx context.Context, userID uint, publi
 		SystemPrompt:      normalized.SystemPrompt,
 		Model:             normalized.Model,
 		Provider:          normalized.Provider,
+		ReasoningEffort:   normalized.ReasoningEffort,
 		MCPDefaultMode:    normalized.MCPDefaultMode,
 		DefaultMCPToolIDs: normalized.DefaultMCPToolIDs,
 		DefaultSkillIDs:   normalized.DefaultSkillIDs,
@@ -151,12 +155,17 @@ func normalizeConversationRoleInput(input ConversationRoleInput) (ConversationRo
 	if mcpDefaultMode != model.ConversationProjectMCPDefaultModeCustom {
 		mcpDefaultMode = model.ConversationProjectMCPDefaultModeInherit
 	}
+	reasoningEffort := strings.TrimSpace(input.ReasoningEffort)
+	if !ReasoningEffortValid(reasoningEffort) {
+		return input, ErrInvalidReasoningEffort
+	}
 	return ConversationRoleInput{
 		Name:              name,
 		Description:       truncateRunes(strings.TrimSpace(input.Description), conversationRoleDescriptionMaxChars),
 		SystemPrompt:      truncateRunes(input.SystemPrompt, conversationRoleSystemPromptMaxChars),
 		Model:             truncateRunes(strings.TrimSpace(input.Model), conversationRoleModelMaxChars),
 		Provider:          truncateRunes(strings.TrimSpace(input.Provider), conversationRoleProviderMaxChars),
+		ReasoningEffort:   reasoningEffort,
 		MCPDefaultMode:    mcpDefaultMode,
 		DefaultMCPToolIDs: dedupeIDs(input.DefaultMCPToolIDs),
 		DefaultSkillIDs:   dedupeIDs(input.DefaultSkillIDs),
@@ -189,6 +198,13 @@ func normalizeConversationRolePatchInput(input ConversationRolePatchInput) (Conv
 	if input.Provider != nil {
 		value := truncateRunes(strings.TrimSpace(*input.Provider), conversationRoleProviderMaxChars)
 		input.Provider = &value
+	}
+	if input.ReasoningEffort != nil {
+		value := strings.TrimSpace(*input.ReasoningEffort)
+		if !ReasoningEffortValid(value) {
+			return input, ErrInvalidReasoningEffort
+		}
+		input.ReasoningEffort = &value
 	}
 	if input.MCPDefaultMode != nil {
 		mode := strings.TrimSpace(*input.MCPDefaultMode)

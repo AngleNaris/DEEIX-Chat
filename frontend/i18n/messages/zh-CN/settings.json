@@ -348,7 +348,9 @@
       "autoTitle": "自动生成标题",
       "autoTitleDescription": "关闭后，新对话使用第一条消息的前 16 个字符作为标题。",
       "autoLabels": "自动生成标签",
-      "autoLabelsDescription": "关闭后，系统将不再自动生成会话标签，可减少辅助模型调用及相应的 Token 消耗。"
+      "autoLabelsDescription": "关闭后，系统将不再自动生成会话标签，可减少辅助模型调用及相应的 Token 消耗。",
+      "defaultReasoningEffortTitle": "新会话默认思考强度",
+      "defaultReasoningEffortDescription": "新会话的模型支持思考强度时使用的默认档位，可在各会话中单独覆盖。"
     },
     "input": {
       "sectionTitle": "输入与发送",

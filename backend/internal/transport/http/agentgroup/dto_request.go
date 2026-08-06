@@ -14,6 +14,7 @@ type CreateAgentGroupRequest struct {
 type AgentGroupMemberRequest struct {
 	RolePublicID    string `json:"rolePublicID" binding:"required,max=32"`
 	ModelOverride   string `json:"modelOverride,omitempty" binding:"max=128"`
+	ReasoningEffort string `json:"reasoningEffort,omitempty" binding:"omitempty,oneof= low medium high xhigh"`
 	DutyInstruction string `json:"dutyInstruction,omitempty" binding:"max=4000"`
 }
 
@@ -29,6 +30,7 @@ type UpdateAgentGroupRequest struct {
 type AddAgentGroupMemberRequest struct {
 	RolePublicID    string `json:"rolePublicID" binding:"required,max=32"`
 	ModelOverride   string `json:"modelOverride,omitempty" binding:"max=128"`
+	ReasoningEffort string `json:"reasoningEffort,omitempty" binding:"omitempty,oneof= low medium high xhigh"`
 	DutyInstruction string `json:"dutyInstruction,omitempty" binding:"max=4000"`
 }
 
@@ -36,6 +38,7 @@ type AddAgentGroupMemberRequest struct {
 type UpdateAgentGroupMemberRequest struct {
 	Enabled         *bool   `json:"enabled,omitempty"`
 	ModelOverride   *string `json:"modelOverride,omitempty" binding:"omitempty,max=128"`
+	ReasoningEffort *string `json:"reasoningEffort,omitempty" binding:"omitempty,oneof= low medium high xhigh"`
 	DutyInstruction *string `json:"dutyInstruction,omitempty" binding:"omitempty,max=4000"`
 	SortOrder       *int    `json:"sortOrder,omitempty" binding:"omitempty,min=0"`
 }
