@@ -551,12 +551,19 @@ export function NavProjects() {
     (projectID: string) => {
       ensureProjectExpanded(projectID, true);
       requestNewConversation({ projectID });
-      router.push(`/chat?project_id=${encodeURIComponent(projectID)}`);
+      const targetHref = `/chat?project_id=${encodeURIComponent(projectID)}`;
+      if (pathname === "/chat") {
+        // 同路由仅查询参数变化：pushState 只更新 URL，不经过路由导航，
+        // 任何浏览器都不会触发整页加载；会话重置由 ChatSession revision 驱动。
+        window.history.pushState(null, "", targetHref);
+      } else {
+        router.push(targetHref);
+      }
       if (isMobile) {
         setOpenMobile(false);
       }
     },
-    [ensureProjectExpanded, isMobile, requestNewConversation, router, setOpenMobile],
+    [ensureProjectExpanded, isMobile, pathname, requestNewConversation, router, setOpenMobile],
   );
 
   const onProjectDragStart = React.useCallback((event: DragStartEvent) => {

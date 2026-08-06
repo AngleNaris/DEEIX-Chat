@@ -54,7 +54,10 @@ export function useAgentGroupStepActions({
     const controller = new AbortController();
     abortRef.current = controller;
     registerGroupRunRetryAbort(clientRunID, controller);
-    retryRequestIDRef.current = window.crypto.randomUUID().replaceAll("-", "");
+    retryRequestIDRef.current =
+      typeof window.crypto?.randomUUID === "function"
+        ? window.crypto.randomUUID().replaceAll("-", "")
+        : Math.random().toString(36).slice(2) + Date.now().toString(36);
     // §16.10 输入锁：重试进行中保持锁定，直到结算（成功/再次暂停/停止/放弃）。
     setGroupRunRetrying(clientRunID, true);
     let streamSettled = false;

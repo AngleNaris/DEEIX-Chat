@@ -19,7 +19,7 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { AnimatePresence, motion, type Transition } from "motion/react";
 import { ChevronDown, PencilLine, Star, StarOff, Trash2 } from "lucide-react";
@@ -360,6 +360,7 @@ function RoleTreeButton({
 
 export function NavRoles() {
   const router = useRouter();
+  const pathname = usePathname();
   const { isMobile, setOpenMobile } = useSidebar();
   const onNavigate = useSidebarConversationNavigation();
   const activeConversationID = useLayoutActiveConversation();
@@ -560,12 +561,19 @@ export function NavRoles() {
     (role: ConversationRoleDTO) => {
       ensureRoleExpanded(role.publicID, true);
       requestNewConversation({ roleID: role.publicID });
-      router.push(`/chat?role_id=${encodeURIComponent(role.publicID)}`);
+      const targetHref = `/chat?role_id=${encodeURIComponent(role.publicID)}`;
+      if (pathname === "/chat") {
+        // 同路由仅查询参数变化：pushState 只更新 URL，不经过路由导航，
+        // 任何浏览器都不会触发整页加载；会话重置由 ChatSession revision 驱动。
+        window.history.pushState(null, "", targetHref);
+      } else {
+        router.push(targetHref);
+      }
       if (isMobile) {
         setOpenMobile(false);
       }
     },
-    [ensureRoleExpanded, isMobile, requestNewConversation, router, setOpenMobile],
+    [ensureRoleExpanded, isMobile, pathname, requestNewConversation, router, setOpenMobile],
   );
 
   const onRoleDragStart = React.useCallback((event: DragStartEvent) => {
