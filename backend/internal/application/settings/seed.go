@@ -192,6 +192,11 @@ func defaultSettings() []domainsettings.SystemSetting {
 		{Namespace: "agent_group", Key: "max_steps_per_run", Value: "64", ValueType: "int", Description: "Agent 群组单次运行最大决策步骤数"},
 		{Namespace: "agent_group", Key: "max_attempts_per_step", Value: "8", ValueType: "int", Description: "Agent 群组单步最大尝试次数"},
 		{Namespace: "agent_group", Key: "attempt_lease_seconds", Value: "600", ValueType: "int", Description: "Agent 群组运行尝试租约时长(秒)，崩溃恢复窗口"},
+
+		// 平台 Agent 工具配置（模型可调用的平台内置能力）
+		{Namespace: "platform_tools", Key: "enabled", Value: "false", ValueType: "bool", Description: "是否启用平台 Agent 工具（读文件/技能/会话历史等只读能力）"},
+		{Namespace: "platform_tools", Key: "write_enabled", Value: "false", ValueType: "bool", Description: "是否启用平台工具写操作（编辑文件/技能；配合用户批准模式管控）"},
+		{Namespace: "platform_tools", Key: "file_reindex_delay_seconds", Value: "60", ValueType: "int", Description: "文件内容修改后延迟重建提取/RAG 的缓冲秒数（避免频繁修改反复重建）"},
 	}
 }
 

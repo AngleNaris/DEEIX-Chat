@@ -79,6 +79,9 @@ type FileProcessingRepository interface {
 	GetFileObjectProcessingByObjectID(ctx context.Context, fileObjID uint) (*domainconversation.FileObjectProcessing, error)
 	CloneFileObjectProcessingState(ctx context.Context, sourceFileObjID uint, targetFileObjID uint, userID uint) error
 	UpdateFileObjectProcessing(ctx context.Context, userID uint, fileID string, input UpdateFileObjectProcessingInput) error
+	// ReplaceFileObjectContent 覆盖文件对象内容元数据并重置处理/提取/向量状态
+	// （供平台工具 write_file 覆盖内容后调用；重建由延迟调度器触发）。
+	ReplaceFileObjectContent(ctx context.Context, userID uint, fileID string, storagePath string, sha256 string, sizeBytes int64) error
 }
 
 // UpdateFileObjectProcessingInput 定义文件处理状态更新字段。

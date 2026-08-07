@@ -107,3 +107,46 @@ func fileObjectProcessingUpdates(input repository.UpdateFileObjectProcessingInpu
 	}
 	return updates
 }
+
+// ReplaceFileObjectContent 覆盖文件对象内容元数据并重置处理/提取/向量状态。
+// 平台工具 write_file 覆盖内容后调用；重建由 file_reindex_scheduler 延迟触发。
+func (r *Repo) ReplaceFileObjectContent(ctx context.Context, userID uint, fileID string, storagePath string, sha256 string, sizeBytes int64) error {
+	updates := map[string]interface{}{
+		"storage_path":          storagePath,
+		"sha256":                sha256,
+		"size_bytes":            sizeBytes,
+		"processing_status":     "pending",
+		"processing_ready":      false,
+		"processing_error_code": "",
+		"processing_error_message": "",
+		"extract_status":        "",
+		"extract_engine":        "",
+		"extract_storage_path":  "",
+		"extract_chars":         0,
+		"extract_pages":         0,
+		"preview_text":          "",
+		"ocr_used":              false,
+		"rag_ready":             false,
+		"rag_reason":            "",
+		"embed_status":          "",
+		"embed_error":           "",
+		"chunk_count":           0,
+		"page_count":            0,
+		"extractor_version":     "",
+		"processing_started_at": nil,
+		"processing_completed_at": nil,
+		"extracted_at":          nil,
+		"updated_at":            time.Now(),
+	}
+	result := r.db.WithContext(ctx).
+		Model(&models.FileObject{}).
+		Where("user_id = ? AND file_id = ?", userID, fileID).
+		Updates(updates)
+	if result.Error != nil {
+		return translateError(result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return repository.ErrNotFound
+	}
+	return nil
+}

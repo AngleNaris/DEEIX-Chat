@@ -26,6 +26,7 @@ type executeAssistantToolCallsInput struct {
 	ToolNameMap       map[string]string
 	MCPConfigs        map[string]mcp.CallConfig
 	ToolSchemas       map[string]json.RawMessage
+	PlatformTools     map[string]platformToolEntry // 平台内置工具（模型名 → 注册项）
 	Ledger            *toolExecutionLedger
 	ResultTokenBudget int64
 }
@@ -93,6 +94,42 @@ func (s *Service) executeAssistantToolCalls(ctx context.Context, input executeAs
 
 		mcpConfig := resolveMCPConfig(modelToolName, input.MCPConfigs)
 		if mcpConfig == nil {
+			if entry, ok := input.PlatformTools[modelToolName]; ok {
+				// 平台内置工具（本地执行）：走同一结果/持久化/预算/去重通道。
+				toolStartedAt := time.Now()
+				outputJSON, executeErr := s.executePlatformToolCall(ctx, entry, ExecuteToolInput{
+					UserID:         input.UserID,
+					ConversationID: input.ConversationID,
+					RequestID:      strings.TrimSpace(input.RequestID),
+					ToolName:       row.ToolName,
+					ArgumentsJSON:  row.InputJSON,
+				})
+				row.LatencyMS = time.Since(toolStartedAt).Milliseconds()
+				if row.LatencyMS < 0 {
+					row.LatencyMS = 0
+				}
+				if executeErr != nil {
+					row.Status = "error"
+					row.ErrorJSON = strings.TrimSpace(executeErr.Error())
+				} else {
+					row.Status = "success"
+					row.OutputJSON = strings.TrimSpace(outputJSON)
+					if row.OutputJSON == "" {
+						row.OutputJSON = "{}"
+					}
+				}
+				persisted := s.persistToolCallResult(ctx, &row)
+				result := buildToolResultForModel(row, modelToolName)
+				slots[i] = toolExecutionSlot{
+					row:       row,
+					result:    result,
+					persisted: persisted,
+				}
+				if input.Ledger != nil {
+					input.Ledger.store(row.ToolName, row.InputJSON, toolExecutionRecord{row: row, result: result})
+				}
+				continue
+			}
 			row.Status = "error"
 			row.ErrorJSON = toolNotEnabledForRunMessage(modelToolName)
 			slots[i] = toolExecutionSlot{

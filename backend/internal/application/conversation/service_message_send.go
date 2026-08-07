@@ -1327,6 +1327,7 @@ func (s *Service) sendMessageInternal(
 			ToolNameMap:       toolRuntime.nameMap,
 			MCPConfigs:        toolRuntime.mcpConfigs,
 			ToolSchemas:       toolRuntime.schemas,
+			PlatformTools:     toolRuntime.platformEntries,
 			Ledger:            toolLedger,
 			ResultTokenBudget: toolResultTokenBudget,
 		})

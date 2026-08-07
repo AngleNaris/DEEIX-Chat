@@ -2,6 +2,10 @@ package conversation
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -56,6 +60,8 @@ type skillResolver interface {
 	ResolveAvailable(ctx context.Context, userID uint, id uint) (*domainskill.Skill, error)
 	ListVisible(ctx context.Context, userID uint, input appskill.ListInput) ([]domainskill.Skill, int64, error)
 	GetPackageFile(ctx context.Context, userID uint, skillID uint, filePath string) ([]byte, error)
+	// UpdateUser 供平台工具 update_skill 更新用户自己的技能。
+	UpdateUser(ctx context.Context, userID uint, id uint, input appskill.PatchInput) (*domainskill.Skill, error)
 }
 
 type mcpToolResolver interface {
@@ -74,6 +80,7 @@ type agentGroupResolver interface {
 }
 
 // agentGroupSettingsReader 读取 agent_group 运行时设置（由 settings 服务注入）。
+// platformToolsSettings 复用同一接口读取 platform_tools 命名空间。
 type agentGroupSettingsReader interface {
 	RuntimeValuesByNamespace(ctx context.Context, namespace string) (map[string]string, error)
 }
@@ -101,6 +108,9 @@ type Service struct {
 	agentGroupRunStore    repository.AgentGroupRunRepository
 	agentGroupSettings    agentGroupSettingsReader
 	agentGroupRunLocks    sync.Map // conversationID (uint) → *sync.Mutex，同会话串行
+	platformToolsSettings agentGroupSettingsReader // platform_tools 运行时设置
+	platformApprovals     *platformWriteApprovalStore // ask 模式待批准写操作
+	reindexScheduler      *fileReindexScheduler      // write_file 延迟重建（debounce）
 	llmClient         *llm.Client
 	mcpClient         *mcp.Client
 	uploadSvc         *appupload.Service
@@ -322,6 +332,14 @@ func NewServiceWithRuntime(
 	svc.processingSvc = processingSvc
 	svc.extractSvc = extractSvc
 	svc.ragSvc = ragSvc
+	// 平台工具：ask 批准存储 + write_file 延迟重建调度器（debounce，缓冲窗口读运行时设置）。
+	svc.platformApprovals = newPlatformWriteApprovalStore()
+	svc.reindexScheduler = newFileReindexScheduler(
+		10*time.Second,
+		func() time.Duration { return svc.ResolvePlatformReindexDelay(context.Background()) },
+		processingSvc.ProcessFile,
+		logger,
+	)
 	// 注入 LLM 语义压缩回调（在 svc 完全初始化后绑定）
 	svc.compactSvc.SetLLMSummarizer(svc.callCompactLLM)
 	return svc
@@ -373,4 +391,63 @@ func (s *Service) SetAgentGroupRunStore(store repository.AgentGroupRunRepository
 // SetAgentGroupSettings 注入 agent_group 运行时设置读取器。
 func (s *Service) SetAgentGroupSettings(reader agentGroupSettingsReader) {
 	s.agentGroupSettings = reader
+}
+
+// SetPlatformToolsSettings 注入 platform_tools 运行时设置读取器（enabled/write_enabled/延迟秒数）。
+func (s *Service) SetPlatformToolsSettings(reader agentGroupSettingsReader) {
+	s.platformToolsSettings = reader
+}
+
+// ResolvePlatformReindexDelay 读取平台工具文件重建缓冲窗口（秒），缺省 60。
+func (s *Service) ResolvePlatformReindexDelay(ctx context.Context) time.Duration {
+	if s.platformToolsSettings == nil {
+		return 60 * time.Second
+	}
+	values, err := s.platformToolsSettings.RuntimeValuesByNamespace(ctx, platformToolsNamespace)
+	if err != nil {
+		return 60 * time.Second
+	}
+	seconds, parseErr := strconv.Atoi(strings.TrimSpace(values[platformToolsKeyReindexDelay]))
+	if parseErr != nil || seconds <= 0 {
+		return 60 * time.Second
+	}
+	return time.Duration(seconds) * time.Second
+}
+
+// ApprovePlatformWrite 批准一条待确认的写操作并执行（ask 模式；返回执行错误与记录摘要）。
+func (s *Service) ApprovePlatformWrite(ctx context.Context, approvalID string, userID uint, approve bool) (string, error) {
+	status := platformApprovalStatusRejected
+	if approve {
+		status = platformApprovalStatusApproved
+	}
+	record := s.platformApprovals.claim(approvalID, userID, status)
+	if record == nil {
+		return "", ErrPlatformApprovalNotFound
+	}
+	if !approve {
+		if s.auditWriter != nil {
+			s.auditWriter.Write(ctx, record.RequestID, userID, "platform_tools.reject", "platform_tools", record.ID, "", "", map[string]interface{}{
+				"tool": record.ToolName,
+			})
+		}
+		return marshalApprovalSummary(record)
+	}
+	entry, ok := platformToolRegistry()[record.ToolName]
+	if !ok || entry.handler == nil {
+		return "", fmt.Errorf("platform tool %q is not registered", record.ToolName)
+	}
+	output, err := entry.handler(s, ctx, platformToolCallContext{
+		UserID:         record.UserID,
+		ConversationID: record.ConversationID,
+		RequestID:      record.RequestID,
+		Arguments:      json.RawMessage(record.ArgumentsJSON),
+	})
+	if err != nil {
+		return "", err
+	}
+	summary, summaryErr := marshalApprovalSummary(record)
+	if summaryErr != nil {
+		return output, nil
+	}
+	return summary, nil
 }

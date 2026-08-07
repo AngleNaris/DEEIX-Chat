@@ -41,6 +41,8 @@ var allowedKeys = map[string]string{
 	"chat.input_height":                         "standard",
 	"chat.content_width":                        "compact",
 	"chat.default_mcp_tool_ids":                 "[]",
+	// 平台工具写操作批准模式：auto 自动执行 / ask 询问用户（模型先收到 pending，用户确认后执行）。
+	"platform_tools.write_approval":             "auto",
 }
 
 // boolKeys 取值只能是 "true" / "false"。
@@ -69,6 +71,7 @@ var enumKeys = map[string]map[string]bool{
 	"chat.default_reasoning_effort": {
 		"": true, "low": true, "medium": true, "high": true, "xhigh": true,
 	},
+	"platform_tools.write_approval": {"auto": true, "ask": true},
 }
 
 // validateValue 校验 key 对应 value 的合法性。

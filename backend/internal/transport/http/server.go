@@ -24,6 +24,7 @@ import (
 	mcphttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/mcp"
 	memoryhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/memory"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/middleware"
+	platformtoolshttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/platformtools"
 	promptpresethttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/promptpreset"
 	settingshttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/settings"
 	skillhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/skill"
@@ -66,6 +67,7 @@ type Modules struct {
 	Settings     *settingshttp.Module
 	User         *userhttp.Module
 	UserSettings *usersettingshttp.Module
+	PlatformTools *platformtoolshttp.Module
 	StartupLog   func(*zap.Logger)
 }
 
@@ -170,6 +172,9 @@ func NewEngine(cfg *config.Runtime, log *zap.Logger, modules Modules, hc HealthC
 	}
 	if modules.UserSettings != nil {
 		modules.UserSettings.RegisterRoutes(authRequired)
+	}
+	if modules.PlatformTools != nil {
+		modules.PlatformTools.RegisterRoutes(authRequired)
 	}
 	if modules.Settings != nil {
 		modules.Settings.RegisterRoutes(authRequired)

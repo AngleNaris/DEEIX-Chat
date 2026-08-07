@@ -652,6 +652,7 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 			ToolNameMap:       toolRuntime.nameMap,
 			MCPConfigs:        toolRuntime.mcpConfigs,
 			ToolSchemas:       toolRuntime.schemas,
+			PlatformTools:     toolRuntime.platformEntries,
 			Ledger:            toolLedger,
 			ResultTokenBudget: toolResultTokenBudget,
 		})
@@ -951,6 +952,7 @@ type executeAgentTurnToolCallsInput struct {
 	ToolNameMap       map[string]string
 	MCPConfigs        map[string]mcp.CallConfig
 	ToolSchemas       map[string]json.RawMessage
+	PlatformTools     map[string]platformToolEntry // 平台内置工具（模型名 → 注册项）
 	Ledger            *toolExecutionLedger
 	ResultTokenBudget int64
 }
@@ -993,6 +995,48 @@ func (s *Service) executeAgentTurnToolCalls(ctx context.Context, turn AgentTurnI
 		})
 		mcpConfig := resolveMCPConfig(modelToolName, input.MCPConfigs)
 		if mcpConfig == nil {
+			if entry, ok := input.PlatformTools[modelToolName]; ok {
+				// 平台内置工具（本地执行）：与 MCP 工具同一结果/持久化/预算通道。
+				toolStartedAt := time.Now()
+				outputJSON, executeErr := s.executePlatformToolCall(ctx, entry, ExecuteToolInput{
+					UserID:         input.UserID,
+					ConversationID: input.ConversationID,
+					RequestID:      strings.TrimSpace(input.RequestID),
+					ToolName:       row.ToolName,
+					ArgumentsJSON:  row.InputJSON,
+				})
+				row.LatencyMS = time.Since(toolStartedAt).Milliseconds()
+				if row.LatencyMS < 0 {
+					row.LatencyMS = 0
+				}
+				if executeErr != nil {
+					row.Status = "error"
+					row.ErrorJSON = strings.TrimSpace(executeErr.Error())
+				} else {
+					row.Status = "success"
+					row.OutputJSON = strings.TrimSpace(outputJSON)
+					if row.OutputJSON == "" {
+						row.OutputJSON = "{}"
+					}
+				}
+				result := buildToolResultForModel(row, modelToolName)
+				slot := toolExecutionSlot{row: row, result: result}
+				if turn.PersistToolCalls {
+					slot.persisted = s.persistToolCallResult(ctx, &row)
+					slot.row = row
+				}
+				slots[i] = slot
+				if input.Ledger != nil {
+					input.Ledger.store(row.ToolName, row.InputJSON, toolExecutionRecord{row: row, result: result})
+				}
+				_ = emitAgentTurnEvent(turn, AgentTurnEventToolResult, map[string]interface{}{
+					"tool_name":    modelToolName,
+					"tool_call_id": row.ToolCallID,
+					"status":       row.Status,
+					"error":        row.ErrorJSON,
+				})
+				continue
+			}
 			row.Status = "error"
 			row.ErrorJSON = toolNotEnabledForRunMessage(modelToolName)
 			slots[i] = toolExecutionSlot{row: row, result: buildToolResultForModel(row, modelToolName)}

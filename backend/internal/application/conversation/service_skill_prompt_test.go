@@ -267,6 +267,10 @@ func (f *fakeSkillFileResolver) GetPackageFile(ctx context.Context, userID uint,
 	return []byte(content), nil
 }
 
+func (f *fakeSkillFileResolver) UpdateUser(ctx context.Context, userID uint, id uint, input appskill.PatchInput) (*domainskill.Skill, error) {
+	return nil, nil
+}
+
 func TestResolveSkillFileRequestsDisclosesOnlyManifestFiles(t *testing.T) {
 	resolver := &fakeSkillFileResolver{files: map[uint]map[string]string{
 		1: {"scripts/roll.py": "import random\nprint(random.randint(1, 6))\n", "secret.txt": "top secret"},

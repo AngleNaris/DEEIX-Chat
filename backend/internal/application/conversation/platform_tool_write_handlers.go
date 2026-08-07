@@ -1,0 +1,203 @@
+package conversation
+
+import (
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/skill"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/objectstore"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/pkg/traceid"
+)
+
+// platformWriteFile 覆盖用户文本文件内容（写操作，受批准模式管控）。
+func (s *Service) platformWriteFile(ctx context.Context, call platformToolCallContext) (string, error) {
+	var args struct {
+		FileID  string `json:"file_id"`
+		Content string `json:"content"`
+	}
+	if err := decodePlatformArgs(call.Arguments, &args); err != nil {
+		return "", err
+	}
+	fileID := strings.TrimSpace(args.FileID)
+	if fileID == "" {
+		return "", fmt.Errorf("file_id is required")
+	}
+	content := args.Content
+	if len(content) > platformFileWriteLimitBytes {
+		return "", fmt.Errorf("content exceeds %d bytes limit", platformFileWriteLimitBytes)
+	}
+	if err := s.overwriteFileContent(ctx, call.UserID, fileID, content); err != nil {
+		return "", err
+	}
+	return marshalPlatformResult(map[string]interface{}{
+		"file_id": fileID,
+		"bytes":   len(content),
+		"status":  "written",
+		"note":    "file content updated; text extraction and RAG index will be rebuilt shortly",
+	})
+}
+
+// overwriteFileContent 覆盖用户文件内容：
+// 校验归属与文本类型 → 写新存储对象 → 更新元数据并重置处理状态 → 删除旧对象 →
+// 延迟重建调度器登记（debounce，不立即触发提取/RAG 重建）。
+func (s *Service) overwriteFileContent(ctx context.Context, userID uint, fileID string, content string) error {
+	if userID == 0 || fileID == "" {
+		return ErrInvalidFileReference
+	}
+	item, err := s.repo.GetActiveFileObjectByID(ctx, userID, fileID)
+	if err != nil {
+		return err
+	}
+	if !isPlatformWritableFile(item.FileCategory) {
+		return fmt.Errorf("file %s is not a writable text file (category %s)", fileID, item.FileCategory)
+	}
+	if s.storeProvider == nil || s.processingSvc == nil {
+		return fmt.Errorf("storage or processing service is unavailable")
+	}
+	store, err := s.storeProvider.Open(ctx)
+	if err != nil {
+		return err
+	}
+
+	now := time.Now()
+	relativePath := filepath.ToSlash(filepath.Join(
+		fmt.Sprintf("%d", userID),
+		now.Format("2006"),
+		now.Format("01"),
+		"file_"+sanitizePlatformFileName(item.FileName),
+	))
+	body := bytes.NewBufferString(content)
+	if _, err := store.Put(ctx, relativePath, body, objectstore.PutOptions{
+		SizeBytes:   int64(len(content)),
+		ContentType: firstNonEmptyString(item.MimeType, "text/plain"),
+	}); err != nil {
+		return fmt.Errorf("write file object: %w", err)
+	}
+	sum := sha256.Sum256([]byte(content))
+	sha256Hex := hex.EncodeToString(sum[:])
+	if err := s.repo.ReplaceFileObjectContent(ctx, userID, fileID, relativePath, sha256Hex, int64(len(content))); err != nil {
+		_ = store.Delete(ctx, relativePath)
+		return err
+	}
+	if relativePath != item.StoragePath {
+		_ = store.Delete(ctx, item.StoragePath)
+	}
+	// 延迟重建：缓冲窗口内合并多次修改，到期才触发一次提取/RAG 重建。
+	s.reindexScheduler.MarkDirty(userID, fileID)
+
+	s.recordPlatformAudit(ctx, callCtx{userID: userID, requestID: traceid.FromContext(ctx)}, "platform_tools.write_file", fileID, map[string]interface{}{
+		"file_name": item.FileName,
+		"bytes":     len(content),
+		"sha256":    sha256Hex,
+	})
+	return nil
+}
+
+// platformUpdateSkill 更新用户自己的技能元数据（写操作，受批准模式管控）。
+func (s *Service) platformUpdateSkill(ctx context.Context, call platformToolCallContext) (string, error) {
+	var args struct {
+		SkillID     uint   `json:"skill_id"`
+		Title       string `json:"title"`
+		Trigger     string `json:"trigger"`
+		Description string `json:"description"`
+		Markdown    string `json:"markdown"`
+		Enabled     *bool  `json:"enabled"`
+	}
+	if err := decodePlatformArgs(call.Arguments, &args); err != nil {
+		return "", err
+	}
+	if args.SkillID == 0 {
+		return "", fmt.Errorf("skill_id is required")
+	}
+	if s.skillResolver == nil {
+		return "", fmt.Errorf("skill service is unavailable")
+	}
+	patch := skill.PatchInput{}
+	if args.Title != "" {
+		value := args.Title
+		patch.Title = &value
+	}
+	if args.Trigger != "" {
+		value := args.Trigger
+		patch.Trigger = &value
+	}
+	if args.Description != "" {
+		value := args.Description
+		patch.Description = &value
+	}
+	if args.Markdown != "" {
+		value := args.Markdown
+		patch.Markdown = &value
+	}
+	if args.Enabled != nil {
+		patch.Enabled = args.Enabled
+	}
+	if !patchHasAnyField(patch) {
+		return "", fmt.Errorf("at least one field to update is required")
+	}
+	updated, err := s.skillResolver.UpdateUser(ctx, call.UserID, args.SkillID, patch)
+	if err != nil {
+		return "", err
+	}
+	s.recordPlatformAudit(ctx, callCtx{userID: call.UserID, requestID: call.RequestID}, "platform_tools.update_skill", fmt.Sprintf("%d", args.SkillID), map[string]interface{}{
+		"title":   updated.Title,
+		"trigger": updated.Trigger,
+	})
+	return marshalPlatformResult(map[string]interface{}{
+		"skill_id": args.SkillID,
+		"title":    updated.Title,
+		"status":   "updated",
+	})
+}
+
+// patchHasAnyField 判断 PatchInput 是否至少有一个字段被设置。
+func patchHasAnyField(patch skill.PatchInput) bool {
+	return patch.Title != nil || patch.Trigger != nil || patch.Description != nil || patch.Markdown != nil || patch.Enabled != nil || patch.SortOrder != nil
+}
+
+// isPlatformWritableFile 判断文件是否可被平台工具写入（仅文本类）。
+func isPlatformWritableFile(category string) bool {
+	return strings.EqualFold(strings.TrimSpace(category), "text")
+}
+
+// sanitizePlatformFileName 清理写入文件对象名称中的路径分隔符。
+func sanitizePlatformFileName(name string) string {
+	base := filepath.Base(strings.TrimSpace(name))
+	base = strings.ReplaceAll(base, " ", "_")
+	base = strings.ReplaceAll(base, "/", "_")
+	base = strings.ReplaceAll(base, "\\", "_")
+	base = strings.TrimSpace(base)
+	if base == "." || base == "" {
+		base = "file"
+	}
+	return base
+}
+
+type callCtx struct {
+	userID    uint
+	requestID string
+}
+
+// recordPlatformAudit 记录平台工具写操作审计。
+func (s *Service) recordPlatformAudit(ctx context.Context, call callCtx, action string, resourceID string, detail interface{}) {
+	if s.auditWriter == nil {
+		return
+	}
+	s.auditWriter.Write(
+		ctx,
+		strings.TrimSpace(call.requestID),
+		call.userID,
+		action,
+		"platform_tools",
+		strings.TrimSpace(resourceID),
+		"",
+		"",
+		detail,
+	)
+}

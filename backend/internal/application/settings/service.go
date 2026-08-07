@@ -259,15 +259,16 @@ func csvSet(raw string) map[string]struct{} {
 
 // validNamespaces 合法的 namespace 集合。
 var validNamespaces = map[string]bool{
-	"auth":        true,
-	"billing":     true,
-	"chat":        true,
-	"storage":     true,
-	"file":        true,
-	"extract":     true,
-	"mcp":         true,
-	"circuit":     true,
-	"agent_group": true,
+	"auth":          true,
+	"billing":       true,
+	"chat":          true,
+	"storage":       true,
+	"file":          true,
+	"extract":       true,
+	"mcp":           true,
+	"circuit":       true,
+	"agent_group":   true,
+	"platform_tools": true,
 }
 
 // IsValidNamespace 判断 namespace 是否允许被动态配置。

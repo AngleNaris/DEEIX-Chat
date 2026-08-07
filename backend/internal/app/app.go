@@ -73,6 +73,7 @@ import (
 	skillhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/skill"
 	userhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/user"
 	usersettingshttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/usersettings"
+	platformtoolshttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/platformtools"
 	"github.com/gin-gonic/gin"
 	"github.com/go-redis/redis/v8"
 	"go.uber.org/zap"
@@ -277,6 +278,7 @@ func NewApp() (*App, error) {
 	conversationService.SetAgentGroupResolver(agentGroupRepo)
 	conversationService.SetAgentGroupRunStore(agentGroupRepo)
 	conversationService.SetAgentGroupSettings(settingsService)
+	conversationService.SetPlatformToolsSettings(settingsService)
 	userService.SetAvatarContentOpener(avatarContentOpener{conversationService: conversationService})
 	userService.SetAvatarFileValidator(conversationService)
 	authService.SetAvatarFileValidator(conversationService)
@@ -313,6 +315,8 @@ func NewApp() (*App, error) {
 	userSettingsService := usersettings.NewService(userSettingsRepo)
 	userSettingsHandler := usersettingshttp.NewHandler(userSettingsService)
 	userSettingsModule := usersettingshttp.NewModule(userSettingsHandler)
+	platformToolsHandler := platformtoolshttp.NewHandler(conversationService)
+	platformToolsModule := platformtoolshttp.NewModule(platformToolsHandler)
 	announcementRepo := announcementrepo.NewRepo(db)
 	announcementService := announcement.NewService(announcementRepo)
 	announcementHandler := announcementhttp.NewHandler(announcementService)
@@ -347,6 +351,7 @@ func NewApp() (*App, error) {
 		Skill:        skillModule,
 		Settings:     settingsModule,
 		UserSettings: userSettingsModule,
+		PlatformTools: platformToolsModule,
 		User:         userModule,
 		StartupLog: func(log *zap.Logger) {
 			if log == nil || bootstrapSuperAdmin == nil {

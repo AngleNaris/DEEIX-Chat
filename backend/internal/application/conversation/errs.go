@@ -89,6 +89,8 @@ var (
 	ErrImageAttachmentProcessingFailed = errors.New("image attachment processing failed")
 	// ErrTooManySelectedSkills 单条消息选择的 Skill 数超限。
 	ErrTooManySelectedSkills = errors.New("too many selected skills")
+	// ErrPlatformApprovalNotFound 平台工具写操作批准记录不存在或不属于当前用户。
+	ErrPlatformApprovalNotFound = errors.New("platform tool approval not found")
 	// ErrSkillNotFound 技能不存在或当前用户不可用。
 	ErrSkillNotFound = errors.New("skill not found")
 	// ErrInvalidSkillUse 技能使用入参不合法。

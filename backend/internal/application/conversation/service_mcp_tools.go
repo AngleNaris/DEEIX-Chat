@@ -21,6 +21,7 @@ type selectedToolRuntime struct {
 	mcpConfigs          map[string]mcp.CallConfig
 	schemas             map[string]json.RawMessage
 	attachmentProcessor *selectedAttachmentProcessor
+	platformEntries     map[string]platformToolEntry // 平台内置工具（本地执行，无 MCP 配置）
 }
 
 type selectedAttachmentProcessor struct {
@@ -41,6 +42,9 @@ func injectMCPToolGuidance(messages []llm.Message, runtime selectedToolRuntime, 
 	content := strings.TrimSpace(customPrompt)
 	if content == "" {
 		content = defaultMCPToolGuidancePrompt()
+	}
+	if len(runtime.platformEntries) > 0 {
+		content = content + "\n\n" + platformToolGuidancePrompt()
 	}
 
 	insertAt := 0
@@ -137,28 +141,39 @@ func schemaFieldType(prop map[string]interface{}) string {
 }
 
 func (s *Service) resolveSelectedToolRuntime(ctx context.Context, toolIDs []uint) (selectedToolRuntime, error) {
-	if len(toolIDs) == 0 || !s.cfg.Snapshot().MCPEnable {
-		return selectedToolRuntime{}, nil
-	}
-	if s.mcpRepo == nil {
-		return selectedToolRuntime{}, fmt.Errorf("resolve selected MCP tools: repository unavailable")
-	}
-	tools, err := s.mcpRepo.ListToolsByIDs(ctx, uniqueToolIDs(toolIDs))
-	if err != nil {
-		return selectedToolRuntime{}, fmt.Errorf("resolve selected MCP tools: %w", err)
-	}
-	if len(tools) == 0 {
-		return selectedToolRuntime{}, nil
-	}
-
-	cfg := s.cfg.Snapshot()
-	outboundPolicy := cfg.TrustedOutboundPolicy()
 	result := selectedToolRuntime{
-		definitions: make([]llm.ToolDefinition, 0, len(tools)),
+		definitions: make([]llm.ToolDefinition, 0, len(toolIDs)+8),
 		nameMap:     map[string]string{},
 		mcpConfigs:  map[string]mcp.CallConfig{},
 		schemas:     map[string]json.RawMessage{},
 	}
+	if len(toolIDs) > 0 && s.cfg.Snapshot().MCPEnable {
+		if s.mcpRepo == nil {
+			return selectedToolRuntime{}, fmt.Errorf("resolve selected MCP tools: repository unavailable")
+		}
+		if err := s.resolveMCPToolRuntime(ctx, toolIDs, &result); err != nil {
+			return selectedToolRuntime{}, err
+		}
+	}
+	// 平台内置工具（本地执行）：读工具受 platform_tools.enabled 控制，写工具另需 write_enabled。
+	if err := s.appendPlatformToolRuntime(ctx, &result); err != nil {
+		return selectedToolRuntime{}, err
+	}
+	return result, nil
+}
+
+// resolveMCPToolRuntime 解析用户勾选的 MCP 工具（原 resolveSelectedToolRuntime 主体）。
+func (s *Service) resolveMCPToolRuntime(ctx context.Context, toolIDs []uint, result *selectedToolRuntime) error {
+	tools, err := s.mcpRepo.ListToolsByIDs(ctx, uniqueToolIDs(toolIDs))
+	if err != nil {
+		return fmt.Errorf("resolve selected MCP tools: %w", err)
+	}
+	if len(tools) == 0 {
+		return nil
+	}
+
+	cfg := s.cfg.Snapshot()
+	outboundPolicy := cfg.TrustedOutboundPolicy()
 	usedNames := map[string]int{}
 	serverCache := map[uint]*domainmcp.Server{}
 	for _, tool := range tools {
@@ -170,17 +185,17 @@ func (s *Service) resolveSelectedToolRuntime(ctx context.Context, toolIDs []uint
 		if !ok {
 			server, err = s.mcpRepo.GetServer(ctx, tool.ServerID)
 			if err != nil {
-				return selectedToolRuntime{}, fmt.Errorf("resolve MCP server %d: %w", tool.ServerID, err)
+				return fmt.Errorf("resolve MCP server %d: %w", tool.ServerID, err)
 			}
 			if server == nil || server.Status != "active" {
 				if isAttachmentProcessor {
-					return selectedToolRuntime{}, fmt.Errorf("%w: processor server is unavailable", ErrImageAttachmentProcessingFailed)
+					return fmt.Errorf("%w: processor server is unavailable", ErrImageAttachmentProcessingFailed)
 				}
 				continue
 			}
 			if validateErr := security.ValidateOutboundHTTPURL(server.BaseURL, outboundPolicy); validateErr != nil {
 				if isAttachmentProcessor {
-					return selectedToolRuntime{}, fmt.Errorf("%w: processor server URL is not allowed", ErrImageAttachmentProcessingFailed)
+					return fmt.Errorf("%w: processor server URL is not allowed", ErrImageAttachmentProcessingFailed)
 				}
 				continue
 			}
@@ -197,7 +212,7 @@ func (s *Service) resolveSelectedToolRuntime(ctx context.Context, toolIDs []uint
 		token, err := secretbox.DecryptString(cfg.DataEncryptionKey, server.AuthTokenEnc)
 		if err != nil {
 			if isAttachmentProcessor {
-				return selectedToolRuntime{}, fmt.Errorf("%w: processor credentials are unavailable", ErrImageAttachmentProcessingFailed)
+				return fmt.Errorf("%w: processor credentials are unavailable", ErrImageAttachmentProcessingFailed)
 			}
 			continue
 		}
@@ -225,11 +240,11 @@ func (s *Service) resolveSelectedToolRuntime(ctx context.Context, toolIDs []uint
 				encoding:       strings.TrimSpace(tool.AttachmentEncoding),
 				promptArgument: strings.TrimSpace(tool.AttachmentPromptArgument),
 			}); bindErr != nil {
-				return selectedToolRuntime{}, bindErr
+				return bindErr
 			}
 		}
 	}
-	return result, nil
+	return nil
 }
 
 func (r *selectedToolRuntime) bindAttachmentProcessor(processor selectedAttachmentProcessor) error {
@@ -265,6 +280,7 @@ func (r selectedToolRuntime) withoutDefinitions() selectedToolRuntime {
 	r.mcpConfigs = nil
 	r.schemas = nil
 	r.attachmentProcessor = nil
+	r.platformEntries = nil
 	return r
 }
 
