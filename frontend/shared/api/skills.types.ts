@@ -1,8 +1,11 @@
 import type {
+  PackageFileResponse,
+  PackagePreviewResponse,
   PatchSkillRequest as ContractPatchSkillRequest,
   SkillDataResponse,
   SkillDeleteDataResponse,
   SkillPageResponseDoc,
+  SkillPackageFileResponse,
   SkillResponse,
   SkillSummaryResponse,
   SkillSummaryPageResponseDoc,
@@ -39,3 +42,9 @@ export type SkillData = Omit<SkillDataResponse, "skill"> & {
 };
 
 export type SkillDeleteData = SkillDeleteDataResponse;
+
+export type PackageFile = PackageFileResponse;
+
+export type SkillPackagePreview = PackagePreviewResponse;
+
+export type SkillPackageFile = SkillPackageFileResponse;

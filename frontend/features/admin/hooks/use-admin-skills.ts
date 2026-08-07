@@ -5,12 +5,17 @@ import { toast } from "sonner";
 import {
   createAdminSkill,
   deleteAdminSkill,
+  getSkillPackageFile,
+  importAdminSkillPackage,
   listAdminSkills,
+  previewAdminSkillPackage,
+  replaceAdminSkillPackage,
   updateAdminSkill,
 } from "@/shared/api/skills";
 import type {
   PatchSkillRequest,
   SkillDTO,
+  SkillPackagePreview,
 } from "@/shared/api/skills.types";
 import { useAuthSession } from "@/shared/auth/auth-session-context";
 import { removeByID, replaceByID } from "@/shared/lib/optimistic-list";
@@ -25,6 +30,7 @@ import {
 import { resolveAdminErrorMessage } from "@/features/admin/utils/admin-error";
 
 export type AdminSkillForm = SkillFormValue;
+export type AdminSkillCreateMode = "text" | "package";
 
 export function useAdminSkills() {
   const t = useTranslations("adminPrompts");
@@ -40,6 +46,12 @@ export function useAdminSkills() {
   const [form, setForm] = React.useState<AdminSkillForm>(EMPTY_SKILL_FORM);
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const [deleteTarget, setDeleteTarget] = React.useState<SkillDTO | null>(null);
+  const [createMode, setCreateMode] = React.useState<AdminSkillCreateMode>("text");
+  const [packageSkill, setPackageSkill] = React.useState<SkillDTO | null>(null);
+  const [packageFile, setPackageFile] = React.useState<File | null>(null);
+  const [packagePreview, setPackagePreview] = React.useState<SkillPackagePreview | null>(null);
+  const [packagePreviewing, setPackagePreviewing] = React.useState(false);
+  const [packageImporting, setPackageImporting] = React.useState(false);
   const [, startTableTransition] = React.useTransition();
   const requestSeqRef = React.useRef(0);
 
@@ -90,11 +102,25 @@ export function useAdminSkills() {
 
   const openCreate = React.useCallback(() => {
     setForm(EMPTY_SKILL_FORM);
+    setCreateMode("text");
+    setPackageSkill(null);
+    setPackageFile(null);
+    setPackagePreview(null);
     setDialogOpen(true);
   }, []);
 
   const openEdit = React.useCallback((item: SkillDTO) => {
-    setForm(skillFormFromDTO(item));
+    if (item.packageType === "package") {
+      setForm(EMPTY_SKILL_FORM);
+      setCreateMode("package");
+      setPackageSkill(item);
+      setPackageFile(null);
+      setPackagePreview(null);
+    } else {
+      setForm(skillFormFromDTO(item));
+      setCreateMode("text");
+      setPackageSkill(null);
+    }
     setDialogOpen(true);
   }, []);
 
@@ -144,6 +170,53 @@ export function useAdminSkills() {
     [accessToken, load, t],
   );
 
+  const fetchPackageFile = React.useCallback(
+    async (skillId: number, path: string) => {
+      const data = await getSkillPackageFile(accessToken, skillId, path);
+      return data.content;
+    },
+    [accessToken],
+  );
+
+  const selectPackageFile = React.useCallback(
+    async (file: File) => {
+      setPackageFile(file);
+      setPackagePreview(null);
+      setPackagePreviewing(true);
+      try {
+        setPackagePreview(await previewAdminSkillPackage(accessToken, file));
+      } catch (error) {
+        toast.error(t("toast.skillPackagePreviewFailed"), { description: resolveAdminErrorMessage(error) });
+      } finally {
+        setPackagePreviewing(false);
+      }
+    },
+    [accessToken, t],
+  );
+
+  const importPackage = React.useCallback(async () => {
+    if (!packageFile) {
+      return;
+    }
+    setPackageImporting(true);
+    try {
+      if (packageSkill) {
+        await replaceAdminSkillPackage(accessToken, packageSkill.id, packageFile);
+        await load();
+        toast.success(t("toast.skillPackageReplaced"));
+      } else {
+        await importAdminSkillPackage(accessToken, packageFile);
+        await load();
+        toast.success(t("toast.skillPackageImported"));
+      }
+      setDialogOpen(false);
+    } catch (error) {
+      toast.error(t("toast.skillPackageImportFailed"), { description: resolveAdminErrorMessage(error) });
+    } finally {
+      setPackageImporting(false);
+    }
+  }, [accessToken, load, packageFile, packageSkill, t]);
+
   const confirmDelete = React.useCallback(async () => {
     if (!deleteTarget) {
       return;
@@ -173,17 +246,29 @@ export function useAdminSkills() {
     form,
     dialogOpen,
     deleteTarget,
+    createMode,
+    packageSkill,
+    packageFile,
+    packagePreview,
+    packagePreviewing,
+    packageImporting,
     setPage,
     setPageSize,
     setQuery,
     setForm,
     setDialogOpen,
     setDeleteTarget,
+    setCreateMode,
+    setPackageFile,
+    setPackagePreview,
     load,
     openCreate,
     openEdit,
     save,
     toggleEnabled,
     confirmDelete,
+    fetchPackageFile,
+    selectPackageFile,
+    importPackage,
   };
 }

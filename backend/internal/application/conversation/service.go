@@ -54,6 +54,7 @@ type memoryRecorder interface {
 type skillResolver interface {
 	ResolveAvailable(ctx context.Context, userID uint, id uint) (*domainskill.Skill, error)
 	ListVisible(ctx context.Context, userID uint, input appskill.ListInput) ([]domainskill.Skill, int64, error)
+	GetPackageFile(ctx context.Context, userID uint, skillID uint, filePath string) ([]byte, error)
 }
 
 type mcpToolResolver interface {

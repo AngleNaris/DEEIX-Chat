@@ -56,6 +56,8 @@ import type { PromptPresetDTO } from "@/shared/api/prompt-presets.types";
 import type { SkillDTO } from "@/shared/api/skills.types";
 import type { PatchSettingItem } from "@/shared/api/settings.types";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
+import { SkillPackageFilesViewer } from "@/shared/components/skill-package/skill-package-files";
+import { SkillPackageUploader } from "@/shared/components/skill-package/skill-package-uploader";
 import {
   SettingsFieldItem,
   SettingsFieldList,
@@ -464,55 +466,105 @@ export function ConversationPromptPresetsSection() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={skills.dialogOpen} onOpenChange={(open) => !skills.saving && skills.setDialogOpen(open)}>
+      <Dialog
+        open={skills.dialogOpen}
+        onOpenChange={(open) => !skills.saving && !skills.packageImporting && skills.setDialogOpen(open)}
+      >
         <DialogContent className="flex max-h-[min(86vh,760px)] flex-col gap-0 overflow-hidden p-0 sm:max-w-[560px]">
           <DialogHeader className="shrink-0 px-5 pb-3 pt-5">
-            <DialogTitle>{skills.form.id ? t("editSkillTitle") : t("createSkillTitle")}</DialogTitle>
+            <DialogTitle>{skills.form.id || skills.packageSkill ? t("editSkillTitle") : t("createSkillTitle")}</DialogTitle>
             <DialogDescription>{t("skillDialogDescription")}</DialogDescription>
           </DialogHeader>
+          {!skills.form.id && !skills.packageSkill ? (
+            <div className="shrink-0 px-5 pb-2">
+              <Tabs
+                value={skills.createMode}
+                onValueChange={(value) => skills.setCreateMode(value as "text" | "package")}
+              >
+                <TabsList className="w-full">
+                  <TabsTrigger value="text">{t("skillCreateModeText")}</TabsTrigger>
+                  <TabsTrigger value="package">{t("skillCreateModePackage")}</TabsTrigger>
+                </TabsList>
+              </Tabs>
+            </div>
+          ) : null}
           <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-5 py-2">
-            <div className="space-y-1">
-              <p className="text-xs text-muted-foreground">{t("fields.name")}</p>
-              <InputGroup>
-                <InputGroupAddon>/</InputGroupAddon>
-                <InputGroupInput
-                  value={skills.form.name}
-                  placeholder="review"
-                  maxLength={SKILL_LIMITS.name}
-                  onChange={(event) => skills.setForm((current) => ({ ...current, name: event.target.value }))}
+            {skills.createMode === "package" || skills.packageSkill ? (
+              <>
+                {skills.packageSkill ? (
+                  <SkillPackageFilesViewer
+                    namespace="adminPrompts"
+                    fetchFile={(path) => skills.fetchPackageFile(skills.packageSkill!.id, path)}
+                    files={skills.packageSkill.files}
+                  />
+                ) : null}
+                <SkillPackageUploader
+                  namespace="adminPrompts"
+                  fileName={skills.packageFile?.name ?? null}
+                  importing={skills.packageImporting}
+                  onImport={() => void skills.importPackage()}
+                  onReset={() => {
+                    skills.setPackageFile(null);
+                    skills.setPackagePreview(null);
+                  }}
+                  onSelectFile={(file) => void skills.selectPackageFile(file)}
+                  preview={skills.packagePreview}
+                  previewing={skills.packagePreviewing}
+                  reimport={skills.packageSkill !== null}
                 />
-              </InputGroup>
-            </div>
-            <div className="space-y-1">
-              <p className="text-xs text-muted-foreground">{t("fields.description")}</p>
-              <Input
-                value={skills.form.description}
-                maxLength={SKILL_LIMITS.description}
-                onChange={(event) => skills.setForm((current) => ({ ...current, description: event.target.value }))}
-              />
-            </div>
-            <div className="space-y-1">
-              <p className="text-xs text-muted-foreground">{t("fields.skillMarkdown")}</p>
-              <Textarea
-                value={skills.form.markdown}
-                className="h-64 resize-none overflow-y-auto [field-sizing:fixed]"
-                maxLength={SKILL_LIMITS.markdown}
-                onChange={(event) => skills.setForm((current) => ({ ...current, markdown: event.target.value }))}
-              />
-            </div>
-            <div className="space-y-1">
-              <p className="text-xs text-muted-foreground">{t("fields.enabled")}</p>
-              <Switch
-                size="sm"
-                checked={skills.form.enabled}
-                disabled={skills.saving}
-                onCheckedChange={(enabled) => skills.setForm((current) => ({ ...current, enabled }))}
-              />
-            </div>
+              </>
+            ) : (
+              <>
+                <div className="space-y-1">
+                  <p className="text-xs text-muted-foreground">{t("fields.name")}</p>
+                  <InputGroup>
+                    <InputGroupAddon>/</InputGroupAddon>
+                    <InputGroupInput
+                      value={skills.form.name}
+                      placeholder="review"
+                      maxLength={SKILL_LIMITS.name}
+                      onChange={(event) => skills.setForm((current) => ({ ...current, name: event.target.value }))}
+                    />
+                  </InputGroup>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-xs text-muted-foreground">{t("fields.description")}</p>
+                  <Input
+                    value={skills.form.description}
+                    maxLength={SKILL_LIMITS.description}
+                    onChange={(event) => skills.setForm((current) => ({ ...current, description: event.target.value }))}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <p className="text-xs text-muted-foreground">{t("fields.skillMarkdown")}</p>
+                  <Textarea
+                    value={skills.form.markdown}
+                    className="h-64 resize-none overflow-y-auto [field-sizing:fixed]"
+                    maxLength={SKILL_LIMITS.markdown}
+                    onChange={(event) => skills.setForm((current) => ({ ...current, markdown: event.target.value }))}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <p className="text-xs text-muted-foreground">{t("fields.enabled")}</p>
+                  <Switch
+                    size="sm"
+                    checked={skills.form.enabled}
+                    disabled={skills.saving}
+                    onCheckedChange={(enabled) => skills.setForm((current) => ({ ...current, enabled }))}
+                  />
+                </div>
+              </>
+            )}
           </div>
           <DialogFooter className="shrink-0 px-5 py-3">
-            <Button variant="ghost" disabled={skills.saving} onClick={() => skills.setDialogOpen(false)}>{t("cancel")}</Button>
-            <Button disabled={skills.saving} onClick={() => void skills.save()}>{skills.saving ? t("saving") : t("save")}</Button>
+            {skills.createMode === "text" ? (
+              <>
+                <Button variant="ghost" disabled={skills.saving} onClick={() => skills.setDialogOpen(false)}>{t("cancel")}</Button>
+                <Button disabled={skills.saving} onClick={() => void skills.save()}>{skills.saving ? t("saving") : t("save")}</Button>
+              </>
+            ) : (
+              <Button variant="ghost" disabled={skills.packageImporting} onClick={() => skills.setDialogOpen(false)}>{t("cancel")}</Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

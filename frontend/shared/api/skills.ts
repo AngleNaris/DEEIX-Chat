@@ -6,6 +6,8 @@ import type {
   SkillDTO,
   SkillData,
   SkillDeleteData,
+  SkillPackageFile,
+  SkillPackagePreview,
   SkillPage,
   SkillSummaryDTO,
   SkillSummaryPage,
@@ -125,6 +127,76 @@ export async function deleteAdminSkill(accessToken: string, id: number): Promise
   return authedRequest<SkillDeleteData>(
     `/api/v1/admin/skills/${pathParam(id)}`,
     { method: "DELETE", accessToken },
+    true,
+  );
+}
+
+function packageUploadForm(file: File): FormData {
+  const formData = new FormData();
+  formData.append("file", file);
+  return formData;
+}
+
+// packageFilePathParam 将包内相对路径编码为 URL 路径段（保留斜杠层级）。
+function packageFilePathParam(path: string): string {
+  return path
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+}
+
+export async function previewMySkillPackage(accessToken: string, file: File): Promise<SkillPackagePreview> {
+  return authedRequest<SkillPackagePreview>(
+    "/api/v1/skills/mine/import/preview",
+    { method: "POST", accessToken, body: packageUploadForm(file) },
+    true,
+  );
+}
+
+export async function importMySkillPackage(accessToken: string, file: File): Promise<SkillData> {
+  return authedRequest<SkillData>(
+    "/api/v1/skills/mine/import",
+    { method: "POST", accessToken, body: packageUploadForm(file) },
+    true,
+  );
+}
+
+export async function replaceMySkillPackage(accessToken: string, id: number, file: File): Promise<SkillData> {
+  return authedRequest<SkillData>(
+    `/api/v1/skills/mine/${pathParam(id)}/package`,
+    { method: "POST", accessToken, body: packageUploadForm(file) },
+    true,
+  );
+}
+
+export async function previewAdminSkillPackage(accessToken: string, file: File): Promise<SkillPackagePreview> {
+  return authedRequest<SkillPackagePreview>(
+    "/api/v1/admin/skills/import/preview",
+    { method: "POST", accessToken, body: packageUploadForm(file) },
+    true,
+  );
+}
+
+export async function importAdminSkillPackage(accessToken: string, file: File): Promise<SkillData> {
+  return authedRequest<SkillData>(
+    "/api/v1/admin/skills/import",
+    { method: "POST", accessToken, body: packageUploadForm(file) },
+    true,
+  );
+}
+
+export async function replaceAdminSkillPackage(accessToken: string, id: number, file: File): Promise<SkillData> {
+  return authedRequest<SkillData>(
+    `/api/v1/admin/skills/${pathParam(id)}/package`,
+    { method: "POST", accessToken, body: packageUploadForm(file) },
+    true,
+  );
+}
+
+export async function getSkillPackageFile(accessToken: string, id: number, path: string): Promise<SkillPackageFile> {
+  return authedRequest<SkillPackageFile>(
+    `/api/v1/skills/${pathParam(id)}/files/${packageFilePathParam(path)}`,
+    { accessToken },
     true,
   );
 }

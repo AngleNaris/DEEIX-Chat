@@ -873,7 +873,13 @@ func (s *Service) sendMessageInternal(
 		streamedText.WriteString(delta)
 		return nil
 	}
+	var lastGenerationAttemptObservation *generationAttemptObservation
+	// lastReadFileRequests 记录最近一次 LLM 调用的 read_file 请求（标记已从可见流中剥离）。
+	var lastReadFileRequests []skillFileRequest
 	runGenerate := func(currentInput llm.GenerateInput) (*llm.GenerateOutput, error) {
+		attemptObservation := &generationAttemptObservation{}
+		lastGenerationAttemptObservation = attemptObservation
+		tagScanner := newReadFileTagScanner()
 		callPromptMode := "full"
 		if strings.TrimSpace(currentInput.PreviousResponseID) != "" {
 			callPromptMode = "stateful"
@@ -882,10 +888,17 @@ func (s *Service) sendMessageInternal(
 		streamSupported := llm.SupportsStreamingAdapter(routeConfig.Protocol)
 		var callVisibleText strings.Builder
 		emitCallVisibleDelta := func(delta string) error {
-			if err := emitVisibleDelta(delta); err != nil {
-				return err
+		visible, requests := tagScanner.consume(delta)
+			if len(requests) > 0 {
+				lastReadFileRequests = append(lastReadFileRequests, requests...)
 			}
-			callVisibleText.WriteString(delta)
+			if visible != "" {
+				attemptObservation.markObservable()
+				if err := emitVisibleDelta(visible); err != nil {
+					return err
+				}
+				callVisibleText.WriteString(visible)
+			}
 			return nil
 		}
 		callPromptShape := summarizePromptShape(callPromptMode, currentInput.Messages, currentInput.Messages, currentInput.PreviousResponseID)
@@ -943,7 +956,7 @@ func (s *Service) sendMessageInternal(
 			if streamErr := emitCallVisibleDelta(cleanText); streamErr != nil {
 				return streamErr
 			}
-			output.Text = cleanText
+			output.Text = callVisibleText.String()
 			return nil
 		}
 
@@ -1449,6 +1462,68 @@ func (s *Service) sendMessageInternal(
 		var nextNativeToolRows []model.ToolCall
 		assistantText, nextNativeToolRows = syncUpstreamOutputTrace(traceRecorder, upstreamOutput, runID)
 		toolCallRows = append(toolCallRows, nextNativeToolRows...)
+	}
+
+	// 请求式披露：模型通过 <read_file> 标记请求技能包内文件内容。
+	// 标记已在流式输出中被剥离；此处读取文件内容并追加 system 消息后再次调用模型（无工具），
+	// 最多补充一轮。第二轮输出中的标记同样被剥离且不再补充。
+	if len(lastReadFileRequests) > 0 && llmCallCount < maxLLMCalls {
+		fileMessages, loadedPaths := s.resolveSkillFileRequests(ctx, input.UserID, skillPrompts, lastReadFileRequests)
+		if len(fileMessages) > 0 {
+			followUpInput := generateInput
+			followUpInput.Messages = append(cloneLLMMessages(llmMessages), fileMessages...)
+			followUpInput.Tools = nil
+			followUpInput.DisableTools = true
+			followUpInput.PreviousResponseID = ""
+			applyOpenAIResponsesInstructions(route, routeConfig.Endpoint, &followUpInput)
+			fileOutput, fileErr := runGenerate(followUpInput)
+			if handleCanceledGeneration(fileErr) {
+				return nil, retErr
+			}
+			if fileErr == nil && fileOutput != nil {
+				totalUsage = addLLMUsage(totalUsage, fileOutput.Usage)
+				if fileOutput.Usage != (llm.Usage{}) {
+					usageAccumulator.setObservedUsage(totalUsage)
+				} else if usageAccumulator.usage() != (llm.Usage{}) {
+					totalUsage = usageAccumulator.usage()
+				}
+				totalServerSideToolUsage = addServerSideToolUsage(totalServerSideToolUsage, fileOutput.ServerSideToolUsage)
+				if text := strings.TrimSpace(fileOutput.Text); text != "" {
+					if strings.TrimSpace(assistantText) != "" {
+						assistantText = strings.TrimSpace(assistantText) + "\n\n" + text
+					} else {
+						assistantText = text
+					}
+				}
+				llmCallCount = llmRequestCount
+			} else if fileErr != nil {
+				// 补充轮失败不影响已生成内容；记录但不 failover（首轮已成功）。
+				if s.logger != nil {
+					s.logger.Warn("skill_file_followup_failed",
+						zap.String("trace_id", traceid.FromContext(ctx)),
+						zap.Uint("conversation_id", input.ConversationID),
+						zap.Int("requested_files", len(lastReadFileRequests)),
+						zap.Int("loaded_files", len(loadedPaths)),
+						zap.Error(fileErr),
+					)
+				}
+			}
+		}
+		if traceRecorder != nil && len(loadedPaths) > 0 {
+			traceRecorder.appendProcessSection(
+				fmt.Sprintf("已读取 %d 个技能包文件", len(loadedPaths)),
+				formatTraceStep("Skill 文件", fmt.Sprintf("根据 <read_file> 请求补充注入 %d 个文件内容：%s。", len(loadedPaths), strings.Join(loadedPaths, "、"))),
+				map[string]interface{}{
+					processTracePayloadStage: map[string]interface{}{
+						"kind":   "skill_context",
+						"status": messageTraceStatusStreaming,
+					},
+					"skill_file_read":  len(loadedPaths),
+					"skill_file_paths": loadedPaths,
+				},
+				messageTraceStatusStreaming,
+			)
+		}
 	}
 
 	effectiveInputTokens := usageAccumulator.effectiveInputTokens(estimatedPromptTokens)

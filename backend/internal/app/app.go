@@ -311,6 +311,7 @@ func NewApp() (*App, error) {
 	skillRepo := skillrepo.NewRepo(db)
 	skillService := appskill.NewService(skillRepo)
 	skillService.SetAuditWriter(auditService)
+	skillService.SetObjectStoreProvider(objectStoreProvider)
 	conversationService.SetSkillResolver(skillService)
 	skillHandler := skillhttp.NewHandler(skillService)
 	skillModule := skillhttp.NewModule(skillHandler)

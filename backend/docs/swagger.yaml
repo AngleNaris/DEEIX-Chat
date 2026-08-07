@@ -4184,6 +4184,50 @@ definitions:
     - inputCacheWrite
     - prompt
     type: object
+  PackageFileResponse:
+    properties:
+      kind:
+        type: string
+      path:
+        type: string
+      size:
+        type: integer
+    required:
+    - kind
+    - path
+    - size
+    type: object
+  PackagePreviewDataResponse:
+    properties:
+      preview:
+        $ref: '#/definitions/PackagePreviewResponse'
+    required:
+    - preview
+    type: object
+  PackagePreviewResponse:
+    properties:
+      description:
+        type: string
+      files:
+        items:
+          $ref: '#/definitions/PackageFileResponse'
+        type: array
+      markdown:
+        type: string
+      rootDir:
+        type: string
+      title:
+        type: string
+      trigger:
+        type: string
+    required:
+    - description
+    - files
+    - markdown
+    - rootDir
+    - title
+    - trigger
+    type: object
   PasswordResetCompleteRequest:
     properties:
       code:
@@ -5763,6 +5807,43 @@ definitions:
     required:
     - errorMsg
     type: object
+  SkillPackageFileDataResponse:
+    properties:
+      file:
+        $ref: '#/definitions/SkillPackageFileResponse'
+    required:
+    - file
+    type: object
+  SkillPackageFileResponse:
+    properties:
+      content:
+        type: string
+      path:
+        type: string
+    required:
+    - content
+    - path
+    type: object
+  SkillPackageFileResponseDoc:
+    properties:
+      data:
+        $ref: '#/definitions/SkillPackageFileDataResponse'
+      errorMsg:
+        type: string
+    required:
+    - data
+    - errorMsg
+    type: object
+  SkillPackagePreviewDoc:
+    properties:
+      data:
+        $ref: '#/definitions/PackagePreviewDataResponse'
+      errorMsg:
+        type: string
+    required:
+    - data
+    - errorMsg
+    type: object
   SkillPageResponseDoc:
     properties:
       data:
@@ -5793,9 +5874,17 @@ definitions:
         type: string
       enabled:
         type: boolean
+      files:
+        items:
+          $ref: '#/definitions/PackageFileResponse'
+        type: array
       id:
         type: integer
       markdown:
+        type: string
+      packageRootDir:
+        type: string
+      packageType:
         type: string
       scope:
         type: string
@@ -5816,6 +5905,7 @@ definitions:
     - enabled
     - id
     - markdown
+    - packageType
     - scope
     - sortOrder
     - title
@@ -5863,6 +5953,8 @@ definitions:
         type: boolean
       id:
         type: integer
+      packageType:
+        type: string
       scope:
         type: string
       sortOrder:
@@ -5878,6 +5970,7 @@ definitions:
     - description
     - enabled
     - id
+    - packageType
     - scope
     - sortOrder
     - title
@@ -11404,6 +11497,113 @@ paths:
       summary: 管理员更新内置技能
       tags:
       - admin-skills
+  /admin/skills/{id}/package:
+    post:
+      consumes:
+      - multipart/form-data
+      parameters:
+      - description: 技能ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 技能包 zip 文件
+        in: formData
+        name: file
+        required: true
+        type: file
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/SkillResponseDoc'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/SkillErrorDoc'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/SkillErrorDoc'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/SkillErrorDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/SkillErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 管理员重新上传内置技能包（zip）
+      tags:
+      - admin-skills
+  /admin/skills/import:
+    post:
+      consumes:
+      - multipart/form-data
+      parameters:
+      - description: 技能包 zip 文件
+        in: formData
+        name: file
+        required: true
+        type: file
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/SkillResponseDoc'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/SkillErrorDoc'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/SkillErrorDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/SkillErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 管理员导入内置技能包（zip）
+      tags:
+      - admin-skills
+  /admin/skills/import/preview:
+    post:
+      consumes:
+      - multipart/form-data
+      parameters:
+      - description: 技能包 zip 文件
+        in: formData
+        name: file
+        required: true
+        type: file
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/SkillPackagePreviewDoc'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/SkillErrorDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/SkillErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 管理员解析技能包（zip 预览）
+      tags:
+      - admin-skills
   /admin/system-events:
     get:
       consumes:
@@ -14856,6 +15056,50 @@ paths:
       summary: 查询当前用户可用技能详情
       tags:
       - skills
+  /skills/{id}/files/{filepath}:
+    get:
+      consumes:
+      - application/json
+      description: 读取当前用户可用的包技能内文本文件内容（仅文本文件）
+      parameters:
+      - description: 技能ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 包内相对路径，如 scripts/roll.py
+        in: path
+        name: filepath
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/SkillPackageFileResponseDoc'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/SkillErrorDoc'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/SkillErrorDoc'
+        "415":
+          description: Unsupported Media Type
+          schema:
+            $ref: '#/definitions/SkillErrorDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/SkillErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 读取技能包内文件内容
+      tags:
+      - skills
   /skills/mine:
     get:
       consumes:
@@ -15002,6 +15246,116 @@ paths:
       security:
       - BearerAuth: []
       summary: 更新我的自定义技能
+      tags:
+      - skills
+  /skills/mine/{id}/package:
+    post:
+      consumes:
+      - multipart/form-data
+      description: 用新的 zip 覆盖当前用户包技能的文件与元数据
+      parameters:
+      - description: 技能ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 技能包 zip 文件
+        in: formData
+        name: file
+        required: true
+        type: file
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/SkillResponseDoc'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/SkillErrorDoc'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/SkillErrorDoc'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/SkillErrorDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/SkillErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 重新上传我的技能包（zip）
+      tags:
+      - skills
+  /skills/mine/import:
+    post:
+      consumes:
+      - multipart/form-data
+      description: 上传 zip 技能包并创建为用户自定义包技能
+      parameters:
+      - description: 技能包 zip 文件
+        in: formData
+        name: file
+        required: true
+        type: file
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/SkillResponseDoc'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/SkillErrorDoc'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/SkillErrorDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/SkillErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 导入我的技能包（zip）
+      tags:
+      - skills
+  /skills/mine/import/preview:
+    post:
+      consumes:
+      - multipart/form-data
+      description: 上传 zip 技能包，解析 SKILL.md 与文件清单并返回预览，不落库
+      parameters:
+      - description: 技能包 zip 文件
+        in: formData
+        name: file
+        required: true
+        type: file
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/SkillPackagePreviewDoc'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/SkillErrorDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/SkillErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 解析我的技能包（zip 预览）
       tags:
       - skills
   /user/settings:
