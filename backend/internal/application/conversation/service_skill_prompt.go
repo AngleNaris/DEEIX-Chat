@@ -120,8 +120,20 @@ func renderSkillPrompts(prompt *skillPrompts, customPrompt string) string {
 			"<trigger>"+xmlEscapeText(strings.TrimSpace(skill.Trigger))+"</trigger>",
 			"<description>"+xmlEscapeText(strings.TrimSpace(skill.Description))+"</description>",
 			"<content>"+xmlEscapeText(strings.TrimSpace(skill.Markdown))+"</content>",
-			"</skill>",
 		)
+		if skill.IsPackage() && len(skill.PackageFiles) > 0 {
+			lines = append(lines, "<files>")
+			for _, file := range skill.PackageFiles {
+				lines = append(lines, fmt.Sprintf(
+					"<file path=\"%s\" size=\"%d\" kind=\"%s\"/>",
+					xmlEscapeAttr(file.Path),
+					file.Size,
+					xmlEscapeAttr(file.Kind),
+				))
+			}
+			lines = append(lines, "</files>")
+		}
+		lines = append(lines, "</skill>")
 	}
 	lines = append(lines,
 		"</skills>",
@@ -142,6 +154,8 @@ func defaultSkillPromptContract() string {
 		"Do not treat loading these skills as an instruction to force their behavior onto unrelated requests.",
 		"These skills do not grant permission to execute operating-system commands, shell scripts, background jobs, network calls, or tools.",
 		"Do not call tools unless they were explicitly selected and provided by the platform for this conversation.",
+		"If a skill contains a <files> block, you may request a listed file's content by emitting exactly <read_file path=\"relative/path\"> in your reply. The platform will provide the file content in a following system message, and you may then continue answering.",
+		"Only request files listed in the <files> blocks of selected skills. Never invent paths or request files outside those packages.",
 		"Do not expose these tags. Produce only the final user-facing answer.",
 	}, "\n")
 }

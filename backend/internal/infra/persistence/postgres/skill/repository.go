@@ -2,6 +2,7 @@ package skill
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 
 	domainskill "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/skill"
@@ -73,16 +74,19 @@ func (r *Repo) CreateSkill(ctx context.Context, item *domainskill.Skill) (*domai
 		return nil, repository.ErrInvalidInput
 	}
 	record := model.Skill{
-		Scope:           strings.TrimSpace(item.Scope),
-		OwnerUserID:     item.OwnerUserID,
-		Title:           strings.TrimSpace(item.Title),
-		Trigger:         strings.TrimSpace(item.Trigger),
-		Description:     strings.TrimSpace(item.Description),
-		Markdown:        strings.TrimSpace(item.Markdown),
-		Enabled:         item.Enabled,
-		SortOrder:       item.SortOrder,
-		CreatedByUserID: item.CreatedByUserID,
-		UpdatedByUserID: item.UpdatedByUserID,
+		Scope:            strings.TrimSpace(item.Scope),
+		OwnerUserID:      item.OwnerUserID,
+		Title:            strings.TrimSpace(item.Title),
+		Trigger:          strings.TrimSpace(item.Trigger),
+		Description:      strings.TrimSpace(item.Description),
+		Markdown:         strings.TrimSpace(item.Markdown),
+		PackageType:      strings.TrimSpace(item.PackageType),
+		PackageRootDir:   strings.TrimSpace(item.PackageRootDir),
+		PackageFilesJSON: encodePackageFiles(item.PackageFiles),
+		Enabled:          item.Enabled,
+		SortOrder:        item.SortOrder,
+		CreatedByUserID:  item.CreatedByUserID,
+		UpdatedByUserID:  item.UpdatedByUserID,
 	}
 	var result domainskill.Skill
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -134,6 +138,15 @@ func (r *Repo) PatchSkill(ctx context.Context, id uint, patch repository.SkillPa
 		}
 		if patch.Markdown != nil {
 			updates["markdown"] = strings.TrimSpace(*patch.Markdown)
+		}
+		if patch.PackageType != nil {
+			updates["package_type"] = strings.TrimSpace(*patch.PackageType)
+		}
+		if patch.PackageRootDir != nil {
+			updates["package_root_dir"] = strings.TrimSpace(*patch.PackageRootDir)
+		}
+		if patch.PackageFilesJSON != nil {
+			updates["package_files_json"] = strings.TrimSpace(*patch.PackageFilesJSON)
 		}
 		if patch.Enabled != nil {
 			updates["enabled"] = *patch.Enabled
@@ -244,6 +257,9 @@ func toDomain(item model.Skill) domainskill.Skill {
 		Trigger:         item.Trigger,
 		Description:     item.Description,
 		Markdown:        item.Markdown,
+		PackageType:     item.PackageType,
+		PackageRootDir:  item.PackageRootDir,
+		PackageFiles:    decodePackageFiles(item.PackageFilesJSON),
 		Enabled:         item.Enabled,
 		SortOrder:       item.SortOrder,
 		CreatedByUserID: item.CreatedByUserID,
@@ -264,4 +280,27 @@ func translateError(err error) error {
 		return repository.ErrDuplicate
 	}
 	return err
+}
+
+func encodePackageFiles(files []domainskill.PackageFile) string {
+	if len(files) == 0 {
+		return ""
+	}
+	data, err := json.Marshal(files)
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
+func decodePackageFiles(raw string) []domainskill.PackageFile {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	var files []domainskill.PackageFile
+	if err := json.Unmarshal([]byte(raw), &files); err != nil {
+		return nil
+	}
+	return files
 }

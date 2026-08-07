@@ -2074,6 +2074,25 @@ export interface OpenRouterOfficialPricingUnitPricingResponse {
   prompt: string;
 }
 
+export interface PackageFileResponse {
+  kind: string;
+  path: string;
+  size: number;
+}
+
+export interface PackagePreviewDataResponse {
+  preview: PackagePreviewResponse;
+}
+
+export interface PackagePreviewResponse {
+  description: string;
+  files: PackageFileResponse[];
+  markdown: string;
+  rootDir: string;
+  title: string;
+  trigger: string;
+}
+
 export interface PasswordResetCompleteRequest {
   code: string;
   /** @maxLength 128 */
@@ -2812,6 +2831,25 @@ export interface SkillErrorDoc {
   errorMsg: string;
 }
 
+export interface SkillPackageFileDataResponse {
+  file: SkillPackageFileResponse;
+}
+
+export interface SkillPackageFileResponse {
+  content: string;
+  path: string;
+}
+
+export interface SkillPackageFileResponseDoc {
+  data: SkillPackageFileDataResponse;
+  errorMsg: string;
+}
+
+export interface SkillPackagePreviewDoc {
+  data: PackagePreviewDataResponse;
+  errorMsg: string;
+}
+
 export interface SkillPageResponseDoc {
   data: {
     results: SkillResponse[];
@@ -2825,8 +2863,11 @@ export interface SkillResponse {
   createdByUserID: number;
   description: string;
   enabled: boolean;
+  files?: PackageFileResponse[];
   id: number;
   markdown: string;
+  packageRootDir?: string;
+  packageType: string;
   scope: string;
   sortOrder: number;
   title: string;
@@ -2853,6 +2894,7 @@ export interface SkillSummaryResponse {
   description: string;
   enabled: boolean;
   id: number;
+  packageType: string;
   scope: string;
   sortOrder: number;
   title: string;
@@ -5838,6 +5880,50 @@ export namespace Admin {
   /**
    * No description
    * @tags admin-skills
+   * @name SkillsImportCreate
+   * @summary 管理员导入内置技能包（zip）
+   * @request POST:/admin/skills/import
+   * @secure
+   */
+  export namespace SkillsImportCreate {
+    export type RequestParams = {};
+    export type RequestQuery = {};
+    export type RequestBody = {
+      /**
+       * 技能包 zip 文件
+       * @format binary
+       */
+      file: File;
+    };
+    export type RequestHeaders = {};
+    export type ResponseBody = SkillResponseDoc;
+  }
+
+  /**
+   * No description
+   * @tags admin-skills
+   * @name SkillsImportPreviewCreate
+   * @summary 管理员解析技能包（zip 预览）
+   * @request POST:/admin/skills/import/preview
+   * @secure
+   */
+  export namespace SkillsImportPreviewCreate {
+    export type RequestParams = {};
+    export type RequestQuery = {};
+    export type RequestBody = {
+      /**
+       * 技能包 zip 文件
+       * @format binary
+       */
+      file: File;
+    };
+    export type RequestHeaders = {};
+    export type ResponseBody = SkillPackagePreviewDoc;
+  }
+
+  /**
+   * No description
+   * @tags admin-skills
    * @name SkillsDelete
    * @summary 管理员删除内置技能
    * @request DELETE:/admin/skills/{id}
@@ -5869,6 +5955,28 @@ export namespace Admin {
     };
     export type RequestQuery = {};
     export type RequestBody = PatchSkillRequest;
+    export type RequestHeaders = {};
+    export type ResponseBody = SkillResponseDoc;
+  }
+
+  /**
+   * No description
+   * @tags admin-skills
+   * @name SkillsPackageCreate
+   * @summary 管理员重新上传内置技能包（zip）
+   * @request POST:/admin/skills/{id}/package
+   * @secure
+   */
+  export namespace SkillsPackageCreate {
+    export type RequestParams = {
+      /** 技能ID */
+      id: number;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = {
+      /** 技能包 zip 文件 */
+      file: File;
+    };
     export type RequestHeaders = {};
     export type ResponseBody = SkillResponseDoc;
   }
@@ -8304,6 +8412,50 @@ export namespace Skills {
   }
 
   /**
+   * @description 上传 zip 技能包并创建为用户自定义包技能
+   * @tags skills
+   * @name MineImportCreate
+   * @summary 导入我的技能包（zip）
+   * @request POST:/skills/mine/import
+   * @secure
+   */
+  export namespace MineImportCreate {
+    export type RequestParams = {};
+    export type RequestQuery = {};
+    export type RequestBody = {
+      /**
+       * 技能包 zip 文件
+       * @format binary
+       */
+      file: File;
+    };
+    export type RequestHeaders = {};
+    export type ResponseBody = SkillResponseDoc;
+  }
+
+  /**
+   * @description 上传 zip 技能包，解析 SKILL.md 与文件清单并返回预览，不落库
+   * @tags skills
+   * @name MineImportPreviewCreate
+   * @summary 解析我的技能包（zip 预览）
+   * @request POST:/skills/mine/import/preview
+   * @secure
+   */
+  export namespace MineImportPreviewCreate {
+    export type RequestParams = {};
+    export type RequestQuery = {};
+    export type RequestBody = {
+      /**
+       * 技能包 zip 文件
+       * @format binary
+       */
+      file: File;
+    };
+    export type RequestHeaders = {};
+    export type ResponseBody = SkillPackagePreviewDoc;
+  }
+
+  /**
    * No description
    * @tags skills
    * @name MineDelete
@@ -8342,6 +8494,28 @@ export namespace Skills {
   }
 
   /**
+   * @description 用新的 zip 覆盖当前用户包技能的文件与元数据
+   * @tags skills
+   * @name MinePackageCreate
+   * @summary 重新上传我的技能包（zip）
+   * @request POST:/skills/mine/{id}/package
+   * @secure
+   */
+  export namespace MinePackageCreate {
+    export type RequestParams = {
+      /** 技能ID */
+      id: number;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = {
+      /** 技能包 zip 文件 */
+      file: File;
+    };
+    export type RequestHeaders = {};
+    export type ResponseBody = SkillResponseDoc;
+  }
+
+  /**
    * @description 按需返回单个可用 Skill 的完整 SKILL.md 内容，用于用户查看详情
    * @tags skills
    * @name SkillsDetail
@@ -8358,6 +8532,27 @@ export namespace Skills {
     export type RequestBody = never;
     export type RequestHeaders = {};
     export type ResponseBody = SkillResponseDoc;
+  }
+
+  /**
+   * @description 读取当前用户可用的包技能内文本文件内容（仅文本文件）
+   * @tags skills
+   * @name FilesDetail
+   * @summary 读取技能包内文件内容
+   * @request GET:/skills/{id}/files/{filepath}
+   * @secure
+   */
+  export namespace FilesDetail {
+    export type RequestParams = {
+      /** 包内相对路径，如 scripts/roll.py */
+      filepath: string;
+      /** 技能ID */
+      id: number;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = never;
+    export type RequestHeaders = {};
+    export type ResponseBody = SkillPackageFileResponseDoc;
   }
 }
 

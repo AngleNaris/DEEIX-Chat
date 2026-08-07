@@ -32,6 +32,9 @@ type SkillPatch struct {
 	Trigger            *string
 	Description        *string
 	Markdown           *string
+	PackageType        *string
+	PackageRootDir     *string
+	PackageFilesJSON   *string
 	Enabled            *bool
 	SortOrder          *int
 	UpdatedByUserIDSet bool

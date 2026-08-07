@@ -5532,6 +5532,108 @@ const docTemplate = `{
                 }
             }
         },
+        "/admin/skills/import": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin-skills"
+                ],
+                "summary": "管理员导入内置技能包（zip）",
+                "parameters": [
+                    {
+                        "type": "file",
+                        "description": "技能包 zip 文件",
+                        "name": "file",
+                        "in": "formData",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/SkillResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/SkillErrorDoc"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/SkillErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/SkillErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/skills/import/preview": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin-skills"
+                ],
+                "summary": "管理员解析技能包（zip 预览）",
+                "parameters": [
+                    {
+                        "type": "file",
+                        "description": "技能包 zip 文件",
+                        "name": "file",
+                        "in": "formData",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/SkillPackagePreviewDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/SkillErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/SkillErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
         "/admin/skills/{id}": {
             "delete": {
                 "security": [
@@ -5617,6 +5719,73 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/PatchSkillRequest"
                         }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/SkillResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/SkillErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/SkillErrorDoc"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/SkillErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/SkillErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/skills/{id}/package": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin-skills"
+                ],
+                "summary": "管理员重新上传内置技能包（zip）",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "技能ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "file",
+                        "description": "技能包 zip 文件",
+                        "name": "file",
+                        "in": "formData",
+                        "required": true
                     }
                 ],
                 "responses": {
@@ -12350,6 +12519,110 @@ const docTemplate = `{
                 }
             }
         },
+        "/skills/mine/import": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "上传 zip 技能包并创建为用户自定义包技能",
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "skills"
+                ],
+                "summary": "导入我的技能包（zip）",
+                "parameters": [
+                    {
+                        "type": "file",
+                        "description": "技能包 zip 文件",
+                        "name": "file",
+                        "in": "formData",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/SkillResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/SkillErrorDoc"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/SkillErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/SkillErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/skills/mine/import/preview": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "上传 zip 技能包，解析 SKILL.md 与文件清单并返回预览，不落库",
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "skills"
+                ],
+                "summary": "解析我的技能包（zip 预览）",
+                "parameters": [
+                    {
+                        "type": "file",
+                        "description": "技能包 zip 文件",
+                        "name": "file",
+                        "in": "formData",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/SkillPackagePreviewDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/SkillErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/SkillErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
         "/skills/mine/{id}": {
             "delete": {
                 "security": [
@@ -12471,6 +12744,74 @@ const docTemplate = `{
                 }
             }
         },
+        "/skills/mine/{id}/package": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "用新的 zip 覆盖当前用户包技能的文件与元数据",
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "skills"
+                ],
+                "summary": "重新上传我的技能包（zip）",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "技能ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "file",
+                        "description": "技能包 zip 文件",
+                        "name": "file",
+                        "in": "formData",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/SkillResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/SkillErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/SkillErrorDoc"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/SkillErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/SkillErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
         "/skills/{id}": {
             "get": {
                 "security": [
@@ -12513,6 +12854,74 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/SkillErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/SkillErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/skills/{id}/files/{filepath}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "读取当前用户可用的包技能内文本文件内容（仅文本文件）",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "skills"
+                ],
+                "summary": "读取技能包内文件内容",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "技能ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "包内相对路径，如 scripts/roll.py",
+                        "name": "filepath",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/SkillPackageFileResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/SkillErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/SkillErrorDoc"
+                        }
+                    },
+                    "415": {
+                        "description": "Unsupported Media Type",
                         "schema": {
                             "$ref": "#/definitions/SkillErrorDoc"
                         }
@@ -19362,6 +19771,70 @@ const docTemplate = `{
                 }
             }
         },
+        "PackageFileResponse": {
+            "type": "object",
+            "required": [
+                "kind",
+                "path",
+                "size"
+            ],
+            "properties": {
+                "kind": {
+                    "type": "string"
+                },
+                "path": {
+                    "type": "string"
+                },
+                "size": {
+                    "type": "integer"
+                }
+            }
+        },
+        "PackagePreviewDataResponse": {
+            "type": "object",
+            "required": [
+                "preview"
+            ],
+            "properties": {
+                "preview": {
+                    "$ref": "#/definitions/PackagePreviewResponse"
+                }
+            }
+        },
+        "PackagePreviewResponse": {
+            "type": "object",
+            "required": [
+                "description",
+                "files",
+                "markdown",
+                "rootDir",
+                "title",
+                "trigger"
+            ],
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "files": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/PackageFileResponse"
+                    }
+                },
+                "markdown": {
+                    "type": "string"
+                },
+                "rootDir": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "trigger": {
+                    "type": "string"
+                }
+            }
+        },
         "PasswordResetCompleteRequest": {
             "type": "object",
             "required": [
@@ -21654,6 +22127,62 @@ const docTemplate = `{
                 }
             }
         },
+        "SkillPackageFileDataResponse": {
+            "type": "object",
+            "required": [
+                "file"
+            ],
+            "properties": {
+                "file": {
+                    "$ref": "#/definitions/SkillPackageFileResponse"
+                }
+            }
+        },
+        "SkillPackageFileResponse": {
+            "type": "object",
+            "required": [
+                "content",
+                "path"
+            ],
+            "properties": {
+                "content": {
+                    "type": "string"
+                },
+                "path": {
+                    "type": "string"
+                }
+            }
+        },
+        "SkillPackageFileResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/SkillPackageFileDataResponse"
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "SkillPackagePreviewDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/PackagePreviewDataResponse"
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
         "SkillPageResponseDoc": {
             "type": "object",
             "required": [
@@ -21693,6 +22222,7 @@ const docTemplate = `{
                 "enabled",
                 "id",
                 "markdown",
+                "packageType",
                 "scope",
                 "sortOrder",
                 "title",
@@ -21713,10 +22243,22 @@ const docTemplate = `{
                 "enabled": {
                     "type": "boolean"
                 },
+                "files": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/PackageFileResponse"
+                    }
+                },
                 "id": {
                     "type": "integer"
                 },
                 "markdown": {
+                    "type": "string"
+                },
+                "packageRootDir": {
+                    "type": "string"
+                },
+                "packageType": {
                     "type": "string"
                 },
                 "scope": {
@@ -21791,6 +22333,7 @@ const docTemplate = `{
                 "description",
                 "enabled",
                 "id",
+                "packageType",
                 "scope",
                 "sortOrder",
                 "title",
@@ -21809,6 +22352,9 @@ const docTemplate = `{
                 },
                 "id": {
                     "type": "integer"
+                },
+                "packageType": {
+                    "type": "string"
                 },
                 "scope": {
                     "type": "string"
