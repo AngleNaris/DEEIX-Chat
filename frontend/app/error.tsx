@@ -16,7 +16,8 @@ export default function GlobalAppError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
-  const t = useTranslations("errorPage");
+  // errorPage 文案定义在 common.json 内，命名空间需带 common 前缀（messages.common.errorPage）。
+  const t = useTranslations("common.errorPage");
 
   React.useEffect(() => {
     // digest 可关联服务端日志；错误被边界捕获后用户无需刷新即可恢复。
