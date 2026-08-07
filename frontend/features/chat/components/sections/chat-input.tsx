@@ -36,7 +36,16 @@ import { ChatModelPicker } from "@/features/chat/components/sections/chat-model-
 import { ChatModelConfig } from "@/features/chat/components/sections/chat-model-config";
 import { ReasoningEffortSelector } from "@/shared/components/reasoning-effort-selector";
 import { ImageQualitySelector } from "@/shared/components/image-quality-selector";
-import { ImageSizeSelector } from "@/shared/components/image-size-selector";
+import { ImageAspectRatioSelector } from "@/shared/components/image-aspect-ratio-selector";
+import { ImageResolutionSelector } from "@/shared/components/image-resolution-selector";
+import {
+  IMAGE_CUSTOM_ASPECT_RATIO,
+  deriveRatioString,
+  inferAspectRatio,
+  inferResolutionLevel,
+  resolveImageSize,
+  type ImageResolutionLevel,
+} from "@/shared/lib/image-size";
 import {
   getReasoningEffortOptionValue,
   resolveReasoningEffortProtocol,
@@ -323,7 +332,8 @@ function ChatInputComponent({
   const tComposer = useTranslations("chat.composer");
   const tFileStatus = useTranslations("files.status");
   const tReasoningEffort = useTranslations("chat.reasoningEffort");
-  const tImageSize = useTranslations("chat.imageSize");
+  const tImageAspectRatio = useTranslations("chat.imageAspectRatio");
+  const tImageResolution = useTranslations("chat.imageResolution");
   const tImageQuality = useTranslations("chat.imageQuality");
   const [isBlocksHovered, setIsBlocksHovered] = React.useState(false);
   const [isVoiceHovered, setIsVoiceHovered] = React.useState(false);
@@ -445,19 +455,33 @@ function ChatInputComponent({
   const isImageTask = submitTask === "image_generation" || submitTask === "image_edit";
   // 尺寸/质量参数目前仅适配 gpt-image-2（不同生图模型参数不同，需单独适配）。
   const isImage2Model = selectedModelName.toLowerCase().includes("image-2");
+  // 比例与分辨率分开选择；options.size 只存最终计算出的合法尺寸（"WxH"），UI 从其反推当前比例/档位。
   const imageSizeValue = typeof options.size === "string" ? options.size : "";
-  const onImageSizeChange = React.useCallback(
-    (size: string) => {
-      const trimmed = size.trim();
-      if (!trimmed) {
-        const next = { ...options };
-        delete next.size;
-        onOptionsChange(next);
-        return;
+  // 比例优先用反推命中的预设精确值（保证 16:9+4K 得到标准 3840×2160），
+  // 未命中预设（自定义/空）才用存储尺寸反推的实际比例，保证档位切换恒等。
+  const inferredAspectRatio = inferAspectRatio(imageSizeValue);
+  const imageRatioForCompute =
+    inferredAspectRatio && inferredAspectRatio !== IMAGE_CUSTOM_ASPECT_RATIO
+      ? inferredAspectRatio
+      : (deriveRatioString(imageSizeValue) ?? "1:1");
+  const imageResolutionLevelValue = inferResolutionLevel(imageSizeValue);
+  const onImageAspectRatioChange = React.useCallback(
+    (ratio: string) => {
+      const size = resolveImageSize(ratio, imageResolutionLevelValue || "2k");
+      if (size) {
+        onOptionsChange(setModelOptionNestedValue(options, "size", size));
       }
-      onOptionsChange(setModelOptionNestedValue(options, "size", trimmed));
     },
-    [onOptionsChange, options],
+    [imageResolutionLevelValue, onOptionsChange, options],
+  );
+  const onImageResolutionChange = React.useCallback(
+    (level: ImageResolutionLevel) => {
+      const size = resolveImageSize(imageRatioForCompute, level);
+      if (size) {
+        onOptionsChange(setModelOptionNestedValue(options, "size", size));
+      }
+    },
+    [imageRatioForCompute, onOptionsChange, options],
   );
   const imageQualityValue = typeof options.quality === "string" ? options.quality : "";
   const onImageQualityChange = React.useCallback(
@@ -1151,7 +1175,7 @@ function ChatInputComponent({
                         protocols={selectedModel?.protocols ?? []}
                         value={reasoningEffortValue}
                         disabled={loading || uploading || modelLoading}
-                        className="h-7 max-w-28 rounded-md sm:h-8"
+                        className="h-7 max-w-28 rounded-md border-transparent bg-transparent hover:bg-accent/60 dark:border-transparent dark:bg-transparent dark:hover:bg-accent/40 sm:h-8"
                         onChange={onReasoningEffortChange}
                       />
                     </span>
@@ -1166,16 +1190,32 @@ function ChatInputComponent({
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <span className="inline-flex shrink-0">
-                        <ImageSizeSelector
+                        <ImageAspectRatioSelector
                           value={imageSizeValue}
                           disabled={loading || uploading || modelLoading}
-                          className="h-7 max-w-44 rounded-md border-transparent bg-transparent hover:bg-accent/60 dark:border-transparent dark:bg-transparent dark:hover:bg-accent/40 sm:h-8"
-                          onChange={onImageSizeChange}
+                          className="h-7 max-w-28 rounded-md border-transparent bg-transparent hover:bg-accent/60 dark:border-transparent dark:bg-transparent dark:hover:bg-accent/40 sm:h-8"
+                          onChange={onImageAspectRatioChange}
                         />
                       </span>
                     </TooltipTrigger>
                     <TooltipContent side="top" align="end" className="max-w-72 text-xs leading-5">
-                      {tImageSize("title")}：{tImageSize("description")}
+                      {tImageAspectRatio("title")}：{tImageAspectRatio("description")}
+                    </TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="inline-flex shrink-0">
+                        <ImageResolutionSelector
+                          value={imageSizeValue}
+                          ratio={imageRatioForCompute}
+                          disabled={loading || uploading || modelLoading}
+                          className="h-7 max-w-44 rounded-md border-transparent bg-transparent hover:bg-accent/60 dark:border-transparent dark:bg-transparent dark:hover:bg-accent/40 sm:h-8"
+                          onChange={onImageResolutionChange}
+                        />
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" align="end" className="max-w-72 text-xs leading-5">
+                      {tImageResolution("title")}：{tImageResolution("description")}
                     </TooltipContent>
                   </Tooltip>
                   <Tooltip>

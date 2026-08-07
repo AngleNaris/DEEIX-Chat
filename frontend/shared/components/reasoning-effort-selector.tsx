@@ -22,7 +22,7 @@ export type ReasoningEffortSelectorProps = {
 };
 
 // 思考强度选择器：无支持协议且未传显式档位时返回 null 隐藏；
-// 空值（继承默认）时触发器显示 Zap 图标。
+// 触发器始终显示 Zap 图标（任何档位选择均不隐藏）。
 export function ReasoningEffortSelector({
   protocols,
   levels,
@@ -54,9 +54,7 @@ export function ReasoningEffortSelector({
       placeholder={t("levels.default")}
       contentClassName="min-w-[200px]"
       triggerClassName={className}
-      renderIcon={(option) =>
-        option?.value ? undefined : <Zap className="size-3.5 shrink-0 text-muted-foreground" strokeWidth={1.7} />
-      }
+      renderIcon={() => <Zap className="size-3.5 shrink-0 text-muted-foreground" strokeWidth={1.7} />}
       onChange={onChange}
     />
   );

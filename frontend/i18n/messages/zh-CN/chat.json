@@ -912,14 +912,23 @@
     "decisionExpectedOutcome": "预期产出",
     "decisionAnswer": "最终回答"
   },
-  "imageSize": {
-    "title": "图片尺寸",
-    "description": "生成图片的画幅比例与分辨率（仅 gpt-image-2），留空沿用模型默认。",
-    "default": "默认",
-    "auto": "自动",
-    "standard": "标准",
-    "2k": "2K",
-    "4k": "4K"
+  "imageAspectRatio": {
+    "title": "图片比例",
+    "description": "选择图片宽高比，分辨率按所选档位自动计算为合法尺寸（仅 gpt-image-2）。",
+    "placeholder": "比例",
+    "custom": {
+      "label": "自定义…",
+      "title": "自定义比例",
+      "description": "输入宽高比（如 16:9 或 2.35:1），分辨率将按当前档位自动计算。",
+      "placeholder": "例如 16:9 或 2.35:1",
+      "invalid": "比例格式不正确，请输入如 16:9 或 2.35:1。",
+      "tooWide": "宽高比超出支持范围（最长边与最短边之比不能超过 3:1）。"
+    }
+  },
+  "imageResolution": {
+    "title": "图片分辨率",
+    "description": "选择分辨率档位（1K/2K/4K），按比例自动计算合法尺寸（仅 gpt-image-2）。",
+    "placeholder": "分辨率"
   },
   "imageQuality": {
     "title": "图片质量",

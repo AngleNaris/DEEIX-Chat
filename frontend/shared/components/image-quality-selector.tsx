@@ -4,6 +4,7 @@ import * as React from "react";
 import { useTranslations } from "next-intl";
 
 import { OptionSelect, type OptionSelectOption } from "@/shared/components/model-select";
+import { Gem } from "lucide-react";
 
 // gpt-image-2 质量档位（官方：low/medium/high/auto，默认 auto；空值表示不指定，沿用模型默认）。
 export const IMAGE_QUALITY_OPTIONS = ["low", "medium", "high", "auto"] as const;
@@ -34,6 +35,7 @@ export function ImageQualitySelector({ value, disabled, className, onChange }: I
       placeholder={t("default")}
       contentClassName="min-w-[140px]"
       triggerClassName={className}
+      renderIcon={() => <Gem className="size-3.5 shrink-0 text-muted-foreground" strokeWidth={1.7} />}
       onChange={onChange}
     />
   );

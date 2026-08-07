@@ -912,14 +912,23 @@
     "decisionExpectedOutcome": "Expected outcome",
     "decisionAnswer": "Final answer"
   },
-  "imageSize": {
-    "title": "Image size",
-    "description": "Aspect ratio and resolution of the generated image (gpt-image-2 only). Leave empty to use the model default.",
-    "default": "Default",
-    "auto": "Auto",
-    "standard": "Standard",
-    "2k": "2K",
-    "4k": "4K"
+  "imageAspectRatio": {
+    "title": "Image aspect ratio",
+    "description": "Pick the image aspect ratio; the resolution is auto-computed to a valid size for the selected tier (gpt-image-2 only).",
+    "placeholder": "Ratio",
+    "custom": {
+      "label": "Custom…",
+      "title": "Custom aspect ratio",
+      "description": "Enter an aspect ratio such as 16:9 or 2.35:1; the resolution is auto-computed for the current tier.",
+      "placeholder": "e.g. 16:9 or 2.35:1",
+      "invalid": "Invalid aspect ratio. Enter something like 16:9 or 2.35:1.",
+      "tooWide": "Aspect ratio out of range (long edge can be at most 3× the short edge)."
+    }
+  },
+  "imageResolution": {
+    "title": "Image resolution",
+    "description": "Pick the resolution tier (1K/2K/4K); a valid size is auto-computed from the aspect ratio (gpt-image-2 only).",
+    "placeholder": "Resolution"
   },
   "imageQuality": {
     "title": "Image quality",
