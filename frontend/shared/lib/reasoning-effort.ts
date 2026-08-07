@@ -7,23 +7,46 @@ export const REASONING_EFFORT_DEFAULT = "";
 // 从低到高排列的可选档位（语义顺序与字典序一致）。
 export const REASONING_EFFORT_LEVELS = ["low", "medium", "high", "xhigh"] as const;
 
-export type ReasoningEffortLevel = typeof REASONING_EFFORT_LEVELS[number] | "";
+export type ReasoningEffortLevelValue = typeof REASONING_EFFORT_LEVELS[number];
+
+export type ReasoningEffortLevel = ReasoningEffortLevelValue | "";
+
+// anthropic thinking 预算制：档位 → budget_tokens（发送时按 max_tokens 收敛）。
+export const ANTHROPIC_REASONING_EFFORT_BUDGETS: Readonly<Record<ReasoningEffortLevelValue, number>> = {
+  low: 2048,
+  medium: 4096,
+  high: 8192,
+  xhigh: 16384,
+};
 
 export type ReasoningEffortProtocolMapping = {
   /** options 中的参数路径（点分），与后端推理注入路径一致。 */
   path: string;
   /** 该协议族支持的最高档位（仅支持 3 档的端点将 xhigh 截断为 high）。 */
-  maxLevel: typeof REASONING_EFFORT_LEVELS[number];
+  maxLevel: ReasoningEffortLevelValue;
+  /** 显式档位词汇表（缺省按 maxLevel 截断，供分族词汇表使用）。 */
+  levels?: readonly ReasoningEffortLevelValue[];
+  /** 视觉配置中应隐藏的底层参数键（点分，含复合路径如 thinking.type）。 */
+  optionKeys: readonly string[];
+  /** 预算制协议的档位 → budget_tokens 映射（如 anthropic thinking）。 */
+  budgets?: Readonly<Record<ReasoningEffortLevelValue, number>>;
 };
 
 // 各协议族的思考强度参数映射（与后端 reasoning_effort.go 保持一致）。
 export const REASONING_EFFORT_PROTOCOL_PATHS: Readonly<Record<string, ReasoningEffortProtocolMapping>> = {
-  openai_chat_completions: { path: "reasoning_effort", maxLevel: "xhigh" },
-  openrouter_chat_completions: { path: "reasoning_effort", maxLevel: "xhigh" },
-  openai_responses: { path: "reasoning.effort", maxLevel: "high" },
-  openrouter_responses: { path: "reasoning.effort", maxLevel: "high" },
-  xai_responses: { path: "reasoning.effort", maxLevel: "high" },
-  gemini_interactions: { path: "generation_config.thinking_level", maxLevel: "high" },
+  openai_chat_completions: { path: "reasoning_effort", maxLevel: "xhigh", optionKeys: ["reasoning_effort"] },
+  openrouter_chat_completions: { path: "reasoning_effort", maxLevel: "xhigh", optionKeys: ["reasoning_effort"] },
+  openai_responses: { path: "reasoning.effort", maxLevel: "high", optionKeys: ["reasoning.effort"] },
+  openrouter_responses: { path: "reasoning.effort", maxLevel: "high", optionKeys: ["reasoning.effort"] },
+  xai_responses: { path: "reasoning.effort", maxLevel: "high", optionKeys: ["reasoning.effort"] },
+  gemini_interactions: { path: "generation_config.thinking_level", maxLevel: "high", optionKeys: ["generation_config.thinking_level"] },
+  // anthropic 为预算制：档位经 thinking.type + thinking.budget_tokens 复合写入。
+  anthropic_messages: {
+    path: "thinking",
+    maxLevel: "xhigh",
+    optionKeys: ["thinking.type", "thinking.budget_tokens"],
+    budgets: ANTHROPIC_REASONING_EFFORT_BUDGETS,
+  },
 };
 
 export function isReasoningEffortLevel(value: string): value is ReasoningEffortLevel {
@@ -54,10 +77,13 @@ export function resolveReasoningEffortProtocol(protocols: readonly string[]): st
   return null;
 }
 
-// 该协议族可选的档位列表（按 maxLevel 截断，如 xhigh 不支持时只到 high）。
+// 该协议族可选的档位列表（显式词汇表优先；否则按 maxLevel 截断，如 xhigh 不支持时只到 high）。
 export function reasoningEffortLevelsForMapping(
   mapping: ReasoningEffortProtocolMapping,
-): readonly typeof REASONING_EFFORT_LEVELS[number][] {
+): readonly ReasoningEffortLevelValue[] {
+  if (mapping.levels && mapping.levels.length > 0) {
+    return mapping.levels;
+  }
   const maxIndex = REASONING_EFFORT_LEVELS.indexOf(mapping.maxLevel);
   return maxIndex >= 0 ? REASONING_EFFORT_LEVELS.slice(0, maxIndex + 1) : [];
 }
@@ -100,7 +126,31 @@ export function setModelOptionNestedValue(
   return result;
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+// nearestBudgetLevel 按预算反查最近档位（预算制协议，如 anthropic thinking）。
+function nearestBudgetLevel(mapping: ReasoningEffortProtocolMapping, budget: number): string {
+  const levels = reasoningEffortLevelsForMapping(mapping);
+  let nearest = REASONING_EFFORT_DEFAULT;
+  let nearestDistance = Number.POSITIVE_INFINITY;
+  for (const level of levels) {
+    const levelBudget = mapping.budgets?.[level];
+    if (typeof levelBudget !== "number") {
+      continue;
+    }
+    const distance = Math.abs(levelBudget - budget);
+    if (distance < nearestDistance) {
+      nearest = level;
+      nearestDistance = distance;
+    }
+  }
+  return nearest;
+}
+
 // getReasoningEffortOptionValue 按协议读取 options 中的思考强度当前值（无协议或未设置返回 ""）。
+// 预算制协议（anthropic）读取 thinking 复合键：type 为 enabled 时按 budget_tokens 反查档位。
 export function getReasoningEffortOptionValue(
   protocol: string,
   options: ConversationOptions,
@@ -110,10 +160,20 @@ export function getReasoningEffortOptionValue(
     return "";
   }
   const value = getModelOptionNestedValue(options, mapping.path);
+  if (mapping.budgets) {
+    if (!isPlainObject(value) || value.type !== "enabled") {
+      return "";
+    }
+    const budget = typeof value.budget_tokens === "number"
+      ? value.budget_tokens
+      : Number(value.budget_tokens);
+    return Number.isFinite(budget) ? nearestBudgetLevel(mapping, budget) : "";
+  }
   return typeof value === "string" ? value : "";
 }
 
 // setReasoningEffortOptionValue 写入思考强度档位；档位为空时清除对应路径（继承默认）。
+// 预算制协议（anthropic）写入 thinking.type + thinking.budget_tokens，清空时仅移除这两个键。
 export function setReasoningEffortOptionValue(
   protocol: string,
   options: ConversationOptions,
@@ -122,6 +182,32 @@ export function setReasoningEffortOptionValue(
   const mapping = REASONING_EFFORT_PROTOCOL_PATHS[protocol];
   if (!mapping) {
     return options;
+  }
+  if (mapping.budgets) {
+    if (!level.trim()) {
+      const thinking = getModelOptionNestedValue(options, "thinking");
+      if (!isPlainObject(thinking)) {
+        return options;
+      }
+      const next: Record<string, unknown> = { ...thinking };
+      delete next.type;
+      delete next.budget_tokens;
+      if (Object.keys(next).length === 0) {
+        return removeModelOptionPath(options, "thinking");
+      }
+      return setModelOptionNestedValue(options, "thinking", next);
+    }
+    const budget = mapping.budgets[level as ReasoningEffortLevelValue];
+    if (typeof budget !== "number") {
+      return options;
+    }
+    const thinking = getModelOptionNestedValue(options, "thinking");
+    const next = {
+      ...(isPlainObject(thinking) ? thinking : {}),
+      type: "enabled",
+      budget_tokens: budget,
+    };
+    return setModelOptionNestedValue(options, "thinking", next);
   }
   if (!level.trim()) {
     return removeModelOptionPath(options, mapping.path);

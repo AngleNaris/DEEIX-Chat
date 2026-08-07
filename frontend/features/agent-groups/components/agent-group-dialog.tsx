@@ -43,7 +43,11 @@ import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 import { ApiError, ApiNetworkError } from "@/shared/api/http-client";
 import { ReasoningEffortSelector } from "@/shared/components/reasoning-effort-selector";
 import { parseProtocolsJSON } from "@/shared/lib/model-protocols";
-import { isReasoningEffortLevel, resolveReasoningEffortForProtocols } from "@/shared/lib/reasoning-effort";
+import {
+  REASONING_EFFORT_LEVELS,
+  isReasoningEffortLevel,
+  resolveReasoningEffortForProtocols,
+} from "@/shared/lib/reasoning-effort";
 
 export type AgentGroupMemberDraft = {
   /** 本地列表渲染键；已持久化成员与 publicID 对应，新建成员仅本地存在。 */
@@ -302,7 +306,7 @@ function ModelOverrideSelector({
   );
 }
 
-/** 成员思考强度字段：生效模型 = modelOverride || roleModel；模型端点不支持时隐藏。 */
+/** 成员思考强度字段：语义档位始终可选，发送时由后端按生效模型协议转换；协议不支持时提示可能不生效。 */
 function MemberReasoningEffortField({
   disabled,
   member,
@@ -319,21 +323,23 @@ function MemberReasoningEffortField({
     const model = models.find((item) => item.platformModelName === effectiveModel);
     return model ? parseProtocolsJSON(model.protocolsJSON) : [];
   }, [models, effectiveModel]);
-
-  if (!resolveReasoningEffortForProtocols(effectiveModelProtocols)) {
-    return null;
-  }
+  const supported = Boolean(resolveReasoningEffortForProtocols(effectiveModelProtocols));
 
   return (
     <div className="min-w-0 flex-1">
       <ReasoningEffortSelector
         protocols={effectiveModelProtocols}
+        levels={REASONING_EFFORT_LEVELS}
         value={member.reasoningEffort}
         disabled={disabled}
         onChange={onReasoningEffortChange}
       />
       <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
-        {member.reasoningEffort ? `自定义：${member.reasoningEffort}` : "继承角色默认 / 用户全局默认"}
+        {supported
+          ? member.reasoningEffort
+            ? `自定义：${member.reasoningEffort}`
+            : "继承角色默认 / 用户全局默认"
+          : "所选模型端点不支持思考强度时，档位在发送时可能不生效"}
       </p>
     </div>
   );

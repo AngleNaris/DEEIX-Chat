@@ -43,6 +43,7 @@ import { listVisibleSkills } from "@/shared/api/skills";
 import type { SkillSummaryDTO } from "@/shared/api/skills.types";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 import { ReasoningEffortSelector } from "@/shared/components/reasoning-effort-selector";
+import { REASONING_EFFORT_LEVELS, resolveReasoningEffortForProtocols } from "@/shared/lib/reasoning-effort";
 import { parseProtocolsJSON } from "@/shared/lib/model-protocols";
 
 export type RoleDraft = {
@@ -351,11 +352,14 @@ function RoleForm({
         <Label className="text-xs text-muted-foreground">默认思考强度</Label>
         <ReasoningEffortSelector
           protocols={selectedModelProtocols}
+          levels={REASONING_EFFORT_LEVELS}
           value={draft.reasoningEffort}
           onChange={(level) => update("reasoningEffort", level)}
         />
         <p className="text-[11px] leading-4 text-muted-foreground">
-          所选模型端点不支持思考强度时隐藏；留空则跟随用户全局默认
+          {resolveReasoningEffortForProtocols(selectedModelProtocols)
+            ? "留空则跟随用户全局默认"
+            : "所选模型端点不支持思考强度时，档位在发送时可能不生效"}
         </p>
       </div>
       <div className="grid grid-cols-2 gap-3">

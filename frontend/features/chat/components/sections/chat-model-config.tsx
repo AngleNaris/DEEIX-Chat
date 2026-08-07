@@ -387,7 +387,7 @@ const NESTED_VISUAL_OPTION_PATHS = [
 // 视觉配置不再展示这些底层技术字段（reasoning_effort / reasoning.effort / thinking_level 等），
 // 避免与友好选择器重复或冲突；JSON 视图仍可手动编辑。
 const REASONING_EFFORT_OPTION_KEYS = new Set<string>([
-  ...Object.values(REASONING_EFFORT_PROTOCOL_PATHS).map((mapping) => mapping.path),
+  ...Object.values(REASONING_EFFORT_PROTOCOL_PATHS).flatMap((mapping) => mapping.optionKeys),
   "generationConfig.thinkingConfig.thinkingLevel",
 ]);
 
