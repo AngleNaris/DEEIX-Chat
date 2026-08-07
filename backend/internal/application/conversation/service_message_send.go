@@ -873,12 +873,10 @@ func (s *Service) sendMessageInternal(
 		streamedText.WriteString(delta)
 		return nil
 	}
-	var lastGenerationAttemptObservation *generationAttemptObservation
 	// lastReadFileRequests 记录最近一次 LLM 调用的 read_file 请求（标记已从可见流中剥离）。
 	var lastReadFileRequests []skillFileRequest
 	runGenerate := func(currentInput llm.GenerateInput) (*llm.GenerateOutput, error) {
 		attemptObservation := &generationAttemptObservation{}
-		lastGenerationAttemptObservation = attemptObservation
 		tagScanner := newReadFileTagScanner()
 		callPromptMode := "full"
 		if strings.TrimSpace(currentInput.PreviousResponseID) != "" {

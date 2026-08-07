@@ -581,6 +581,18 @@ func shouldFallbackToNonStreaming(err error) bool {
 	}
 }
 
+// generationAttemptObservation 记录单次 LLM 生成尝试是否已向用户输出可见内容，
+// 用于区分"重试失败"与"已产生部分输出"（技能文件补充轮等场景）。
+type generationAttemptObservation struct {
+	emitted bool
+}
+
+func (o *generationAttemptObservation) markObservable() {
+	if o != nil {
+		o.emitted = true
+	}
+}
+
 func isStreamUnsupportedError(err *llm.UpstreamError) bool {
 	detail := strings.ToLower(strings.TrimSpace(err.Message + " " + err.Body))
 	if detail == "" || !strings.Contains(detail, "stream") {
