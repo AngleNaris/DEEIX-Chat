@@ -172,7 +172,8 @@ func TestRenderSkillPromptIncludesPackageFileManifest(t *testing.T) {
 		t.Fatalf("expected text-only skill to be rendered, got:\n%s", rendered)
 	}
 	// 文本技能不含 <files> 块：整个渲染结果只应有包技能一个 files 块。
-	if strings.Count(rendered, "<files>") != 1 {
+	// （用闭合标签 </files> 计数：contract 模板文案中的 "<files> block" 字样不含闭合标签）
+	if strings.Count(rendered, "</files>") != 1 {
 		t.Fatalf("expected exactly one <files> block for the package skill, got:\n%s", rendered)
 	}
 }
