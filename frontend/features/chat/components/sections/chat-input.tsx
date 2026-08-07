@@ -35,6 +35,7 @@ import { ChatMCP } from "@/features/chat/components/sections/chat-mcp";
 import { ChatModelPicker } from "@/features/chat/components/sections/chat-model-picker";
 import { ChatModelConfig } from "@/features/chat/components/sections/chat-model-config";
 import { ReasoningEffortSelector } from "@/shared/components/reasoning-effort-selector";
+import { ImageQualitySelector } from "@/shared/components/image-quality-selector";
 import { ImageSizeSelector } from "@/shared/components/image-size-selector";
 import {
   getReasoningEffortOptionValue,
@@ -323,6 +324,7 @@ function ChatInputComponent({
   const tFileStatus = useTranslations("files.status");
   const tReasoningEffort = useTranslations("chat.reasoningEffort");
   const tImageSize = useTranslations("chat.imageSize");
+  const tImageQuality = useTranslations("chat.imageQuality");
   const [isBlocksHovered, setIsBlocksHovered] = React.useState(false);
   const [isVoiceHovered, setIsVoiceHovered] = React.useState(false);
   const [toolsMenuHovered, setToolsMenuHovered] = React.useState(false);
@@ -441,6 +443,8 @@ function ChatInputComponent({
   const submitTask = submitDecision.task;
   const isMediaMode = isMediaSubmitTask(submitTask);
   const isImageTask = submitTask === "image_generation" || submitTask === "image_edit";
+  // 尺寸/质量参数目前仅适配 gpt-image-2（不同生图模型参数不同，需单独适配）。
+  const isImage2Model = selectedModelName.toLowerCase().includes("image-2");
   const imageSizeValue = typeof options.size === "string" ? options.size : "";
   const onImageSizeChange = React.useCallback(
     (size: string) => {
@@ -452,6 +456,20 @@ function ChatInputComponent({
         return;
       }
       onOptionsChange(setModelOptionNestedValue(options, "size", trimmed));
+    },
+    [onOptionsChange, options],
+  );
+  const imageQualityValue = typeof options.quality === "string" ? options.quality : "";
+  const onImageQualityChange = React.useCallback(
+    (quality: string) => {
+      const trimmed = quality.trim();
+      if (!trimmed) {
+        const next = { ...options };
+        delete next.quality;
+        onOptionsChange(next);
+        return;
+      }
+      onOptionsChange(setModelOptionNestedValue(options, "quality", trimmed));
     },
     [onOptionsChange, options],
   );
@@ -1143,22 +1161,39 @@ function ChatInputComponent({
                   </TooltipContent>
                 </Tooltip>
               ) : null}
-              {isImageTask ? (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <span className="inline-flex shrink-0">
-                      <ImageSizeSelector
-                        value={imageSizeValue}
-                        disabled={loading || uploading || modelLoading}
-                        className="h-7 max-w-28 rounded-md sm:h-8"
-                        onChange={onImageSizeChange}
-                      />
-                    </span>
-                  </TooltipTrigger>
-                  <TooltipContent side="top" align="end" className="max-w-72 text-xs leading-5">
-                    {tImageSize("title")}：{tImageSize("description")}
-                  </TooltipContent>
-                </Tooltip>
+              {isImageTask && isImage2Model ? (
+                <>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="inline-flex shrink-0">
+                        <ImageSizeSelector
+                          value={imageSizeValue}
+                          disabled={loading || uploading || modelLoading}
+                          className="h-7 max-w-44 rounded-md border-transparent bg-transparent hover:bg-accent/60 dark:border-transparent dark:bg-transparent dark:hover:bg-accent/40 sm:h-8"
+                          onChange={onImageSizeChange}
+                        />
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" align="end" className="max-w-72 text-xs leading-5">
+                      {tImageSize("title")}：{tImageSize("description")}
+                    </TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="inline-flex shrink-0">
+                        <ImageQualitySelector
+                          value={imageQualityValue}
+                          disabled={loading || uploading || modelLoading}
+                          className="h-7 max-w-24 rounded-md border-transparent bg-transparent hover:bg-accent/60 dark:border-transparent dark:bg-transparent dark:hover:bg-accent/40 sm:h-8"
+                          onChange={onImageQualityChange}
+                        />
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" align="end" className="max-w-72 text-xs leading-5">
+                      {tImageQuality("title")}：{tImageQuality("description")}
+                    </TooltipContent>
+                  </Tooltip>
+                </>
               ) : null}
               {hideModelPicker ? null : (
                 <ChatModelPicker

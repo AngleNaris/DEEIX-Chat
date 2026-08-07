@@ -914,8 +914,20 @@
   },
   "imageSize": {
     "title": "Image size",
-    "description": "Resolution of the generated image (width x height). Leave empty to use the model default.",
+    "description": "Aspect ratio and resolution of the generated image (gpt-image-2 only). Leave empty to use the model default.",
     "default": "Default",
+    "auto": "Auto",
+    "standard": "Standard",
+    "2k": "2K",
+    "4k": "4K"
+  },
+  "imageQuality": {
+    "title": "Image quality",
+    "description": "Detail and speed of the generated image (gpt-image-2 only). Leave empty to use the model default.",
+    "default": "Default",
+    "low": "Low",
+    "medium": "Medium",
+    "high": "High",
     "auto": "Auto"
   },
   "reasoningEffort": {

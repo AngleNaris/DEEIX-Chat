@@ -914,8 +914,20 @@
   },
   "imageSize": {
     "title": "图片尺寸",
-    "description": "指定生成图片的分辨率（宽 x 高），留空沿用模型默认。",
+    "description": "生成图片的画幅比例与分辨率（仅 gpt-image-2），留空沿用模型默认。",
     "default": "默认",
+    "auto": "自动",
+    "standard": "标准",
+    "2k": "2K",
+    "4k": "4K"
+  },
+  "imageQuality": {
+    "title": "图片质量",
+    "description": "生成图片的细节与速度（仅 gpt-image-2），留空沿用模型默认。",
+    "default": "默认",
+    "low": "低",
+    "medium": "中",
+    "high": "高",
     "auto": "自动"
   },
   "reasoningEffort": {

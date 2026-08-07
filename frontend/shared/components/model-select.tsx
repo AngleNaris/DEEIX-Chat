@@ -13,7 +13,6 @@ import {
   ComboboxItem,
   ComboboxList,
   ComboboxTrigger,
-  ComboboxValue,
 } from "@/components/ui/combobox";
 import { cn } from "@/lib/utils";
 import { ModelOptionIcon } from "@/shared/components/model-option-icon";
@@ -137,7 +136,7 @@ export function OptionSelect<TOption extends OptionSelectOption>({
                   valueClassName,
                 )}
               >
-                {selectedItem ? <ComboboxValue /> : resolvedPlaceholder}
+                {selectedItem ? selectedItem.label : resolvedPlaceholder}
               </span>
             </span>
           </Button>
