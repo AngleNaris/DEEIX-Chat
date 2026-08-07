@@ -282,11 +282,22 @@ func translateError(err error) error {
 	return err
 }
 
+// packageFileRecord 是包文件清单的持久化形态（领域类型不含 JSON 契约，存储层负责映射）。
+type packageFileRecord struct {
+	Path string `json:"path"`
+	Size int64  `json:"size"`
+	Kind string `json:"kind"`
+}
+
 func encodePackageFiles(files []domainskill.PackageFile) string {
 	if len(files) == 0 {
 		return ""
 	}
-	data, err := json.Marshal(files)
+	records := make([]packageFileRecord, 0, len(files))
+	for _, file := range files {
+		records = append(records, packageFileRecord{Path: file.Path, Size: file.Size, Kind: file.Kind})
+	}
+	data, err := json.Marshal(records)
 	if err != nil {
 		return ""
 	}
@@ -298,9 +309,13 @@ func decodePackageFiles(raw string) []domainskill.PackageFile {
 	if raw == "" {
 		return nil
 	}
-	var files []domainskill.PackageFile
-	if err := json.Unmarshal([]byte(raw), &files); err != nil {
+	var records []packageFileRecord
+	if err := json.Unmarshal([]byte(raw), &records); err != nil {
 		return nil
+	}
+	files := make([]domainskill.PackageFile, 0, len(records))
+	for _, record := range records {
+		files = append(files, domainskill.PackageFile{Path: record.Path, Size: record.Size, Kind: record.Kind})
 	}
 	return files
 }

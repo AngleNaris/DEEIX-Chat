@@ -193,6 +193,12 @@ var exactErrorSpecs = map[string]errorSpec{
 	"file too large for full context":                      {Code: "file.too_large_for_context", Message: "file is too large for full context"},
 	"at least one of file_name or rag_opt_out is required": {Code: CodeRequestRequired, Message: "at least one of file_name or rag_opt_out is required"},
 
+	"invalid file path":                {Code: "skill.invalid_file_path", Message: "invalid file path"},
+	"skill package file is required":   {Code: "skill.package_file_required", Message: "skill package file is required"},
+	"skill package file is too large":  {Code: "skill.package_file_too_large", Message: "skill package file is too large"},
+	"skill package file is unreadable": {Code: "skill.package_file_unreadable", Message: "skill package file is unreadable"},
+	"skill trigger already exists":     {Code: "skill.trigger_already_exists", Message: "skill trigger already exists"},
+
 	"invalid billing plan":                           {Code: "billing.invalid_plan", Message: "invalid billing plan"},
 	"billing plan not found":                         {Code: "billing.plan_not_found", Message: "billing plan not found"},
 	"invalid permission group":                       {Code: "billing.invalid_permission_group", Message: "invalid permission group"},
