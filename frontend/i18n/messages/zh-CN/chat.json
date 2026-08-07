@@ -912,6 +912,12 @@
     "decisionExpectedOutcome": "预期产出",
     "decisionAnswer": "最终回答"
   },
+  "imageSize": {
+    "title": "图片尺寸",
+    "description": "指定生成图片的分辨率（宽 x 高），留空沿用模型默认。",
+    "default": "默认",
+    "auto": "自动"
+  },
   "reasoningEffort": {
     "title": "思考强度",
     "description": "控制模型在推理时的思考投入程度。",

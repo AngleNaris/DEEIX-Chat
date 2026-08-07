@@ -912,6 +912,12 @@
     "decisionExpectedOutcome": "Expected outcome",
     "decisionAnswer": "Final answer"
   },
+  "imageSize": {
+    "title": "Image size",
+    "description": "Resolution of the generated image (width x height). Leave empty to use the model default.",
+    "default": "Default",
+    "auto": "Auto"
+  },
   "reasoningEffort": {
     "title": "Reasoning effort",
     "description": "Controls how much the model thinks before responding.",

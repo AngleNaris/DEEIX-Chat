@@ -35,9 +35,11 @@ import { ChatMCP } from "@/features/chat/components/sections/chat-mcp";
 import { ChatModelPicker } from "@/features/chat/components/sections/chat-model-picker";
 import { ChatModelConfig } from "@/features/chat/components/sections/chat-model-config";
 import { ReasoningEffortSelector } from "@/shared/components/reasoning-effort-selector";
+import { ImageSizeSelector } from "@/shared/components/image-size-selector";
 import {
   getReasoningEffortOptionValue,
   resolveReasoningEffortProtocol,
+  setModelOptionNestedValue,
   setReasoningEffortOptionValue,
 } from "@/shared/lib/reasoning-effort";
 import { formatBytes, resolveFileExtension, resolveFileIcon } from "@/shared/lib/file-display";
@@ -320,6 +322,7 @@ function ChatInputComponent({
   const tComposer = useTranslations("chat.composer");
   const tFileStatus = useTranslations("files.status");
   const tReasoningEffort = useTranslations("chat.reasoningEffort");
+  const tImageSize = useTranslations("chat.imageSize");
   const [isBlocksHovered, setIsBlocksHovered] = React.useState(false);
   const [isVoiceHovered, setIsVoiceHovered] = React.useState(false);
   const [toolsMenuHovered, setToolsMenuHovered] = React.useState(false);
@@ -437,6 +440,21 @@ function ChatInputComponent({
   const submitDecision = resolveChatSubmitDecision(selectedModel, attachments, options);
   const submitTask = submitDecision.task;
   const isMediaMode = isMediaSubmitTask(submitTask);
+  const isImageTask = submitTask === "image_generation" || submitTask === "image_edit";
+  const imageSizeValue = typeof options.size === "string" ? options.size : "";
+  const onImageSizeChange = React.useCallback(
+    (size: string) => {
+      const trimmed = size.trim();
+      if (!trimmed) {
+        const next = { ...options };
+        delete next.size;
+        onOptionsChange(next);
+        return;
+      }
+      onOptionsChange(setModelOptionNestedValue(options, "size", trimmed));
+    },
+    [onOptionsChange, options],
+  );
   const composerModeIndicator = resolveComposerModeIndicator(submitDecision, tComposer);
   const ComposerModeIcon = composerModeIndicator?.icon;
   const modelOptionPolicyDisabled = modelOptionPolicy?.mode?.trim() === "disabled";
@@ -1122,6 +1140,23 @@ function ChatInputComponent({
                   </TooltipTrigger>
                   <TooltipContent side="top" align="end" className="max-w-72 text-xs leading-5">
                     {tReasoningEffort("title")}：{tReasoningEffort("description")}
+                  </TooltipContent>
+                </Tooltip>
+              ) : null}
+              {isImageTask ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="inline-flex shrink-0">
+                      <ImageSizeSelector
+                        value={imageSizeValue}
+                        disabled={loading || uploading || modelLoading}
+                        className="h-7 max-w-28 rounded-md sm:h-8"
+                        onChange={onImageSizeChange}
+                      />
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" align="end" className="max-w-72 text-xs leading-5">
+                    {tImageSize("title")}：{tImageSize("description")}
                   </TooltipContent>
                 </Tooltip>
               ) : null}

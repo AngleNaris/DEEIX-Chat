@@ -52,7 +52,6 @@ const MODEL_CAPABILITY_PRESETS: CapabilityPreset[] = [
         enabled: true,
       },
       defaultOptions: {
-        reasoning_effort: "high",
         verbosity: "medium",
       },
       optionControls: [
@@ -81,7 +80,6 @@ const MODEL_CAPABILITY_PRESETS: CapabilityPreset[] = [
       },
       defaultOptions: {
         reasoning: {
-          effort: "high",
           summary: "auto",
         },
         text: {
@@ -292,9 +290,6 @@ const MODEL_CAPABILITY_PRESETS: CapabilityPreset[] = [
     protocol: "xai_responses",
     payload: {
       defaultOptions: {
-        reasoning: {
-          effort: "low",
-        },
         parallel_tool_calls: true,
         store: true,
         temperature: 1,
