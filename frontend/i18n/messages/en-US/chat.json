@@ -949,5 +949,18 @@
       "high": "High",
       "xhigh": "Highest"
     }
+  },
+  "platformTools": {
+    "title": "Platform write operation awaiting approval",
+    "target": "{tool} → {target}",
+    "approve": "Approve",
+    "reject": "Reject",
+    "approved": "Approved, executing",
+    "rejected": "Rejected",
+    "approvedHint": "Approved and executed",
+    "rejectedHint": "Rejected, not executed",
+    "authRequired": "Sign in required",
+    "approveFailed": "Approval failed",
+    "rejectFailed": "Reject failed"
   }
 }

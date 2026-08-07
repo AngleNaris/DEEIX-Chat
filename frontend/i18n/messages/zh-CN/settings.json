@@ -427,6 +427,18 @@
         "rag": "当前：RAG — 后续每轮优先检索会话文件相关片段；检索不可用时回退全文注入。"
       }
     },
+    "platformTools": {
+      "sectionTitle": "平台 Agent 工具",
+      "writeApprovalTitle": "写操作批准模式",
+      "writeApproval": {
+        "auto": "自动执行",
+        "ask": "询问用户"
+      },
+      "writeApprovalDescription": {
+        "auto": "当前：自动 — 模型编辑文件/技能等写操作直接执行（管理员需已开启写操作）。",
+        "ask": "当前：询问用户 — 模型的写操作先挂起为待批准，由你在消息区确认后才执行。"
+      }
+    },
     "memory": {
       "sectionTitle": "AI 偏好记忆",
       "save": "保存",

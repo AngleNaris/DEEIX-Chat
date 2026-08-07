@@ -7,6 +7,8 @@ import type { PublicModelDTO } from "@/shared/api/model.types";
 export type SendShortcut = "enter" | "ctrl_enter" | "meta_enter";
 export type FileMode = "auto" | "full_context" | "rag";
 export type ChatInputHeight = "compact" | "standard" | "loose";
+// PlatformToolsWriteApproval 平台工具写操作批准模式：auto 自动执行 / ask 询问用户。
+export type PlatformToolsWriteApproval = "auto" | "ask";
 export type ChatSettings = {
   defaultModel: string;
   defaultReasoningEffort: string;
@@ -27,6 +29,7 @@ export type ChatSettings = {
   inputHeight: ChatInputHeight;
   contentWidth: ChatContentWidth;
   fileMode: FileMode;
+  platformToolsWriteApproval: PlatformToolsWriteApproval;
 };
 
 export type ModelVendorGroup = [vendor: string, items: PublicModelDTO[]];

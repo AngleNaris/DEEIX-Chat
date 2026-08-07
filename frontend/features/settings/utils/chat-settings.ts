@@ -1,5 +1,12 @@
 import { parseChatContentWidth } from "@/shared/model/chat-content-width";
-import type { ChatInputHeight, ChatSettings, FileMode, ModelVendorGroup, SendShortcut } from "@/features/settings/types/settings";
+import type {
+  ChatInputHeight,
+  ChatSettings,
+  FileMode,
+  ModelVendorGroup,
+  PlatformToolsWriteApproval,
+  SendShortcut,
+} from "@/features/settings/types/settings";
 import type { UserSettingsMap } from "@/shared/api/user-settings";
 import type { PublicModelDTO } from "@/shared/api/model.types";
 import { platformSendShortcut } from "@/shared/lib/platform-shortcuts";
@@ -7,6 +14,7 @@ import { platformSendShortcut } from "@/shared/lib/platform-shortcuts";
 const FILE_MODES: FileMode[] = ["auto", "full_context", "rag"];
 const INPUT_HEIGHTS: ChatInputHeight[] = ["compact", "standard", "loose"];
 const SEND_SHORTCUTS: SendShortcut[] = ["enter", "ctrl_enter", "meta_enter"];
+const WRITE_APPROVALS: PlatformToolsWriteApproval[] = ["auto", "ask"];
 
 export const DEFAULT_CHAT_SETTINGS: ChatSettings = {
   defaultModel: "",
@@ -28,6 +36,7 @@ export const DEFAULT_CHAT_SETTINGS: ChatSettings = {
   inputHeight: "standard",
   contentWidth: "compact",
   fileMode: "auto",
+  platformToolsWriteApproval: "auto",
 };
 
 export function parseChatSettings(map: UserSettingsMap): ChatSettings {
@@ -35,6 +44,7 @@ export function parseChatSettings(map: UserSettingsMap): ChatSettings {
   const inputHeight = map["chat.input_height"];
   const contentWidth = map["chat.content_width"];
   const sendShortcut = map["chat.send_on_enter"];
+  const writeApproval = map["platform_tools.write_approval"];
 
   return {
     defaultModel: map["chat.default_model"] ?? "",
@@ -56,6 +66,9 @@ export function parseChatSettings(map: UserSettingsMap): ChatSettings {
     inputHeight: INPUT_HEIGHTS.includes(inputHeight as ChatInputHeight) ? (inputHeight as ChatInputHeight) : "standard",
     contentWidth: parseChatContentWidth(contentWidth),
     fileMode: FILE_MODES.includes(fileMode as FileMode) ? (fileMode as FileMode) : "auto",
+    platformToolsWriteApproval: WRITE_APPROVALS.includes(writeApproval as PlatformToolsWriteApproval)
+      ? (writeApproval as PlatformToolsWriteApproval)
+      : "auto",
   };
 }
 

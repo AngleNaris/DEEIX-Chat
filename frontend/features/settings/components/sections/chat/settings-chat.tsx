@@ -807,6 +807,35 @@ export function SettingsChat() {
 
       <SettingsSectionSeparator />
 
+      <SettingsSection title={t("platformTools.sectionTitle")}>
+        <SettingsFieldList>
+          <SettingsFieldRow
+            title={t("platformTools.writeApprovalTitle")}
+            description={
+              settings.platformToolsWriteApproval === "ask"
+                ? t("platformTools.writeApprovalDescription.ask")
+                : t("platformTools.writeApprovalDescription.auto")
+            }
+          >
+            <Select
+              value={settings.platformToolsWriteApproval}
+              onValueChange={handleEnum("platform_tools.write_approval", "platformToolsWriteApproval")}
+              disabled={loading}
+            >
+              <SelectTrigger size="sm" className="text-left md:text-right *:data-[slot=select-value]:flex-1 *:data-[slot=select-value]:justify-start md:*:data-[slot=select-value]:justify-end">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent align="start">
+                <SelectItem value="auto">{t("platformTools.writeApproval.auto")}</SelectItem>
+                <SelectItem value="ask">{t("platformTools.writeApproval.ask")}</SelectItem>
+              </SelectContent>
+            </Select>
+          </SettingsFieldRow>
+        </SettingsFieldList>
+      </SettingsSection>
+
+      <SettingsSectionSeparator />
+
       <PreferenceMemorySection />
     </SettingsPage>
   );

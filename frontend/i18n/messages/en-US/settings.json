@@ -427,6 +427,18 @@
         "rag": "Current: RAG. Later turns retrieve relevant file chunks first, then fall back to full-context injection when retrieval is unavailable."
       }
     },
+    "platformTools": {
+      "sectionTitle": "Platform agent tools",
+      "writeApprovalTitle": "Write approval mode",
+      "writeApproval": {
+        "auto": "Auto approve",
+        "ask": "Ask me"
+      },
+      "writeApprovalDescription": {
+        "auto": "Current: Auto. Write operations (editing files/skills) execute immediately (requires the administrator to enable writes).",
+        "ask": "Current: Ask me. Write operations are held for approval — confirm them from the message area before they execute."
+      }
+    },
     "memory": {
       "sectionTitle": "AI preference memory",
       "save": "Save",

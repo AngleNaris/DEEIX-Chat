@@ -949,5 +949,18 @@
       "high": "高",
       "xhigh": "最高"
     }
+  },
+  "platformTools": {
+    "title": "平台工具写操作待批准",
+    "target": "{tool} → {target}",
+    "approve": "批准",
+    "reject": "拒绝",
+    "approved": "已批准，正在执行",
+    "rejected": "已拒绝",
+    "approvedHint": "已批准并执行",
+    "rejectedHint": "已拒绝，未执行",
+    "authRequired": "请先登录",
+    "approveFailed": "批准失败",
+    "rejectFailed": "拒绝失败"
   }
 }

@@ -7,6 +7,7 @@ import { useTranslations } from "next-intl";
 import { AssistantMessageMeta } from "@/features/chat/components/message/message-meta";
 import { MessageAttachmentRow } from "@/features/chat/components/message/message-attachment";
 import { MessageProcessTrace, MessageTraceEventBlocks } from "@/features/chat/components/message/message-process-trace";
+import { PlatformToolApprovalCard } from "@/features/chat/components/message/platform-tool-approval-card";
 import { GrainientBackground } from "@/components/reactbits/backgrounds/grainient";
 import type { AssistantReaction } from "@/features/chat/components/message/message-meta";
 import type {
@@ -384,6 +385,7 @@ export function ChatMessageBot({
         messageStreaming={messageStreaming}
         autoCollapseReady={hasStreamdownContent || Boolean(item.inlineAlert)}
       />
+      <PlatformToolApprovalCard tracePayloadJson={toolTrace?.payloadJson} />
       <MessageAgentGroupTrace run={liveGroupRun} streaming={messageStreaming} clientRunID={item.runID} />
 
       <div
