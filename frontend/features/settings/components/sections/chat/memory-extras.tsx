@@ -350,69 +350,75 @@ export function DocCardSection() {
         />
 
         {loading ? (
-          <div className="space-y-1">
-            <Skeleton className="h-9 w-full rounded-md" />
-            <Skeleton className="h-9 w-4/5 rounded-md" />
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {[0, 1, 2].map((i) => (
+              <Skeleton key={i} className="h-28 w-full rounded-lg" />
+            ))}
           </div>
         ) : cards.length === 0 ? (
           <div className="flex h-9 items-center rounded-md bg-muted/30 px-2.5">
             <p className="text-xs text-muted-foreground">{t("empty")}</p>
           </div>
         ) : (
-          <div className="space-y-1">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             {cards.map((card) => (
-              <div key={card.card_id} className="group flex min-h-9 items-center gap-2 rounded-md px-2 py-1.5 transition-colors hover:bg-muted/40">
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-xs leading-5">
+              <div
+                key={card.card_id}
+                className="group flex flex-col gap-2 rounded-lg border border-border/55 bg-card p-3 transition-colors hover:border-border"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex min-w-0 items-center gap-1.5">
                     <AiBadge show={card.updated_by === "ai"} />
-                    <span className="font-medium text-foreground/80">{card.title}</span>
-                    <span className="text-muted-foreground">{t("separator")}{card.content}</span>
-                  </p>
-                  <div className="mt-0.5 flex flex-wrap items-center gap-1">
-                    {card.category && (
-                      <span className="rounded-sm bg-amber-500/10 px-1 py-px text-[10px] text-amber-700 dark:text-amber-400">
-                        {card.category}
-                      </span>
-                    )}
-                    {card.project_id !== null && card.project_id !== undefined && (
-                      <span className="rounded-sm bg-sky-500/10 px-1 py-px text-[10px] text-sky-700 dark:text-sky-400">
-                        {projects.find((project) => project.id === card.project_id)?.name ?? t("boundProject")}
-                      </span>
-                    )}
-                    {card.role_id !== null && card.role_id !== undefined && (
-                      <span className="rounded-sm bg-violet-500/10 px-1 py-px text-[10px] text-violet-700 dark:text-violet-400">
-                        {roles.find((role) => role.id === card.role_id)?.name ?? t("boundRole")}
-                      </span>
-                    )}
-                    {card.keywords.slice(0, 5).map((kw) => (
-                      <span key={kw} className="rounded-sm bg-muted/60 px-1 py-px text-[10px] text-muted-foreground">
-                        {kw}
-                      </span>
-                    ))}
+                    <span className="truncate text-sm font-medium text-foreground/90">{card.title}</span>
                     {!card.enabled && (
-                      <span className="rounded-sm bg-destructive/10 px-1 py-px text-[10px] text-destructive">
+                      <span className="shrink-0 rounded-sm bg-destructive/10 px-1 py-px text-[10px] text-destructive">
                         {t("disabled")}
                       </span>
                     )}
                   </div>
+                  <div className="flex shrink-0 gap-0.5">
+                    <button
+                      type="button"
+                      className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                      onClick={() => openEdit(card)}
+                      aria-label={t("edit")}
+                    >
+                      <Pencil className="h-3 w-3" />
+                    </button>
+                    <button
+                      type="button"
+                      className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-destructive"
+                      onClick={() => void remove(card)}
+                      aria-label={t("delete")}
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  </div>
                 </div>
-                <div className="flex shrink-0 gap-0.5 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100">
-                  <button
-                    type="button"
-                    className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                    onClick={() => openEdit(card)}
-                    aria-label={t("edit")}
-                  >
-                    <Pencil className="h-3 w-3" />
-                  </button>
-                  <button
-                    type="button"
-                    className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-destructive"
-                    onClick={() => void remove(card)}
-                    aria-label={t("delete")}
-                  >
-                    <Trash2 className="h-3 w-3" />
-                  </button>
+                <p className="line-clamp-3 min-h-0 flex-1 whitespace-pre-wrap text-xs leading-5 text-muted-foreground">
+                  {card.content}
+                </p>
+                <div className="flex flex-wrap items-center gap-1">
+                  {card.category && (
+                    <span className="rounded-sm bg-amber-500/10 px-1 py-px text-[10px] text-amber-700 dark:text-amber-400">
+                      {card.category}
+                    </span>
+                  )}
+                  {card.project_id !== null && card.project_id !== undefined && (
+                    <span className="rounded-sm bg-sky-500/10 px-1 py-px text-[10px] text-sky-700 dark:text-sky-400">
+                      {projects.find((project) => project.id === card.project_id)?.name ?? t("boundProject")}
+                    </span>
+                  )}
+                  {card.role_id !== null && card.role_id !== undefined && (
+                    <span className="rounded-sm bg-violet-500/10 px-1 py-px text-[10px] text-violet-700 dark:text-violet-400">
+                      {roles.find((role) => role.id === card.role_id)?.name ?? t("boundRole")}
+                    </span>
+                  )}
+                  {card.keywords.slice(0, 5).map((kw) => (
+                    <span key={kw} className="rounded-sm bg-muted/60 px-1 py-px text-[10px] text-muted-foreground">
+                      {kw}
+                    </span>
+                  ))}
                 </div>
               </div>
             ))}

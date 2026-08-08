@@ -175,7 +175,19 @@
     "close": "关闭",
     "resize": "调整 Artifact 宽度",
     "empty": "当前 Artifact 为空，暂无法预览。",
-    "security": "预览运行在隔离沙箱中，外部网络、表单、弹窗、父页面访问和存储访问均受限制。"
+    "security": "预览运行在隔离沙箱中，外部网络、表单、弹窗、父页面访问和存储访问均受限制。",
+    "save": "保存为制品",
+    "saveTitle": "保存为制品",
+    "saveDescription": "把当前制品保存到制品库，保存后自动生成公开分享链接。",
+    "titleLabel": "标题",
+    "saveAndShare": "保存并分享",
+    "saving": "保存中",
+    "saveSuccess": "制品已保存",
+    "saveFailed": "保存失败",
+    "linkCopied": "链接已复制",
+    "openLink": "打开分享链接",
+    "authTokenMissing": "登录状态已失效，请重新登录",
+    "cancel": "取消"
   },
   "messages": {
     "debugRequest": "请求",

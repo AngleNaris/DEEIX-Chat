@@ -34,7 +34,6 @@ import { Button } from "@/components/ui/button";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 import { upsertUserMemory } from "@/shared/api/memory";
 import { useLocalizedErrorMessage } from "@/i18n/use-localized-error";
-import { SaveArtifactButton, type ArtifactMessageSource } from "@/features/chat/components/message/save-artifact-button";
 import { resolvePersistedPublicID } from "@/features/chat/model/message-submit";
 import {
   billingRateMultiplierNote,
@@ -959,7 +958,6 @@ export function AssistantMessageMeta({
   alwaysVisible = false,
   showBranchNavigator = true,
   retryBusy = false,
-  artifactSource,
 }: {
   item: ChatMetaMessage;
   busy: boolean;
@@ -982,8 +980,6 @@ export function AssistantMessageMeta({
   showBranchNavigator?: boolean;
   // 群组 step retry 进行中（§16.10）：重试按钮禁用，避免重复发起重试流。
   retryBusy?: boolean;
-  // 消息正文（"保存为制品"按钮从代码块提取 artifact）。
-  artifactSource?: ArtifactMessageSource;
 }) {
   const t = useTranslations("chat.messages");
   const timeT = useTranslations("common.time");
@@ -1105,7 +1101,6 @@ export function AssistantMessageMeta({
                   </MetaIconButton>
                 ) : null}
                 <QuickMemoryPin disabled={messagePending} />
-                {!readOnly && <SaveArtifactButton message={artifactSource} />}
               </>
             ) : null}
             {canShowBranchNavigator ? <BranchSwitcher item={item} onCycle={onCycleBranch} /> : null}

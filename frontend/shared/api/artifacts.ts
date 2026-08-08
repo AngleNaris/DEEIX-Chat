@@ -23,16 +23,14 @@ export type ArtifactListItemDTO = {
 };
 
 export type ArtifactDetailDTO = {
-  id: number;
-  artifactPublicID: string;
-  userID: number;
-  conversationID: number;
-  messageID: number;
+  artifact_id: string;
   kind: ArtifactKind;
   title: string;
   code: string;
-  createdAt: string;
-  updatedAt: string;
+  conversation_id: number;
+  message_id: number;
+  created_at: string;
+  updated_at: string;
 };
 
 export type PublicSharedArtifactDTO = {

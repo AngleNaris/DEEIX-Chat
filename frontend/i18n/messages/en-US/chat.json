@@ -175,7 +175,19 @@
     "close": "Close",
     "resize": "Resize Artifact",
     "empty": "This artifact is empty and cannot be previewed yet.",
-    "security": "The preview runs in an isolated sandbox with external network, forms, popups, parent page access, and storage access restricted."
+    "security": "The preview runs in an isolated sandbox with external network, forms, popups, parent page access, and storage access restricted.",
+    "save": "Save as artifact",
+    "saveTitle": "Save as artifact",
+    "saveDescription": "Save the current artifact to your library and create a public share link.",
+    "titleLabel": "Title",
+    "saveAndShare": "Save & share",
+    "saving": "Saving",
+    "saveSuccess": "Artifact saved",
+    "saveFailed": "Failed to save",
+    "linkCopied": "Link copied",
+    "openLink": "Open share link",
+    "authTokenMissing": "Your session has expired, please sign in again",
+    "cancel": "Cancel"
   },
   "messages": {
     "debugRequest": "Request",

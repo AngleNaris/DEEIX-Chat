@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	appartifact "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/artifact"
+	domainartifact "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/artifact"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/response"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/middleware"
 )
@@ -45,7 +46,7 @@ func (h *Handler) CreateArtifact(c *gin.Context) {
 		response.Error(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	response.Success(c, item)
+	response.Success(c, appartifact.ToDetailView(item.(*domainartifact.Artifact)))
 }
 
 // ListArtifacts 分页列出制品。
@@ -77,7 +78,7 @@ func (h *Handler) GetArtifact(c *gin.Context) {
 		response.Error(c, http.StatusNotFound, "artifact not found")
 		return
 	}
-	response.Success(c, item)
+	response.Success(c, appartifact.ToDetailView(item))
 }
 
 // DeleteArtifact 删除制品。

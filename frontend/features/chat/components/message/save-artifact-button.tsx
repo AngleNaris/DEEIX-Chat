@@ -15,18 +15,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { CopyActionButton } from "@/shared/components/copy-action";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 import { useLocalizedErrorMessage } from "@/i18n/use-localized-error";
-import { extractArtifactsFromContent, type ChatArtifact } from "@/features/chat/model/chat-artifacts";
-import type { ChatAreaMessage } from "@/features/chat/types/messages";
+import type { ChatArtifact } from "@/features/chat/model/chat-artifacts";
 import {
   artifactShareUrl,
   createArtifact,
@@ -41,39 +33,26 @@ function mapArtifactKind(kind: ChatArtifact["kind"]): ArtifactKind {
   return kind;
 }
 
-// ArtifactMessageSource 提取代码块所需的消息字段。
-export type ArtifactMessageSource = Pick<
-  ChatAreaMessage,
-  "content" | "isStreaming" | "key" | "publicID" | "runID" | "updatedAt"
->;
-
 /**
- * SaveArtifactButton 消息操作栏按钮：把 AI 回复中的代码块保存为制品并生成分享链接。
- * 消息中无可保存的 artifact 时返回 null。
+ * SaveArtifactButton 制品展示面板操作栏按钮：把当前展示的制品保存到制品库并生成分享链接。
  */
-export function SaveArtifactButton({ message }: { message?: ArtifactMessageSource }) {
-  const t = useTranslations("chat.messages");
+export function SaveArtifactButton({ artifact }: { artifact: ChatArtifact | null }) {
+  const t = useTranslations("chat.artifacts");
   const resolveErrorMessage = useLocalizedErrorMessage();
   const [open, setOpen] = React.useState(false);
-  const [artifacts, setArtifacts] = React.useState<ChatArtifact[]>([]);
-  const [selectedIndex, setSelectedIndex] = React.useState(0);
   const [title, setTitle] = React.useState("");
   const [saving, setSaving] = React.useState(false);
   const [share, setShare] = React.useState<ArtifactShareDTO | null>(null);
 
-  const extracted = React.useMemo(() => (message ? extractArtifactsFromContent(message) : []), [message]);
-  const saveable = extracted.filter((artifact) => artifact.complete && artifact.code.trim());
+  const saveable = Boolean(artifact && artifact.complete && artifact.code.trim());
 
   const openDialog = () => {
-    setArtifacts(saveable);
-    setSelectedIndex(0);
-    setTitle(defaultArtifactTitle(saveable[0]));
+    setTitle(defaultArtifactTitle(artifact));
     setShare(null);
     setOpen(true);
   };
 
   const submit = async () => {
-    const artifact = artifacts[selectedIndex];
     if (!artifact || !title.trim()) return;
     setSaving(true);
     try {
@@ -88,64 +67,41 @@ export function SaveArtifactButton({ message }: { message?: ArtifactMessageSourc
         code: artifact.code.trim(),
       });
       // 保存成功后直接创建公开分享，用户可复制链接或打开。
-      const createdShare = await createArtifactShare(token, saved.artifactPublicID);
+      const createdShare = await createArtifactShare(token, saved.artifact_id);
       setShare(createdShare);
-      toast.success(t("artifactSaved"));
+      toast.success(t("saveSuccess"));
     } catch (error) {
-      toast.error(t("artifactSaveFailed"), { description: resolveErrorMessage(error) });
+      toast.error(t("saveFailed"), { description: resolveErrorMessage(error) });
     } finally {
       setSaving(false);
     }
   };
 
+  if (!saveable) {
+    return null;
+  }
+
   return (
     <>
-      {saveable.length > 0 && (
-        <button
-          type="button"
-          className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          onClick={openDialog}
-          aria-label={t("saveArtifact")}
-          title={t("saveArtifact")}
-        >
-          <Save className="h-3 w-3" />
-        </button>
-      )}
+      <button
+        type="button"
+        className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/[0.04] hover:text-foreground"
+        onClick={openDialog}
+        aria-label={t("save")}
+        title={t("save")}
+      >
+        <Save className="size-3" />
+      </button>
       <Dialog open={open} onOpenChange={(next) => { if (!saving) setOpen(next); }}>
         <DialogContent className="sm:max-w-[460px]">
           <div className="space-y-4">
             <DialogHeader>
-              <DialogTitle>{t("saveArtifactTitle")}</DialogTitle>
-              <DialogDescription>{t("saveArtifactDescription")}</DialogDescription>
+              <DialogTitle>{t("saveTitle")}</DialogTitle>
+              <DialogDescription>{t("saveDescription")}</DialogDescription>
             </DialogHeader>
 
-            {artifacts.length > 1 && (
-              <div className="space-y-1">
-                <p className="text-xs text-muted-foreground">{t("artifactSelect")}</p>
-                <Select
-                  value={String(selectedIndex)}
-                  onValueChange={(value) => {
-                    const index = Number(value);
-                    setSelectedIndex(index);
-                    setTitle(defaultArtifactTitle(artifacts[index]));
-                  }}
-                >
-                  <SelectTrigger className="h-8 text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {artifacts.map((artifact, index) => (
-                      <SelectItem key={artifact.id ?? index} value={String(index)}>
-                        {artifact.kind} #{index + 1}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-
             <div className="space-y-1">
-              <p className="text-xs text-muted-foreground">{t("artifactTitleLabel")}</p>
+              <p className="text-xs text-muted-foreground">{t("titleLabel")}</p>
               <Input
                 autoFocus
                 maxLength={255}
@@ -162,7 +118,7 @@ export function SaveArtifactButton({ message }: { message?: ArtifactMessageSourc
                 </span>
                 <CopyActionButton
                   value={artifactShareUrl(share.share_id)}
-                  messages={{ copied: t("artifactLinkCopied"), failed: t("copyFailed") }}
+                  messages={{ copied: t("linkCopied"), failed: t("copyFailed") }}
                   iconClassName="size-3"
                 />
                 <a
@@ -170,7 +126,7 @@ export function SaveArtifactButton({ message }: { message?: ArtifactMessageSourc
                   target="_blank"
                   rel="noreferrer"
                   className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                  aria-label={t("artifactOpenLink")}
+                  aria-label={t("openLink")}
                 >
                   <ExternalLink className="size-3" />
                 </a>
@@ -182,7 +138,7 @@ export function SaveArtifactButton({ message }: { message?: ArtifactMessageSourc
                 {t("cancel")}
               </Button>
               <Button type="button" disabled={saving || !title.trim()} onClick={() => void submit()}>
-                {saving ? t("artifactSaving") : t("artifactSaveAndShare")}
+                {saving ? t("saving") : t("saveAndShare")}
               </Button>
             </DialogFooter>
           </div>
@@ -192,7 +148,7 @@ export function SaveArtifactButton({ message }: { message?: ArtifactMessageSourc
   );
 }
 
-function defaultArtifactTitle(artifact: ChatArtifact | undefined): string {
+function defaultArtifactTitle(artifact: ChatArtifact | null): string {
   if (!artifact) return "";
   const firstLine = artifact.code.trim().split("\n")[0] ?? "";
   const cleaned = firstLine.replace(/^[\/#\*\-<\s]+/, "").trim();

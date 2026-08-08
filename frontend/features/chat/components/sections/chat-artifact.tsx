@@ -29,6 +29,7 @@ import { useFontSizePreference } from "@/features/settings/utils/font-size";
 import { cn } from "@/lib/utils";
 import { CopyActionButton } from "@/shared/components/copy-action";
 import { useTheme } from "@/shared/components/theme-provider";
+import { SaveArtifactButton } from "@/features/chat/components/message/save-artifact-button";
 import {
   captureHTMLVisualThemeSnapshot,
   type HTMLVisualThemeSnapshot,
@@ -235,6 +236,7 @@ function ChatArtifactPanel({
             <ArtifactActionButton label={t("downloadHtml")} disabled={!canPreview} onClick={handleDownload}>
               <Download className="size-3" />
             </ArtifactActionButton>
+            <SaveArtifactButton artifact={artifact} />
             <ArtifactActionButton label={t("close")} onClick={onClose}>
               <X className="size-3" />
             </ArtifactActionButton>

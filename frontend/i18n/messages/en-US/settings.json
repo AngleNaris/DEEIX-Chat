@@ -474,10 +474,10 @@
       "retryLater": "Please try again later."
     },
     "docCards": {
-      "sectionTitle": "Doc cards",
+      "sectionTitle": "Cards",
       "addCard": "Add card",
-      "addTitle": "Add doc card",
-      "editTitle": "Edit doc card",
+      "addTitle": "Add card",
+      "editTitle": "Edit card",
       "addDescription": "When the user message matches a keyword, the card content is injected into the AI context (lorebook-style).",
       "name": "Name",
       "namePlaceholder": "e.g. World setting",
@@ -496,7 +496,7 @@
       "edit": "Edit card",
       "delete": "Delete",
       "separator": ": ",
-      "empty": "No doc cards yet.",
+      "empty": "No cards yet.",
       "disabled": "disabled",
       "aiSource": "AI",
       "category": "Category",

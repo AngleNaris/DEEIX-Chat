@@ -474,10 +474,10 @@
       "retryLater": "请稍后重试。"
     },
     "docCards": {
-      "sectionTitle": "文档卡片",
+      "sectionTitle": "卡片",
       "addCard": "添加卡片",
-      "addTitle": "添加文档卡片",
-      "editTitle": "编辑文档卡片",
+      "addTitle": "添加卡片",
+      "editTitle": "编辑卡片",
       "addDescription": "用户消息命中关键字时，卡片内容会自动注入 AI 上下文（类似酒馆的 lorebook）。",
       "name": "名称",
       "namePlaceholder": "例如：世界设定",
@@ -496,7 +496,7 @@
       "edit": "编辑卡片",
       "delete": "删除",
       "separator": "：",
-      "empty": "还没有文档卡片。",
+      "empty": "还没有卡片。",
       "disabled": "已停用",
       "aiSource": "AI",
       "category": "分类",

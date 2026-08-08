@@ -69,6 +69,32 @@ type ArtifactView struct {
 	UpdatedAt        string     `json:"updated_at"`
 }
 
+// ArtifactDetailView 制品详情视图（创建/读取用，含完整代码）。
+type ArtifactDetailView struct {
+	ArtifactPublicID string `json:"artifact_id"`
+	Kind             string `json:"kind"`
+	Title            string `json:"title"`
+	Code             string `json:"code"`
+	ConversationID   uint   `json:"conversation_id"`
+	MessageID        uint   `json:"message_id"`
+	CreatedAt        string `json:"created_at"`
+	UpdatedAt        string `json:"updated_at"`
+}
+
+// ToDetailView 把领域制品映射为详情视图。
+func ToDetailView(item *domainartifact.Artifact) ArtifactDetailView {
+	return ArtifactDetailView{
+		ArtifactPublicID: item.ArtifactPublicID,
+		Kind:             item.Kind,
+		Title:            item.Title,
+		Code:             item.Code,
+		ConversationID:   item.ConversationID,
+		MessageID:        item.MessageID,
+		CreatedAt:        item.CreatedAt.Format("2006-01-02 15:04:05"),
+		UpdatedAt:        item.UpdatedAt.Format("2006-01-02 15:04:05"),
+	}
+}
+
 // PublicShareView 公开分享视图。
 type PublicShareView struct {
 	ShareID   string `json:"share_id"`
