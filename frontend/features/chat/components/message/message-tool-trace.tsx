@@ -179,7 +179,7 @@ function resolveNativeToolKind(call: ToolTraceCall): NativeToolKind {
   const type = normalizeToolName(call.type);
   const value = `${name} ${type}`;
   if (value.includes("web_search") || value.includes("google_search") || value.includes("url_context")) return "web_search";
-  if (value.includes("code_interpreter") || value.includes("code_execution")) return "code_interpreter";
+  if (value.includes("code_interpreter") || value.includes("code_execution") || value.includes("execute_js")) return "code_interpreter";
   if (value.includes("image_generation")) return "image_generation";
   if (value.includes("shell")) return "shell";
   return "generic";

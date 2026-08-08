@@ -205,6 +205,47 @@ func platformToolRegistry() map[string]platformToolEntry {
 			handler:     (*Service).platformDeleteMemory,
 			auditAction: "platform_tools.delete_memory",
 		},
+		"execute_js": {
+			definition: llm.ToolDefinition{
+				Name: "execute_js",
+				Description: "Run JavaScript code in a safe sandbox to compute values the user needs " +
+					"(random numbers, math, data transforms, string/number processing). " +
+					"The sandbox has NO filesystem, network, or process access; print results with console.log " +
+					"(stdout up to 64KB). The completion value of the last expression is returned as result. " +
+					"Default timeout 5s (max 15s via timeout_seconds). " +
+					"This is a WRITE operation (code execution): it may require user approval depending on the user's approval mode.",
+				InputSchema: json.RawMessage(`{
+					"type":"object","properties":{
+						"code":{"type":"string","description":"JavaScript source code to execute (max 32KB)"},
+						"timeout_seconds":{"type":"integer","description":"Execution timeout in seconds (default 5, max 15)"}
+					},"required":["code"]
+				}`),
+			},
+			kind:        platformToolWrite,
+			handler:     (*Service).platformExecuteJs,
+			auditAction: "platform_tools.execute_js",
+		},
+		"execute_skill_script": {
+			definition: llm.ToolDefinition{
+				Name: "execute_skill_script",
+				Description: "Execute a JavaScript file (.js/.mjs/.cjs) bundled inside a skill package. " +
+					"Get the skill_id and script path from list_skills (package_files). " +
+					"Optional args array is passed to the script as the global `args` variable. " +
+					"Same sandbox as execute_js: no filesystem, network, or process access. " +
+					"This is a WRITE operation (code execution): it may require user approval depending on the user's approval mode.",
+				InputSchema: json.RawMessage(`{
+					"type":"object","properties":{
+						"skill_id":{"type":"integer","description":"Numeric skill id from list_skills"},
+						"path":{"type":"string","description":"Relative path of the .js file inside the skill package, e.g. scripts/tool.js"},
+						"args":{"type":"array","description":"Optional arguments passed to the script as the global args variable"},
+						"timeout_seconds":{"type":"integer","description":"Execution timeout in seconds (default 5, max 15)"}
+					},"required":["skill_id","path"]
+				}`),
+			},
+			kind:        platformToolWrite,
+			handler:     (*Service).platformExecuteSkillScript,
+			auditAction: "platform_tools.execute_skill_script",
+		},
 		"write_file": {
 			definition: llm.ToolDefinition{
 				Name: "write_file",
@@ -603,11 +644,12 @@ func (s *Service) resolveWriteApprovalMode(ctx context.Context, userID uint) (st
 func platformToolGuidancePrompt() string {
 	return strings.TrimSpace(`# platform_tools
 - Platform tools access the user's own data (files, skills, conversations, memories). Only use them when the user asks or when the information is genuinely needed.
-- read_file / read_skill_file / read_conversation / list_memories are read-only; write_file, update_skill, save_memory and delete_memory modify data and may be held for user approval — if a write returns pending_approval, tell the user it is waiting for their confirmation.
+- read_file / read_skill_file / read_conversation / list_memories are read-only; write_file, update_skill, save_memory, delete_memory, execute_js and execute_skill_script modify or execute code and may be held for user approval — if a write returns pending_approval, tell the user it is waiting for their confirmation.
 - Never fabricate file_id / skill_id / conversation_id; obtain them from the list_* tools first.
 - Do not expose raw tool output or internal fields unless the user asks.
 - Memories: use save_memory for durable facts about the user (long-term preferences, background, standing instructions) — not for transient task details or conversation-specific context. Before saving, call list_memories and update the existing entry with the same meaning instead of creating duplicates.
-- Memory scopes: "preference" is injected into every message (use sparingly, high-value always-on preferences only); "profile" and "custom" are recalled by relevance. When the user asks to forget or change something remembered, use delete_memory / save_memory accordingly.`)
+- Memory scopes: "preference" is injected into every message (use sparingly, high-value always-on preferences only); "profile" and "custom" are recalled by relevance. When the user asks to forget or change something remembered, use delete_memory / save_memory accordingly.
+- JS execution: use execute_js to compute values on demand (random numbers, math, data transforms). The sandbox has no filesystem/network/process access; print results with console.log and rely on the returned stdout/result. For a script bundled in a skill, use execute_skill_script with the path from list_skills.`)
 }
 
 // traceIDFromContext 提取链路 trace id（缺失时返回空串）。

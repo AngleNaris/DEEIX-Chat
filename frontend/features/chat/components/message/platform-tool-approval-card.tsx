@@ -56,7 +56,14 @@ function summarizeArguments(call: ToolTraceCall): string {
     const fileID = typeof parsed.file_id === "string" ? parsed.file_id : "";
     const skillID = typeof parsed.skill_id === "number" ? String(parsed.skill_id) : "";
     const memoryKey = typeof parsed.key === "string" ? parsed.key : "";
-    return fileID || skillID || memoryKey || "";
+    const scriptPath = typeof parsed.path === "string" ? parsed.path : "";
+    const code = typeof parsed.code === "string" ? parsed.code : "";
+    if (fileID) return fileID;
+    if (skillID && scriptPath) return `#${skillID}:${scriptPath}`;
+    if (skillID) return `#${skillID}`;
+    if (memoryKey) return memoryKey;
+    if (code) return code.length > 80 ? `${code.slice(0, 80)}…` : code;
+    return "";
   } catch {
     return text.slice(0, 120);
   }
