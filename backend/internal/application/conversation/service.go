@@ -62,6 +62,8 @@ type skillResolver interface {
 	GetPackageFile(ctx context.Context, userID uint, skillID uint, filePath string) ([]byte, error)
 	// UpdateUser 供平台工具 update_skill 更新用户自己的技能。
 	UpdateUser(ctx context.Context, userID uint, id uint, input appskill.PatchInput) (*domainskill.Skill, error)
+	// DeleteUser 供平台工具 delete_skill 删除用户自己的技能。
+	DeleteUser(ctx context.Context, userID uint, id uint) error
 }
 
 type mcpToolResolver interface {
@@ -109,10 +111,11 @@ type AgentGroupCreateInput struct {
 	Workers            []AgentGroupMemberCreateInput
 }
 
-// agentGroupWriter 创建/列出 Agent 群组（由 agentgroup 服务注入，平台工具 create/list_agent_group 使用）。
+// agentGroupWriter 创建/列出/删除 Agent 群组（由 agentgroup 服务注入，平台工具 create/list/delete_agent_group 使用）。
 type agentGroupWriter interface {
 	CreateAgentGroup(ctx context.Context, userID uint, input AgentGroupCreateInput) (*domainagentgroup.Group, error)
 	ListAgentGroups(ctx context.Context, userID uint) ([]domainagentgroup.Group, error)
+	DeleteAgentGroup(ctx context.Context, userID uint, publicID string) error
 }
 
 type auditWriter interface {

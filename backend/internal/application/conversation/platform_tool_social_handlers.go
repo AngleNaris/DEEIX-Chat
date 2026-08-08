@@ -221,3 +221,128 @@ func (s *Service) platformCreateAgentGroup(ctx context.Context, call platformToo
 		"created":  true,
 	})
 }
+
+// 删除类平台工具（与创建/更新工具对称，全部写操作受批准模式管控）。
+
+// platformDeleteSkill 删除用户自己的技能。
+func (s *Service) platformDeleteSkill(ctx context.Context, call platformToolCallContext) (string, error) {
+	var args struct {
+		SkillID uint `json:"skill_id"`
+	}
+	if err := decodePlatformArgs(call.Arguments, &args); err != nil {
+		return "", err
+	}
+	if args.SkillID == 0 {
+		return "", fmt.Errorf("skill_id is required")
+	}
+	if s.skillResolver == nil {
+		return "", fmt.Errorf("skill service is unavailable")
+	}
+	if err := s.skillResolver.DeleteUser(ctx, call.UserID, args.SkillID); err != nil {
+		return "", err
+	}
+	s.recordPlatformAudit(ctx, callCtx{userID: call.UserID, requestID: call.RequestID}, "platform_tools.delete_skill", fmt.Sprintf("%d", args.SkillID), nil)
+	return marshalPlatformResult(map[string]interface{}{
+		"skill_id": args.SkillID,
+		"deleted":  true,
+	})
+}
+
+// platformDeleteRole 删除用户角色（被群组引用时服务拒绝）。
+func (s *Service) platformDeleteRole(ctx context.Context, call platformToolCallContext) (string, error) {
+	var args struct {
+		RoleID string `json:"role_id"`
+	}
+	if err := decodePlatformArgs(call.Arguments, &args); err != nil {
+		return "", err
+	}
+	roleID := strings.TrimSpace(args.RoleID)
+	if roleID == "" {
+		return "", fmt.Errorf("role_id is required")
+	}
+	if err := s.DeleteConversationRole(ctx, call.UserID, roleID); err != nil {
+		return "", err
+	}
+	s.recordPlatformAudit(ctx, callCtx{userID: call.UserID, requestID: call.RequestID}, "platform_tools.delete_role", roleID, nil)
+	return marshalPlatformResult(map[string]interface{}{
+		"role_id": roleID,
+		"deleted": true,
+	})
+}
+
+// platformDeleteProject 删除用户项目（保留项目下的会话）。
+func (s *Service) platformDeleteProject(ctx context.Context, call platformToolCallContext) (string, error) {
+	var args struct {
+		ProjectID string `json:"project_id"`
+	}
+	if err := decodePlatformArgs(call.Arguments, &args); err != nil {
+		return "", err
+	}
+	projectID := strings.TrimSpace(args.ProjectID)
+	if projectID == "" {
+		return "", fmt.Errorf("project_id is required")
+	}
+	_, err := s.DeleteConversationProject(ctx, call.UserID, projectID, false, DeleteConversationOptions{})
+	if err != nil {
+		return "", err
+	}
+	s.recordPlatformAudit(ctx, callCtx{userID: call.UserID, requestID: call.RequestID}, "platform_tools.delete_project", projectID, nil)
+	return marshalPlatformResult(map[string]interface{}{
+		"project_id": projectID,
+		"deleted":    true,
+	})
+}
+
+// platformDeleteAgentGroup 删除用户 Agent 群组（有运行历史时服务拒绝；群组开关关闭时报错）。
+func (s *Service) platformDeleteAgentGroup(ctx context.Context, call platformToolCallContext) (string, error) {
+	var args struct {
+		GroupID string `json:"group_id"`
+	}
+	if err := decodePlatformArgs(call.Arguments, &args); err != nil {
+		return "", err
+	}
+	groupID := strings.TrimSpace(args.GroupID)
+	if groupID == "" {
+		return "", fmt.Errorf("group_id is required")
+	}
+	if s.agentGroupWriter == nil {
+		return "", fmt.Errorf("agent group service is unavailable")
+	}
+	if err := s.agentGroupWriter.DeleteAgentGroup(ctx, call.UserID, groupID); err != nil {
+		return "", err
+	}
+	s.recordPlatformAudit(ctx, callCtx{userID: call.UserID, requestID: call.RequestID}, "platform_tools.delete_agent_group", groupID, nil)
+	return marshalPlatformResult(map[string]interface{}{
+		"group_id": groupID,
+		"deleted":  true,
+	})
+}
+
+// platformDeleteConversation 删除用户会话（可选连带删除会话文件）。
+func (s *Service) platformDeleteConversation(ctx context.Context, call platformToolCallContext) (string, error) {
+	var args struct {
+		ConversationID uint `json:"conversation_id"`
+		DeleteFiles    bool `json:"delete_files"`
+	}
+	if err := decodePlatformArgs(call.Arguments, &args); err != nil {
+		return "", err
+	}
+	if args.ConversationID == 0 {
+		return "", fmt.Errorf("conversation_id is required")
+	}
+	conversation, err := s.GetConversation(ctx, call.UserID, args.ConversationID)
+	if err != nil {
+		return "", err
+	}
+	result, err := s.DeleteConversation(ctx, call.UserID, conversation.PublicID, DeleteConversationOptions{DeleteFiles: args.DeleteFiles})
+	if err != nil {
+		return "", err
+	}
+	s.recordPlatformAudit(ctx, callCtx{userID: call.UserID, requestID: call.RequestID}, "platform_tools.delete_conversation", conversation.PublicID, map[string]interface{}{
+		"delete_files": args.DeleteFiles,
+	})
+	return marshalPlatformResult(map[string]interface{}{
+		"conversation_id": args.ConversationID,
+		"deleted":         result.Deleted,
+	})
+}

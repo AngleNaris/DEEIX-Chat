@@ -116,6 +116,10 @@ func (a agentGroupWriterAdapter) ListAgentGroups(ctx context.Context, userID uin
 	return a.inner.ListAgentGroups(ctx, userID)
 }
 
+func (a agentGroupWriterAdapter) DeleteAgentGroup(ctx context.Context, userID uint, publicID string) error {
+	return a.inner.DeleteAgentGroup(ctx, userID, publicID)
+}
+
 // App 维护应用运行依赖。
 type App struct {
 	cfg              config.Config

@@ -359,6 +359,84 @@ func platformToolRegistry() map[string]platformToolEntry {
 			handler:     (*Service).platformCreateAgentGroup,
 			auditAction: "platform_tools.create_agent_group",
 		},
+		"delete_skill": {
+			definition: llm.ToolDefinition{
+				Name: "delete_skill",
+				Description: "Delete one of the user's own skills. Only skills owned by the user can be deleted. " +
+					"This is a WRITE operation: it may require user approval.",
+				InputSchema: json.RawMessage(`{
+					"type":"object","properties":{
+						"skill_id":{"type":"integer","description":"Numeric skill id from list_skills"}
+					},"required":["skill_id"]
+				}`),
+			},
+			kind:        platformToolWrite,
+			handler:     (*Service).platformDeleteSkill,
+			auditAction: "platform_tools.delete_skill",
+		},
+		"delete_role": {
+			definition: llm.ToolDefinition{
+				Name: "delete_role",
+				Description: "Delete one of the user's conversation roles. Roles still referenced by agent groups cannot be deleted. " +
+					"This is a WRITE operation: it may require user approval.",
+				InputSchema: json.RawMessage(`{
+					"type":"object","properties":{
+						"role_id":{"type":"string","description":"Public role id from list_roles"}
+					},"required":["role_id"]
+				}`),
+			},
+			kind:        platformToolWrite,
+			handler:     (*Service).platformDeleteRole,
+			auditAction: "platform_tools.delete_role",
+		},
+		"delete_project": {
+			definition: llm.ToolDefinition{
+				Name: "delete_project",
+				Description: "Delete one of the user's conversation projects. Conversations under the project are preserved (not deleted). " +
+					"This is a WRITE operation: it may require user approval.",
+				InputSchema: json.RawMessage(`{
+					"type":"object","properties":{
+						"project_id":{"type":"string","description":"Public project id from list_projects"}
+					},"required":["project_id"]
+				}`),
+			},
+			kind:        platformToolWrite,
+			handler:     (*Service).platformDeleteProject,
+			auditAction: "platform_tools.delete_project",
+		},
+		"delete_agent_group": {
+			definition: llm.ToolDefinition{
+				Name: "delete_agent_group",
+				Description: "Delete one of the user's agent groups. Groups with run history cannot be deleted. " +
+					"Requires the agent group feature to be enabled. " +
+					"This is a WRITE operation: it may require user approval.",
+				InputSchema: json.RawMessage(`{
+					"type":"object","properties":{
+						"group_id":{"type":"string","description":"Public group id from list_agent_groups"}
+					},"required":["group_id"]
+				}`),
+			},
+			kind:        platformToolWrite,
+			handler:     (*Service).platformDeleteAgentGroup,
+			auditAction: "platform_tools.delete_agent_group",
+		},
+		"delete_conversation": {
+			definition: llm.ToolDefinition{
+				Name: "delete_conversation",
+				Description: "Delete one of the user's conversations. Optionally delete the files attached to it " +
+					"(delete_files=false by default to be safe). " +
+					"This is a WRITE operation: it may require user approval.",
+				InputSchema: json.RawMessage(`{
+					"type":"object","properties":{
+						"conversation_id":{"type":"integer","description":"Numeric conversation id from list_conversations"},
+						"delete_files":{"type":"boolean","description":"Also delete files attached to this conversation (default false)"}
+					},"required":["conversation_id"]
+				}`),
+			},
+			kind:        platformToolWrite,
+			handler:     (*Service).platformDeleteConversation,
+			auditAction: "platform_tools.delete_conversation",
+		},
 	}
 }
 

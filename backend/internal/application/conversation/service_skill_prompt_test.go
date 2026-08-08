@@ -271,6 +271,10 @@ func (f *fakeSkillFileResolver) UpdateUser(ctx context.Context, userID uint, id 
 	return nil, nil
 }
 
+func (f *fakeSkillFileResolver) DeleteUser(ctx context.Context, userID uint, id uint) error {
+	return nil
+}
+
 func TestResolveSkillFileRequestsDisclosesOnlyManifestFiles(t *testing.T) {
 	resolver := &fakeSkillFileResolver{files: map[uint]map[string]string{
 		1: {"scripts/roll.py": "import random\nprint(random.randint(1, 6))\n", "secret.txt": "top secret"},
