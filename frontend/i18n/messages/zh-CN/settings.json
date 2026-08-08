@@ -440,7 +440,7 @@
       }
     },
     "memory": {
-      "sectionTitle": "AI 偏好记忆",
+      "sectionTitle": "长期记忆",
       "save": "保存",
       "cancel": "取消",
       "delete": "删除",
@@ -463,7 +463,11 @@
       "deleteFailed": "删除失败",
       "full": "已满",
       "addPreference": "添加偏好",
-      "empty": "还没有偏好记忆。"
+      "empty": "还没有偏好记忆。",
+      "groupPreference": "AI 偏好",
+      "groupProfile": "个人档案",
+      "groupCustom": "自定义",
+      "aiSource": "AI"
     },
     "toasts": {
       "saveFailed": "保存失败",

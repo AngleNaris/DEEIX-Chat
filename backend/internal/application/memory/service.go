@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -16,6 +17,10 @@ type embeddingProvider interface {
 type auditWriter interface {
 	Write(ctx context.Context, requestID string, actorUserID uint, action string, resource string, resourceID string, ip string, userAgent string, detail interface{})
 }
+
+// maxUserMemoriesPerUser 每用户记忆条数防御性上限（仅约束新增，更新不受限）。
+// 前端 UI 对 preference 另有 20 条展示上限；此上限兜底 AI 工具批量写入导致的膨胀。
+const maxUserMemoriesPerUser = 200
 
 // Service 封装记忆业务能力。
 type Service struct {
@@ -76,12 +81,27 @@ type AuditInput struct {
 
 // UpsertUserMemory 新增或更新用户长期记忆。
 func (s *Service) UpsertUserMemory(ctx context.Context, userID uint, key string, value string, scope string, updatedBy string) error {
+	key = strings.TrimSpace(key)
 	item := &domainmemory.UserMemory{
 		UserID:    userID,
-		MemoryKey: strings.TrimSpace(key),
+		MemoryKey: key,
 		Value:     strings.TrimSpace(value),
 		Scope:     strings.TrimSpace(scope),
 		UpdatedBy: strings.TrimSpace(updatedBy),
+	}
+	// 防御性条数上限：一次查询同时判断 key 是否已存在（更新不受限）与当前条数。
+	// 查询失败不阻断写入主路径（真实故障会由随后的 Upsert 报错暴露）。
+	if existing, err := s.repo.ListUserMemories(ctx, userID); err == nil {
+		isNew := true
+		for _, m := range existing {
+			if m.MemoryKey == key {
+				isNew = false
+				break
+			}
+		}
+		if isNew && len(existing) >= maxUserMemoriesPerUser {
+			return fmt.Errorf("memory limit reached: %d entries per user", maxUserMemoriesPerUser)
+		}
 	}
 	if err := s.repo.UpsertUserMemory(ctx, item); err != nil {
 		return err

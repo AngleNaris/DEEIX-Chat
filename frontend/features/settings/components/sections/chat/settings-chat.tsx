@@ -65,6 +65,10 @@ const SYSTEM_RECOMMENDED_MODEL = "none";
 
 const MAX_PREFERENCES = 20;
 
+// MemoryScope 记忆作用域（与后端 UpsertUserMemoryRequest.scope 一致；
+// 响应 DTO 的 scope 为宽松 string，写入时需收窄）。
+type MemoryScope = "preference" | "profile" | "custom";
+
 function PreferenceCard({
   item,
   onEdit,
@@ -146,6 +150,11 @@ function PreferenceCard({
   return (
     <div className="group flex min-h-9 items-center gap-2 rounded-md px-2 py-1.5 transition-colors hover:bg-muted/40">
       <p className="min-w-0 flex-1 truncate text-xs leading-5">
+        {item.updatedBy === "ai" && (
+          <span className="mr-1 inline-block rounded-sm bg-violet-500/10 px-1 py-px align-baseline text-[10px] font-medium text-violet-600 dark:text-violet-400">
+            {t("aiSource")}
+          </span>
+        )}
         <span className="font-medium text-foreground/80">{item.memoryKey}</span>
         <span className="text-muted-foreground">{t("separator")}{item.value}</span>
       </p>
@@ -282,8 +291,9 @@ function PreferenceMemorySection() {
       try {
         const token = await resolveAccessToken();
         if (!token) return;
+        // 展示全部 scope 的记忆（AI 可通过平台工具写入 profile/custom）。
         const all = await listUserMemories(token);
-        setItems(all.filter((m) => m.scope === "preference"));
+        setItems(all);
       } catch {
         // ignore
       } finally {
@@ -328,11 +338,11 @@ function PreferenceMemorySection() {
     }
   }, [addKey, addValue, resolveErrorMessage, t]);
 
-  const handleEdit = React.useCallback(async (memoryKey: string, value: string) => {
+  const handleEdit = React.useCallback(async (memoryKey: string, value: string, scope: MemoryScope) => {
     try {
       const token = await resolveAccessToken();
       if (!token) return;
-      await upsertUserMemory(token, memoryKey, value, "preference");
+      await upsertUserMemory(token, memoryKey, value, scope);
       setItems((prev) => prev.map((m) => m.memoryKey === memoryKey ? { ...m, value } : m));
       toast.success(t("updated"));
     } catch (error) {
@@ -352,67 +362,95 @@ function PreferenceMemorySection() {
     }
   }, [resolveErrorMessage, t]);
 
-  const preferenceCount = items.length;
+  const preferenceItems = items.filter((m) => m.scope === "preference");
+  const profileItems = items.filter((m) => m.scope === "profile");
+  const customItems = items.filter((m) => m.scope === "custom");
+  const preferenceCount = preferenceItems.length;
   const atLimit = preferenceCount >= MAX_PREFERENCES;
+
+  const renderCards = (scopeItems: UserMemoryDTO[]) => (
+    scopeItems.length > 0 ? (
+      <div className="space-y-1">
+        {scopeItems.map((item) => (
+          <PreferenceCard
+            key={item.memoryKey}
+            item={item}
+            onEdit={(key, value) => handleEdit(key, value, item.scope as MemoryScope)}
+            onDelete={handleDelete}
+          />
+        ))}
+      </div>
+    ) : null
+  );
 
   return (
     <SettingsSection title={t("sectionTitle")}>
-      <div className="space-y-2">
-        <div className="flex h-8 items-center justify-between gap-3">
-          <span className="text-[11px] tabular-nums text-muted-foreground">
-            {loadingMems ? `-- / ${MAX_PREFERENCES}` : `${preferenceCount} / ${MAX_PREFERENCES}`}
-          </span>
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-7 gap-1.5 px-2 text-xs"
-            disabled={loadingMems || atLimit}
-            onClick={() => setAddDialogOpen(true)}
-          >
-            <Plus className="h-3.5 w-3.5" />
-            {atLimit ? t("full") : t("addPreference")}
-          </Button>
+      <div className="space-y-4">
+        <div className="space-y-2">
+          <div className="flex h-8 items-center justify-between gap-3">
+            <span className="min-w-0 truncate text-xs font-medium text-foreground/70">
+              {t("groupPreference")}
+              <span className="ml-1.5 text-[11px] tabular-nums text-muted-foreground">
+                {loadingMems ? `-- / ${MAX_PREFERENCES}` : `${preferenceCount} / ${MAX_PREFERENCES}`}
+              </span>
+            </span>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 gap-1.5 px-2 text-xs"
+              disabled={loadingMems || atLimit}
+              onClick={() => setAddDialogOpen(true)}
+            >
+              <Plus className="h-3.5 w-3.5" />
+              {atLimit ? t("full") : t("addPreference")}
+            </Button>
+          </div>
+
+          <AddPreferenceDialog
+            open={addDialogOpen}
+            addKey={addKey}
+            addValue={addValue}
+            adding={adding}
+            atLimit={atLimit}
+            onOpenChange={(open) => {
+              setAddDialogOpen(open);
+              if (!open) {
+                setAddKey("");
+                setAddValue("");
+              }
+            }}
+            onKeyChange={setAddKey}
+            onValueChange={setAddValue}
+            onAdd={() => void handleAdd()}
+          />
+
+          {loadingMems ? (
+            <div className="space-y-1">
+              <Skeleton className="h-9 w-full rounded-md" />
+              <Skeleton className="h-9 w-4/5 rounded-md" />
+            </div>
+          ) : preferenceItems.length === 0 ? (
+            <div className="flex h-9 items-center rounded-md bg-muted/30 px-2.5">
+              <p className="text-xs text-muted-foreground">{t("empty")}</p>
+            </div>
+          ) : (
+            renderCards(preferenceItems)
+          )}
         </div>
 
-        <AddPreferenceDialog
-          open={addDialogOpen}
-          addKey={addKey}
-          addValue={addValue}
-          adding={adding}
-          atLimit={atLimit}
-          onOpenChange={(open) => {
-            setAddDialogOpen(open);
-            if (!open) {
-              setAddKey("");
-              setAddValue("");
-            }
-          }}
-          onKeyChange={setAddKey}
-          onValueChange={setAddValue}
-          onAdd={() => void handleAdd()}
-        />
+        {profileItems.length > 0 && (
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-foreground/70">{t("groupProfile")}</p>
+            {renderCards(profileItems)}
+          </div>
+        )}
 
-        {loadingMems ? (
-          <div className="space-y-1">
-            <Skeleton className="h-9 w-full rounded-md" />
-            <Skeleton className="h-9 w-4/5 rounded-md" />
+        {customItems.length > 0 && (
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-foreground/70">{t("groupCustom")}</p>
+            {renderCards(customItems)}
           </div>
-        ) : items.length === 0 ? (
-          <div className="flex h-9 items-center rounded-md bg-muted/30 px-2.5">
-            <p className="text-xs text-muted-foreground">{t("empty")}</p>
-          </div>
-        ) : items.length > 0 ? (
-          <div className="space-y-1">
-            {items.map((item) => (
-              <PreferenceCard
-                key={item.memoryKey}
-                item={item}
-                onEdit={handleEdit}
-                onDelete={handleDelete}
-              />
-            ))}
-          </div>
-        ) : null}
+        )}
       </div>
     </SettingsSection>
   );

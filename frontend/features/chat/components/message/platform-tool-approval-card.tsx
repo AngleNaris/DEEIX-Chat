@@ -55,7 +55,8 @@ function summarizeArguments(call: ToolTraceCall): string {
     const parsed = JSON.parse(text) as Record<string, unknown>;
     const fileID = typeof parsed.file_id === "string" ? parsed.file_id : "";
     const skillID = typeof parsed.skill_id === "number" ? String(parsed.skill_id) : "";
-    return fileID || skillID || "";
+    const memoryKey = typeof parsed.key === "string" ? parsed.key : "";
+    return fileID || skillID || memoryKey || "";
   } catch {
     return text.slice(0, 120);
   }

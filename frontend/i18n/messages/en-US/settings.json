@@ -440,7 +440,7 @@
       }
     },
     "memory": {
-      "sectionTitle": "AI preference memory",
+      "sectionTitle": "Long-term memory",
       "save": "Save",
       "cancel": "Cancel",
       "delete": "Delete",
@@ -463,7 +463,11 @@
       "deleteFailed": "Failed to delete",
       "full": "Full",
       "addPreference": "Add preference",
-      "empty": "No preference memory yet."
+      "empty": "No preference memory yet.",
+      "groupPreference": "AI preferences",
+      "groupProfile": "Profile",
+      "groupCustom": "Custom",
+      "aiSource": "AI"
     },
     "toasts": {
       "saveFailed": "Failed to save",

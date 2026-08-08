@@ -156,6 +156,55 @@ func platformToolRegistry() map[string]platformToolEntry {
 			kind:    platformToolRead,
 			handler: (*Service).platformReadConversation,
 		},
+		"list_memories": {
+			definition: llm.ToolDefinition{
+				Name: "list_memories",
+				Description: "List the user's long-term memories (key, scope, value summary) to see what is stored about them. " +
+					"Optional scope filter: preference, profile, custom.",
+				InputSchema: json.RawMessage(`{
+					"type":"object","properties":{
+						"scope":{"type":"string","description":"Optional filter: preference, profile, or custom"}
+					},"required":[]
+				}`),
+			},
+			kind:    platformToolRead,
+			handler: (*Service).platformListMemories,
+		},
+		"save_memory": {
+			definition: llm.ToolDefinition{
+				Name: "save_memory",
+				Description: "Save or update a long-term memory about the user (durable preference, background fact, or standing instruction). " +
+					"Use the same key to update an existing memory. Scope: preference (injected every message, use sparingly), " +
+					"profile/custom (recalled by relevance, default custom). " +
+					"This is a WRITE operation: it may require user approval depending on the user's approval mode.",
+				InputSchema: json.RawMessage(`{
+					"type":"object","properties":{
+						"key":{"type":"string","description":"Memory name/key, e.g. language_preference (max 128 chars)"},
+						"value":{"type":"string","description":"Memory content (max 10000 chars)"},
+						"scope":{"type":"string","enum":["preference","profile","custom"],"description":"preference=always injected, use sparingly; profile/custom=recalled by relevance (default custom)"}
+					},"required":["key","value"]
+				}`),
+			},
+			kind:        platformToolWrite,
+			handler:     (*Service).platformSaveMemory,
+			auditAction: "platform_tools.save_memory",
+		},
+		"delete_memory": {
+			definition: llm.ToolDefinition{
+				Name: "delete_memory",
+				Description: "Delete a long-term memory by its key (use list_memories to find keys). " +
+					"Use when the user says to forget or change something previously remembered. " +
+					"This is a WRITE operation: it may require user approval depending on the user's approval mode.",
+				InputSchema: json.RawMessage(`{
+					"type":"object","properties":{
+						"key":{"type":"string","description":"Memory key to delete"}
+					},"required":["key"]
+				}`),
+			},
+			kind:        platformToolWrite,
+			handler:     (*Service).platformDeleteMemory,
+			auditAction: "platform_tools.delete_memory",
+		},
 		"write_file": {
 			definition: llm.ToolDefinition{
 				Name: "write_file",
@@ -553,10 +602,12 @@ func (s *Service) resolveWriteApprovalMode(ctx context.Context, userID uint) (st
 // platformToolGuidancePrompt 平台工具使用纪律（追加在 MCP 工具引导之后）。
 func platformToolGuidancePrompt() string {
 	return strings.TrimSpace(`# platform_tools
-- Platform tools access the user's own data (files, skills, conversations). Only use them when the user asks or when the information is genuinely needed.
-- read_file / read_skill_file / read_conversation are read-only; write_file and update_skill modify data and may be held for user approval — if a write returns pending_approval, tell the user it is waiting for their confirmation.
+- Platform tools access the user's own data (files, skills, conversations, memories). Only use them when the user asks or when the information is genuinely needed.
+- read_file / read_skill_file / read_conversation / list_memories are read-only; write_file, update_skill, save_memory and delete_memory modify data and may be held for user approval — if a write returns pending_approval, tell the user it is waiting for their confirmation.
 - Never fabricate file_id / skill_id / conversation_id; obtain them from the list_* tools first.
-- Do not expose raw tool output or internal fields unless the user asks.`)
+- Do not expose raw tool output or internal fields unless the user asks.
+- Memories: use save_memory for durable facts about the user (long-term preferences, background, standing instructions) — not for transient task details or conversation-specific context. Before saving, call list_memories and update the existing entry with the same meaning instead of creating duplicates.
+- Memory scopes: "preference" is injected into every message (use sparingly, high-value always-on preferences only); "profile" and "custom" are recalled by relevance. When the user asks to forget or change something remembered, use delete_memory / save_memory accordingly.`)
 }
 
 // traceIDFromContext 提取链路 trace id（缺失时返回空串）。
