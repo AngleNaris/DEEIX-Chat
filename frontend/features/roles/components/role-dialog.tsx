@@ -270,6 +270,9 @@ function RoleForm({
           onChange={(event) => update("systemPrompt", event.target.value)}
           disabled={submitting}
         />
+        <p className="text-[11px] leading-relaxed text-muted-foreground">
+          可用变量：{"{{date}} {{time}} {{datetime}} {{weekday}} {{language}} {{username}} {{js: 代码}}"}
+        </p>
       </div>
       <div className="space-y-1">
         <Label className="text-xs text-muted-foreground">分组</Label>

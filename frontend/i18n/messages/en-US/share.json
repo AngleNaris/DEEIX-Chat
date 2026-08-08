@@ -6,5 +6,10 @@
   "signInToContinue": "Sign in to DEEIX Chat to continue",
   "notFoundTitle": "Share unavailable",
   "notFoundDescription": "This share does not exist, has been closed, or the original conversation was deleted.",
-  "cloneFailed": "Failed to continue conversation"
+  "cloneFailed": "Failed to continue conversation",
+  "artifact": {
+    "notFound": "This share does not exist or was revoked.",
+    "preview": "Preview",
+    "source": "Source"
+  }
 }

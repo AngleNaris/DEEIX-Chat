@@ -151,7 +151,7 @@ func publicRateLimitPolicy(c *gin.Context, baseRPM int) rateLimitPolicy {
 		return newRateLimitPolicy("public_auth", baseRPM, "too many authentication attempts")
 	case strings.HasPrefix(route, "/billing/payments/"):
 		return newRateLimitPolicy("payment_callback", atLeast(baseRPM*20, 600), "rate limit exceeded")
-	case route == "/settings/login-page" || strings.HasPrefix(route, "/shared-conversations/"):
+	case route == "/settings/login-page" || strings.HasPrefix(route, "/shared-conversations/") || strings.HasPrefix(route, "/shared-artifacts/"):
 		return newRateLimitPolicy("public_read", atLeast(baseRPM*20, 600), "rate limit exceeded")
 	default:
 		return newRateLimitPolicy("public", atLeast(baseRPM*10, 300), "rate limit exceeded")

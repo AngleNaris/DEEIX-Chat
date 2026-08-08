@@ -181,7 +181,7 @@
     "debugRequest": "Request",
     "debugResponse": "Response",
     "copied": "Message copied",
-    "copyFailed": "Copy failed",
+    "copyFailed": "Failed to copy",
     "copyFailedDescription": "Please try again later.",
     "generationInterrupted": "Generation interrupted",
     "streamInterrupted": "The generation connection was interrupted. Retry this message.",
@@ -213,7 +213,18 @@
     "memoryNamePlaceholder": "Preference name, e.g. response style",
     "memoryValuePlaceholder": "Preference content, e.g. answer concisely",
     "savingPreference": "Saving...",
-    "savePreference": "Save preference"
+    "savePreference": "Save preference",
+    "saveArtifact": "Save as artifact",
+    "saveArtifactTitle": "Save as artifact",
+    "saveArtifactDescription": "Save the code block as an artifact and create a public share link (anyone with the link can view it).",
+    "artifactSelect": "Select code block",
+    "artifactTitleLabel": "Name",
+    "artifactSaveAndShare": "Save & share",
+    "artifactSaving": "Saving",
+    "artifactSaved": "Saved, share link created",
+    "artifactSaveFailed": "Failed to save",
+    "artifactLinkCopied": "Link copied",
+    "artifactOpenLink": "Open share page"
   },
   "loadError": {
     "title": "Failed to load conversation",

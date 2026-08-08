@@ -205,6 +205,119 @@ func platformToolRegistry() map[string]platformToolEntry {
 			handler:     (*Service).platformDeleteMemory,
 			auditAction: "platform_tools.delete_memory",
 		},
+		"save_artifact": {
+			definition: llm.ToolDefinition{
+				Name: "save_artifact",
+				Description: "Save an artifact (user-facing HTML/JS/CSS/text content produced for the user) so the user can revisit or share it later. " +
+					"Pass artifact_id to update an existing artifact. " +
+					"This is a WRITE operation: it may require user approval depending on the user's approval mode.",
+				InputSchema: json.RawMessage(`{
+					"type":"object","properties":{
+						"artifact_id":{"type":"string","description":"Optional artifact id to update (from list_artifacts)"},
+						"title":{"type":"string","description":"Artifact title (max 255 chars)"},
+						"kind":{"type":"string","enum":["html","js","css","text"],"description":"Artifact type (default text)"},
+						"code":{"type":"string","description":"Full artifact content (max 256KB)"}
+					},"required":["title","code"]
+				}`),
+			},
+			kind:        platformToolWrite,
+			handler:     (*Service).platformSaveArtifact,
+			auditAction: "platform_tools.save_artifact",
+		},
+		"list_artifacts": {
+			definition: llm.ToolDefinition{
+				Name: "list_artifacts",
+				Description: "List the user's saved artifacts (id, title, kind, share link if active) " +
+					"to see what has been saved or find an artifact id.",
+				InputSchema: json.RawMessage(`{
+					"type":"object","properties":{
+						"page":{"type":"integer","description":"Page number, starting at 1 (default 1)"},
+						"page_size":{"type":"integer","description":"Page size (default 20, max 50)"}
+					},"required":[]
+				}`),
+			},
+			kind:    platformToolRead,
+			handler: (*Service).platformListArtifacts,
+		},
+		"delete_artifact": {
+			definition: llm.ToolDefinition{
+				Name: "delete_artifact",
+				Description: "Delete one of the user's saved artifacts (also revokes its public share). " +
+					"This is a WRITE operation: it may require user approval depending on the user's approval mode.",
+				InputSchema: json.RawMessage(`{
+					"type":"object","properties":{
+						"artifact_id":{"type":"string","description":"Artifact id from list_artifacts"}
+					},"required":["artifact_id"]
+				}`),
+			},
+			kind:        platformToolWrite,
+			handler:     (*Service).platformDeleteArtifact,
+			auditAction: "platform_tools.delete_artifact",
+		},
+		"share_artifact": {
+			definition: llm.ToolDefinition{
+				Name: "share_artifact",
+				Description: "Create a public share link for one of the user's saved artifacts (anyone with the link can view it). " +
+					"Use when the user wants to share an artifact's HTML preview publicly. " +
+					"This is a WRITE operation: it may require user approval depending on the user's approval mode.",
+				InputSchema: json.RawMessage(`{
+					"type":"object","properties":{
+						"artifact_id":{"type":"string","description":"Artifact id from list_artifacts"}
+					},"required":["artifact_id"]
+				}`),
+			},
+			kind:        platformToolWrite,
+			handler:     (*Service).platformShareArtifact,
+			auditAction: "platform_tools.share_artifact",
+		},
+		"save_doc_card": {
+			definition: llm.ToolDefinition{
+				Name: "save_doc_card",
+				Description: "Save or update a document card (lorebook entry): a doc snippet that is injected into context " +
+					"whenever the user message matches one of its keywords (e.g. world settings, character sheets, rule documents). " +
+					"Pass card_id to update an existing card (from list_doc_cards). " +
+					"This is a WRITE operation: it may require user approval depending on the user's approval mode.",
+				InputSchema: json.RawMessage(`{
+					"type":"object","properties":{
+						"card_id":{"type":"string","description":"Optional card id to update (from list_doc_cards)"},
+						"title":{"type":"string","description":"Card title (max 128 chars)"},
+						"content":{"type":"string","description":"Card content injected on keyword match (max 20000 chars)"},
+						"keywords":{"type":"array","items":{"type":"string"},"description":"Trigger keywords (max 20); card activates when the user message contains any of them"},
+						"enabled":{"type":"boolean","description":"Whether the card is active (default true)"}
+					},"required":["title","content"]
+				}`),
+			},
+			kind:        platformToolWrite,
+			handler:     (*Service).platformSaveDocCard,
+			auditAction: "platform_tools.save_doc_card",
+		},
+		"list_doc_cards": {
+			definition: llm.ToolDefinition{
+				Name: "list_doc_cards",
+				Description: "List the user's document cards (title, content, keywords, enabled) " +
+					"to see which lorebook entries exist and find a card_id.",
+				InputSchema: json.RawMessage(`{
+					"type":"object","properties":{},"required":[]
+				}`),
+			},
+			kind:    platformToolRead,
+			handler: (*Service).platformListDocCards,
+		},
+		"delete_doc_card": {
+			definition: llm.ToolDefinition{
+				Name: "delete_doc_card",
+				Description: "Delete one of the user's document cards by card_id. " +
+					"This is a WRITE operation: it may require user approval depending on the user's approval mode.",
+				InputSchema: json.RawMessage(`{
+					"type":"object","properties":{
+						"card_id":{"type":"string","description":"Card id from list_doc_cards"}
+					},"required":["card_id"]
+				}`),
+			},
+			kind:        platformToolWrite,
+			handler:     (*Service).platformDeleteDocCard,
+			auditAction: "platform_tools.delete_doc_card",
+		},
 		"execute_js": {
 			definition: llm.ToolDefinition{
 				Name: "execute_js",
@@ -649,7 +762,8 @@ func platformToolGuidancePrompt() string {
 - Do not expose raw tool output or internal fields unless the user asks.
 - Memories: use save_memory for durable facts about the user (long-term preferences, background, standing instructions) — not for transient task details or conversation-specific context. Before saving, call list_memories and update the existing entry with the same meaning instead of creating duplicates.
 - Memory scopes: "preference" is injected into every message (use sparingly, high-value always-on preferences only); "profile" and "custom" are recalled by relevance. When the user asks to forget or change something remembered, use delete_memory / save_memory accordingly.
-- JS execution: use execute_js to compute values on demand (random numbers, math, data transforms). The sandbox has no filesystem/network/process access; print results with console.log and rely on the returned stdout/result. For a script bundled in a skill, use execute_skill_script with the path from list_skills.`)
+- JS execution: use execute_js to compute values on demand (random numbers, math, data transforms). The sandbox has no filesystem/network/process access; print results with console.log and rely on the returned stdout/result. For a script bundled in a skill, use execute_skill_script with the path from list_skills.
+- Artifacts: when you produce a polished user-facing HTML/JS piece, offer save_artifact so the user can keep and share it; use list_artifacts to find saved items and share_artifact to create a public link when the user asks to share.`)
 }
 
 // traceIDFromContext 提取链路 trace id（缺失时返回空串）。

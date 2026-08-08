@@ -12,8 +12,10 @@ import (
 	appbilling "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/billing"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/channel"
 	appcompact "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/compact"
+	appdoccard "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/doccard"
 	appembedding "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/embedding"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/extraction"
+	appartifact "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/artifact"
 	appstorage "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/objectstorage"
 	appprocessing "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/processing"
 	apprag "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/rag"
@@ -21,6 +23,7 @@ import (
 	appupload "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/upload"
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 	domainagentgroup "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/agentgroup"
+	domaindoccard "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/doccard"
 	domainmcp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/mcp"
 	domainmemory "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/memory"
 	domainskill "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/skill"
@@ -89,6 +92,20 @@ type agentGroupSettingsReader interface {
 	RuntimeValuesByNamespace(ctx context.Context, namespace string) (map[string]string, error)
 }
 
+// userProfileReader 读取用户档案字段，供系统提示词模板变量
+// {{language}} / {{username}} 使用（由 user 服务适配注入）。
+type userProfileReader interface {
+	GetUserProfile(ctx context.Context, userID uint) (locale string, username string, err error)
+}
+
+// docCardReader 文档卡片能力（由 doccard 服务注入）：
+// 发送路径用 ListDocCards 做关键字触发注入；平台工具 save/delete_doc_card 走读写方法。
+type docCardReader interface {
+	ListDocCards(ctx context.Context, userID uint) ([]appdoccard.CardView, error)
+	UpsertDocCard(ctx context.Context, userID uint, publicID string, input appdoccard.UpsertInput, updatedBy string) (*domaindoccard.DocCard, error)
+	DeleteDocCard(ctx context.Context, userID uint, publicID string) error
+}
+
 // userSettingsWriter 读写用户个人设置（白名单 key，由 usersettings 服务注入）。
 type userSettingsWriter interface {
 	ListSettings(ctx context.Context, userID uint) (map[string]string, error)
@@ -148,6 +165,10 @@ type Service struct {
 	reindexScheduler      *fileReindexScheduler      // write_file 延迟重建（debounce）
 	userSettingsSvc       userSettingsWriter         // 用户个人设置读写（平台工具 list/update_user_setting）
 	agentGroupWriter      agentGroupWriter           // Agent 群组创建/列表（平台工具 create/list_agent_group）
+	userProfile           userProfileReader          // 用户档案读取（模板变量 {{language}}/{{username}}）
+	artifactSvc           *appartifact.Service       // 制品保存/分享（平台工具 save/list/delete/share_artifact）
+	docCards              docCardReader              // 文档卡片读取（关键字触发注入）
+	docCardCache          sync.Map                   // userID (uint) → *cachedDocCards
 	llmClient         *llm.Client
 	mcpClient         *mcp.Client
 	uploadSvc         *appupload.Service
@@ -443,6 +464,28 @@ func (s *Service) SetUserSettingsService(writer userSettingsWriter) {
 // SetAgentGroupWriter 注入 Agent 群组创建/列表能力（平台工具 create_agent_group / list_agent_groups 使用）。
 func (s *Service) SetAgentGroupWriter(writer agentGroupWriter) {
 	s.agentGroupWriter = writer
+}
+
+// SetUserProfileReader 注入用户档案读取（系统提示词模板变量 {{language}}/{{username}}）。
+func (s *Service) SetUserProfileReader(reader userProfileReader) {
+	s.userProfile = reader
+}
+
+// SetArtifactService 注入制品服务（平台工具 save/list/delete/share_artifact 使用）。
+func (s *Service) SetArtifactService(svc *appartifact.Service) {
+	s.artifactSvc = svc
+}
+
+// SetDocCardReader 注入文档卡片读取（关键字触发注入）。
+func (s *Service) SetDocCardReader(reader docCardReader) {
+	s.docCards = reader
+}
+
+// InvalidateDocCardCache 清除用户文档卡片缓存（写入/删除后即时生效）。
+func (s *Service) InvalidateDocCardCache(userID uint) {
+	if userID != 0 {
+		s.docCardCache.Delete(userID)
+	}
 }
 
 // ResolvePlatformReindexDelay 读取平台工具文件重建缓冲窗口（秒），缺省 60。

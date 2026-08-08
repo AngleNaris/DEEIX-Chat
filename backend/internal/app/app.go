@@ -27,7 +27,9 @@ import (
 	apppromptpreset "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/promptpreset"
 	apprag "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/rag"
 	appruntime "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/runtime"
+	appartifact "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/artifact"
 	agentgroup "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/agentgroup"
+	appdoccard "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/doccard"
 	domainagentgroup "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/agentgroup"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/settings"
 	appskill "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/skill"
@@ -53,6 +55,8 @@ import (
 	mcprepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/mcp"
 	memoryrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/memory"
 	promptpresetrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/promptpreset"
+	artifactrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/artifact"
+	doccardrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/doccard"
 	settingsrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/settings"
 	skillrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/skill"
 	systemeventrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/systemevent"
@@ -70,6 +74,8 @@ import (
 	mcphttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/mcp"
 	memoryhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/memory"
 	promptpresethttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/promptpreset"
+	artifacthttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/artifact"
+	doccardhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/doccard"
 	settingshttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/settings"
 	skillhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/skill"
 	userhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/user"
@@ -85,6 +91,23 @@ import (
 // 转换平台工具输入结构（避免 conversation → agentgroup 的导入环）。
 type agentGroupWriterAdapter struct {
 	inner *agentgroup.Service
+}
+
+// userProfileReaderAdapter 把 user.Service 适配为 conversation.userProfileReader，
+// 供系统提示词模板变量 {{language}} / {{username}} 使用。
+type userProfileReaderAdapter struct {
+	inner *user.Service
+}
+
+func (a userProfileReaderAdapter) GetUserProfile(ctx context.Context, userID uint) (string, string, error) {
+	if a.inner == nil {
+		return "", "", nil
+	}
+	u, err := a.inner.GetByID(ctx, userID)
+	if err != nil {
+		return "", "", err
+	}
+	return u.Locale, u.Username, nil
 }
 
 func (a agentGroupWriterAdapter) CreateAgentGroup(ctx context.Context, userID uint, input conversation.AgentGroupCreateInput) (*domainagentgroup.Group, error) {
@@ -355,6 +378,7 @@ func NewApp() (*App, error) {
 	userSettingsRepo := usersettingsrepo.NewRepo(db)
 	userSettingsService := usersettings.NewService(userSettingsRepo)
 	conversationService.SetUserSettingsService(userSettingsService)
+	conversationService.SetUserProfileReader(userProfileReaderAdapter{inner: userService})
 	userSettingsHandler := usersettingshttp.NewHandler(userSettingsService)
 	userSettingsModule := usersettingshttp.NewModule(userSettingsHandler)
 	platformToolsHandler := platformtoolshttp.NewHandler(conversationService)
@@ -375,6 +399,17 @@ func NewApp() (*App, error) {
 	conversationService.SetSkillResolver(skillService)
 	skillHandler := skillhttp.NewHandler(skillService)
 	skillModule := skillhttp.NewModule(skillHandler)
+	artifactRepo := artifactrepo.NewRepo(db)
+	artifactService := appartifact.NewService(artifactRepo)
+	artifactHandler := artifacthttp.NewHandler(artifactService)
+	artifactModule := artifacthttp.NewModule(artifactHandler)
+	conversationService.SetArtifactService(artifactService)
+	docCardRepo := doccardrepo.NewRepo(db)
+	docCardService := appdoccard.NewService(docCardRepo)
+	docCardService.SetCacheInvalidator(conversationService.InvalidateDocCardCache)
+	docCardHandler := doccardhttp.NewHandler(docCardService)
+	docCardModule := doccardhttp.NewModule(docCardHandler)
+	conversationService.SetDocCardReader(docCardService)
 
 	hc := newHealthChecker(db, cfg.CacheDriver, redisClient)
 	rateLimiter := buildRateLimiter(cfg, redisClient, memoryCache)
@@ -394,6 +429,8 @@ func NewApp() (*App, error) {
 		Settings:     settingsModule,
 		UserSettings: userSettingsModule,
 		PlatformTools: platformToolsModule,
+		Artifact:     artifactModule,
+		DocCard:      docCardModule,
 		User:         userModule,
 		StartupLog: func(log *zap.Logger) {
 			if log == nil || bootstrapSuperAdmin == nil {

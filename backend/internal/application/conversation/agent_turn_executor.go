@@ -249,6 +249,7 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 	// 5. 提示词组装：SystemPrompt 只含项目级层，平台/模型级规则由 executor 注入。
 	routePromptInput := messageRoutePromptInput{
 		UserContent:             input.UserContent,
+		UserID:                  input.UserID,
 		AppendUserContent:       true,
 		ProjectSystemPrompt:     strings.TrimSpace(input.SystemPrompt),
 		HTMLVisualPromptEnabled: false,

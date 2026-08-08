@@ -213,7 +213,18 @@
     "memoryNamePlaceholder": "偏好名称（如：回复风格）",
     "memoryValuePlaceholder": "偏好内容（如：请用简洁的中文回复）",
     "savingPreference": "保存中…",
-    "savePreference": "保存偏好"
+    "savePreference": "保存偏好",
+    "saveArtifact": "保存为制品",
+    "saveArtifactTitle": "保存为制品",
+    "saveArtifactDescription": "把代码块保存为制品，并生成公开分享链接（任何人可通过链接查看）。",
+    "artifactSelect": "选择代码块",
+    "artifactTitleLabel": "名称",
+    "artifactSaveAndShare": "保存并分享",
+    "artifactSaving": "保存中",
+    "artifactSaved": "已保存，分享链接已生成",
+    "artifactSaveFailed": "保存失败",
+    "artifactLinkCopied": "链接已复制",
+    "artifactOpenLink": "打开分享页"
   },
   "loadError": {
     "title": "会话加载失败",

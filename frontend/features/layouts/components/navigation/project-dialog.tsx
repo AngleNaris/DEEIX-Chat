@@ -195,6 +195,7 @@ export function ProjectDialog({
                 }}
                 disabled={submitting}
               />
+              <p className="text-[11px] leading-relaxed text-muted-foreground">{t("systemPromptVarsHint")}</p>
             </div>
 
             <div className="space-y-3 border-t border-border/60 pt-4">

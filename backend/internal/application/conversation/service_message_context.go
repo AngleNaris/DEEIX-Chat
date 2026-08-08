@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	appdoccard "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/doccard"
 	appstorage "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/objectstorage"
 	domainconversation "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 	domainmemory "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/memory"
@@ -697,6 +698,7 @@ type userContextInput struct {
 	CurrentArtifacts    []domainconversation.ContextArtifact
 	Snapshot            *snapshotContext
 	Memory              []domainmemory.UserMemory
+	DocCards            []appdoccard.CardView
 	RecallChunks        []domainconversation.MessageChunk
 }
 
@@ -1075,6 +1077,7 @@ func formatAttachmentFileContext(fileName string, text string) string {
 type userContextXML struct {
 	summary  string
 	memory   []string
+	cards    string
 	files    []string
 	images   []string
 	evidence []string
@@ -1085,6 +1088,7 @@ type userContextXML struct {
 func (x userContextXML) empty() bool {
 	return strings.TrimSpace(x.summary) == "" &&
 		len(x.memory) == 0 &&
+		strings.TrimSpace(x.cards) == "" &&
 		len(x.files) == 0 &&
 		len(x.images) == 0 &&
 		len(x.evidence) == 0 &&
@@ -1094,8 +1098,9 @@ func (x userContextXML) empty() bool {
 
 func buildUserContextXML(input userContextInput) userContextXML {
 	return userContextXML{
-		summary:  formatSnapshotContext(input.Snapshot),
-		memory:   formatMemoryContext(input.Memory),
+		summary: formatSnapshotContext(input.Snapshot),
+		memory:  formatMemoryContext(input.Memory),
+		cards:   formatDocCardsContext(input.DocCards, docCardContentLimit),
 		images:   formatImageAnalysisContext(input.ImageAnalyses),
 		evidence: formatHistoricalEvidenceContext(input.HistoricalArtifacts),
 		rag:      formatRAGFileContext(input.RAGChunks),
@@ -1233,6 +1238,9 @@ func buildUserContextPrompt(userRequest string, contextXML userContextXML) strin
 		builder.WriteString("\n<mems>\n")
 		builder.WriteString(strings.Join(contextXML.memory, "\n"))
 		builder.WriteString("\n</mems>")
+	}
+	if strings.TrimSpace(contextXML.cards) != "" {
+		builder.WriteString(contextXML.cards)
 	}
 	if len(contextXML.files) > 0 {
 		builder.WriteString("\n<files>\n")

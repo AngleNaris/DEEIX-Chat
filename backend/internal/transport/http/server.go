@@ -17,10 +17,12 @@ import (
 	adminhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/admin"
 	agentgrouphttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/agentgroup"
 	announcementhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/announcement"
+	artifacthttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/artifact"
 	authhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/auth"
 	billinghttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/billing"
 	channelhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/channel"
 	conversationhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/conversation"
+	doccardhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/doccard"
 	mcphttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/mcp"
 	memoryhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/memory"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/middleware"
@@ -52,23 +54,25 @@ type HealthChecker interface {
 
 // Modules 聚合可注册的业务模块。
 type Modules struct {
-	Auth         *authhttp.Module
-	AuthService  middleware.SessionValidator
-	Channel      *channelhttp.Module
-	Conversation *conversationhttp.Module
-	AgentGroup   *agentgrouphttp.Module
-	MCP          *mcphttp.Module
-	Memory       *memoryhttp.Module
-	Billing      *billinghttp.Module
-	Admin        *adminhttp.Module
-	Announcement *announcementhttp.Module
-	PromptPreset *promptpresethttp.Module
-	Skill        *skillhttp.Module
-	Settings     *settingshttp.Module
-	User         *userhttp.Module
-	UserSettings *usersettingshttp.Module
+	Auth          *authhttp.Module
+	AuthService   middleware.SessionValidator
+	Channel       *channelhttp.Module
+	Conversation  *conversationhttp.Module
+	AgentGroup    *agentgrouphttp.Module
+	MCP           *mcphttp.Module
+	Memory        *memoryhttp.Module
+	Billing       *billinghttp.Module
+	Admin         *adminhttp.Module
+	Announcement  *announcementhttp.Module
+	PromptPreset  *promptpresethttp.Module
+	Skill         *skillhttp.Module
+	Settings      *settingshttp.Module
+	User          *userhttp.Module
+	UserSettings  *usersettingshttp.Module
 	PlatformTools *platformtoolshttp.Module
-	StartupLog   func(*zap.Logger)
+	Artifact      *artifacthttp.Module
+	DocCard       *doccardhttp.Module
+	StartupLog    func(*zap.Logger)
 }
 
 // NewEngine 创建并注册 API 路由。
@@ -128,6 +132,9 @@ func NewEngine(cfg *config.Runtime, log *zap.Logger, modules Modules, hc HealthC
 		if modules.Conversation != nil {
 			modules.Conversation.RegisterPublicRoutes(publicAuth)
 		}
+		if modules.Artifact != nil {
+			modules.Artifact.RegisterPublicRoutes(publicAuth)
+		}
 		if modules.Settings != nil {
 			modules.Settings.RegisterPublicRoutes(publicAuth)
 		}
@@ -175,6 +182,12 @@ func NewEngine(cfg *config.Runtime, log *zap.Logger, modules Modules, hc HealthC
 	}
 	if modules.PlatformTools != nil {
 		modules.PlatformTools.RegisterRoutes(authRequired)
+	}
+	if modules.Artifact != nil {
+		modules.Artifact.RegisterRoutes(authRequired)
+	}
+	if modules.DocCard != nil {
+		modules.DocCard.RegisterRoutes(authRequired)
 	}
 	if modules.Settings != nil {
 		modules.Settings.RegisterRoutes(authRequired)

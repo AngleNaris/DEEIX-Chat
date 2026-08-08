@@ -11,8 +11,8 @@ import (
 
 type messageRoutePromptInput struct {
 	UserContent string
-	// AppendUserContent 用于 DomainMessages 只包含历史消息的内部 Actor 回合；
-	// 普通消息路径的 DomainMessages 已包含当前用户消息，保持 false 避免重复。
+	// UserID 用于解析系统提示词模板变量（{{language}}/{{username}}）。
+	UserID                   uint
 	AppendUserContent        bool
 	ProjectSystemPrompt      string
 	HTMLVisualPromptEnabled  bool
@@ -71,7 +71,13 @@ func (s *Service) buildMessageRoutePrompt(ctx context.Context, route *channel.Re
 	}
 
 	assembler := NewContextAssembler(int64(input.Config.ContextMaxInputTokens))
-	systemPrompt := resolveMessageSystemPromptInjection(input.Config, route, input.ProjectSystemPrompt, input.HTMLVisualPromptEnabled)
+	systemPrompt := resolveMessageSystemPromptInjection(
+		input.Config,
+		route,
+		input.ProjectSystemPrompt,
+		input.HTMLVisualPromptEnabled,
+		s.resolveSystemPromptVars(ctx, input.UserID),
+	)
 	if systemPrompt.Content != "" {
 		if systemPrompt.InlineToUser {
 			historyMessages = inlineSystemPromptIntoLatestUserMessage(historyMessages, systemPrompt.Content)
