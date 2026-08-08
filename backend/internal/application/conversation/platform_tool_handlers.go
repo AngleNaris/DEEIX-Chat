@@ -223,7 +223,8 @@ func (s *Service) platformListSkills(ctx context.Context, call platformToolCallC
 	})
 }
 
-// platformListConversations 列出用户会话。
+// platformListConversations 列出用户会话（与用户搜索同一查询路径 SearchConversations，
+// 覆盖归档会话；关键词匹配标题/标签/模型/项目/消息正文）。
 func (s *Service) platformListConversations(ctx context.Context, call platformToolCallContext) (string, error) {
 	var args struct {
 		Query string `json:"query"`
@@ -235,7 +236,7 @@ func (s *Service) platformListConversations(ctx context.Context, call platformTo
 	if args.Page < 1 {
 		args.Page = 1
 	}
-	items, total, err := s.ListConversations(ctx, call.UserID, args.Page, platformListPageSize, "", "", "", "", args.Query)
+	items, hasMore, err := s.SearchConversations(ctx, call.UserID, args.Page, platformListPageSize, args.Query)
 	if err != nil {
 		return "", err
 	}
@@ -248,15 +249,15 @@ func (s *Service) platformListConversations(ctx context.Context, call platformTo
 	summary := make([]conversationSummary, 0, len(items))
 	for _, item := range items {
 		summary = append(summary, conversationSummary{
-			ID:        item.ID,
-			Title:     item.Title,
-			Status:    item.Status,
-			UpdatedAt: item.UpdatedAt.Format("2006-01-02 15:04:05"),
+			ID:        item.Conversation.ID,
+			Title:     item.Conversation.Title,
+			Status:    item.Conversation.Status,
+			UpdatedAt: item.Conversation.UpdatedAt.Format("2006-01-02 15:04:05"),
 		})
 	}
 	return marshalPlatformResult(map[string]interface{}{
-		"total": total,
-		"page":  args.Page,
+		"has_more": hasMore,
+		"page":     args.Page,
 		"conversations": summary,
 	})
 }
