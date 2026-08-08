@@ -195,6 +195,71 @@ func platformToolRegistry() map[string]platformToolEntry {
 			handler:     (*Service).platformUpdateSkill,
 			auditAction: "platform_tools.update_skill",
 		},
+		"delete_file": {
+			definition: llm.ToolDefinition{
+				Name: "delete_file",
+				Description: "Permanently delete one of the user's uploaded files and release its storage quota. " +
+					"Files still referenced by active conversations cannot be deleted. " +
+					"This is a WRITE operation: it may require user approval depending on the user's approval mode.",
+				InputSchema: json.RawMessage(`{
+					"type":"object","properties":{
+						"file_id":{"type":"string","description":"file_id from list_files"}
+					},"required":["file_id"]
+				}`),
+			},
+			kind:        platformToolWrite,
+			handler:     (*Service).platformDeleteFile,
+			auditAction: "platform_tools.delete_file",
+		},
+		"list_user_settings": {
+			definition: llm.ToolDefinition{
+				Name: "list_user_settings",
+				Description: "List the user's personal settings (default model, file mode, input behavior, write approval mode, etc.). " +
+					"Read-only; use update_user_setting to change a value.",
+				InputSchema: json.RawMessage(`{
+					"type":"object","properties":{},"required":[]
+				}`),
+			},
+			kind:    platformToolRead,
+			handler: (*Service).platformListUserSettings,
+		},
+		"update_user_setting": {
+			definition: llm.ToolDefinition{
+				Name: "update_user_setting",
+				Description: "Update one of the user's personal settings by key, e.g. chat.file_mode (auto|full_context|rag), " +
+					"chat.default_model, chat.default_mcp_tool_ids, chat.send_on_enter, platform_tools.write_approval (auto|ask), etc. " +
+					"Invalid keys are rejected. This is a WRITE operation: it may require user approval.",
+				InputSchema: json.RawMessage(`{
+					"type":"object","properties":{
+						"key":{"type":"string","description":"Setting key from list_user_settings"},
+						"value":{"type":"string","description":"New value"}
+					},"required":["key","value"]
+				}`),
+			},
+			kind:        platformToolWrite,
+			handler:     (*Service).platformUpdateUserSetting,
+			auditAction: "platform_tools.update_user_setting",
+		},
+		"update_conversation": {
+			definition: llm.ToolDefinition{
+				Name: "update_conversation",
+				Description: "Update one of the user's conversations: title, starred, archived, or labels. " +
+					"Use list_conversations / read_conversation first to find the conversation_id. " +
+					"This is a WRITE operation: it may require user approval.",
+				InputSchema: json.RawMessage(`{
+					"type":"object","properties":{
+						"conversation_id":{"type":"integer","description":"Numeric conversation id from list_conversations"},
+						"title":{"type":"string","description":"New conversation title"},
+						"starred":{"type":"boolean","description":"Mark / unmark as starred"},
+						"archived":{"type":"boolean","description":"Archive / unarchive the conversation"},
+						"labels":{"type":"array","items":{"type":"string"},"description":"Replace the conversation labels"}
+					},"required":["conversation_id"]
+				}`),
+			},
+			kind:        platformToolWrite,
+			handler:     (*Service).platformUpdateConversation,
+			auditAction: "platform_tools.update_conversation",
+		},
 	}
 }
 

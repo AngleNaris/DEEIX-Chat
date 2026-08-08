@@ -249,3 +249,14 @@ func llmToolDefinition(name, description string) llm.ToolDefinition {
 func skillPatchInput() skill.PatchInput {
 	return skill.PatchInput{}
 }
+
+func TestPlatformUpdateUserSettingRequiresService(t *testing.T) {
+	svc := newTestServiceWithPlatformSettings(nil)
+	output, err := svc.platformUpdateUserSetting(context.Background(), platformToolCallContext{
+		UserID:    1,
+		Arguments: json.RawMessage(`{"key":"chat.file_mode","value":"rag"}`),
+	})
+	if err == nil {
+		t.Fatalf("expected error when user settings service is unavailable, got %q", output)
+	}
+}

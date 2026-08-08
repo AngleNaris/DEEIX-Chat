@@ -313,6 +313,7 @@ func NewApp() (*App, error) {
 	adminModule := adminhttp.NewModule(adminHandler)
 	userSettingsRepo := usersettingsrepo.NewRepo(db)
 	userSettingsService := usersettings.NewService(userSettingsRepo)
+	conversationService.SetUserSettingsService(userSettingsService)
 	userSettingsHandler := usersettingshttp.NewHandler(userSettingsService)
 	userSettingsModule := usersettingshttp.NewModule(userSettingsHandler)
 	platformToolsHandler := platformtoolshttp.NewHandler(conversationService)

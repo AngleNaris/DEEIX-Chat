@@ -161,6 +161,139 @@ func patchHasAnyField(patch skill.PatchInput) bool {
 	return patch.Title != nil || patch.Trigger != nil || patch.Description != nil || patch.Markdown != nil || patch.Enabled != nil || patch.SortOrder != nil
 }
 
+// platformDeleteFile 永久删除用户文件（写操作，受批准模式管控）。
+func (s *Service) platformDeleteFile(ctx context.Context, call platformToolCallContext) (string, error) {
+	var args struct {
+		FileID string `json:"file_id"`
+	}
+	if err := decodePlatformArgs(call.Arguments, &args); err != nil {
+		return "", err
+	}
+	fileID := strings.TrimSpace(args.FileID)
+	if fileID == "" {
+		return "", fmt.Errorf("file_id is required")
+	}
+	if s.uploadSvc == nil {
+		return "", fmt.Errorf("file service is unavailable")
+	}
+	result, err := s.uploadSvc.DeleteFile(ctx, call.UserID, fileID)
+	if err != nil {
+		return "", err
+	}
+	s.recordPlatformAudit(ctx, callCtx{userID: call.UserID, requestID: call.RequestID}, "platform_tools.delete_file", fileID, map[string]interface{}{
+		"deleted": result.Deleted,
+	})
+	return marshalPlatformResult(map[string]interface{}{
+		"file_id": fileID,
+		"deleted": result.Deleted,
+		"note":    "file permanently deleted and storage quota released",
+	})
+}
+
+// platformListUserSettings 列出用户个人设置（只读）。
+func (s *Service) platformListUserSettings(ctx context.Context, call platformToolCallContext) (string, error) {
+	if s.userSettingsSvc == nil {
+		return "", fmt.Errorf("user settings service is unavailable")
+	}
+	settings, err := s.userSettingsSvc.ListSettings(ctx, call.UserID)
+	if err != nil {
+		return "", err
+	}
+	return marshalPlatformResult(map[string]interface{}{
+		"settings": settings,
+	})
+}
+
+// platformUpdateUserSetting 更新用户个人设置（白名单 key，写操作受批准模式管控）。
+func (s *Service) platformUpdateUserSetting(ctx context.Context, call platformToolCallContext) (string, error) {
+	var args struct {
+		Key   string `json:"key"`
+		Value string `json:"value"`
+	}
+	if err := decodePlatformArgs(call.Arguments, &args); err != nil {
+		return "", err
+	}
+	key := strings.TrimSpace(args.Key)
+	if key == "" {
+		return "", fmt.Errorf("key is required")
+	}
+	if s.userSettingsSvc == nil {
+		return "", fmt.Errorf("user settings service is unavailable")
+	}
+	updated, err := s.userSettingsSvc.PatchSettings(ctx, call.UserID, map[string]string{key: args.Value})
+	if err != nil {
+		return "", err
+	}
+	s.recordPlatformAudit(ctx, callCtx{userID: call.UserID, requestID: call.RequestID}, "platform_tools.update_user_setting", key, map[string]interface{}{
+		"value": args.Value,
+	})
+	return marshalPlatformResult(map[string]interface{}{
+		"key":     key,
+		"value":   updated[key],
+		"updated": true,
+	})
+}
+
+// platformUpdateConversation 更新用户会话（标题/星标/归档/标签；写操作受批准模式管控）。
+// conversation_id 为数字 id，内部统一转 publicID 走既有应用层方法。
+func (s *Service) platformUpdateConversation(ctx context.Context, call platformToolCallContext) (string, error) {
+	var args struct {
+		ConversationID uint     `json:"conversation_id"`
+		Title          string   `json:"title"`
+		Starred        *bool    `json:"starred"`
+		Archived       *bool    `json:"archived"`
+		Labels         []string `json:"labels"`
+	}
+	if err := decodePlatformArgs(call.Arguments, &args); err != nil {
+		return "", err
+	}
+	if args.ConversationID == 0 {
+		return "", fmt.Errorf("conversation_id is required")
+	}
+	conversation, err := s.GetConversation(ctx, call.UserID, args.ConversationID)
+	if err != nil {
+		return "", err
+	}
+	publicID := conversation.PublicID
+	updated := conversation
+	if strings.TrimSpace(args.Title) != "" {
+		updated, err = s.RenameConversation(ctx, call.UserID, publicID, args.Title)
+		if err != nil {
+			return "", err
+		}
+	}
+	if args.Starred != nil {
+		updated, err = s.SetConversationStar(ctx, call.UserID, publicID, *args.Starred)
+		if err != nil {
+			return "", err
+		}
+	}
+	if args.Archived != nil {
+		updated, err = s.SetConversationArchived(ctx, call.UserID, publicID, *args.Archived)
+		if err != nil {
+			return "", err
+		}
+	}
+	if args.Labels != nil {
+		updated, err = s.UpdateConversationLabels(ctx, call.UserID, publicID, args.Labels)
+		if err != nil {
+			return "", err
+		}
+	}
+	s.recordPlatformAudit(ctx, callCtx{userID: call.UserID, requestID: call.RequestID}, "platform_tools.update_conversation", fmt.Sprintf("%d", args.ConversationID), map[string]interface{}{
+		"title":    updated.Title,
+		"starred":  updated.IsStarred,
+		"archived": updated.Status == "archived",
+	})
+	return marshalPlatformResult(map[string]interface{}{
+		"conversation_id": args.ConversationID,
+		"title":           updated.Title,
+		"starred":         updated.IsStarred,
+		"archived":        updated.Status == "archived",
+		"updated":         true,
+	})
+}
+
 // isPlatformWritableFile 判断文件是否可被平台工具写入（仅文本类）。
 func isPlatformWritableFile(category string) bool {
 	return strings.EqualFold(strings.TrimSpace(category), "text")

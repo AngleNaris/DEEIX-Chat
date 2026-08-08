@@ -85,6 +85,12 @@ type agentGroupSettingsReader interface {
 	RuntimeValuesByNamespace(ctx context.Context, namespace string) (map[string]string, error)
 }
 
+// userSettingsWriter 读写用户个人设置（白名单 key，由 usersettings 服务注入）。
+type userSettingsWriter interface {
+	ListSettings(ctx context.Context, userID uint) (map[string]string, error)
+	PatchSettings(ctx context.Context, userID uint, patches map[string]string) (map[string]string, error)
+}
+
 type auditWriter interface {
 	Write(ctx context.Context, requestID string, actorUserID uint, action string, resource string, resourceID string, ip string, userAgent string, detail interface{})
 }
@@ -111,6 +117,7 @@ type Service struct {
 	platformToolsSettings agentGroupSettingsReader // platform_tools 运行时设置
 	platformApprovals     *platformWriteApprovalStore // ask 模式待批准写操作
 	reindexScheduler      *fileReindexScheduler      // write_file 延迟重建（debounce）
+	userSettingsSvc       userSettingsWriter         // 用户个人设置读写（平台工具 list/update_user_setting）
 	llmClient         *llm.Client
 	mcpClient         *mcp.Client
 	uploadSvc         *appupload.Service
@@ -396,6 +403,11 @@ func (s *Service) SetAgentGroupSettings(reader agentGroupSettingsReader) {
 // SetPlatformToolsSettings 注入 platform_tools 运行时设置读取器（enabled/write_enabled/延迟秒数）。
 func (s *Service) SetPlatformToolsSettings(reader agentGroupSettingsReader) {
 	s.platformToolsSettings = reader
+}
+
+// SetUserSettingsService 注入用户个人设置读写服务（平台工具 list_user_settings / update_user_setting 使用）。
+func (s *Service) SetUserSettingsService(writer userSettingsWriter) {
+	s.userSettingsSvc = writer
 }
 
 // ResolvePlatformReindexDelay 读取平台工具文件重建缓冲窗口（秒），缺省 60。
