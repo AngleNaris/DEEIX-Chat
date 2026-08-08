@@ -1,0 +1,35 @@
+{
+  "pageTitle": "平台 Agent 工具设置",
+  "feature": {
+    "title": "功能开关",
+    "description": "平台 Agent 工具让会话中的模型可以读取用户文件/技能/会话历史并编辑用户数据。全新部署默认关闭，读工具与写工具分别控制。"
+  },
+  "runtime": {
+    "title": "运行参数",
+    "description": "写操作与文件重建相关的参数。"
+  },
+  "fields": {
+    "enabled": {
+      "label": "启用平台 Agent 工具",
+      "description": "开启后模型可获得只读工具（list_files / read_file / read_skill_file / list_skills / list_conversations / read_conversation）。"
+    },
+    "writeEnabled": {
+      "label": "启用写操作",
+      "description": "开启后模型可调用写工具（write_file / update_skill）；实际执行还受每个用户的「写操作批准模式」管控（自动 / 询问用户）。"
+    },
+    "fileReindexDelaySeconds": {
+      "label": "文件重建缓冲（秒）",
+      "description": "文件内容被修改后延迟重建提取/RAG 的缓冲秒数。缓冲期内多次修改会合并为一次重建，避免频繁修改反复触发。"
+    }
+  },
+  "actions": {
+    "save": "保存更改"
+  },
+  "toast": {
+    "loadFailed": "加载平台 Agent 工具设置失败",
+    "saveFailed": "保存平台 Agent 工具设置失败",
+    "updated": "平台 Agent 工具设置已保存",
+    "sessionExpired": "登录已过期",
+    "signInAgain": "请重新登录"
+  }
+}

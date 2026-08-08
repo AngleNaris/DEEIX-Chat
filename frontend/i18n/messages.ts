@@ -1,4 +1,5 @@
 import enAdminAgentGroups from "@/i18n/messages/en-US/admin-agent-groups.json";
+import enAdminPlatformTools from "@/i18n/messages/en-US/admin-platform-tools.json";
 import enAdminAnnouncements from "@/i18n/messages/en-US/admin-announcements.json";
 import enAdminBilling from "@/i18n/messages/en-US/admin-billing.json";
 import enAdminConversation from "@/i18n/messages/en-US/admin-conversation.json";
@@ -41,6 +42,7 @@ const ENGLISH_MESSAGES = {
   files: enFiles,
   settings: enSettings,
   adminAgentGroups: enAdminAgentGroups,
+  adminPlatformTools: enAdminPlatformTools,
   adminAnnouncements: enAdminAnnouncements,
   adminBilling: enAdminBilling,
   adminConversation: enAdminConversation,
@@ -124,6 +126,7 @@ export async function loadLocaleMessages(locale: AppLocale): Promise<AppMessages
     files,
     settings,
     adminAgentGroups,
+    adminPlatformTools,
     adminAnnouncements,
     adminBilling,
     adminConversation,
@@ -151,6 +154,7 @@ export async function loadLocaleMessages(locale: AppLocale): Promise<AppMessages
     import("@/i18n/messages/zh-CN/files.json"),
     import("@/i18n/messages/zh-CN/settings.json"),
     import("@/i18n/messages/zh-CN/admin-agent-groups.json"),
+    import("@/i18n/messages/zh-CN/admin-platform-tools.json"),
     import("@/i18n/messages/zh-CN/admin-announcements.json"),
     import("@/i18n/messages/zh-CN/admin-billing.json"),
     import("@/i18n/messages/zh-CN/admin-conversation.json"),
@@ -180,6 +184,7 @@ export async function loadLocaleMessages(locale: AppLocale): Promise<AppMessages
     files: files.default,
     settings: settings.default,
     adminAgentGroups: adminAgentGroups.default,
+    adminPlatformTools: adminPlatformTools.default,
     adminAnnouncements: adminAnnouncements.default,
     adminBilling: adminBilling.default,
     adminConversation: adminConversation.default,

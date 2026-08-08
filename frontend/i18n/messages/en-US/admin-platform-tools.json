@@ -1,0 +1,35 @@
+{
+  "pageTitle": "Platform agent tools settings",
+  "feature": {
+    "title": "Feature toggles",
+    "description": "Platform agent tools let models in conversations read the user's files/skills/conversation history and edit user data. Disabled by default on fresh installs; read tools and write tools are controlled separately."
+  },
+  "runtime": {
+    "title": "Runtime parameters",
+    "description": "Parameters for write operations and file re-processing."
+  },
+  "fields": {
+    "enabled": {
+      "label": "Enable platform agent tools",
+      "description": "Exposes read-only tools to the model: list_files / read_file / read_skill_file / list_skills / list_conversations / read_conversation."
+    },
+    "writeEnabled": {
+      "label": "Enable write operations",
+      "description": "Exposes write tools (write_file / update_skill). Actual execution is also gated by each user's write approval mode (auto / ask)."
+    },
+    "fileReindexDelaySeconds": {
+      "label": "Re-index buffer (seconds)",
+      "description": "Delay before text extraction / RAG rebuild after a file is modified. Rapid successive modifications are merged into a single rebuild."
+    }
+  },
+  "actions": {
+    "save": "Save changes"
+  },
+  "toast": {
+    "loadFailed": "Failed to load platform agent tools settings",
+    "saveFailed": "Failed to save platform agent tools settings",
+    "updated": "Platform agent tools settings saved",
+    "sessionExpired": "Session expired",
+    "signInAgain": "Please sign in again"
+  }
+}
