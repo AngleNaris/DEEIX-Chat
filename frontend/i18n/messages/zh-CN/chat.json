@@ -187,7 +187,10 @@
     "linkCopied": "链接已复制",
     "openLink": "打开分享链接",
     "authTokenMissing": "登录状态已失效，请重新登录",
-    "cancel": "取消"
+    "cancel": "取消",
+    "previewWidth": "预览宽度",
+    "previewWidthFull": "全宽",
+    "previewWidthFixed": "固定宽度"
   },
   "messages": {
     "debugRequest": "请求",

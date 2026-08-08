@@ -57,11 +57,12 @@ type ShareView struct {
 	CreatedAt     string `json:"created_at"`
 }
 
-// ArtifactView 制品视图（列表用，不含完整代码）。
+// ArtifactView 制品视图（列表用，含完整代码用于前端缩略图渲染）。
 type ArtifactView struct {
 	ArtifactPublicID string     `json:"artifact_id"`
 	Kind             string     `json:"kind"`
 	Title            string     `json:"title"`
+	Code             string     `json:"code"`
 	ConversationID   uint       `json:"conversation_id"`
 	MessageID        uint       `json:"message_id"`
 	Share            *ShareView `json:"share,omitempty"`
@@ -172,6 +173,7 @@ func (s *Service) ListArtifacts(ctx context.Context, userID uint, page int, page
 			ArtifactPublicID: item.ArtifactPublicID,
 			Kind:             item.Kind,
 			Title:            item.Title,
+			Code:             item.Code,
 			ConversationID:   item.ConversationID,
 			MessageID:        item.MessageID,
 			CreatedAt:        item.CreatedAt.Format("2006-01-02 15:04:05"),

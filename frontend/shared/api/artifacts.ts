@@ -15,6 +15,7 @@ export type ArtifactListItemDTO = {
   artifact_id: string;
   kind: ArtifactKind;
   title: string;
+  code: string;
   conversation_id: number;
   message_id: number;
   share?: ArtifactShareDTO | null;
@@ -106,6 +107,19 @@ export async function getSharedArtifact(shareId: string): Promise<PublicSharedAr
   });
 }
 
-export function artifactShareUrl(shareId: string): string {
-  return `/share/artifact?artifact_id=${encodeURIComponent(shareId)}`;
+// ArtifactPreviewWidth 制品分享/预览的宽度模式：全宽或固定宽度居中。
+export type ArtifactPreviewWidth = "full" | "fixed";
+
+/**
+ * artifactShareUrl 生成制品分享链接（绝对 URL，含域名）。
+ * previewWidth 可选：分享页打开时的默认预览宽度（full=全宽 / fixed=固定宽度居中）。
+ * SSR 环境（window 不可用）退回相对路径。
+ */
+export function artifactShareUrl(shareId: string, previewWidth?: ArtifactPreviewWidth): string {
+  const path = `/share/artifact?artifact_id=${encodeURIComponent(shareId)}`;
+  const query = previewWidth ? `${path}&preview_width=${encodeURIComponent(previewWidth)}` : path;
+  if (typeof window === "undefined") {
+    return query;
+  }
+  return `${window.location.origin}${query}`;
 }

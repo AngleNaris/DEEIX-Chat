@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
-import { ExternalLink, Pencil, Plus, Share2, ShieldX, Trash2 } from "lucide-react";
+import { ExternalLink, FileCode2, Pencil, Plus, Share2, ShieldX, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,7 +19,9 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { CopyActionButton } from "@/shared/components/copy-action";
+import { ArtifactShareLink } from "@/shared/components/artifact-share-link";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 import { useLocalizedErrorMessage } from "@/i18n/use-localized-error";
 import {
@@ -29,6 +31,7 @@ import {
   revokeArtifactShare,
   artifactShareUrl,
   type ArtifactListItemDTO,
+  type ArtifactShareDTO,
 } from "@/shared/api/artifacts";
 import {
   createDocCard,
@@ -430,7 +433,7 @@ export function DocCardSection() {
 }
 
 /**
- * ArtifactsSection 已保存制品（AI 生成的 HTML/JS 等）：查看/分享/撤销分享/删除。
+ * ArtifactsSection 已保存制品（AI 生成的 HTML/JS 等）：缩略图预览/分享/撤销分享/删除。
  */
 export function ArtifactsSection() {
   const t = useTranslations("settings.chatPage.artifacts");
@@ -438,6 +441,7 @@ export function ArtifactsSection() {
   const [items, setItems] = React.useState<ArtifactListItemDTO[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [busy, setBusy] = React.useState<string | null>(null);
+  const [shareDialog, setShareDialog] = React.useState<ArtifactListItemDTO | null>(null);
 
   const load = React.useCallback(async () => {
     try {
@@ -466,10 +470,17 @@ export function ArtifactsSection() {
       const token = await resolveAccessToken();
       if (!token) return;
       const share = await createArtifactShare(token, item.artifact_id);
-      setItems((prev) => prev.map((entry) => entry.artifact_id === item.artifact_id
-        ? { ...entry, share: { share_id: share.share_id, status: "active", title_snapshot: share.title_snapshot, created_at: share.created_at } }
-        : entry));
-      toast.success(t("shared"), { description: artifactShareUrl(share.share_id) });
+      const updated: ArtifactListItemDTO = {
+        ...item,
+        share: {
+          share_id: share.share_id,
+          status: "active",
+          title_snapshot: share.title_snapshot,
+          created_at: share.created_at,
+        },
+      };
+      setItems((prev) => prev.map((entry) => entry.artifact_id === item.artifact_id ? updated : entry));
+      setShareDialog(updated);
     } catch (error) {
       toast.error(t("shareFailed"), { description: resolveErrorMessage(error) });
     } finally {
@@ -509,91 +520,147 @@ export function ArtifactsSection() {
     }
   };
 
+  const shareLink = (item: ArtifactListItemDTO): string | null => {
+    if (!item.share) return null;
+    return artifactShareUrl(item.share.share_id);
+  };
+
   return (
     <SettingsSection title={t("sectionTitle")}>
       <div className="space-y-2">
         {loading ? (
-          <div className="space-y-1">
-            <Skeleton className="h-9 w-full rounded-md" />
-            <Skeleton className="h-9 w-4/5 rounded-md" />
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {[0, 1, 2].map((i) => (
+              <Skeleton key={i} className="h-48 w-full rounded-lg" />
+            ))}
           </div>
         ) : items.length === 0 ? (
           <div className="flex h-9 items-center rounded-md bg-muted/30 px-2.5">
             <p className="text-xs text-muted-foreground">{t("empty")}</p>
           </div>
         ) : (
-          <div className="space-y-1">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             {items.map((item) => (
-              <div key={item.artifact_id} className="group flex min-h-9 items-center gap-2 rounded-md px-2 py-1.5 transition-colors hover:bg-muted/40">
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-xs leading-5">
-                    <span className="mr-1 inline-block rounded-sm bg-muted/70 px-1 py-px align-baseline text-[10px] font-medium uppercase text-muted-foreground">
-                      {item.kind}
-                    </span>
-                    <span className="font-medium text-foreground/80">{item.title}</span>
-                    <span className="text-muted-foreground">{t("separator")}{item.updated_at}</span>
-                  </p>
-                  {item.share && (
-                    <div className="mt-0.5 flex items-center gap-1.5">
-                      <span className="truncate text-[11px] text-emerald-600/80 dark:text-emerald-400/80">
-                        {artifactShareUrl(item.share.share_id)}
-                      </span>
-                      <CopyActionButton
-                        value={artifactShareUrl(item.share.share_id)}
-                        messages={{ copied: t("linkCopied"), failed: t("copyFailed") }}
-                        iconClassName="size-3"
-                      />
+              <div
+                key={item.artifact_id}
+                className="group flex flex-col gap-2 rounded-lg border border-border/55 bg-card p-3 transition-colors hover:border-border"
+              >
+                <div className="h-28 shrink-0 overflow-hidden rounded-md border border-border/40 bg-muted/20">
+                  {item.kind === "html" && item.code ? (
+                    <iframe
+                      title={item.title}
+                      sandbox="allow-scripts"
+                      srcDoc={item.code}
+                      className="pointer-events-none h-28 w-full bg-background"
+                    />
+                  ) : (
+                    <div className="flex h-full items-center justify-center gap-1.5 text-muted-foreground">
+                      <FileCode2 className="size-4" />
+                      <span className="text-[10px] font-medium uppercase">{item.kind}</span>
                     </div>
                   )}
                 </div>
-                <div className="flex shrink-0 gap-0.5 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100">
+                <div className="flex items-start justify-between gap-2">
+                  <p className="min-w-0 flex-1 truncate text-sm font-medium text-foreground/90">{item.title}</p>
+                  <span className="shrink-0 text-[10px] text-muted-foreground">{item.updated_at}</span>
+                </div>
+                {item.share ? (
+                  <div className="flex items-center gap-1.5">
+                    <span className="min-w-0 flex-1 truncate text-[11px] text-emerald-600/80 dark:text-emerald-400/80">
+                      {shareLink(item)}
+                    </span>
+                    <CopyActionButton
+                      value={shareLink(item) ?? ""}
+                      messages={{ copied: t("linkCopied"), failed: t("copyFailed") }}
+                      iconClassName="size-3"
+                    />
+                  </div>
+                ) : null}
+                <div className="flex items-center justify-end gap-0.5 border-t border-border/40 pt-2">
                   {item.share ? (
                     <>
-                      <a
-                        href={artifactShareUrl(item.share.share_id)}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                        aria-label={t("openLink")}
-                      >
-                        <ExternalLink className="h-3 w-3" />
-                      </a>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <a
+                            href={shareLink(item) ?? ""}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                            aria-label={t("openLink")}
+                          >
+                            <ExternalLink className="h-3 w-3" />
+                          </a>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom">{t("openLink")}</TooltipContent>
+                      </Tooltip>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            type="button"
+                            className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-destructive"
+                            onClick={() => void revoke(item)}
+                            disabled={busy === item.artifact_id}
+                            aria-label={t("revokeShare")}
+                          >
+                            <ShieldX className="h-3 w-3" />
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom">{t("revokeShare")}</TooltipContent>
+                      </Tooltip>
+                    </>
+                  ) : (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                          onClick={() => void share(item)}
+                          disabled={busy === item.artifact_id}
+                          aria-label={t("share")}
+                        >
+                          <Share2 className="h-3 w-3" />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom">{t("share")}</TooltipContent>
+                    </Tooltip>
+                  )}
+                  <Tooltip>
+                    <TooltipTrigger asChild>
                       <button
                         type="button"
                         className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-destructive"
-                        onClick={() => void revoke(item)}
+                        onClick={() => void remove(item)}
                         disabled={busy === item.artifact_id}
-                        aria-label={t("revokeShare")}
+                        aria-label={t("delete")}
                       >
-                        <ShieldX className="h-3 w-3" />
+                        <Trash2 className="h-3 w-3" />
                       </button>
-                    </>
-                  ) : (
-                    <button
-                      type="button"
-                      className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                      onClick={() => void share(item)}
-                      disabled={busy === item.artifact_id}
-                      aria-label={t("share")}
-                    >
-                      <Share2 className="h-3 w-3" />
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-destructive"
-                    onClick={() => void remove(item)}
-                    disabled={busy === item.artifact_id}
-                    aria-label={t("delete")}
-                  >
-                    <Trash2 className="h-3 w-3" />
-                  </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">{t("delete")}</TooltipContent>
+                  </Tooltip>
                 </div>
               </div>
             ))}
           </div>
         )}
       </div>
+
+      <Dialog open={Boolean(shareDialog)} onOpenChange={(next) => { if (!next) setShareDialog(null); }}>
+        <DialogContent className="sm:max-w-[460px]">
+          <div className="space-y-4">
+            <DialogHeader>
+              <DialogTitle>{t("shareTitle")}</DialogTitle>
+              <DialogDescription>{t("shareDescription")}</DialogDescription>
+            </DialogHeader>
+            <ArtifactShareLink share={shareDialog?.share ?? null} />
+            <DialogFooter>
+              <Button type="button" variant="ghost" onClick={() => setShareDialog(null)}>
+                {t("close")}
+              </Button>
+            </DialogFooter>
+          </div>
+        </DialogContent>
+      </Dialog>
     </SettingsSection>
   );
 }

@@ -41,9 +41,10 @@ func (s *Service) platformSaveArtifact(ctx context.Context, call platformToolCal
 		return "", fmt.Errorf("artifact service is unavailable")
 	}
 	input := appartifact.CreateInput{
-		Title: title,
-		Kind:  strings.ToLower(strings.TrimSpace(args.Kind)),
-		Code:  code,
+		Title:          title,
+		Kind:           strings.ToLower(strings.TrimSpace(args.Kind)),
+		Code:           code,
+		ConversationID: call.ConversationID,
 	}
 	var savedID string
 	var err error
@@ -170,7 +171,19 @@ func (s *Service) platformShareArtifact(ctx context.Context, call platformToolCa
 	return marshalPlatformResult(map[string]interface{}{
 		"artifact_id": artifactID,
 		"share_id":    share.ShareID,
-		"share_url":   "/share/artifact?artifact_id=" + share.ShareID,
+		"share_url":   s.absoluteArtifactShareURL(share.ShareID),
 		"note":        "anyone with the share link can view this artifact",
 	})
+}
+
+// absoluteArtifactShareURL 拼接制品分享绝对链接（配置了公开域名时），否则退回相对路径。
+func (s *Service) absoluteArtifactShareURL(shareID string) string {
+	if s == nil || s.cfg == nil {
+		return "/share/artifact?artifact_id=" + shareID
+	}
+	base := strings.TrimRight(strings.TrimSpace(s.cfg.Snapshot().PublicWebBaseURL), "/")
+	if base == "" {
+		return "/share/artifact?artifact_id=" + shareID
+	}
+	return base + "/share/artifact?artifact_id=" + shareID
 }

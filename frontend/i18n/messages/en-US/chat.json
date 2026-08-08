@@ -187,7 +187,10 @@
     "linkCopied": "Link copied",
     "openLink": "Open share link",
     "authTokenMissing": "Your session has expired, please sign in again",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "previewWidth": "Preview width",
+    "previewWidthFull": "Full width",
+    "previewWidthFixed": "Fixed width"
   },
   "messages": {
     "debugRequest": "Request",

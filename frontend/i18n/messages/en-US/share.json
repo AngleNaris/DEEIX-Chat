@@ -10,6 +10,9 @@
   "artifact": {
     "notFound": "This share does not exist or was revoked.",
     "preview": "Preview",
-    "source": "Source"
+    "source": "Source",
+    "previewWidth": "Preview width",
+    "previewWidthFull": "Full width",
+    "previewWidthFixed": "Fixed width"
   }
 }

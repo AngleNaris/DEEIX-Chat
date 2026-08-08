@@ -523,7 +523,10 @@
       "copyFailed": "Failed to copy",
       "deleted": "Deleted",
       "deleteFailed": "Failed to delete",
-      "delete": "Delete artifact"
+      "delete": "Delete artifact",
+      "shareTitle": "Share artifact",
+      "shareDescription": "Anyone with the link can view this artifact; the preview width is the default when opening the shared page.",
+      "close": "Close"
     },
     "dynamicPrompts": {
       "sectionTitle": "Dynamic prompts",

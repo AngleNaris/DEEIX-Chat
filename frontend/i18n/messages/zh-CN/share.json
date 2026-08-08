@@ -10,6 +10,9 @@
   "artifact": {
     "notFound": "分享不存在或已被撤销。",
     "preview": "预览",
-    "source": "源码"
+    "source": "源码",
+    "previewWidth": "预览宽度",
+    "previewWidthFull": "全宽",
+    "previewWidthFixed": "固定宽度"
   }
 }

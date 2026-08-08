@@ -523,7 +523,10 @@
       "copyFailed": "复制失败",
       "deleted": "已删除",
       "deleteFailed": "删除失败",
-      "delete": "删除制品"
+      "delete": "删除制品",
+      "shareTitle": "分享制品",
+      "shareDescription": "任何人拿到链接即可查看该制品；预览宽度为打开分享页时的默认设置。",
+      "close": "关闭"
     },
     "dynamicPrompts": {
       "sectionTitle": "动态提示词",

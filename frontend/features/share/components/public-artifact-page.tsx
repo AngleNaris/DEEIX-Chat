@@ -3,14 +3,18 @@
 import * as React from "react";
 import { useTranslations } from "next-intl";
 import { useSearchParams } from "next/navigation";
-import { FileCode2, Loader2 } from "lucide-react";
+import { FileCode2, Loader2, Maximize2, Minimize2 } from "lucide-react";
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { getSharedArtifact, type PublicSharedArtifactDTO } from "@/shared/api/artifacts";
+
+type PreviewWidth = "full" | "fixed";
 
 /**
  * PublicArtifactPage 公开制品分享页（免登录）：HTML 制品用 sandbox iframe 渲染，
- * JS/CSS/文本展示源码。
+ * JS/CSS/文本展示源码。预览宽度支持全宽/固定宽度居中切换，
+ * 初始宽度取分享链接中的 preview_width 参数（分享者设置的默认）。
  */
 export function PublicArtifactPage() {
   const t = useTranslations("share.artifact");
@@ -19,6 +23,9 @@ export function PublicArtifactPage() {
   const [data, setData] = React.useState<PublicSharedArtifactDTO | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [notFound, setNotFound] = React.useState(false);
+  const [previewWidth, setPreviewWidth] = React.useState<PreviewWidth>(() =>
+    searchParams.get("preview_width") === "fixed" ? "fixed" : "full",
+  );
 
   React.useEffect(() => {
     if (!shareId) {
@@ -72,16 +79,41 @@ export function PublicArtifactPage() {
 
       {data.kind === "html" ? (
         <Tabs defaultValue="preview" className="flex min-h-0 flex-1 flex-col">
-          <TabsList className="w-fit">
-            <TabsTrigger value="preview">{t("preview")}</TabsTrigger>
-            <TabsTrigger value="source">{t("source")}</TabsTrigger>
-          </TabsList>
+          <div className="flex items-center justify-between gap-2">
+            <TabsList className="w-fit">
+              <TabsTrigger value="preview">{t("preview")}</TabsTrigger>
+              <TabsTrigger value="source">{t("source")}</TabsTrigger>
+            </TabsList>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  aria-label={previewWidth === "full" ? t("previewWidthFixed") : t("previewWidthFull")}
+                  onClick={() => setPreviewWidth((prev) => (prev === "full" ? "fixed" : "full"))}
+                >
+                  {previewWidth === "full" ? (
+                    <Minimize2 className="size-3" />
+                  ) : (
+                    <Maximize2 className="size-3" />
+                  )}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                {previewWidth === "full" ? t("previewWidthFixed") : t("previewWidthFull")}
+              </TooltipContent>
+            </Tooltip>
+          </div>
           <TabsContent value="preview" className="min-h-0 flex-1">
             <iframe
               title={data.title}
               sandbox="allow-scripts"
               srcDoc={data.code}
-              className="h-[70vh] w-full rounded-lg border border-border/60 bg-white"
+              className={
+                previewWidth === "fixed"
+                  ? "mx-auto block h-[70vh] w-full max-w-3xl rounded-lg border border-border/60 bg-white"
+                  : "h-[70vh] w-full rounded-lg border border-border/60 bg-white"
+              }
             />
           </TabsContent>
           <TabsContent value="source" className="min-h-0 flex-1">

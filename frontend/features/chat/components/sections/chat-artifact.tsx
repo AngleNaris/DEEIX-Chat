@@ -1,6 +1,6 @@
 "use client";
 
-import { Download, X } from "lucide-react";
+import { Download, Maximize2, Minimize2, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useTranslations } from "next-intl";
 import * as React from "react";
@@ -161,6 +161,7 @@ function ChatArtifactPanel({
     colorScheme: "light",
     variables: [],
   });
+  const [previewWidth, setPreviewWidth] = React.useState<"full" | "fixed">("full");
 
   React.useEffect(() => {
     setPreviewTheme(captureHTMLVisualThemeSnapshot(resolvedTheme));
@@ -233,6 +234,16 @@ function ChatArtifactPanel({
               </TooltipTrigger>
               <TooltipContent side="bottom">{t("copySource")}</TooltipContent>
             </Tooltip>
+            <ArtifactActionButton
+              label={previewWidth === "full" ? t("previewWidthFixed") : t("previewWidthFull")}
+              onClick={() => setPreviewWidth((prev) => (prev === "full" ? "fixed" : "full"))}
+            >
+              {previewWidth === "full" ? (
+                <Minimize2 className="size-3" />
+              ) : (
+                <Maximize2 className="size-3" />
+              )}
+            </ArtifactActionButton>
             <ArtifactActionButton label={t("downloadHtml")} disabled={!canPreview} onClick={handleDownload}>
               <Download className="size-3" />
             </ArtifactActionButton>
@@ -245,11 +256,13 @@ function ChatArtifactPanel({
 
         <TabsContent value="preview" className="mt-0 min-h-0 flex-1 overflow-hidden">
           {canPreview ? (
-            <ArtifactPreviewFrame
-              key={artifact.id}
-              documentHTML={previewHTML}
-              title={t("previewTitle")}
-            />
+            <div className={previewWidth === "fixed" ? "mx-auto h-full max-w-3xl" : "h-full"}>
+              <ArtifactPreviewFrame
+                key={artifact.id}
+                documentHTML={previewHTML}
+                title={t("previewTitle")}
+              />
+            </div>
           ) : (
             <div className="flex h-full min-h-[320px] items-center justify-center bg-muted/15 px-6 text-center text-sm text-muted-foreground">
               {t("empty")}

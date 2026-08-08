@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
-import { ExternalLink, Save } from "lucide-react";
+import { Save } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,12 +15,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { CopyActionButton } from "@/shared/components/copy-action";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { ArtifactShareLink } from "@/shared/components/artifact-share-link";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 import { useLocalizedErrorMessage } from "@/i18n/use-localized-error";
 import type { ChatArtifact } from "@/features/chat/model/chat-artifacts";
 import {
-  artifactShareUrl,
   createArtifact,
   createArtifactShare,
   type ArtifactKind,
@@ -83,15 +83,19 @@ export function SaveArtifactButton({ artifact }: { artifact: ChatArtifact | null
 
   return (
     <>
-      <button
-        type="button"
-        className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/[0.04] hover:text-foreground"
-        onClick={openDialog}
-        aria-label={t("save")}
-        title={t("save")}
-      >
-        <Save className="size-3" />
-      </button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/[0.04] hover:text-foreground"
+            onClick={openDialog}
+            aria-label={t("save")}
+          >
+            <Save className="size-3" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">{t("save")}</TooltipContent>
+      </Tooltip>
       <Dialog open={open} onOpenChange={(next) => { if (!saving) setOpen(next); }}>
         <DialogContent className="sm:max-w-[460px]">
           <div className="space-y-4">
@@ -111,27 +115,7 @@ export function SaveArtifactButton({ artifact }: { artifact: ChatArtifact | null
               />
             </div>
 
-            {share ? (
-              <div className="flex items-center gap-2 rounded-md bg-muted/30 px-2.5 py-2">
-                <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">
-                  {artifactShareUrl(share.share_id)}
-                </span>
-                <CopyActionButton
-                  value={artifactShareUrl(share.share_id)}
-                  messages={{ copied: t("linkCopied"), failed: t("copyFailed") }}
-                  iconClassName="size-3"
-                />
-                <a
-                  href={artifactShareUrl(share.share_id)}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                  aria-label={t("openLink")}
-                >
-                  <ExternalLink className="size-3" />
-                </a>
-              </div>
-            ) : null}
+            {share ? <ArtifactShareLink share={share} disabled={saving} /> : null}
 
             <DialogFooter>
               <Button type="button" variant="ghost" disabled={saving} onClick={() => setOpen(false)}>
