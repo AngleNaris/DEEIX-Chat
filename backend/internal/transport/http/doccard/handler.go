@@ -12,10 +12,13 @@ import (
 
 // UpsertDocCardRequest 创建/更新卡片的请求体。
 type UpsertDocCardRequest struct {
-	Title    string   `json:"title" binding:"required,max=128"`
-	Content  string   `json:"content" binding:"required,max=20000"`
-	Keywords []string `json:"keywords" binding:"max=20"`
-	Enabled  *bool    `json:"enabled"`
+	Category  string   `json:"category" binding:"max=64"`
+	ProjectID *uint    `json:"projectId"`
+	RoleID    *uint    `json:"roleId"`
+	Title     string   `json:"title" binding:"required,max=128"`
+	Content   string   `json:"content" binding:"required,max=20000"`
+	Keywords  []string `json:"keywords" binding:"max=20"`
+	Enabled   *bool    `json:"enabled"`
 }
 
 // CardIDParam 路径参数。
@@ -42,10 +45,13 @@ func (h *Handler) CreateDocCard(c *gin.Context) {
 		return
 	}
 	item, err := h.svc.UpsertDocCard(c, userID, "", appdoccard.UpsertInput{
-		Title:    req.Title,
-		Content:  req.Content,
-		Keywords: req.Keywords,
-		Enabled:  req.Enabled,
+		Category:  req.Category,
+		ProjectID: req.ProjectID,
+		RoleID:    req.RoleID,
+		Title:     req.Title,
+		Content:   req.Content,
+		Keywords:  req.Keywords,
+		Enabled:   req.Enabled,
 	}, "user")
 	if err != nil {
 		response.Error(c, http.StatusInternalServerError, err.Error())
@@ -68,10 +74,13 @@ func (h *Handler) UpdateDocCard(c *gin.Context) {
 		return
 	}
 	item, err := h.svc.UpsertDocCard(c, userID, param.ID, appdoccard.UpsertInput{
-		Title:    req.Title,
-		Content:  req.Content,
-		Keywords: req.Keywords,
-		Enabled:  req.Enabled,
+		Category:  req.Category,
+		ProjectID: req.ProjectID,
+		RoleID:    req.RoleID,
+		Title:     req.Title,
+		Content:   req.Content,
+		Keywords:  req.Keywords,
+		Enabled:   req.Enabled,
 	}, "user")
 	if err != nil {
 		response.Error(c, http.StatusNotFound, "doc card not found")

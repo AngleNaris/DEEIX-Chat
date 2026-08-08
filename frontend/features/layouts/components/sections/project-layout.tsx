@@ -9,7 +9,7 @@ import { SidebarConversationsProvider } from "@/entities/conversation";
 import { AppSidebar } from "@/features/layouts/components/navigation/app-sidebar";
 import { MobileHeader } from "@/features/layouts/components/sections/mobile-header";
 import { ChatSessionProvider, useChatSession } from "@/features/chat";
-import { AppearancePreferencesSync } from "@/features/settings";
+import { AppearancePreferencesSync, UserTimeZoneSync } from "@/features/settings";
 import { SidebarInset, SidebarProvider, useSidebar } from "@/components/ui/sidebar";
 import { UserLocaleSync } from "@/i18n/user-locale-sync";
 
@@ -82,6 +82,7 @@ export function ProjectLayout({
     <>
       <UserLocaleSync />
       <AppearancePreferencesSync />
+      <UserTimeZoneSync />
       <InitialSecurityGuard />
       <AnnouncementDialogHost />
       <SidebarProvider className="h-svh overflow-hidden" defaultOpen={defaultSidebarOpen}>

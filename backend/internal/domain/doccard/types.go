@@ -9,6 +9,9 @@ type DocCard struct {
 	ID           uint
 	CardPublicID string
 	UserID       uint
+	Category     string
+	ProjectID    *uint // 可选绑定项目（空=全局）
+	RoleID       *uint // 可选绑定角色（空=全局）
 	Title        string
 	Content      string
 	Keywords     []string

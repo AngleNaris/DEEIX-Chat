@@ -80,7 +80,9 @@
     "fallbackUser": "User",
     "today": "Today",
     "archived": "Archived",
-    "yesterday": "Yesterday"
+    "yesterday": "Yesterday",
+    "docCards": "Doc cards",
+    "artifacts": "Artifacts"
   },
   "time": {
     "todayTime": "{time}",

@@ -66,6 +66,7 @@ export type ConversationProjectStatusFilter = "active" | "archived" | "all";
 export type ConversationProjectMCPDefaultMode = "inherit" | "custom";
 
 export type ConversationProjectDTO = Omit<ConversationProjectResponse, "mcpDefaultMode"> & {
+  id: number;
   mcpDefaultMode: ConversationProjectMCPDefaultMode;
 };
 

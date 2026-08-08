@@ -498,7 +498,15 @@
       "separator": ": ",
       "empty": "No doc cards yet.",
       "disabled": "disabled",
-      "aiSource": "AI"
+      "aiSource": "AI",
+      "category": "Category",
+      "categoryPlaceholder": "e.g. world, characters",
+      "binding": "Project",
+      "projectGlobal": "Global (all projects)",
+      "role": "Role",
+      "roleGlobal": "Global (all roles)",
+      "boundProject": "project",
+      "boundRole": "role"
     },
     "artifacts": {
       "sectionTitle": "Artifacts",
@@ -516,6 +524,36 @@
       "deleted": "Deleted",
       "deleteFailed": "Failed to delete",
       "delete": "Delete artifact"
+    },
+    "dynamicPrompts": {
+      "sectionTitle": "Dynamic prompts",
+      "addPrompt": "Add dynamic prompt",
+      "addTitle": "Add dynamic prompt",
+      "editTitle": "Edit dynamic prompt",
+      "addDescription": "Name a JS script or text snippet and reference it in prompts with {{script: name}}; it expands on each send.",
+      "name": "Name",
+      "namePlaceholder": "e.g. today's date",
+      "kind": "Type",
+      "kindJs": "JS script (sandbox)",
+      "kindText": "Plain text",
+      "content": "Content",
+      "contentJsPlaceholder": "JS code; its result is inserted (e.g. new Date().toLocaleDateString())",
+      "contentTextPlaceholder": "Fixed text inserted on reference",
+      "enabled": "Enabled",
+      "usageHint": "In a project/role prompt editor, click Insert variable → Dynamic prompt and pick this item to insert {{script: name}}.",
+      "usageTag": "Reference: {{script: ",
+      "separator": ": ",
+      "save": "Save",
+      "saving": "Saving",
+      "cancel": "Cancel",
+      "saved": "Saved",
+      "saveFailed": "Failed to save",
+      "deleted": "Deleted",
+      "deleteFailed": "Failed to delete",
+      "edit": "Edit",
+      "delete": "Delete",
+      "empty": "No dynamic prompts yet.",
+      "aiSource": "AI"
     }
   },
   "subscriptionPage": {

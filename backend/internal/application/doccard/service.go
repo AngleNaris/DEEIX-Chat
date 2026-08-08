@@ -25,15 +25,21 @@ const (
 
 // UpsertInput 创建/更新卡片的输入。
 type UpsertInput struct {
-	Title    string
-	Content  string
-	Keywords []string
-	Enabled  *bool // nil 保持原值（更新时）
+	Category  string
+	ProjectID *uint
+	RoleID    *uint
+	Title     string
+	Content   string
+	Keywords  []string
+	Enabled   *bool // nil 保持原值（更新时）
 }
 
 // CardView 卡片视图。
 type CardView struct {
 	CardPublicID string   `json:"card_id"`
+	Category     string   `json:"category"`
+	ProjectID    *uint    `json:"project_id,omitempty"`
+	RoleID       *uint    `json:"role_id,omitempty"`
 	Title        string   `json:"title"`
 	Content      string   `json:"content"`
 	Keywords     []string `json:"keywords"`
@@ -91,6 +97,9 @@ func (s *Service) UpsertDocCard(ctx context.Context, userID uint, publicID strin
 	}
 	item := &domaindoccard.DocCard{
 		UserID:    userID,
+		Category:  strings.TrimSpace(input.Category),
+		ProjectID: input.ProjectID,
+		RoleID:    input.RoleID,
 		Title:     strings.TrimSpace(input.Title),
 		Content:   strings.TrimSpace(input.Content),
 		Keywords:  normalizeKeywords(input.Keywords),
@@ -125,6 +134,9 @@ func (s *Service) ListDocCards(ctx context.Context, userID uint) ([]CardView, er
 	for _, item := range items {
 		views = append(views, CardView{
 			CardPublicID: item.CardPublicID,
+			Category:     item.Category,
+			ProjectID:    item.ProjectID,
+			RoleID:       item.RoleID,
 			Title:        item.Title,
 			Content:      item.Content,
 			Keywords:     item.Keywords,

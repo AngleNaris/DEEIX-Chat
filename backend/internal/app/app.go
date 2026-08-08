@@ -30,6 +30,7 @@ import (
 	appartifact "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/artifact"
 	agentgroup "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/agentgroup"
 	appdoccard "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/doccard"
+	appdynamicprompt "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/dynamicprompt"
 	domainagentgroup "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/agentgroup"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/settings"
 	appskill "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/skill"
@@ -57,6 +58,7 @@ import (
 	promptpresetrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/promptpreset"
 	artifactrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/artifact"
 	doccardrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/doccard"
+	dynamicpromptrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/dynamicprompt"
 	settingsrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/settings"
 	skillrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/skill"
 	systemeventrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/systemevent"
@@ -76,6 +78,7 @@ import (
 	promptpresethttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/promptpreset"
 	artifacthttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/artifact"
 	doccardhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/doccard"
+	dynamicprompthttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/dynamicprompt"
 	settingshttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/settings"
 	skillhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/skill"
 	userhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/user"
@@ -99,15 +102,15 @@ type userProfileReaderAdapter struct {
 	inner *user.Service
 }
 
-func (a userProfileReaderAdapter) GetUserProfile(ctx context.Context, userID uint) (string, string, error) {
+func (a userProfileReaderAdapter) GetUserProfile(ctx context.Context, userID uint) (string, string, string, error) {
 	if a.inner == nil {
-		return "", "", nil
+		return "", "", "", nil
 	}
 	u, err := a.inner.GetByID(ctx, userID)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
-	return u.Locale, u.Username, nil
+	return u.Locale, u.Username, u.Timezone, nil
 }
 
 func (a agentGroupWriterAdapter) CreateAgentGroup(ctx context.Context, userID uint, input conversation.AgentGroupCreateInput) (*domainagentgroup.Group, error) {
@@ -410,6 +413,12 @@ func NewApp() (*App, error) {
 	docCardHandler := doccardhttp.NewHandler(docCardService)
 	docCardModule := doccardhttp.NewModule(docCardHandler)
 	conversationService.SetDocCardReader(docCardService)
+	dynamicPromptRepo := dynamicpromptrepo.NewRepo(db)
+	dynamicPromptService := appdynamicprompt.NewService(dynamicPromptRepo)
+	dynamicPromptService.SetCacheInvalidator(conversationService.InvalidateDynamicPromptCache)
+	dynamicPromptHandler := dynamicprompthttp.NewHandler(dynamicPromptService)
+	dynamicPromptModule := dynamicprompthttp.NewModule(dynamicPromptHandler)
+	conversationService.SetDynamicPromptReader(dynamicPromptService)
 
 	hc := newHealthChecker(db, cfg.CacheDriver, redisClient)
 	rateLimiter := buildRateLimiter(cfg, redisClient, memoryCache)
@@ -429,9 +438,10 @@ func NewApp() (*App, error) {
 		Settings:     settingsModule,
 		UserSettings: userSettingsModule,
 		PlatformTools: platformToolsModule,
-		Artifact:     artifactModule,
-		DocCard:      docCardModule,
-		User:         userModule,
+		Artifact:      artifactModule,
+		DocCard:       docCardModule,
+		DynamicPrompt: dynamicPromptModule,
+		User:          userModule,
 		StartupLog: func(log *zap.Logger) {
 			if log == nil || bootstrapSuperAdmin == nil {
 				return

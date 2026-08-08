@@ -27,6 +27,7 @@ import { listVisibleSkills } from "@/shared/api/skills";
 import type { SkillSummaryDTO } from "@/shared/api/skills.types";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 import { useDialogSnapshot } from "@/shared/hooks/use-dialog-snapshot";
+import { PromptVarToolbar } from "@/features/prompts/components/prompt-var-toolbar";
 import {
   hasMultipleImageAttachmentProcessors,
   normalizeImageAttachmentProcessorSelection,
@@ -68,6 +69,22 @@ export function ProjectDialog({
   const open = Boolean(draft);
   const nameInputID = React.useId();
   const systemPromptInputID = React.useId();
+  const systemPromptRef = React.useRef<HTMLTextAreaElement>(null);
+
+  // insertSystemPromptVar 在系统提示词光标处插入变量标签。
+  const insertSystemPromptVar = (text: string) => {
+    const el = systemPromptRef.current;
+    const current = stableDraft?.systemPrompt ?? "";
+    const start = el?.selectionStart ?? current.length;
+    const end = el?.selectionEnd ?? start;
+    setDraft((cur) => cur
+      ? { ...cur, systemPrompt: current.slice(0, start) + text + current.slice(end) }
+      : cur);
+    requestAnimationFrame(() => {
+      el?.focus();
+      el?.setSelectionRange(start + text.length, start + text.length);
+    });
+  };
 
   React.useEffect(() => {
     if (!draft) {
@@ -184,7 +201,9 @@ export function ProjectDialog({
               <label htmlFor={systemPromptInputID} className="text-xs text-muted-foreground">
                 {t("systemPromptLabel")}
               </label>
+              <PromptVarToolbar onInsert={insertSystemPromptVar} />
               <Textarea
+                ref={systemPromptRef}
                 id={systemPromptInputID}
                 value={stableDraft?.systemPrompt ?? ""}
                 maxLength={12000}

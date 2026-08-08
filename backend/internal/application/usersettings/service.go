@@ -43,6 +43,9 @@ var allowedKeys = map[string]string{
 	"chat.default_mcp_tool_ids":                 "[]",
 	// 平台工具写操作批准模式：auto 自动执行 / ask 询问用户（模型先收到 pending，用户确认后执行）。
 	"platform_tools.write_approval":             "auto",
+	// 用户时区（IANA 名称，如 Asia/Shanghai）：动态提示词 {{date}} 等按此渲染。
+	// 前端初始化时用浏览器时区静默写入；非法值由 validateValue 的 LoadLocation 校验拒绝。
+	"timezone": "Etc/UTC",
 }
 
 // boolKeys 取值只能是 "true" / "false"。
@@ -78,6 +81,12 @@ var enumKeys = map[string]map[string]bool{
 func validateValue(key, value string) error {
 	if key == "chat.default_mcp_tool_ids" {
 		return validateDefaultMCPToolIDs(value, key)
+	}
+	if key == "timezone" {
+		if _, err := time.LoadLocation(strings.TrimSpace(value)); err != nil {
+			return &ErrValidation{Msg: fmt.Sprintf("invalid value for %s: must be a valid IANA time zone name", key)}
+		}
+		return nil
 	}
 	if boolKeys[key] {
 		if value != "true" && value != "false" {

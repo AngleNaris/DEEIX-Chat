@@ -57,6 +57,9 @@ func toDomain(item model.DocCard) domaindoccard.DocCard {
 	return domaindoccard.DocCard{
 		ID:           item.ID,
 		CardPublicID: item.CardPublicID,
+		Category:     item.Category,
+		ProjectID:    item.ProjectID,
+		RoleID:       item.RoleID,
 		UserID:       item.UserID,
 		Title:        item.Title,
 		Content:      item.Content,
@@ -79,6 +82,9 @@ func (r *Repo) UpsertDocCard(ctx context.Context, item *domaindoccard.DocCard) e
 		First(&existing).Error
 	if err == nil {
 		return translateError(r.db.WithContext(ctx).Model(&existing).Updates(map[string]interface{}{
+			"category":      item.Category,
+			"project_id":    item.ProjectID,
+			"role_id":       item.RoleID,
 			"title":         item.Title,
 			"content":       item.Content,
 			"keywords_json": encodeKeywords(item.Keywords),
@@ -89,6 +95,9 @@ func (r *Repo) UpsertDocCard(ctx context.Context, item *domaindoccard.DocCard) e
 	if dberror.IsRecordNotFound(err) {
 		record := model.DocCard{
 			CardPublicID: item.CardPublicID,
+			Category:     item.Category,
+			ProjectID:    item.ProjectID,
+			RoleID:       item.RoleID,
 			UserID:       item.UserID,
 			Title:        item.Title,
 			Content:      item.Content,

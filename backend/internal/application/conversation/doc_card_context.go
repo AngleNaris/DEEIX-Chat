@@ -54,8 +54,9 @@ func (s *Service) getCachedDocCards(ctx context.Context, userID uint) []appdocca
 }
 
 // matchDocCards 关键字子串匹配（大小写不敏感），返回命中的启用卡片。
+// projectID/roleID 为会话的项目/角色绑定：卡片绑定任一命中即触发，无绑定=全局。
 // 命中顺序按卡片列表顺序（ListDocCards 已按 updated_at DESC）。
-func matchDocCards(query string, cards []appdoccard.CardView, maxCards int) []appdoccard.CardView {
+func matchDocCards(query string, cards []appdoccard.CardView, projectID uint, roleID uint, maxCards int) []appdoccard.CardView {
 	if strings.TrimSpace(query) == "" || len(cards) == 0 {
 		return nil
 	}
@@ -68,6 +69,9 @@ func matchDocCards(query string, cards []appdoccard.CardView, maxCards int) []ap
 		if !card.Enabled || len(matched) >= maxCards {
 			continue
 		}
+		if !docCardScopeMatches(card, projectID, roleID) {
+			continue
+		}
 		for _, keyword := range card.Keywords {
 			kw := strings.ToLower(strings.TrimSpace(keyword))
 			if kw != "" && strings.Contains(lower, kw) {
@@ -77,6 +81,21 @@ func matchDocCards(query string, cards []appdoccard.CardView, maxCards int) []ap
 		}
 	}
 	return matched
+}
+
+// docCardScopeMatches 卡片作用域匹配：无绑定（全局）始终命中；
+// 绑定项目/角色时，会话对应维度命中即触发。
+func docCardScopeMatches(card appdoccard.CardView, projectID uint, roleID uint) bool {
+	if card.ProjectID == nil && card.RoleID == nil {
+		return true
+	}
+	if card.ProjectID != nil && projectID != 0 && *card.ProjectID == projectID {
+		return true
+	}
+	if card.RoleID != nil && roleID != 0 && *card.RoleID == roleID {
+		return true
+	}
+	return false
 }
 
 // formatDocCardsContext 生成 <cards> 注入片段（每张内容截断）。

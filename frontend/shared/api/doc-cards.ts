@@ -3,6 +3,9 @@ import { pathParam } from "@/shared/api/http-client";
 
 export type DocCardDTO = {
   card_id: string;
+  category: string;
+  project_id: number | null;
+  role_id: number | null;
   title: string;
   content: string;
   keywords: string[];
@@ -15,6 +18,9 @@ export type UpsertDocCardInput = {
   title: string;
   content: string;
   keywords: string[];
+  category?: string;
+  projectId?: number | null;
+  roleId?: number | null;
   enabled?: boolean;
 };
 

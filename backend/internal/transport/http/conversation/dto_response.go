@@ -207,6 +207,7 @@ func ToConversationExportResponse(item *appconversation.ConversationExportResult
 
 // ConversationProjectResponse 对外会话项目响应 DTO。
 type ConversationProjectResponse struct {
+	ID                uint      `json:"id"`
 	PublicID          string    `json:"publicID"`
 	Name              string    `json:"name"`
 	Description       string    `json:"description"`
@@ -227,6 +228,7 @@ func toConversationProjectResponse(item *model.ConversationProject) Conversation
 		return ConversationProjectResponse{}
 	}
 	return ConversationProjectResponse{
+		ID:                item.ID,
 		PublicID:          item.PublicID,
 		Name:              item.Name,
 		Description:       item.Description,
@@ -245,6 +247,7 @@ func toConversationProjectResponse(item *model.ConversationProject) Conversation
 
 // ConversationRoleResponse 对外角色响应 DTO。
 type ConversationRoleResponse struct {
+	ID                uint      `json:"id"`
 	PublicID          string    `json:"publicID"`
 	Name              string    `json:"name"`
 	Description       string    `json:"description"`
@@ -269,6 +272,7 @@ func toConversationRoleResponse(item *model.ConversationRole) ConversationRoleRe
 		return ConversationRoleResponse{}
 	}
 	return ConversationRoleResponse{
+		ID:                item.ID,
 		PublicID:          item.PublicID,
 		Name:              item.Name,
 		Description:       item.Description,

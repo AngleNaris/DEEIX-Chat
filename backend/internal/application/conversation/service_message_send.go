@@ -510,8 +510,16 @@ func (s *Service) sendMessageInternal(
 		}
 	}
 	// 文档卡片：关键字子串匹配最新用户消息，命中的启用卡片注入用户上下文。
+	// 绑定项目/角色的卡片仅在该会话对应维度命中时触发。
 	if len(prefetch.docCards) > 0 {
-		userCtx.DocCards = matchDocCards(input.Content, prefetch.docCards, docCardMaxMatched)
+		var projectID, roleID uint
+		if conversation.ProjectID != nil {
+			projectID = *conversation.ProjectID
+		}
+		if conversation.RoleID != nil {
+			roleID = *conversation.RoleID
+		}
+		userCtx.DocCards = matchDocCards(input.Content, prefetch.docCards, projectID, roleID, docCardMaxMatched)
 	}
 	processTraceAttachments := attachmentProcessTraceItems(fileContextPlan.Attachments)
 	if traceRecorder != nil && shouldShowAttachmentProcessTrace(processTraceAttachments) {

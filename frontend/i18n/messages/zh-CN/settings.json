@@ -498,7 +498,15 @@
       "separator": "：",
       "empty": "还没有文档卡片。",
       "disabled": "已停用",
-      "aiSource": "AI"
+      "aiSource": "AI",
+      "category": "分类",
+      "categoryPlaceholder": "例如：世界观、人物",
+      "binding": "绑定项目",
+      "projectGlobal": "全局（所有项目）",
+      "role": "绑定角色",
+      "roleGlobal": "全局（所有角色）",
+      "boundProject": "项目",
+      "boundRole": "角色"
     },
     "artifacts": {
       "sectionTitle": "制品",
@@ -516,6 +524,36 @@
       "deleted": "已删除",
       "deleteFailed": "删除失败",
       "delete": "删除制品"
+    },
+    "dynamicPrompts": {
+      "sectionTitle": "动态提示词",
+      "addPrompt": "添加动态提示词",
+      "addTitle": "添加动态提示词",
+      "editTitle": "编辑动态提示词",
+      "addDescription": "命名一段 JS 脚本或文本，在提示词中用 {{script: 名称}} 引用；发送时自动展开。",
+      "name": "名称",
+      "namePlaceholder": "例如：当前日期",
+      "kind": "类型",
+      "kindJs": "JS 脚本（沙箱执行）",
+      "kindText": "纯文本",
+      "content": "内容",
+      "contentJsPlaceholder": "JS 代码，结果将插入提示词（如 new Date().toLocaleDateString()）",
+      "contentTextPlaceholder": "固定文本，引用时直接插入",
+      "enabled": "启用",
+      "usageHint": "在项目/角色的提示词编辑器中点击「插入变量」→ 动态提示词，选择此项即插入 {{script: 名称}}。",
+      "usageTag": "引用标签：{{script: ",
+      "separator": "：",
+      "save": "保存",
+      "saving": "保存中",
+      "cancel": "取消",
+      "saved": "已保存",
+      "saveFailed": "保存失败",
+      "deleted": "已删除",
+      "deleteFailed": "删除失败",
+      "edit": "编辑",
+      "delete": "删除",
+      "empty": "还没有动态提示词。",
+      "aiSource": "AI"
     }
   },
   "subscriptionPage": {

@@ -32,6 +32,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { PromptVarToolbar } from "@/features/prompts/components/prompt-var-toolbar";
 import { ProjectDefaultSelector } from "@/features/layouts/components/navigation/project-dialog";
 import { listAvailableMCPTools } from "@/shared/api/mcp";
 import type { MCPToolDTO } from "@/shared/api/mcp.types";
@@ -176,6 +177,19 @@ function RoleForm({
   const update = <K extends keyof RoleDraft>(key: K, value: RoleDraft[K]) => {
     setDraft({ ...draft, [key]: value });
   };
+  const systemPromptRef = React.useRef<HTMLTextAreaElement>(null);
+  // insertSystemPromptVar 在系统提示词光标处插入变量标签。
+  const insertSystemPromptVar = (text: string) => {
+    const el = systemPromptRef.current;
+    const current = draft.systemPrompt ?? "";
+    const start = el?.selectionStart ?? current.length;
+    const end = el?.selectionEnd ?? start;
+    setDraft({ ...draft, systemPrompt: current.slice(0, start) + text + current.slice(end) });
+    requestAnimationFrame(() => {
+      el?.focus();
+      el?.setSelectionRange(start + text.length, start + text.length);
+    });
+  };
   const selectedModelProtocols = React.useMemo(() => {
     const model = models.find((item) => item.platformModelName === draft.model);
     return model ? parseProtocolsJSON(model.protocolsJSON) : [];
@@ -262,7 +276,9 @@ function RoleForm({
       </div>
       <div className="space-y-1">
         <Label className="text-xs text-muted-foreground">系统提示词</Label>
+        <PromptVarToolbar onInsert={insertSystemPromptVar} />
         <Textarea
+          ref={systemPromptRef}
           value={draft.systemPrompt}
           maxLength={12000}
           placeholder="角色的人格、能力与行为规则……"

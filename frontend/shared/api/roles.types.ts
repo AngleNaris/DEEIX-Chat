@@ -3,6 +3,7 @@ export type ConversationRoleMCPDefaultMode = "inherit" | "custom";
 export type ConversationRoleReasoningEffort = "low" | "medium" | "high" | "xhigh";
 
 export type ConversationRoleDTO = {
+  id: number;
   publicID: string;
   name: string;
   description: string;

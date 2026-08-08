@@ -16,6 +16,7 @@ import (
 func (s *Service) platformSaveDocCard(ctx context.Context, call platformToolCallContext) (string, error) {
 	var args struct {
 		CardID   string   `json:"card_id"`
+		Category string   `json:"category"`
 		Title    string   `json:"title"`
 		Content  string   `json:"content"`
 		Keywords []string `json:"keywords"`
@@ -38,10 +39,14 @@ func (s *Service) platformSaveDocCard(ctx context.Context, call platformToolCall
 	if len(content) > appdoccard.MaxContentLen {
 		return "", fmt.Errorf("content exceeds %d characters", appdoccard.MaxContentLen)
 	}
+	if len(args.Category) > 64 {
+		return "", fmt.Errorf("category exceeds 64 characters")
+	}
 	if s.docCards == nil {
 		return "", fmt.Errorf("doc card service is unavailable")
 	}
 	item, err := s.docCards.UpsertDocCard(ctx, call.UserID, strings.TrimSpace(args.CardID), appdoccard.UpsertInput{
+		Category: strings.TrimSpace(args.Category),
 		Title:    title,
 		Content:  content,
 		Keywords: args.Keywords,
@@ -58,6 +63,7 @@ func (s *Service) platformSaveDocCard(ctx context.Context, call platformToolCall
 	return marshalPlatformResult(map[string]interface{}{
 		"card_id":  item.CardPublicID,
 		"title":    item.Title,
+		"category": item.Category,
 		"keywords": item.Keywords,
 		"enabled":  item.Enabled,
 		"status":   "saved",
@@ -76,6 +82,7 @@ func (s *Service) platformListDocCards(ctx context.Context, call platformToolCal
 	}
 	type cardSummary struct {
 		CardID   string   `json:"card_id"`
+		Category string   `json:"category"`
 		Title    string   `json:"title"`
 		Content  string   `json:"content"`
 		Keywords []string `json:"keywords"`
@@ -85,6 +92,7 @@ func (s *Service) platformListDocCards(ctx context.Context, call platformToolCal
 	for _, card := range cards {
 		summaries = append(summaries, cardSummary{
 			CardID:   card.CardPublicID,
+			Category: card.Category,
 			Title:    card.Title,
 			Content:  card.Content,
 			Keywords: card.Keywords,

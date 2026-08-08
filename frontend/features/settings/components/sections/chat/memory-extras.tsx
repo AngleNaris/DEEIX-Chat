@@ -7,6 +7,7 @@ import { ExternalLink, Pencil, Plus, Share2, ShieldX, Trash2 } from "lucide-reac
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -36,6 +37,10 @@ import {
   updateDocCard,
   type DocCardDTO,
 } from "@/shared/api/doc-cards";
+import { listConversationProjects } from "@/shared/api/conversation";
+import type { ConversationProjectDTO } from "@/shared/api/conversation.types";
+import { listConversationRoles } from "@/shared/api/roles";
+import type { ConversationRoleDTO } from "@/shared/api/roles.types";
 import { SettingsSection } from "@/shared/components/settings-layout";
 
 function AiBadge({ show }: { show: boolean }) {
@@ -48,10 +53,14 @@ function AiBadge({ show }: { show: boolean }) {
   );
 }
 
+type DocCardEditorField = "title" | "content" | "keywords" | "category" | "projectId" | "roleId" | "enabled";
+
 function DocCardEditorDialog({
   open,
   editing,
   initial,
+  projects,
+  roles,
   saving,
   onOpenChange,
   onChange,
@@ -59,10 +68,12 @@ function DocCardEditorDialog({
 }: {
   open: boolean;
   editing: DocCardDTO | null;
-  initial: { title: string; content: string; keywords: string; enabled: boolean };
+  initial: { title: string; content: string; keywords: string; category: string; projectId: number | null; roleId: number | null; enabled: boolean };
+  projects: ConversationProjectDTO[];
+  roles: ConversationRoleDTO[];
   saving: boolean;
   onOpenChange: (open: boolean) => void;
-  onChange: (field: "title" | "content" | "keywords" | "enabled", value: string | boolean) => void;
+  onChange: (field: DocCardEditorField, value: string | boolean | number | null) => void;
   onSubmit: () => void;
 }) {
   const t = useTranslations("settings.chatPage.docCards");
@@ -114,6 +125,58 @@ function DocCardEditorDialog({
                 onChange={(event) => onChange("content", event.target.value)}
               />
             </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <p className="text-xs text-muted-foreground">{t("category")}</p>
+                <Input
+                  maxLength={64}
+                  placeholder={t("categoryPlaceholder")}
+                  value={initial.category}
+                  disabled={saving}
+                  onChange={(event) => onChange("category", event.target.value)}
+                />
+              </div>
+              <div className="space-y-1">
+                <p className="text-xs text-muted-foreground">{t("binding")}</p>
+                <Select
+                  value={initial.projectId === null ? "0" : String(initial.projectId)}
+                  disabled={saving}
+                  onValueChange={(value) => onChange("projectId", value === "0" ? null : Number(value))}
+                >
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue placeholder={t("projectGlobal")} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="0">{t("projectGlobal")}</SelectItem>
+                    {projects.map((project) => (
+                      <SelectItem key={project.publicID} value={project.publicID}>
+                        {project.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="space-y-1">
+              <p className="text-xs text-muted-foreground">{t("role")}</p>
+              <Select
+                value={initial.roleId === null ? "0" : String(initial.roleId)}
+                disabled={saving}
+                onValueChange={(value) => onChange("roleId", value === "0" ? null : Number(value))}
+              >
+                <SelectTrigger className="h-8 text-xs">
+                  <SelectValue placeholder={t("roleGlobal")} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="0">{t("roleGlobal")}</SelectItem>
+                  {roles.map((role) => (
+                    <SelectItem key={role.publicID} value={role.publicID}>
+                      {role.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             <div className="flex items-center justify-between">
               <p className="text-xs text-muted-foreground">{t("enabled")}</p>
               <Switch
@@ -146,12 +209,17 @@ export function DocCardSection() {
   const t = useTranslations("settings.chatPage.docCards");
   const resolveErrorMessage = useLocalizedErrorMessage();
   const [cards, setCards] = React.useState<DocCardDTO[]>([]);
+  const [projects, setProjects] = React.useState<ConversationProjectDTO[]>([]);
+  const [roles, setRoles] = React.useState<ConversationRoleDTO[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<DocCardDTO | null>(null);
   const [title, setTitle] = React.useState("");
   const [content, setContent] = React.useState("");
   const [keywords, setKeywords] = React.useState("");
+  const [category, setCategory] = React.useState("");
+  const [projectId, setProjectId] = React.useState<number | null>(null);
+  const [roleId, setRoleId] = React.useState<number | null>(null);
   const [enabled, setEnabled] = React.useState(true);
   const [saving, setSaving] = React.useState(false);
 
@@ -167,18 +235,32 @@ export function DocCardSection() {
     }
   }, []);
 
+  const loadBindings = React.useCallback(async () => {
+    try {
+      const token = await resolveAccessToken();
+      if (!token) return;
+      setProjects(await listConversationProjects(token));
+      setRoles(await listConversationRoles(token));
+    } catch {
+      // ignore
+    }
+  }, []);
+
   React.useEffect(() => {
     void (async () => {
       setLoading(true);
-      await load();
+      await Promise.all([load(), loadBindings()]);
     })();
-  }, [load]);
+  }, [load, loadBindings]);
 
   const openCreate = () => {
     setEditing(null);
     setTitle("");
     setContent("");
     setKeywords("");
+    setCategory("");
+    setProjectId(null);
+    setRoleId(null);
     setEnabled(true);
     setDialogOpen(true);
   };
@@ -188,6 +270,9 @@ export function DocCardSection() {
     setTitle(card.title);
     setContent(card.content);
     setKeywords(card.keywords.join(", "));
+    setCategory(card.category ?? "");
+    setProjectId(card.project_id ?? null);
+    setRoleId(card.role_id ?? null);
     setEnabled(card.enabled);
     setDialogOpen(true);
   };
@@ -202,6 +287,9 @@ export function DocCardSection() {
         title: title.trim(),
         content: content.trim(),
         keywords: keywords.split(/[,，]/).map((item) => item.trim()).filter(Boolean),
+        category: category.trim(),
+        projectId,
+        roleId,
         enabled,
       };
       if (editing) {
@@ -245,12 +333,17 @@ export function DocCardSection() {
           open={dialogOpen}
           editing={editing}
           saving={saving}
-          initial={{ title, content, keywords, enabled }}
+          projects={projects}
+          roles={roles}
+          initial={{ title, content, keywords, category, projectId, roleId, enabled }}
           onOpenChange={setDialogOpen}
           onChange={(field, value) => {
             if (field === "title") setTitle(String(value));
             else if (field === "content") setContent(String(value));
             else if (field === "keywords") setKeywords(String(value));
+            else if (field === "category") setCategory(String(value));
+            else if (field === "projectId") setProjectId(value === null ? null : Number(value));
+            else if (field === "roleId") setRoleId(value === null ? null : Number(value));
             else setEnabled(Boolean(value));
           }}
           onSubmit={() => void submit()}
@@ -276,6 +369,21 @@ export function DocCardSection() {
                     <span className="text-muted-foreground">{t("separator")}{card.content}</span>
                   </p>
                   <div className="mt-0.5 flex flex-wrap items-center gap-1">
+                    {card.category && (
+                      <span className="rounded-sm bg-amber-500/10 px-1 py-px text-[10px] text-amber-700 dark:text-amber-400">
+                        {card.category}
+                      </span>
+                    )}
+                    {card.project_id !== null && card.project_id !== undefined && (
+                      <span className="rounded-sm bg-sky-500/10 px-1 py-px text-[10px] text-sky-700 dark:text-sky-400">
+                        {projects.find((project) => project.id === card.project_id)?.name ?? t("boundProject")}
+                      </span>
+                    )}
+                    {card.role_id !== null && card.role_id !== undefined && (
+                      <span className="rounded-sm bg-violet-500/10 px-1 py-px text-[10px] text-violet-700 dark:text-violet-400">
+                        {roles.find((role) => role.id === card.role_id)?.name ?? t("boundRole")}
+                      </span>
+                    )}
                     {card.keywords.slice(0, 5).map((kw) => (
                       <span key={kw} className="rounded-sm bg-muted/60 px-1 py-px text-[10px] text-muted-foreground">
                         {kw}

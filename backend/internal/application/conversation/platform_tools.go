@@ -281,6 +281,7 @@ func platformToolRegistry() map[string]platformToolEntry {
 					"type":"object","properties":{
 						"card_id":{"type":"string","description":"Optional card id to update (from list_doc_cards)"},
 						"title":{"type":"string","description":"Card title (max 128 chars)"},
+						"category":{"type":"string","description":"Optional category label (max 64 chars)"},
 						"content":{"type":"string","description":"Card content injected on keyword match (max 20000 chars)"},
 						"keywords":{"type":"array","items":{"type":"string"},"description":"Trigger keywords (max 20); card activates when the user message contains any of them"},
 						"enabled":{"type":"boolean","description":"Whether the card is active (default true)"}

@@ -13,6 +13,7 @@ import (
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/channel"
 	appcompact "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/compact"
 	appdoccard "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/doccard"
+	appdynamicprompt "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/dynamicprompt"
 	appembedding "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/embedding"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/extraction"
 	appartifact "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/artifact"
@@ -93,9 +94,9 @@ type agentGroupSettingsReader interface {
 }
 
 // userProfileReader 读取用户档案字段，供系统提示词模板变量
-// {{language}} / {{username}} 使用（由 user 服务适配注入）。
+// {{language}} / {{username}} / 时区（{{date}} 等）使用（由 user 服务适配注入）。
 type userProfileReader interface {
-	GetUserProfile(ctx context.Context, userID uint) (locale string, username string, err error)
+	GetUserProfile(ctx context.Context, userID uint) (locale string, username string, timezone string, err error)
 }
 
 // docCardReader 文档卡片能力（由 doccard 服务注入）：
@@ -104,6 +105,12 @@ type docCardReader interface {
 	ListDocCards(ctx context.Context, userID uint) ([]appdoccard.CardView, error)
 	UpsertDocCard(ctx context.Context, userID uint, publicID string, input appdoccard.UpsertInput, updatedBy string) (*domaindoccard.DocCard, error)
 	DeleteDocCard(ctx context.Context, userID uint, publicID string) error
+}
+
+// dynamicPromptReader 动态提示词能力（由 dynamicprompt 服务注入），
+// 供提示词模板变量 {{script: name}} 展开使用。
+type dynamicPromptReader interface {
+	ListDynamicPrompts(ctx context.Context, userID uint) ([]appdynamicprompt.PromptView, error)
 }
 
 // userSettingsWriter 读写用户个人设置（白名单 key，由 usersettings 服务注入）。
@@ -169,6 +176,8 @@ type Service struct {
 	artifactSvc           *appartifact.Service       // 制品保存/分享（平台工具 save/list/delete/share_artifact）
 	docCards              docCardReader              // 文档卡片读取（关键字触发注入）
 	docCardCache          sync.Map                   // userID (uint) → *cachedDocCards
+	dynamicPrompts        dynamicPromptReader        // 动态提示词读取（{{script: name}} 展开）
+	dynamicPromptCache    sync.Map                   // userID (uint) → *cachedDynamicPrompts
 	llmClient         *llm.Client
 	mcpClient         *mcp.Client
 	uploadSvc         *appupload.Service
@@ -485,6 +494,18 @@ func (s *Service) SetDocCardReader(reader docCardReader) {
 func (s *Service) InvalidateDocCardCache(userID uint) {
 	if userID != 0 {
 		s.docCardCache.Delete(userID)
+	}
+}
+
+// SetDynamicPromptReader 注入动态提示词读取（{{script: name}} 展开）。
+func (s *Service) SetDynamicPromptReader(reader dynamicPromptReader) {
+	s.dynamicPrompts = reader
+}
+
+// InvalidateDynamicPromptCache 清除用户动态提示词缓存（写入/删除后即时生效）。
+func (s *Service) InvalidateDynamicPromptCache(userID uint) {
+	if userID != 0 {
+		s.dynamicPromptCache.Delete(userID)
 	}
 }
 

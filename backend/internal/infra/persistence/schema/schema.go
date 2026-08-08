@@ -41,6 +41,7 @@ func Models() []interface{} {
 		&model.ChatContextRecord{},
 		&model.UserMemory{},
 		&model.DocCard{},
+		&model.DynamicPrompt{},
 		&model.BillingPlan{},
 		&model.BillingPrice{},
 		&model.Subscription{},

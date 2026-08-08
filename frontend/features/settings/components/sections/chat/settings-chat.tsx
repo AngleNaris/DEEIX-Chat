@@ -39,7 +39,7 @@ import {
 } from "@/features/settings/utils/chat-font";
 import { useLocalizedErrorMessage } from "@/i18n/use-localized-error";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
-import { ArtifactsSection, DocCardSection } from "@/features/settings/components/sections/chat/memory-extras";
+import { DynamicPromptsSection } from "@/features/settings/components/sections/chat/dynamic-prompts-section";
 import { listUserMemories, upsertUserMemory, deleteUserMemory } from "@/shared/api/memory";
 import type { UserMemoryDTO } from "@/shared/api/memory.types";
 import { useDialogSnapshot } from "@/shared/hooks/use-dialog-snapshot";
@@ -879,11 +879,7 @@ export function SettingsChat() {
 
       <SettingsSectionSeparator />
 
-      <DocCardSection />
-
-      <SettingsSectionSeparator />
-
-      <ArtifactsSection />
+      <DynamicPromptsSection />
     </SettingsPage>
   );
 }

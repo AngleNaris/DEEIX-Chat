@@ -71,7 +71,10 @@
     "deleteConversationsDescription": "When selected, conversations in this project are also deleted; otherwise they move to Default.",
     "cancel": "Cancel",
     "save": "Save",
-    "systemPromptVarsHint": "Variables: {{date}} {{time}} {{datetime}} {{weekday}} {{language}} {{username}} {{js: code}} (expanded on each send; js runs in a safe sandbox, empty on failure)"
+    "systemPromptVarsHint": "Variables: {{date}} {{time}} {{datetime}} {{weekday}} {{language}} {{username}} {{js: code}} (expanded on each send; js runs in a safe sandbox, empty on failure)",
+    "promptVarsLabel": "Insert variable:",
+    "promptVarsDynamic": "Dynamic prompt…",
+    "promptVarsInsertHint": "Click to insert {variable} at the cursor"
   },
   "select": "Select",
   "selectedCount": "{count} conversations selected",

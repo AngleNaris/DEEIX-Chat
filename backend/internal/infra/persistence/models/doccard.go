@@ -1,10 +1,15 @@
 package model
 
 // DocCard 文档卡片：用户或 AI 创建的关键字触发文档（lorebook 式）。
+// ProjectID/RoleID 可选绑定：为空表示全局（所有会话触发），
+// 绑定后仅在该项目/角色下的会话触发。
 type DocCard struct {
 	BaseModel
 	CardPublicID string `gorm:"size:32;not null;default:'';uniqueIndex:idx_chat_doc_cards_public_id;comment:公开卡片ID"`
 	UserID       uint   `gorm:"not null;default:0;index:idx_chat_doc_cards_user_id;comment:用户ID"`
+	Category     string `gorm:"size:64;not null;default:'';index:idx_chat_doc_cards_category;comment:分类"`
+	ProjectID    *uint  `gorm:"index:idx_chat_doc_cards_project_id;comment:绑定项目ID(空=全局)"`
+	RoleID       *uint  `gorm:"index:idx_chat_doc_cards_role_id;comment:绑定角色ID(空=全局)"`
 	Title        string `gorm:"size:128;not null;default:'';comment:卡片标题"`
 	Content      string `gorm:"type:text;not null;default:'';comment:卡片内容"`
 	KeywordsJSON string `gorm:"type:text;not null;default:'[]';comment:触发关键字JSON"`
