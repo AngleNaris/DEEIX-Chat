@@ -16,7 +16,7 @@ import (
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/billing"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/channel"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/compact"
-	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/conversation"
+	conversation "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/conversation"
 	appembedding "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/embedding"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/extraction"
 	applogcleanup "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/logcleanup"
@@ -27,7 +27,8 @@ import (
 	apppromptpreset "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/promptpreset"
 	apprag "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/rag"
 	appruntime "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/runtime"
-	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/agentgroup"
+	agentgroup "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/agentgroup"
+	domainagentgroup "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/agentgroup"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/settings"
 	appskill "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/skill"
 	appsystemevent "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/systemevent"
@@ -79,6 +80,41 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
+
+// agentGroupWriterAdapter 把 agentgroup.Service 适配为 conversation.agentGroupWriter，
+// 转换平台工具输入结构（避免 conversation → agentgroup 的导入环）。
+type agentGroupWriterAdapter struct {
+	inner *agentgroup.Service
+}
+
+func (a agentGroupWriterAdapter) CreateAgentGroup(ctx context.Context, userID uint, input conversation.AgentGroupCreateInput) (*domainagentgroup.Group, error) {
+	groupInput := agentgroup.CreateGroupInput{
+		Name:               input.Name,
+		Description:        input.Description,
+		CoordinationPrompt: input.CoordinationPrompt,
+		Supervisor:         agentgroup.MemberCreateInput{
+			RolePublicID:    input.Supervisor.RolePublicID,
+			MemberType:      input.Supervisor.MemberType,
+			ModelOverride:   input.Supervisor.ModelOverride,
+			ReasoningEffort: input.Supervisor.ReasoningEffort,
+			DutyInstruction: input.Supervisor.DutyInstruction,
+		},
+	}
+	for _, worker := range input.Workers {
+		groupInput.Workers = append(groupInput.Workers, agentgroup.MemberCreateInput{
+			RolePublicID:    worker.RolePublicID,
+			MemberType:      worker.MemberType,
+			ModelOverride:   worker.ModelOverride,
+			ReasoningEffort: worker.ReasoningEffort,
+			DutyInstruction: worker.DutyInstruction,
+		})
+	}
+	return a.inner.CreateAgentGroup(ctx, userID, groupInput)
+}
+
+func (a agentGroupWriterAdapter) ListAgentGroups(ctx context.Context, userID uint) ([]domainagentgroup.Group, error) {
+	return a.inner.ListAgentGroups(ctx, userID)
+}
 
 // App 维护应用运行依赖。
 type App struct {
@@ -287,6 +323,7 @@ func NewApp() (*App, error) {
 	conversationModule := conversationhttp.NewModule(conversationHandler)
 	agentGroupService := agentgroup.NewService(agentGroupRepo, conversationService, settingsService, log)
 	agentGroupService.SetAuditWriter(auditService)
+	conversationService.SetAgentGroupWriter(agentGroupWriterAdapter{inner: agentGroupService})
 	agentGroupHandler := agentgrouphttp.NewHandler(agentGroupService, conversationService)
 	agentGroupModule := agentgrouphttp.NewModule(agentGroupHandler)
 	userHandler := userhttp.NewHandler(userService)

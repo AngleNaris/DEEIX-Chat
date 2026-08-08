@@ -260,6 +260,105 @@ func platformToolRegistry() map[string]platformToolEntry {
 			handler:     (*Service).platformUpdateConversation,
 			auditAction: "platform_tools.update_conversation",
 		},
+		"list_roles": {
+			definition: llm.ToolDefinition{
+				Name: "list_roles",
+				Description: "List the user's conversation roles (name, description, model, group). " +
+					"Use before create_agent_group to find role public ids for supervisors/workers.",
+				InputSchema: json.RawMessage(`{
+					"type":"object","properties":{},"required":[]
+				}`),
+			},
+			kind:    platformToolRead,
+			handler: (*Service).platformListRoles,
+		},
+		"create_role": {
+			definition: llm.ToolDefinition{
+				Name: "create_role",
+				Description: "Create a conversation role for the user (name required; optional description, system prompt, model, icon color, group). " +
+					"This is a WRITE operation: it may require user approval.",
+				InputSchema: json.RawMessage(`{
+					"type":"object","properties":{
+						"name":{"type":"string","description":"Role name (required)"},
+						"description":{"type":"string","description":"Role description"},
+						"system_prompt":{"type":"string","description":"System prompt for the role"},
+						"model":{"type":"string","description":"Default model name (empty = platform default)"},
+						"group_name":{"type":"string","description":"Display group for organizing roles"},
+						"color":{"type":"string","description":"Role icon color"},
+						"icon":{"type":"string","description":"Role icon"}
+					},"required":["name"]
+				}`),
+			},
+			kind:        platformToolWrite,
+			handler:     (*Service).platformCreateRole,
+			auditAction: "platform_tools.create_role",
+		},
+		"list_projects": {
+			definition: llm.ToolDefinition{
+				Name: "list_projects",
+				Description: "List the user's conversation projects (name, description, system prompt, default tools/skills).",
+				InputSchema: json.RawMessage(`{
+					"type":"object","properties":{},"required":[]
+				}`),
+			},
+			kind:    platformToolRead,
+			handler: (*Service).platformListProjects,
+		},
+		"create_project": {
+			definition: llm.ToolDefinition{
+				Name: "create_project",
+				Description: "Create a conversation project for the user (name required; optional description, system prompt, color, icon). " +
+					"This is a WRITE operation: it may require user approval.",
+				InputSchema: json.RawMessage(`{
+					"type":"object","properties":{
+						"name":{"type":"string","description":"Project name (required)"},
+						"description":{"type":"string","description":"Project description"},
+						"system_prompt":{"type":"string","description":"Project system prompt applied to conversations"},
+						"color":{"type":"string","description":"Project color"},
+						"icon":{"type":"string","description":"Project icon"}
+					},"required":["name"]
+				}`),
+			},
+			kind:        platformToolWrite,
+			handler:     (*Service).platformCreateProject,
+			auditAction: "platform_tools.create_project",
+		},
+		"list_agent_groups": {
+			definition: llm.ToolDefinition{
+				Name: "list_agent_groups",
+				Description: "List the user's agent groups (name, description, supervisor, members). " +
+					"Requires the agent group feature to be enabled.",
+				InputSchema: json.RawMessage(`{
+					"type":"object","properties":{},"required":[]
+				}`),
+			},
+			kind:    platformToolRead,
+			handler: (*Service).platformListAgentGroups,
+		},
+		"create_agent_group": {
+			definition: llm.ToolDefinition{
+				Name: "create_agent_group",
+				Description: "Create an agent group for the user: one supervisor + optional workers, each referencing an existing role public id " +
+					"(from list_roles). Requires the agent group feature to be enabled. " +
+					"This is a WRITE operation: it may require user approval.",
+				InputSchema: json.RawMessage(`{
+					"type":"object","properties":{
+						"name":{"type":"string","description":"Group name (required)"},
+						"description":{"type":"string","description":"Group description"},
+						"coordination_prompt":{"type":"string","description":"Coordination prompt shown to the supervisor"},
+						"supervisor_role_id":{"type":"string","description":"Public id of the supervisor role (from list_roles)"},
+						"supervisor_duty":{"type":"string","description":"Optional duty instruction for the supervisor"},
+						"workers":{"type":"array","items":{"type":"object","properties":{
+							"role_id":{"type":"string","description":"Public id of a worker role"},
+							"duty_instruction":{"type":"string","description":"Optional duty instruction for this worker"}
+						},"required":["role_id"]},"description":"Worker members"}
+					},"required":["name","supervisor_role_id"]
+				}`),
+			},
+			kind:        platformToolWrite,
+			handler:     (*Service).platformCreateAgentGroup,
+			auditAction: "platform_tools.create_agent_group",
+		},
 	}
 }
 

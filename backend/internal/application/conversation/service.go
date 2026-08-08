@@ -91,6 +91,30 @@ type userSettingsWriter interface {
 	PatchSettings(ctx context.Context, userID uint, patches map[string]string) (map[string]string, error)
 }
 
+// AgentGroupMemberCreateInput 平台工具创建群组成员输入（导出供 app 层适配器转换，避免导入环）。
+type AgentGroupMemberCreateInput struct {
+	RolePublicID    string
+	MemberType      string
+	ModelOverride   string
+	ReasoningEffort string
+	DutyInstruction string
+}
+
+// AgentGroupCreateInput 平台工具创建群组输入。
+type AgentGroupCreateInput struct {
+	Name               string
+	Description        string
+	CoordinationPrompt string
+	Supervisor         AgentGroupMemberCreateInput
+	Workers            []AgentGroupMemberCreateInput
+}
+
+// agentGroupWriter 创建/列出 Agent 群组（由 agentgroup 服务注入，平台工具 create/list_agent_group 使用）。
+type agentGroupWriter interface {
+	CreateAgentGroup(ctx context.Context, userID uint, input AgentGroupCreateInput) (*domainagentgroup.Group, error)
+	ListAgentGroups(ctx context.Context, userID uint) ([]domainagentgroup.Group, error)
+}
+
 type auditWriter interface {
 	Write(ctx context.Context, requestID string, actorUserID uint, action string, resource string, resourceID string, ip string, userAgent string, detail interface{})
 }
@@ -118,6 +142,7 @@ type Service struct {
 	platformApprovals     *platformWriteApprovalStore // ask 模式待批准写操作
 	reindexScheduler      *fileReindexScheduler      // write_file 延迟重建（debounce）
 	userSettingsSvc       userSettingsWriter         // 用户个人设置读写（平台工具 list/update_user_setting）
+	agentGroupWriter      agentGroupWriter           // Agent 群组创建/列表（平台工具 create/list_agent_group）
 	llmClient         *llm.Client
 	mcpClient         *mcp.Client
 	uploadSvc         *appupload.Service
@@ -408,6 +433,11 @@ func (s *Service) SetPlatformToolsSettings(reader agentGroupSettingsReader) {
 // SetUserSettingsService 注入用户个人设置读写服务（平台工具 list_user_settings / update_user_setting 使用）。
 func (s *Service) SetUserSettingsService(writer userSettingsWriter) {
 	s.userSettingsSvc = writer
+}
+
+// SetAgentGroupWriter 注入 Agent 群组创建/列表能力（平台工具 create_agent_group / list_agent_groups 使用）。
+func (s *Service) SetAgentGroupWriter(writer agentGroupWriter) {
+	s.agentGroupWriter = writer
 }
 
 // ResolvePlatformReindexDelay 读取平台工具文件重建缓冲窗口（秒），缺省 60。

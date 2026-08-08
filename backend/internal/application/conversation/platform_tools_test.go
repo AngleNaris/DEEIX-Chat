@@ -260,3 +260,14 @@ func TestPlatformUpdateUserSettingRequiresService(t *testing.T) {
 		t.Fatalf("expected error when user settings service is unavailable, got %q", output)
 	}
 }
+
+func TestPlatformCreateRoleRequiresName(t *testing.T) {
+	svc := newTestServiceWithPlatformSettings(nil)
+	output, err := svc.platformCreateRole(context.Background(), platformToolCallContext{
+		UserID:    1,
+		Arguments: json.RawMessage(`{"description":"no name"}`),
+	})
+	if err == nil {
+		t.Fatalf("expected error when name missing, got %q", output)
+	}
+}
