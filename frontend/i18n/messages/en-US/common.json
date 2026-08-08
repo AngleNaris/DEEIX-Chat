@@ -48,7 +48,6 @@
     "files": "Files",
     "skillsPrompt": "Skills & Prompts",
     "agentGroups": "Agent Groups",
-    "platformTools": "Platform Tools",
     "searchTitle": "Search",
     "searchDescription": "Search conversation titles, labels, projects, and message content",
     "searchPlaceholder": "Search conversations or message content",

@@ -14,6 +14,7 @@
     "conversationSettings": "Conversation",
     "chatFiles": "Files & retrieval",
     "agentGroups": "Agent Groups",
+    "platformTools": "Platform Tools",
     "about": "About"
   },
   "aboutPage": {
