@@ -83,6 +83,11 @@ COPY --from=backend-builder /out/deeix-chat /app/deeix-chat
 COPY --from=frontend-builder /src/frontend/out /app/frontend/out
 COPY LICENSE NOTICE /app/licenses/DEEIX-Chat/
 
+LABEL org.opencontainers.image.source="https://github.com/AngleNaris/X-DEEIX"
+LABEL org.opencontainers.image.title="X-DEEIX"
+LABEL org.opencontainers.image.description="DEEIX-Chat 定制分支：AI 自主记忆 · 平台工具 · Artifact 制品 · 文档卡片 · 动态提示词"
+LABEL org.opencontainers.image.licenses="Apache-2.0"
+
 ENV FRONTEND_DIST_DIR=/app/frontend/out
 
 EXPOSE 8080
