@@ -167,3 +167,9 @@ docker-compose.local.yml
 .DS_Store
 .idea
 .pnpm-store
+
+# ZCode session plans
+.zcode/
+
+# Runtime data (per-service)
+backend/data/
