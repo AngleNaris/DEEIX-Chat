@@ -1,6 +1,124 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="./frontend/public/logo-white.svg" />
+    <img src="./frontend/public/logo-black.svg" alt="X-DEEIX" width="160" />
+  </picture>
+</p>
+
+<p align="center">
+  <b>X-DEEIX</b> —— 基于 <a href="https://github.com/DEEIX-AI/DEEIX-Chat">DEEIX-Chat</a> 的定制分支：AI 自主记忆 · 平台工具 · Artifact 制品 · 文档卡片 · 动态提示词
+</p>
+
+<p align="center">
+  <a href="https://www.apache.org/licenses/LICENSE-2.0"><img alt="License" src="https://img.shields.io/badge/License-Apache%202.0-blue" /></a>
+  <img alt="Next.js" src="https://img.shields.io/badge/Next.js-16-black" />
+  <img alt="React" src="https://img.shields.io/badge/React-19-149eca" />
+  <img alt="Go" src="https://img.shields.io/badge/Go-1.26-00add8" />
+</p>
+
+## 镜像（GitHub Container Registry）
+
+制品镜像发布在 GitHub 的容器镜像源（ghcr.io），在仓库 Packages 页面可查看：
+
+```
+ghcr.io/anglenaris/x-deeix:latest     # 最新构建
+ghcr.io/anglenaris/x-deeix:0.3.4      # 版本标签
+```
+
+## 本定制版的新增功能
+
+| 功能 | 说明 |
+| --- | --- |
+| **平台工具（Platform Tools）** | AI 可直接调用系统工具：记忆管理（`save_memory` / `delete_memory` / `list_memories`）、JavaScript 执行（`execute_js`，goja 纯计算沙箱）、文档卡片、Artifact 制品、文件/技能/角色/项目/会话管理等 35+ 个工具；写操作默认自动执行，可切换为每次询问审批，全程审计留痕 |
+| **AI 自主记忆** | AI 自己管理长期记忆（保存/删除/列出），用户也可以在设置页手动维护，双向打通 |
+| **会话系统提示词模板变量** | 系统提示词支持 `{{date}}` / `{{time}}` / `{{datetime}}` / `{{weekday}}` / `{{language}}` / `{{username}}` / `{{js: 代码}}` 等变量，时间按**用户时区**渲染（浏览器时区自动同步） |
+| **Artifact 制品** | 把 AI 生成的 HTML/JS 保存为制品并一键生成公开分享链接（`/share/artifact`，sandbox iframe 渲染）；保存时自动捕获预览截图作为缩略图；预览支持全宽 / 固定宽度（768px 居中）切换，分享时可设置默认宽度 |
+| **文档卡片（lorebook）** | 用户或 AI 创建的关键字触发卡片，命中时自动注入 AI 上下文（`<cards>` 段）；支持分类、按项目 / 角色绑定触发、停用 |
+| **动态提示词** | 命名 JS / 文本片段，在提示词中通过 `{{script: name}}` 引用（3 分钟缓存，沙箱执行）；设置页可视化管理 |
+| **提示词标签插入** | 角色 / 项目提示词编辑器内置标签工具栏：系统变量 + 动态提示词选单，一键插入光标处 |
+| **侧边栏与页面** | 卡片、制品与文件同级入口（路由页面模式），卡片 / 制品管理页为卡片网格 UI |
+| **Skills & Prompts 管理** | 技能包（skill package）功能：后端服务 + 前端管理 / 提示词面板 |
+
+## 部署方式
+
+### 方式一：Docker Compose（推荐）
+
+```bash
+docker pull ghcr.io/anglenaris/x-deeix:latest
+```
+
+`docker-compose.yml`：
+
+```yaml
+name: x-deeix
+
+services:
+  app:
+    image: ghcr.io/anglenaris/x-deeix:latest
+    container_name: x-deeix-app
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8088:8080"   # 反代到域名时建议只监听本机
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - x-deeix-storage:/app/storage
+      - x-deeix-data:/app/data
+    networks:
+      - x-deeix-net
+
+volumes:
+  x-deeix-storage:
+  x-deeix-data:
+
+networks:
+  x-deeix-net:
+```
+
+`config.yaml` 关键项（首次启动生成默认配置，正式部署必须修改）：
+
+```yaml
+server:
+  public_web_base_url: "https://your-domain.com"   # 对外访问域名（分享链接、邮件链接使用）
+  public_api_base_url: "https://your-domain.com"
+  secret_key: "换成随机密钥"                        # JWT / 敏感数据加密
+database:
+  driver: "sqlite"                                  # 或 postgres
+```
+
+启动：
+
+```bash
+docker compose up -d
+```
+
+数据持久化在 Docker 卷 `x-deeix-storage`（上传文件）与 `x-deeix-data`（SQLite 数据库）。
+
+### 方式二：从源码构建
+
+```bash
+# 后端
+cd backend && go build -o ../bin/deeix-chat . && cd ..
+# 前端
+cd frontend && pnpm install && pnpm build && cd ..
+# 自定义镜像
+docker build -t x-deeix:local .
+```
+
+## 分支说明
+
+| 分支 | 说明 |
+| --- | --- |
+| `dev` | 主开发线（与上游 DEEIX-Chat 同步） |
+| `custom` | 本定制版功能开发分支（当前版本基于此分支构建） |
+
+---
+
+<details>
+<summary><b>📖 原版 README（上游 DEEIX-Chat）</b> —— 点击展开</summary>
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./frontend/public/logo-white.svg" />
     <img src="./frontend/public/logo-black.svg" alt="DEEIX Chat" width="160" />
   </picture>
 </p>
@@ -438,3 +556,6 @@ DEEIX Chat is built on the open-source ecosystem. Thanks to all maintainers and 
 ## License
 
 DEEIX Chat is licensed under the [Apache License 2.0](./LICENSE).
+
+
+</details>
