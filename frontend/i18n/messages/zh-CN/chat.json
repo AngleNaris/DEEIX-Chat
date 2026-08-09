@@ -502,7 +502,11 @@
       "openai": "OpenAI 原生工具",
       "claude": "Claude 原生工具",
       "google": "Google 原生工具"
-    }
+    },
+    "insertScript": "插入脚本",
+    "insertScriptTitle": "插入脚本",
+    "insertScriptDescription": "选择脚本，在输入框光标处插入 {{script: name}} 标签，发送消息时自动执行并展开结果。",
+    "insertScriptEmpty": "还没有脚本。可在「技能 → 脚本」中创建。"
   },
   "modelPicker": {
     "selectModel": "选择模型",
@@ -973,7 +977,8 @@
       "low": "低",
       "medium": "中",
       "high": "高",
-      "xhigh": "最高"
+      "xhigh": "最高",
+      "max": "极高"
     }
   },
   "platformTools": {

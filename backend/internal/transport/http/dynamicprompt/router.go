@@ -18,4 +18,5 @@ func (m *Module) RegisterRoutes(authRequired *gin.RouterGroup) {
 	authRequired.POST("/dynamic-prompts", m.Handler.CreatePrompt)
 	authRequired.PUT("/dynamic-prompts/:id", m.Handler.UpdatePrompt)
 	authRequired.DELETE("/dynamic-prompts/:id", m.Handler.DeletePrompt)
+	authRequired.POST("/dynamic-prompts/:id/run", m.Handler.RunPrompt)
 }

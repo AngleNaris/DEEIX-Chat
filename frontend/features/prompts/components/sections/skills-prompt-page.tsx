@@ -40,6 +40,7 @@ import {
   SkillsSection,
   type SkillsSectionHandle,
 } from "@/features/prompts/components/sections/skills-section";
+import { DynamicPromptsSection } from "@/features/settings/components/sections/chat/dynamic-prompts-section";
 import {
   promptPresetKey,
   useSkillsPromptPage,
@@ -247,18 +248,19 @@ export function SkillsPromptPage() {
                 <Plus className="size-4" />
                 {t("add")}
               </Button>
-            ) : (
+            ) : activeTab === "prompts" ? (
               <Button size="sm" variant="default" className="shrink-0" disabled={loading} onClick={openCreate}>
                 <Plus className="size-4" />
                 {t("add")}
               </Button>
-            )}
+            ) : null}
           </div>
 
           <Tabs value={activeTab} onValueChange={setActiveTab} className="mt-5">
             <TabsList>
               <TabsTrigger value="skills">{t("skillsTab")}</TabsTrigger>
               <TabsTrigger value="prompts">{t("promptsTab")}</TabsTrigger>
+              <TabsTrigger value="scripts">{t("scriptsTab")}</TabsTrigger>
             </TabsList>
           </Tabs>
 
@@ -286,6 +288,11 @@ export function SkillsPromptPage() {
               ) : (
                 listContent
               )}
+            </section>
+          </TabsContent>
+          <TabsContent value="scripts" className="flex h-full min-h-0">
+            <section className="mt-6 flex min-h-0 flex-1 flex-col overflow-hidden">
+              <DynamicPromptsSection title="" />
             </section>
           </TabsContent>
         </Tabs>

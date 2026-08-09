@@ -49,8 +49,9 @@ function AiBadge({ show }: { show: boolean }) {
 /**
  * DynamicPromptsSection 动态提示词（命名脚本/文本）：提示词中可插入
  * {{script: name}} 标签引用，发送时展开（js 沙箱执行 / text 直插）。
+ * title 传空串时隐藏区块标题（供 skills-prompt 页面以 Tab 形式嵌入）。
  */
-export function DynamicPromptsSection() {
+export function DynamicPromptsSection({ title }: { title?: string }) {
   const t = useTranslations("settings.chatPage.dynamicPrompts");
   const resolveErrorMessage = useLocalizedErrorMessage();
   const [items, setItems] = React.useState<DynamicPromptDTO[]>([]);
@@ -135,7 +136,7 @@ export function DynamicPromptsSection() {
   };
 
   return (
-    <SettingsSection title={t("sectionTitle")}>
+    <SettingsSection title={title ?? t("sectionTitle")}>
       <div className="space-y-2">
         <div className="flex h-8 items-center justify-end gap-3">
           <Button size="sm" variant="ghost" className="h-7 gap-1.5 px-2 text-xs" onClick={openCreate}>

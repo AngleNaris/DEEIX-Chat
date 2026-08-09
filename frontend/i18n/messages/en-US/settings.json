@@ -526,7 +526,8 @@
       "delete": "Delete artifact",
       "shareTitle": "Share artifact",
       "shareDescription": "Anyone with the link can view this artifact; the preview width is the default when opening the shared page.",
-      "close": "Close"
+      "close": "Close",
+      "copyLink": "Copy link"
     },
     "dynamicPrompts": {
       "sectionTitle": "Dynamic prompts",

@@ -1,6 +1,7 @@
 package dynamicprompt
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -89,6 +90,26 @@ func (h *Handler) ListPrompts(c *gin.Context) {
 		return
 	}
 	response.Success(c, items)
+}
+
+// RunPrompt 执行动态提示词并返回结果（js 沙箱执行 / text 直返）。
+func (h *Handler) RunPrompt(c *gin.Context) {
+	userID := middleware.MustUserID(c)
+	var param PromptIDParam
+	if err := c.ShouldBindUri(&param); err != nil {
+		response.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	result, err := h.svc.RunDynamicPrompt(c, userID, param.ID)
+	if err != nil {
+		if errors.Is(err, appdynamicprompt.ErrPromptNotFound) {
+			response.Error(c, http.StatusNotFound, "dynamic prompt not found")
+			return
+		}
+		response.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	response.Success(c, gin.H{"result": result})
 }
 
 // DeletePrompt 删除动态提示词。

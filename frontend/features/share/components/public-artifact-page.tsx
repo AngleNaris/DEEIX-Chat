@@ -7,6 +7,7 @@ import { FileCode2, Loader2, Maximize2, Minimize2 } from "lucide-react";
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 import { getSharedArtifact, type PublicSharedArtifactDTO } from "@/shared/api/artifacts";
 
 type PreviewWidth = "full" | "fixed";
@@ -67,7 +68,12 @@ export function PublicArtifactPage() {
   }
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-4xl flex-col gap-4 p-4 md:p-8">
+    <main
+      className={cn(
+        "flex min-h-screen w-full flex-col gap-4 p-4 md:p-8",
+        previewWidth === "fixed" && "mx-auto max-w-4xl",
+      )}
+    >
       <header className="flex flex-wrap items-center gap-2">
         <FileCode2 className="size-4 text-muted-foreground" />
         <h1 className="min-w-0 flex-1 truncate text-base font-semibold">{data.title}</h1>

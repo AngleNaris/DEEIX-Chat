@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
@@ -34,6 +35,7 @@ type ConversationRoleInput struct {
 	Color             string
 	Icon              string
 	GroupName         string
+	Pinned            bool
 }
 
 // ConversationRolePatchInput 定义角色局部更新输入。
@@ -50,6 +52,7 @@ type ConversationRolePatchInput struct {
 	Color             *string
 	Icon              *string
 	GroupName         *string
+	Pinned            *bool
 	Status            *string
 }
 
@@ -75,6 +78,10 @@ func (s *Service) CreateConversationRole(ctx context.Context, userID uint, input
 		Icon:              normalized.Icon,
 		GroupName:         normalized.GroupName,
 		Status:            "active",
+	}
+	if input.Pinned {
+		now := time.Now()
+		item.PinnedAt = &now
 	}
 	if err = s.repo.CreateConversationRole(ctx, item); err != nil {
 		return nil, err
@@ -111,6 +118,7 @@ func (s *Service) UpdateConversationRole(ctx context.Context, userID uint, publi
 		Color:             normalized.Color,
 		Icon:              normalized.Icon,
 		GroupName:         normalized.GroupName,
+		Pinned:            normalized.Pinned,
 		Status:            normalized.Status,
 	}
 	return s.repo.UpdateConversationRoleByPublicID(ctx, userID, strings.TrimSpace(publicID), domainPatch)
@@ -172,6 +180,7 @@ func normalizeConversationRoleInput(input ConversationRoleInput) (ConversationRo
 		Color:             truncateRunes(strings.TrimSpace(input.Color), conversationRoleMetaMaxChars),
 		Icon:              truncateRunes(strings.TrimSpace(input.Icon), conversationRoleMetaMaxChars),
 		GroupName:         truncateRunes(strings.TrimSpace(input.GroupName), conversationRoleGroupNameMaxChars),
+		Pinned:            input.Pinned,
 	}, nil
 }
 

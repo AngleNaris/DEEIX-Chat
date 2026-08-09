@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
 import {
   Box,
   Check,
@@ -60,6 +61,7 @@ export type RoleDraft = {
   icon: string;
   groupName: string;
   reasoningEffort: string;
+  pinned: boolean;
 };
 
 export const EMPTY_ROLE_DRAFT: RoleDraft = {
@@ -74,6 +76,7 @@ export const EMPTY_ROLE_DRAFT: RoleDraft = {
   icon: "",
   groupName: "",
   reasoningEffort: "",
+  pinned: false,
 };
 
 type RoleSelectorOption = {
@@ -380,6 +383,17 @@ function RoleForm({
             ? "留空则跟随用户全局默认"
             : "所选模型端点不支持思考强度时，档位在发送时可能不生效"}
         </p>
+      </div>
+      <div className="flex items-center justify-between">
+        <div>
+          <Label className="text-xs text-muted-foreground">置顶角色</Label>
+          <p className="text-[11px] leading-4 text-muted-foreground">置顶后显示在角色列表顶部（按置顶先后排列）</p>
+        </div>
+        <Switch
+          checked={draft.pinned}
+          disabled={submitting}
+          onCheckedChange={(checked) => update("pinned", checked)}
+        />
       </div>
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1">

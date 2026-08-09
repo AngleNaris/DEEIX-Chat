@@ -67,6 +67,7 @@ func (h *Handler) CreateConversationRole(c *gin.Context) {
 		Color:             req.Color,
 		Icon:              req.Icon,
 		GroupName:         req.GroupName,
+		Pinned:            req.Pinned,
 	})
 	if err != nil {
 		if errors.Is(err, appconversation.ErrInvalidConversationProject) {
@@ -157,6 +158,7 @@ func (h *Handler) UpdateConversationRole(c *gin.Context) {
 		Icon:              req.Icon,
 		Status:            req.Status,
 		GroupName:         req.GroupName,
+		Pinned:            req.Pinned,
 	})
 	if err != nil {
 		if errors.Is(err, appconversation.ErrConversationProjectNotFound) {

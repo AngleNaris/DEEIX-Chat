@@ -46,13 +46,14 @@ type CreateConversationRoleRequest struct {
 	SystemPrompt      string `json:"systemPrompt,omitempty" binding:"max=12000"`
 	Model             string `json:"model,omitempty" binding:"max=128"`
 	Provider          string `json:"provider,omitempty" binding:"max=32"`
-	ReasoningEffort   string `json:"reasoningEffort,omitempty" binding:"omitempty,oneof= low medium high xhigh"`
+	ReasoningEffort   string `json:"reasoningEffort,omitempty" binding:"omitempty,oneof= low medium high xhigh max"`
 	MCPDefaultMode    string `json:"mcpDefaultMode,omitempty" binding:"omitempty,oneof=inherit custom"`
 	DefaultMCPToolIDs []uint `json:"defaultMCPToolIDs,omitempty" binding:"max=128"`
 	DefaultSkillIDs   []uint `json:"defaultSkillIDs,omitempty" binding:"max=128"`
 	Color             string `json:"color,omitempty" binding:"max=32"`
 	Icon              string `json:"icon,omitempty" binding:"max=32"`
 	GroupName         string `json:"groupName,omitempty" binding:"max=80"`
+	Pinned            bool   `json:"pinned,omitempty"`
 }
 
 // UpdateConversationRoleRequest 更新角色请求。
@@ -62,7 +63,7 @@ type UpdateConversationRoleRequest struct {
 	SystemPrompt      *string `json:"systemPrompt,omitempty" binding:"omitempty,max=12000"`
 	Model             *string `json:"model,omitempty" binding:"omitempty,max=128"`
 	Provider          *string `json:"provider,omitempty" binding:"omitempty,max=32"`
-	ReasoningEffort   *string `json:"reasoningEffort,omitempty" binding:"omitempty,oneof= low medium high xhigh"`
+	ReasoningEffort   *string `json:"reasoningEffort,omitempty" binding:"omitempty,oneof= low medium high xhigh max"`
 	MCPDefaultMode    *string `json:"mcpDefaultMode,omitempty" binding:"omitempty,oneof=inherit custom"`
 	DefaultMCPToolIDs *[]uint `json:"defaultMCPToolIDs,omitempty" binding:"omitempty,max=128"`
 	DefaultSkillIDs   *[]uint `json:"defaultSkillIDs,omitempty" binding:"omitempty,max=128"`
@@ -70,6 +71,7 @@ type UpdateConversationRoleRequest struct {
 	Icon              *string `json:"icon,omitempty" binding:"omitempty,max=32"`
 	Status            *string `json:"status,omitempty" binding:"omitempty,oneof=active archived"`
 	GroupName         *string `json:"groupName,omitempty" binding:"omitempty,max=80"`
+	Pinned            *bool   `json:"pinned,omitempty"`
 }
 
 // ReorderConversationRolesRequest 更新角色排序请求。

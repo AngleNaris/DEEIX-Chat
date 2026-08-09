@@ -1,6 +1,6 @@
 export type AgentGroupMemberType = "supervisor" | "worker";
 
-export type AgentGroupMemberReasoningEffort = "low" | "medium" | "high" | "xhigh";
+export type AgentGroupMemberReasoningEffort = "low" | "medium" | "high" | "xhigh" | "max";
 
 export type AgentGroupMemberDTO = {
   publicID: string;

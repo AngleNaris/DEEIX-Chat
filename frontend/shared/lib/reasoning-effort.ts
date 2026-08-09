@@ -5,7 +5,7 @@ import type { ConversationOptions } from "@/shared/api/conversation.types";
 export const REASONING_EFFORT_DEFAULT = "";
 
 // 从低到高排列的可选档位（语义顺序与字典序一致）。
-export const REASONING_EFFORT_LEVELS = ["low", "medium", "high", "xhigh"] as const;
+export const REASONING_EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"] as const;
 
 export type ReasoningEffortLevelValue = typeof REASONING_EFFORT_LEVELS[number];
 
@@ -17,6 +17,7 @@ export const ANTHROPIC_REASONING_EFFORT_BUDGETS: Readonly<Record<ReasoningEffort
   medium: 4096,
   high: 8192,
   xhigh: 16384,
+  max: 32000,
 };
 
 export type ReasoningEffortProtocolMapping = {
@@ -33,17 +34,19 @@ export type ReasoningEffortProtocolMapping = {
 };
 
 // 各协议族的思考强度参数映射（与后端 reasoning_effort.go 保持一致）。
+// maxLevel 决定选单最大档位：chat_completions 直通 max；responses 系截断到 xhigh
+// （GPT-5.5 最高 xhigh，max 会报错）；gemini 截断到 high；anthropic 预算制到 max。
 export const REASONING_EFFORT_PROTOCOL_PATHS: Readonly<Record<string, ReasoningEffortProtocolMapping>> = {
-  openai_chat_completions: { path: "reasoning_effort", maxLevel: "xhigh", optionKeys: ["reasoning_effort"] },
-  openrouter_chat_completions: { path: "reasoning_effort", maxLevel: "xhigh", optionKeys: ["reasoning_effort"] },
-  openai_responses: { path: "reasoning.effort", maxLevel: "high", optionKeys: ["reasoning.effort"] },
-  openrouter_responses: { path: "reasoning.effort", maxLevel: "high", optionKeys: ["reasoning.effort"] },
-  xai_responses: { path: "reasoning.effort", maxLevel: "high", optionKeys: ["reasoning.effort"] },
+  openai_chat_completions: { path: "reasoning_effort", maxLevel: "max", optionKeys: ["reasoning_effort"] },
+  openrouter_chat_completions: { path: "reasoning_effort", maxLevel: "max", optionKeys: ["reasoning_effort"] },
+  openai_responses: { path: "reasoning.effort", maxLevel: "xhigh", optionKeys: ["reasoning.effort"] },
+  openrouter_responses: { path: "reasoning.effort", maxLevel: "xhigh", optionKeys: ["reasoning.effort"] },
+  xai_responses: { path: "reasoning.effort", maxLevel: "xhigh", optionKeys: ["reasoning.effort"] },
   gemini_interactions: { path: "generation_config.thinking_level", maxLevel: "high", optionKeys: ["generation_config.thinking_level"] },
   // anthropic 为预算制：档位经 thinking.type + thinking.budget_tokens 复合写入。
   anthropic_messages: {
     path: "thinking",
-    maxLevel: "xhigh",
+    maxLevel: "max",
     optionKeys: ["thinking.type", "thinking.budget_tokens"],
     budgets: ANTHROPIC_REASONING_EFFORT_BUDGETS,
   },

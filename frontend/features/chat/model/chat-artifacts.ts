@@ -187,6 +187,15 @@ function artifactThumbnailSnapshotScript(): string {
     });
     clonedRoot.style.margin = "0";
     clonedRoot.style.overflow = "hidden";
+    // 隐藏所有滚动条，避免滚动条被截进缩略图。
+    const scrollbarHider = document.createElement("style");
+    scrollbarHider.textContent = [
+      "html, body { overflow: hidden !important; }",
+      "* { scrollbar-width: none !important; }",
+      "*::-webkit-scrollbar { width: 0 !important; height: 0 !important; display: none !important; }",
+      "*::-webkit-scrollbar-thumb { background: transparent !important; }",
+    ].join("\n");
+    (clonedRoot.querySelector("head") ?? clonedRoot).appendChild(scrollbarHider);
 
     return {
       html: "<!doctype html>" + new XMLSerializer().serializeToString(clonedRoot),

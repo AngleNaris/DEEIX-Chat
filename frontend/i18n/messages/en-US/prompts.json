@@ -79,5 +79,6 @@
   "skillPackagePreviewFailed": "Failed to parse package",
   "skillPackageImported": "Skill package imported",
   "skillPackageReplaced": "Skill package replaced",
-  "skillPackageImportFailed": "Failed to import package"
+  "skillPackageImportFailed": "Failed to import package",
+  "scriptsTab": "Scripts"
 }

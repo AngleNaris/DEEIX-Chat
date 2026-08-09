@@ -22,7 +22,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { usePathname, useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { AnimatePresence, motion, type Transition } from "motion/react";
-import { ChevronDown, PencilLine, Star, StarOff, Trash2 } from "lucide-react";
+import { ChevronDown, PencilLine, Pin, PinOff, Star, StarOff, Trash2 } from "lucide-react";
 
 import { Ellipsis } from "@/components/animate-ui/icons/ellipsis";
 import {
@@ -461,7 +461,12 @@ export function NavRoles() {
   const roleGroups = React.useMemo(() => {
     const named = new Map<string, ConversationRoleDTO[]>();
     const ungrouped: ConversationRoleDTO[] = [];
+    const pinned: ConversationRoleDTO[] = [];
     for (const role of roles) {
+      if (role.pinned) {
+        pinned.push(role);
+        continue;
+      }
       const name = role.groupName?.trim() || "";
       if (!name) {
         ungrouped.push(role);
@@ -472,17 +477,14 @@ export function NavRoles() {
       named.set(name, list);
     }
     const groups = Array.from(named.entries()).map(([name, list]) => ({ name, roles: list }));
-    if (ungrouped.length > 0) {
-      groups.push({ name: "", roles: ungrouped });
-    }
-    return groups;
+    return { pinned, groups, ungrouped };
   }, [roles]);
 
   const roleGroupOptions = React.useMemo(
     () => Array.from(new Set(roles.map((role) => role.groupName?.trim() || "").filter((name) => name.length > 0))),
     [roles],
   );
-  const showRoleGroupHeaders = roleGroups.length > 1 || (roleGroups.length === 1 && roleGroups[0].name !== "");
+  const showRoleGroupHeaders = roleGroups.groups.length > 0;
   const groupNameOfRole = React.useCallback(
     (roleID: string) => roles.find((role) => role.publicID === roleID)?.groupName?.trim() || "",
     [roles],
@@ -600,7 +602,8 @@ export function NavRoles() {
         // 跨分组拖拽不支持，直接取消。
         return;
       }
-      const group = roleGroups.find((item) => item.name === activeGroupName);
+      const group = roleGroups.groups.find((item) => item.name === activeGroupName)
+        ?? (activeGroupName === "" ? { name: "", roles: roleGroups.ungrouped } : null);
       if (!group || group.roles.length < 2) {
         return;
       }
@@ -660,6 +663,7 @@ export function NavRoles() {
         color: draft.color,
         icon: draft.icon,
         groupName: draft.groupName,
+        pinned: draft.pinned,
         reasoningEffort:
           isReasoningEffortLevel(draft.reasoningEffort) && draft.reasoningEffort
             ? draft.reasoningEffort
@@ -697,6 +701,240 @@ export function NavRoles() {
     },
     [loadRoles],
   );
+
+  // pinRole 置顶/取消置顶角色。
+  const pinRole = React.useCallback(
+    async (role: ConversationRoleDTO) => {
+      try {
+        const token = await resolveAccessToken();
+        await updateConversationRole(token, role.publicID, { pinned: !role.pinned });
+        toast.success(role.pinned ? "已取消置顶" : "已置顶");
+        await loadRoles();
+      } catch {
+        toast.error("置顶操作失败");
+      }
+    },
+    [loadRoles],
+  );
+
+  // renderRoleRow 渲染单个角色行（置顶区 / 命名分组 / 未分组共用）。
+  const renderRoleRow = (role: ConversationRoleDTO, canSortRoleGroup: boolean, keyPrefix: string) => {
+    const expanded = expandedRoleIDs.has(role.publicID);
+    const conversations = conversationsByRole.get(role.publicID) ?? [];
+    const menuOpen = openMenuID === role.publicID;
+    const rowHovered = hoveredRoleRowID === role.publicID;
+    const rowFocused = focusedRoleRowID === role.publicID;
+    const createHovered = hoveredRoleCreateID === role.publicID;
+    const menuHovered = hoveredRoleMenuID === role.publicID;
+    const rowDragging = draggingRoleID === role.publicID;
+    const roleActionPaddingClassName = canSortRoleGroup ? "pr-24" : "pr-16";
+    const roleCreateActionClassName = canSortRoleGroup ? "right-16" : "right-8";
+    const roleMenuActionClassName = canSortRoleGroup ? "right-8" : "right-0";
+    const showRoleActions = isMobile || (!rowDragging && (rowHovered || rowFocused || menuHovered || menuOpen));
+    const roleConversationContentID = `sidebar-role-${role.publicID}-conversations`;
+
+    return (
+      <RoleSortableItem
+        key={`${keyPrefix}:${role.publicID}`}
+        roleID={role.publicID}
+        disabled={!canSortRoleGroup || savingRoleOrder}
+      >
+        {({ attributes, isDragging, listeners }) => (
+          <>
+            <div
+              className="group/role-row relative"
+              onFocus={(event) => {
+                setFocusedRoleRowID(
+                  event.target instanceof HTMLElement && event.target.matches(":focus-visible")
+                    ? role.publicID
+                    : null,
+                );
+              }}
+              onBlur={(event) => {
+                const nextTarget = event.relatedTarget;
+                if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
+                  setFocusedRoleRowID(null);
+                }
+              }}
+            >
+              {canSortRoleGroup ? (
+                <RoleDragHandle
+                  attributes={attributes}
+                  disabled={savingRoleOrder}
+                  label={`拖动调整「${role.name}」顺序`}
+                  listeners={listeners}
+                  visible={isMobile || rowHovered || rowFocused || isDragging}
+                />
+              ) : null}
+              <RoleTreeButton
+                actionPaddingClassName={roleActionPaddingClassName}
+                active={activeRoleID === role.publicID}
+                color={role.color}
+                contentID={roleConversationContentID}
+                count={conversations.length}
+                expanded={expanded}
+                icon={role.icon}
+                name={role.name}
+                onHoverChange={(hovered) => setHoveredRoleRowID(hovered ? role.publicID : null)}
+                onToggleExpanded={() => toggleRole(role.publicID)}
+              />
+              <RoleInlineAction
+                label={`以「${role.name}」开始新对话`}
+                visible={showRoleActions}
+                className={roleCreateActionClassName}
+                onHoverChange={(hovered) => setHoveredRoleCreateID(hovered ? role.publicID : null)}
+                onClick={() => startRoleChat(role)}
+              >
+                <PlusIcon aria-hidden size={16} strokeWidth={1.6} animate={createHovered ? "default" : undefined} />
+              </RoleInlineAction>
+              <DropdownMenu
+                modal={false}
+                open={menuOpen}
+                onOpenChange={(open) => setOpenMenuID(open ? role.publicID : null)}
+              >
+                <DropdownMenuTrigger asChild>
+                  <RoleInlineAction
+                    label="角色操作"
+                    visible={showRoleActions}
+                    className={roleMenuActionClassName}
+                    onHoverChange={(hovered) => setHoveredRoleMenuID(hovered ? role.publicID : null)}
+                  >
+                    <Ellipsis aria-hidden size={16} strokeWidth={1.4} animate={menuHovered ? "pulse" : undefined} />
+                  </RoleInlineAction>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-max min-w-36 max-w-[calc(100vw-2rem)]">
+                  <DropdownMenuItem
+                    onSelect={(event) => {
+                      event.preventDefault();
+                      setDraft({
+                        publicID: role.publicID,
+                        name: role.name,
+                        description: role.description,
+                        systemPrompt: role.systemPrompt,
+                        model: role.model,
+                        mcpDefaultMode: role.mcpDefaultMode,
+                        defaultMCPToolIDs: role.defaultMCPToolIDs,
+                        defaultSkillIDs: role.defaultSkillIDs,
+                        color: role.color,
+                        icon: role.icon,
+                        groupName: role.groupName ?? "",
+                        reasoningEffort: role.reasoningEffort ?? "",
+                        pinned: role.pinned,
+                      });
+                    }}
+                  >
+                    <DropdownMenuItemIcon icon={PencilLine} className="text-current" />
+                    编辑角色
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onSelect={(event) => {
+                      event.preventDefault();
+                      void pinRole(role);
+                    }}
+                  >
+                    <DropdownMenuItemIcon icon={role.pinned ? PinOff : Pin} className="text-current" />
+                    {role.pinned ? "取消置顶" : "置顶角色"}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onSelect={(event) => {
+                      event.preventDefault();
+                      void removeRole(role);
+                    }}
+                  >
+                    <DropdownMenuItemIcon icon={Trash2} className="text-destructive" />
+                    删除角色
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+            <AnimatePresence initial={false}>
+              {expanded ? (
+                <motion.div
+                  key={`${role.publicID}-conversations`}
+                  id={roleConversationContentID}
+                  initial={{ height: 0, opacity: 0, "--mask-stop": "0%", y: 6 }}
+                  animate={{ height: "auto", opacity: 1, "--mask-stop": "100%", y: 0 }}
+                  exit={{ height: 0, opacity: 0, "--mask-stop": "0%", y: 6 }}
+                  transition={ROLE_TREE_ACCORDION_TRANSITION}
+                  style={ROLE_TREE_ACCORDION_MASK_STYLE}
+                >
+                  <SidebarMenuSub className="mx-0 w-full translate-x-0 gap-0.5 border-l-0 px-0 py-0.5">
+                    {conversations.length === 0 ? (
+                      <SidebarMenuSubItem>
+                        <div className="w-full rounded-md py-1 pl-8 pr-2 text-xs text-sidebar-foreground/55">
+                          暂无对话
+                        </div>
+                      </SidebarMenuSubItem>
+                    ) : (
+                      conversations.map((conversation) => {
+                        const title = conversation.title || "未命名对话";
+                        return (
+                          <SidebarConversationItem
+                            key={conversation.publicID}
+                            active={activeConversationID === conversation.publicID}
+                            item={{
+                              publicID: conversation.publicID,
+                              title,
+                              url: `/chat?conversation_id=${conversation.publicID}`,
+                              shareActive:
+                                conversation.shareStatus === "active" &&
+                                Boolean(conversation.shareID?.trim()),
+                              labelsJSON: conversation.labelsJSON,
+                            }}
+                            starAction={{
+                              label: conversation.isStarred ? "取消收藏" : "收藏",
+                              icon: conversation.isStarred ? StarOff : Star,
+                              onSelect: (targetPublicID) => {
+                                void setStarByPublicID(targetPublicID, !conversation.isStarred);
+                              },
+                            }}
+                            projectMenu={{
+                              label: "移动到项目",
+                              unassignedLabel: "未分配项目",
+                              currentProjectID: conversation.projectID,
+                              projects,
+                              onSelect: (targetPublicID, targetProjectID) => {
+                                void setProjectByPublicID(targetPublicID, targetProjectID);
+                              },
+                            }}
+                            isTransferring={false}
+                            isRenaming={conversationRenameTarget?.publicID === conversation.publicID}
+                            renameValue={
+                              conversationRenameTarget?.publicID === conversation.publicID
+                                ? renameValue
+                                : title
+                            }
+                            rowClassName="w-full"
+                            linkClassName="pl-8"
+                            onRenameValueChange={setRenameValue}
+                            onRenameCommit={onRenameConversationCommit}
+                            onRenameCancel={onRenameConversationCancel}
+                            onAutoRename={onAutoRenameConversation}
+                            isAutoRenaming={autoRenamingConversationID === conversation.publicID}
+                            onManageLabels={() => setLabelsTarget(conversation)}
+                            onRename={onRenameConversation}
+                            onArchive={onArchiveConversation}
+                            onShare={(publicID, shareTitle) =>
+                              setShareTarget({ publicID, title: shareTitle })
+                            }
+                            onExport={onExportConversation}
+                            onDelete={onDeleteConversation}
+                            onNavigate={onNavigate}
+                            menuTriggerID={`role-conversation-menu-trigger-${conversation.publicID}`}
+                          />
+                        );
+                      })
+                    )}
+                  </SidebarMenuSub>
+                </motion.div>
+              ) : null}
+            </AnimatePresence>
+          </>
+        )}
+      </RoleSortableItem>
+    );
+  };
 
   const onRenameConversation = React.useCallback((publicID: string, currentTitle: string) => {
     setConversationRenameTarget({ publicID, currentTitle });
@@ -815,12 +1053,28 @@ export function NavRoles() {
                   onDragEnd={(event) => void onRoleDragEnd(event)}
                   onDragCancel={onRoleDragCancel}
                 >
-                  {roleGroups.map((group) => {
+                  {roleGroups.pinned.length > 0 ? (
+                    <div className="space-y-0.5">
+                      <div className="px-1 pb-0.5 pt-1">
+                        <p className="flex items-center gap-1 px-2 text-[10px] font-medium uppercase tracking-wide text-sidebar-foreground/50">
+                          <Pin aria-hidden className="size-3" />
+                          置顶
+                        </p>
+                      </div>
+                      <SortableContext items={roleGroups.pinned.map((role) => role.publicID)} strategy={verticalListSortingStrategy}>
+                        <SidebarMenu className="gap-0.5">
+                          {roleGroups.pinned.map((role) => renderRoleRow(role, false, "pinned"))}
+                        </SidebarMenu>
+                      </SortableContext>
+                    </div>
+                  ) : null}
+
+                  {roleGroups.groups.map((group) => {
                     const groupCollapsed = collapsedRoleGroups.has(group.name);
                     const groupRoleIDs = group.roles.map((role) => role.publicID);
                     const canSortRoleGroup = group.roles.length >= 2;
                     return (
-                      <React.Fragment key={group.name || "__ungrouped__"}>
+                      <React.Fragment key={group.name}>
                         {showRoleGroupHeaders ? (
                           <div className="px-1 pb-0.5 pt-1">
                             <Button
@@ -837,228 +1091,40 @@ export function NavRoles() {
                                   !groupCollapsed && "rotate-180",
                                 )}
                               />
-                              <span className="min-w-0 flex-1 truncate text-left">{group.name || "未分组"}</span>
+                              <span className="min-w-0 flex-1 truncate text-left">{group.name}</span>
                               <span className="shrink-0 text-[10px] text-sidebar-foreground/45">{group.roles.length}</span>
                             </Button>
                           </div>
                         ) : null}
-                        {!groupCollapsed ? (
-                          <SortableContext items={groupRoleIDs} strategy={verticalListSortingStrategy}>
-                            <SidebarMenu className="gap-0.5">
-                              {group.roles.map((role) => {
-                                const expanded = expandedRoleIDs.has(role.publicID);
-                                const conversations = conversationsByRole.get(role.publicID) ?? [];
-                                const menuOpen = openMenuID === role.publicID;
-                                const rowHovered = hoveredRoleRowID === role.publicID;
-                                const rowFocused = focusedRoleRowID === role.publicID;
-                                const createHovered = hoveredRoleCreateID === role.publicID;
-                                const menuHovered = hoveredRoleMenuID === role.publicID;
-                                const rowDragging = draggingRoleID === role.publicID;
-                                const roleActionPaddingClassName = canSortRoleGroup ? "pr-24" : "pr-16";
-                                const roleCreateActionClassName = canSortRoleGroup ? "right-16" : "right-8";
-                                const roleMenuActionClassName = canSortRoleGroup ? "right-8" : "right-0";
-                                const showRoleActions = isMobile || (!rowDragging && (rowHovered || rowFocused || menuHovered || menuOpen));
-                                const roleConversationContentID = `sidebar-role-${role.publicID}-conversations`;
-
-                                return (
-                                  <RoleSortableItem
-                                    key={role.publicID}
-                                    roleID={role.publicID}
-                                    disabled={!canSortRoleGroup || savingRoleOrder}
-                                  >
-                                    {({ attributes, isDragging, listeners }) => (
-                                      <>
-                                        <div
-                                          className="group/role-row relative"
-                                          onFocus={(event) => {
-                                            setFocusedRoleRowID(
-                                              event.target instanceof HTMLElement && event.target.matches(":focus-visible")
-                                                ? role.publicID
-                                                : null,
-                                            );
-                                          }}
-                                          onBlur={(event) => {
-                                            const nextTarget = event.relatedTarget;
-                                            if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
-                                              setFocusedRoleRowID(null);
-                                            }
-                                          }}
-                                        >
-                                          {canSortRoleGroup ? (
-                                            <RoleDragHandle
-                                              attributes={attributes}
-                                              disabled={savingRoleOrder}
-                                              label={`拖动调整「${role.name}」顺序`}
-                                              listeners={listeners}
-                                              visible={isMobile || rowHovered || rowFocused || isDragging}
-                                            />
-                                          ) : null}
-                                          <RoleTreeButton
-                                            actionPaddingClassName={roleActionPaddingClassName}
-                                            active={activeRoleID === role.publicID}
-                                            color={role.color}
-                                            contentID={roleConversationContentID}
-                                            count={conversations.length}
-                                            expanded={expanded}
-                                            icon={role.icon}
-                                            name={role.name}
-                                            onHoverChange={(hovered) => setHoveredRoleRowID(hovered ? role.publicID : null)}
-                                            onToggleExpanded={() => toggleRole(role.publicID)}
-                                          />
-                                          <RoleInlineAction
-                                            label={`以「${role.name}」开始新对话`}
-                                            visible={showRoleActions}
-                                            className={roleCreateActionClassName}
-                                            onHoverChange={(hovered) => setHoveredRoleCreateID(hovered ? role.publicID : null)}
-                                            onClick={() => startRoleChat(role)}
-                                          >
-                                            <PlusIcon aria-hidden size={16} strokeWidth={1.6} animate={createHovered ? "default" : undefined} />
-                                          </RoleInlineAction>
-                                          <DropdownMenu
-                                            modal={false}
-                                            open={menuOpen}
-                                            onOpenChange={(open) => setOpenMenuID(open ? role.publicID : null)}
-                                          >
-                                            <DropdownMenuTrigger asChild>
-                                              <RoleInlineAction
-                                                label="角色操作"
-                                                visible={showRoleActions}
-                                                className={roleMenuActionClassName}
-                                                onHoverChange={(hovered) => setHoveredRoleMenuID(hovered ? role.publicID : null)}
-                                              >
-                                                <Ellipsis aria-hidden size={16} strokeWidth={1.4} animate={menuHovered ? "pulse" : undefined} />
-                                              </RoleInlineAction>
-                                            </DropdownMenuTrigger>
-                                            <DropdownMenuContent align="end" className="w-max min-w-36 max-w-[calc(100vw-2rem)]">
-                                              <DropdownMenuItem
-                                                onSelect={(event) => {
-                                                  event.preventDefault();
-                                                  setDraft({
-                                                    publicID: role.publicID,
-                                                    name: role.name,
-                                                    description: role.description,
-                                                    systemPrompt: role.systemPrompt,
-                                                    model: role.model,
-                                                    mcpDefaultMode: role.mcpDefaultMode,
-                                                    defaultMCPToolIDs: role.defaultMCPToolIDs,
-                                                    defaultSkillIDs: role.defaultSkillIDs,
-                                                    color: role.color,
-                                                    icon: role.icon,
-                                                    groupName: role.groupName ?? "",
-                                                    reasoningEffort: role.reasoningEffort ?? "",
-                                                  });
-                                                }}
-                                              >
-                                                <DropdownMenuItemIcon icon={PencilLine} className="text-current" />
-                                                编辑角色
-                                              </DropdownMenuItem>
-                                              <DropdownMenuSeparator />
-                                              <DropdownMenuItem
-                                                variant="destructive"
-                                                onSelect={(event) => {
-                                                  event.preventDefault();
-                                                  void removeRole(role);
-                                                }}
-                                              >
-                                                <DropdownMenuItemIcon icon={Trash2} className="text-current" />
-                                                删除角色
-                                              </DropdownMenuItem>
-                                            </DropdownMenuContent>
-                                          </DropdownMenu>
-                                        </div>
-                                        <AnimatePresence initial={false}>
-                                          {expanded ? (
-                                            <motion.div
-                                              key={`${role.publicID}-conversations`}
-                                              id={roleConversationContentID}
-                                              initial={{ height: 0, opacity: 0, "--mask-stop": "0%", y: 6 }}
-                                              animate={{ height: "auto", opacity: 1, "--mask-stop": "100%", y: 0 }}
-                                              exit={{ height: 0, opacity: 0, "--mask-stop": "0%", y: 6 }}
-                                              transition={ROLE_TREE_ACCORDION_TRANSITION}
-                                              style={ROLE_TREE_ACCORDION_MASK_STYLE}
-                                            >
-                                              <SidebarMenuSub className="mx-0 w-full translate-x-0 gap-0.5 border-l-0 px-0 py-0.5">
-                                                {conversations.length === 0 ? (
-                                                  <SidebarMenuSubItem>
-                                                    <div className="w-full rounded-md py-1 pl-8 pr-2 text-xs text-sidebar-foreground/55">
-                                                      暂无对话
-                                                    </div>
-                                                  </SidebarMenuSubItem>
-                                                ) : (
-                                                  conversations.map((conversation) => {
-                                                    const title = conversation.title || "未命名对话";
-                                                    return (
-                                                      <SidebarConversationItem
-                                                        key={conversation.publicID}
-                                                        active={activeConversationID === conversation.publicID}
-                                                        item={{
-                                                          publicID: conversation.publicID,
-                                                          title,
-                                                          url: `/chat?conversation_id=${conversation.publicID}`,
-                                                          shareActive:
-                                                            conversation.shareStatus === "active" &&
-                                                            Boolean(conversation.shareID?.trim()),
-                                                          labelsJSON: conversation.labelsJSON,
-                                                        }}
-                                                        starAction={{
-                                                          label: conversation.isStarred ? "取消收藏" : "收藏",
-                                                          icon: conversation.isStarred ? StarOff : Star,
-                                                          onSelect: (targetPublicID) => {
-                                                            void setStarByPublicID(targetPublicID, !conversation.isStarred);
-                                                          },
-                                                        }}
-                                                        projectMenu={{
-                                                          label: "移动到项目",
-                                                          unassignedLabel: "未分配项目",
-                                                          currentProjectID: conversation.projectID,
-                                                          projects,
-                                                          onSelect: (targetPublicID, targetProjectID) => {
-                                                            void setProjectByPublicID(targetPublicID, targetProjectID);
-                                                          },
-                                                        }}
-                                                        isTransferring={false}
-                                                        isRenaming={conversationRenameTarget?.publicID === conversation.publicID}
-                                                        renameValue={
-                                                          conversationRenameTarget?.publicID === conversation.publicID
-                                                            ? renameValue
-                                                            : title
-                                                        }
-                                                        rowClassName="w-full"
-                                                        linkClassName="pl-8"
-                                                        onRenameValueChange={setRenameValue}
-                                                        onRenameCommit={onRenameConversationCommit}
-                                                        onRenameCancel={onRenameConversationCancel}
-                                                        onAutoRename={onAutoRenameConversation}
-                                                        isAutoRenaming={autoRenamingConversationID === conversation.publicID}
-                                                        onManageLabels={() => setLabelsTarget(conversation)}
-                                                        onRename={onRenameConversation}
-                                                        onArchive={onArchiveConversation}
-                                                        onShare={(publicID, shareTitle) =>
-                                                          setShareTarget({ publicID, title: shareTitle })
-                                                        }
-                                                        onExport={onExportConversation}
-                                                        onDelete={onDeleteConversation}
-                                                        onNavigate={onNavigate}
-                                                        menuTriggerID={`role-conversation-menu-trigger-${conversation.publicID}`}
-                                                      />
-                                                    );
-                                                  })
-                                                )}
-                                              </SidebarMenuSub>
-                                            </motion.div>
-                                          ) : null}
-                                        </AnimatePresence>
-                                      </>
-                                    )}
-                                  </RoleSortableItem>
-                                );
-                              })}
-                            </SidebarMenu>
-                          </SortableContext>
-                        ) : null}
+                        <AnimatePresence initial={false}>
+                          {!groupCollapsed ? (
+                            <motion.div
+                              key={`${group.name}-roles`}
+                              initial={{ height: 0, opacity: 0, "--mask-stop": "0%", y: 6 }}
+                              animate={{ height: "auto", opacity: 1, "--mask-stop": "100%", y: 0 }}
+                              exit={{ height: 0, opacity: 0, "--mask-stop": "0%", y: 6 }}
+                              transition={ROLE_TREE_ACCORDION_TRANSITION}
+                              style={ROLE_TREE_ACCORDION_MASK_STYLE}
+                            >
+                              <SortableContext items={groupRoleIDs} strategy={verticalListSortingStrategy}>
+                                <SidebarMenu className="gap-0.5">
+                                  {group.roles.map((role) => renderRoleRow(role, canSortRoleGroup, `group:${group.name}`))}
+                                </SidebarMenu>
+                              </SortableContext>
+                            </motion.div>
+                          ) : null}
+                        </AnimatePresence>
                       </React.Fragment>
                     );
                   })}
+
+                  {roleGroups.ungrouped.length > 0 ? (
+                    <SortableContext items={roleGroups.ungrouped.map((role) => role.publicID)} strategy={verticalListSortingStrategy}>
+                      <SidebarMenu className="gap-0.5">
+                        {roleGroups.ungrouped.map((role) => renderRoleRow(role, roleGroups.ungrouped.length >= 2, "ungrouped"))}
+                      </SidebarMenu>
+                    </SortableContext>
+                  ) : null}
                 </DndContext>
               )}
             </CollapsibleMotionContent>

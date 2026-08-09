@@ -262,6 +262,7 @@ type ConversationRoleResponse struct {
 	Icon              string    `json:"icon"`
 	GroupName         string    `json:"groupName"`
 	SortOrder         int       `json:"sortOrder"`
+	Pinned            bool      `json:"pinned"`
 	Status            string    `json:"status"`
 	CreatedAt         time.Time `json:"createdAt"`
 	UpdatedAt         time.Time `json:"updatedAt"`
@@ -287,6 +288,7 @@ func toConversationRoleResponse(item *model.ConversationRole) ConversationRoleRe
 		Icon:              item.Icon,
 		GroupName:         item.GroupName,
 		SortOrder:         item.SortOrder,
+		Pinned:            item.PinnedAt != nil,
 		Status:            item.Status,
 		CreatedAt:         item.CreatedAt,
 		UpdatedAt:         item.UpdatedAt,

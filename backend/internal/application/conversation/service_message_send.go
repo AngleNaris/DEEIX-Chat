@@ -188,6 +188,12 @@ func (s *Service) sendMessageInternal(
 		return nil, err
 	}
 
+	// 用户消息正文支持 {{script: name}} / {{js: ...}} / {{date}} 等提示词变量展开
+	// （与系统提示词同一逻辑：js 沙箱执行、text 直插、3 分钟缓存）。
+	if strings.Contains(input.Content, "{{") {
+		input.Content = expandSystemPromptVars(input.Content, s.resolveSystemPromptVars(ctx, input.UserID))
+	}
+
 	startedAt := time.Now()
 	runID := normalizeRunID(input.ClientRunID)
 	if runID == "" {

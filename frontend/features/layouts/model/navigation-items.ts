@@ -5,7 +5,7 @@ import { Search } from "@/components/animate-ui/icons/search";
 import { Blend } from "@/components/animate-ui/icons/blend";
 import { Blocks } from "@/components/animate-ui/icons/blocks";
 import { List } from "@/components/animate-ui/icons/list";
-import { Users } from "lucide-react";
+import { Users } from "@/components/animate-ui/icons/users";
 import type { NavigationItem } from "@/features/layouts/types/navigation";
 
 export const NAVIGATION_ITEMS = [

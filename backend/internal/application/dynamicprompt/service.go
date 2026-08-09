@@ -6,8 +6,10 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	domaindynamicprompt "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/dynamicprompt"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/jseval"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/pkg/conv"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 	"github.com/google/uuid"
@@ -20,6 +22,12 @@ var ErrPromptNotFound = errors.New("dynamic prompt not found")
 const (
 	MaxNameLen    = 64
 	MaxContentLen = 20000
+)
+
+// 脚本执行限制（与提示词展开一致）。
+const (
+	runTimeout     = time.Second
+	runMaxOutput   = 4096
 )
 
 // UpsertInput 创建/更新动态提示词的输入。
@@ -129,4 +137,55 @@ func (s *Service) DeleteDynamicPrompt(ctx context.Context, userID uint, publicID
 	}
 	s.invalidateCache(userID)
 	return nil
+}
+
+// RunDynamicPrompt 执行动态提示词并返回结果：js 走纯计算沙箱；text 直接返回（截断）。
+// 未启用或不存在返回错误；执行失败返回空串（与提示词展开行为一致，不阻塞）。
+func (s *Service) RunDynamicPrompt(ctx context.Context, userID uint, publicID string) (string, error) {
+	publicID = strings.TrimSpace(publicID)
+	items, err := s.repo.ListDynamicPrompts(ctx, userID)
+	if err != nil {
+		return "", err
+	}
+	var found *domaindynamicprompt.DynamicPrompt
+	for i := range items {
+		if items[i].PublicID == publicID {
+			found = &items[i]
+			break
+		}
+	}
+	if found == nil {
+		return "", ErrPromptNotFound
+	}
+	if !found.Enabled {
+		return "", errors.New("dynamic prompt is disabled")
+	}
+	content := strings.TrimSpace(found.Content)
+	if content == "" {
+		return "", nil
+	}
+	if found.Kind == domaindynamicprompt.KindJS {
+		return runDynamicPromptJS(content), nil
+	}
+	if runes := []rune(content); len(runes) > runMaxOutput {
+		content = string(runes[:runMaxOutput]) + "…"
+	}
+	return content, nil
+}
+
+// runDynamicPromptJS 在纯计算沙箱中执行 js 代码（与提示词展开同参数：1s 超时、4KB 输出截断）。
+func runDynamicPromptJS(code string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), runTimeout)
+	defer cancel()
+	result, err := jseval.Run(ctx, code, jseval.Options{
+		Timeout:        runTimeout,
+		MaxOutputBytes: runMaxOutput,
+	})
+	if err != nil {
+		return ""
+	}
+	if strings.TrimSpace(result.Result) != "" {
+		return strings.TrimSpace(result.Result)
+	}
+	return strings.TrimSpace(result.Stdout)
 }

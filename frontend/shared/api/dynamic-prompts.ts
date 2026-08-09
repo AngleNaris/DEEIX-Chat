@@ -51,3 +51,12 @@ export async function deleteDynamicPrompt(accessToken: string, promptId: string)
     accessToken,
   });
 }
+
+// runDynamicPrompt 执行动态提示词（js 沙箱执行 / text 直返），返回执行结果文本。
+export async function runDynamicPrompt(accessToken: string, promptId: string): Promise<string> {
+  const data = await authedRequest<{ result: string }>(`/api/v1/dynamic-prompts/${pathParam(promptId)}/run`, {
+    method: "POST",
+    accessToken,
+  });
+  return data.result ?? "";
+}

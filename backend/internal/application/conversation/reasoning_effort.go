@@ -16,12 +16,13 @@ const (
 	ReasoningEffortMedium  = "medium"
 	ReasoningEffortHigh    = "high"
 	ReasoningEffortXHigh   = "xhigh"
+	ReasoningEffortMax     = "max"
 )
 
 // ReasoningEffortValid 判断档位是否合法。
 func ReasoningEffortValid(level string) bool {
 	switch level {
-	case ReasoningEffortDefault, ReasoningEffortLow, ReasoningEffortMedium, ReasoningEffortHigh, ReasoningEffortXHigh:
+	case ReasoningEffortDefault, ReasoningEffortLow, ReasoningEffortMedium, ReasoningEffortHigh, ReasoningEffortXHigh, ReasoningEffortMax:
 		return true
 	}
 	return false
@@ -29,8 +30,8 @@ func ReasoningEffortValid(level string) bool {
 
 // reasoningEffortParams 各协议族的思考强度参数映射：
 // path 为 options 中的参数路径（点分），values 为档位 → 注入值。
-// 仅支持 4 档的端点直通 xhigh；仅支持 3 档的端点（gemini_interactions）截断为 high。
-// anthropic 为预算制：注入 thinking 复合键（type=enabled + budget_tokens），发送时按 max_tokens 收敛。
+// chat_completions 直通 max；responses 系支持到 xhigh（max 截断为 xhigh，官方模型无 max 档）；
+// gemini 截断为 high；anthropic 为预算制：注入 thinking 复合键（type=enabled + budget_tokens），发送时按 max_tokens 收敛。
 var reasoningEffortParams = map[string]struct {
 	path   string
 	values map[string]interface{}
@@ -40,6 +41,7 @@ var reasoningEffortParams = map[string]struct {
 		values: map[string]interface{}{
 			ReasoningEffortLow: "low", ReasoningEffortMedium: "medium",
 			ReasoningEffortHigh: "high", ReasoningEffortXHigh: "xhigh",
+			ReasoningEffortMax: "max",
 		},
 	},
 	llm.AdapterOpenRouterChat: {
@@ -47,27 +49,31 @@ var reasoningEffortParams = map[string]struct {
 		values: map[string]interface{}{
 			ReasoningEffortLow: "low", ReasoningEffortMedium: "medium",
 			ReasoningEffortHigh: "high", ReasoningEffortXHigh: "xhigh",
+			ReasoningEffortMax: "max",
 		},
 	},
 	llm.AdapterOpenAIResponses: {
 		path: "reasoning.effort",
 		values: map[string]interface{}{
 			ReasoningEffortLow: "low", ReasoningEffortMedium: "medium",
-			ReasoningEffortHigh: "high", ReasoningEffortXHigh: "high",
+			ReasoningEffortHigh: "high", ReasoningEffortXHigh: "xhigh",
+			ReasoningEffortMax: "xhigh",
 		},
 	},
 	llm.AdapterOpenRouterResponses: {
 		path: "reasoning.effort",
 		values: map[string]interface{}{
 			ReasoningEffortLow: "low", ReasoningEffortMedium: "medium",
-			ReasoningEffortHigh: "high", ReasoningEffortXHigh: "high",
+			ReasoningEffortHigh: "high", ReasoningEffortXHigh: "xhigh",
+			ReasoningEffortMax: "xhigh",
 		},
 	},
 	llm.AdapterXAIResponses: {
 		path: "reasoning.effort",
 		values: map[string]interface{}{
 			ReasoningEffortLow: "low", ReasoningEffortMedium: "medium",
-			ReasoningEffortHigh: "high", ReasoningEffortXHigh: "high",
+			ReasoningEffortHigh: "high", ReasoningEffortXHigh: "xhigh",
+			ReasoningEffortMax: "xhigh",
 		},
 	},
 	llm.AdapterGeminiInteractions: {
@@ -75,6 +81,7 @@ var reasoningEffortParams = map[string]struct {
 		values: map[string]interface{}{
 			ReasoningEffortLow: "low", ReasoningEffortMedium: "medium",
 			ReasoningEffortHigh: "high", ReasoningEffortXHigh: "high",
+			ReasoningEffortMax: "high",
 		},
 	},
 	// anthropic thinking 预算制：档位映射为 budget_tokens（type 固定 enabled）。
@@ -85,6 +92,7 @@ var reasoningEffortParams = map[string]struct {
 			ReasoningEffortMedium: map[string]interface{}{"type": "enabled", "budget_tokens": 4096},
 			ReasoningEffortHigh:   map[string]interface{}{"type": "enabled", "budget_tokens": 8192},
 			ReasoningEffortXHigh:  map[string]interface{}{"type": "enabled", "budget_tokens": 16384},
+			ReasoningEffortMax:    map[string]interface{}{"type": "enabled", "budget_tokens": 32000},
 		},
 	},
 }

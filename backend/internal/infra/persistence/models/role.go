@@ -1,5 +1,7 @@
 package model
 
+import "time"
+
 // ConversationRole 存储用户角色(助手)配置。
 // 角色 = 项目的全部能力 + 默认模型 + 图标。
 type ConversationRole struct {
@@ -13,11 +15,12 @@ type ConversationRole struct {
 	Provider       string `gorm:"size:32;not null;default:'';comment:默认模型供应商"`
 	ReasoningEffort string `gorm:"size:16;not null;default:'';comment:默认思考强度档位(low/medium/high/xhigh，空=继承用户全局默认)"`
 	MCPDefaultMode string `gorm:"size:16;not null;default:'inherit';comment:MCP默认模式(inherit/custom)"`
-	Color          string `gorm:"size:32;not null;default:'';comment:角色颜色"`
-	Icon           string `gorm:"size:32;not null;default:'';comment:角色图标"`
-	GroupName      string `gorm:"size:80;not null;default:'';comment:分组名称"`
-	SortOrder      int    `gorm:"not null;default:0;index:idx_chat_roles_sort_order;comment:展示顺序"`
-	Status         string `gorm:"size:32;not null;default:'active';index:idx_chat_roles_status;comment:角色状态(active/archived)"`
+	Color          string     `gorm:"size:32;not null;default:'';comment:角色颜色"`
+	Icon           string     `gorm:"size:32;not null;default:'';comment:角色图标"`
+	GroupName      string     `gorm:"size:80;not null;default:'';comment:分组名称"`
+	SortOrder      int        `gorm:"not null;default:0;index:idx_chat_roles_sort_order;comment:展示顺序"`
+	PinnedAt       *time.Time `gorm:"index:idx_chat_roles_pinned_at;comment:置顶时间(非空=置顶，按置顶先后排序)"`
+	Status         string     `gorm:"size:32;not null;default:'active';index:idx_chat_roles_status;comment:角色状态(active/archived)"`
 }
 
 // TableName 指定表名。

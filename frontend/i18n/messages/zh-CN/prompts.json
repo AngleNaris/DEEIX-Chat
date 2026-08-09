@@ -1,5 +1,5 @@
 {
-  "pageTitle": "Skills & Prompts",
+  "pageTitle": "技能，提示词",
   "pageDescription": "管理可在对话中通过 / 插入的个人提示词。管理员配置的内置提示词会自动出现在选择器中。",
   "description": "自定义可通过 / 触发的个人提示词。",
   "skillsTab": "Skills",
@@ -79,5 +79,6 @@
   "skillPackagePreviewFailed": "技能包解析失败",
   "skillPackageImported": "技能包已导入",
   "skillPackageReplaced": "技能包已替换",
-  "skillPackageImportFailed": "技能包导入失败"
+  "skillPackageImportFailed": "技能包导入失败",
+  "scriptsTab": "脚本"
 }

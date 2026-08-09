@@ -502,7 +502,11 @@
       "openai": "OpenAI native tools",
       "claude": "Claude native tools",
       "google": "Google native tools"
-    }
+    },
+    "insertScript": "Insert script",
+    "insertScriptTitle": "Insert script",
+    "insertScriptDescription": "Pick a script to insert a {{script: name}} tag at the cursor; it runs and expands when the message is sent.",
+    "insertScriptEmpty": "No scripts yet. Create one in Skills → Scripts."
   },
   "modelPicker": {
     "selectModel": "Select model",
@@ -973,7 +977,8 @@
       "low": "Low",
       "medium": "Medium",
       "high": "High",
-      "xhigh": "Highest"
+      "xhigh": "Highest",
+      "max": "Max"
     }
   },
   "platformTools": {

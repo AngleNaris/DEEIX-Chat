@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
-import { ExternalLink, FileCode2, Pencil, Plus, Share2, ShieldX, Trash2 } from "lucide-react";
+import { Check, Copy, ExternalLink, FileCode2, Pencil, Plus, Share2, ShieldX, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,7 +20,6 @@ import {
 } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { CopyActionButton } from "@/shared/components/copy-action";
 import { ArtifactShareLink } from "@/shared/components/artifact-share-link";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 import { useLocalizedErrorMessage } from "@/i18n/use-localized-error";
@@ -441,6 +440,7 @@ export function ArtifactsSection() {
   const [loading, setLoading] = React.useState(true);
   const [busy, setBusy] = React.useState<string | null>(null);
   const [shareDialog, setShareDialog] = React.useState<ArtifactListItemDTO | null>(null);
+  const [copiedArtifactID, setCopiedArtifactID] = React.useState<string | null>(null);
 
   const load = React.useCallback(async () => {
     try {
@@ -524,6 +524,20 @@ export function ArtifactsSection() {
     return artifactShareUrl(item.share.share_id);
   };
 
+  const copyLink = async (item: ArtifactListItemDTO) => {
+    const url = shareLink(item);
+    if (!url) return;
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopiedArtifactID(item.artifact_id);
+      window.setTimeout(() => {
+        setCopiedArtifactID((prev) => (prev === item.artifact_id ? null : prev));
+      }, 1500);
+    } catch {
+      toast.error(t("copyFailed"));
+    }
+  };
+
   return (
     <SettingsSection title={t("sectionTitle")}>
       <div className="space-y-2">
@@ -561,84 +575,90 @@ export function ArtifactsSection() {
                     </div>
                   )}
                 </div>
-                <div className="flex items-start justify-between gap-2">
+                <div className="flex items-center gap-2">
                   <p className="min-w-0 flex-1 truncate text-sm font-medium text-foreground/90">{item.title}</p>
                   <span className="shrink-0 text-[10px] text-muted-foreground">{item.updated_at}</span>
-                </div>
-                {item.share ? (
-                  <div className="flex items-center gap-1.5">
-                    <span className="min-w-0 flex-1 truncate text-[11px] text-emerald-600/80 dark:text-emerald-400/80">
-                      {shareLink(item)}
-                    </span>
-                    <CopyActionButton
-                      value={shareLink(item) ?? ""}
-                      messages={{ copied: t("linkCopied"), failed: t("copyFailed") }}
-                      iconClassName="size-3"
-                    />
-                  </div>
-                ) : null}
-                <div className="flex items-center justify-end gap-0.5 border-t border-border/40 pt-2">
-                  {item.share ? (
-                    <>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <a
-                            href={shareLink(item) ?? ""}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                            aria-label={t("openLink")}
-                          >
-                            <ExternalLink className="h-3 w-3" />
-                          </a>
-                        </TooltipTrigger>
-                        <TooltipContent side="bottom">{t("openLink")}</TooltipContent>
-                      </Tooltip>
+                  <div className="flex shrink-0 items-center gap-0.5">
+                    {item.share ? (
+                      <>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <a
+                              href={shareLink(item) ?? ""}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                              aria-label={t("openLink")}
+                            >
+                              <ExternalLink className="h-3 w-3" />
+                            </a>
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom">{t("openLink")}</TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              type="button"
+                              className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                              onClick={() => void copyLink(item)}
+                              disabled={busy === item.artifact_id}
+                              aria-label={t("copyLink")}
+                            >
+                              {copiedArtifactID === item.artifact_id ? (
+                                <Check className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
+                              ) : (
+                                <Copy className="h-3 w-3" />
+                              )}
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom">{t("copyLink")}</TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              type="button"
+                              className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-destructive"
+                              onClick={() => void revoke(item)}
+                              disabled={busy === item.artifact_id}
+                              aria-label={t("revokeShare")}
+                            >
+                              <ShieldX className="h-3 w-3" />
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom">{t("revokeShare")}</TooltipContent>
+                        </Tooltip>
+                      </>
+                    ) : (
                       <Tooltip>
                         <TooltipTrigger asChild>
                           <button
                             type="button"
-                            className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-destructive"
-                            onClick={() => void revoke(item)}
+                            className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                            onClick={() => void share(item)}
                             disabled={busy === item.artifact_id}
-                            aria-label={t("revokeShare")}
+                            aria-label={t("share")}
                           >
-                            <ShieldX className="h-3 w-3" />
+                            <Share2 className="h-3 w-3" />
                           </button>
                         </TooltipTrigger>
-                        <TooltipContent side="bottom">{t("revokeShare")}</TooltipContent>
+                        <TooltipContent side="bottom">{t("share")}</TooltipContent>
                       </Tooltip>
-                    </>
-                  ) : (
+                    )}
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <button
                           type="button"
-                          className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                          onClick={() => void share(item)}
+                          className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-destructive"
+                          onClick={() => void remove(item)}
                           disabled={busy === item.artifact_id}
-                          aria-label={t("share")}
+                          aria-label={t("delete")}
                         >
-                          <Share2 className="h-3 w-3" />
+                          <Trash2 className="h-3 w-3" />
                         </button>
                       </TooltipTrigger>
-                      <TooltipContent side="bottom">{t("share")}</TooltipContent>
+                      <TooltipContent side="bottom">{t("delete")}</TooltipContent>
                     </Tooltip>
-                  )}
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-destructive"
-                        onClick={() => void remove(item)}
-                        disabled={busy === item.artifact_id}
-                        aria-label={t("delete")}
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom">{t("delete")}</TooltipContent>
-                  </Tooltip>
+                  </div>
                 </div>
               </div>
             ))}

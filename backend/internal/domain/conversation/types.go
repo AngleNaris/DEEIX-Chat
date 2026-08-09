@@ -97,6 +97,8 @@ type ConversationRole struct {
 	Icon              string
 	GroupName         string
 	SortOrder         int
+	// PinnedAt 非空表示角色已置顶（按置顶先后排序）。
+	PinnedAt          *time.Time
 	Status            string
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
@@ -116,6 +118,8 @@ type ConversationRolePatch struct {
 	Color             *string
 	Icon              *string
 	GroupName         *string
+	// Pinned true=置顶（记录当前时间）；false=取消置顶；nil=不变。
+	Pinned            *bool
 	Status            *string
 }
 

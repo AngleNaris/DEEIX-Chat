@@ -3,6 +3,7 @@ package conversation
 import (
 	"context"
 	"strings"
+	"time"
 
 	domainconversation "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 	models "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/models"
@@ -46,6 +47,8 @@ func (r *Repo) ListConversationRoles(ctx context.Context, userID uint, statusFil
 		query = query.Where("status = ?", "active")
 	}
 	if err := query.
+		Order("pinned_at IS NULL ASC").
+		Order("pinned_at ASC").
 		Order("sort_order ASC").
 		Order("id DESC").
 		Find(&items).Error; err != nil {
@@ -112,6 +115,13 @@ func (r *Repo) UpdateConversationRoleByPublicID(
 	}
 	if patch.GroupName != nil {
 		updates["group_name"] = *patch.GroupName
+	}
+	if patch.Pinned != nil {
+		if *patch.Pinned {
+			updates["pinned_at"] = time.Now()
+		} else {
+			updates["pinned_at"] = nil
+		}
 	}
 	if patch.Status != nil {
 		updates["status"] = *patch.Status
@@ -215,6 +225,7 @@ func toConversationRoleDomain(item models.ConversationRole) domainconversation.C
 		Icon:            item.Icon,
 		GroupName:       item.GroupName,
 		SortOrder:       item.SortOrder,
+		PinnedAt:        item.PinnedAt,
 		Status:          item.Status,
 		CreatedAt:       item.CreatedAt,
 		UpdatedAt:       item.UpdatedAt,
@@ -247,6 +258,7 @@ func toConversationRoleModel(item *domainconversation.ConversationRole) models.C
 		Icon:            item.Icon,
 		GroupName:       item.GroupName,
 		SortOrder:       item.SortOrder,
+		PinnedAt:        item.PinnedAt,
 		Status:          item.Status,
 	}
 }

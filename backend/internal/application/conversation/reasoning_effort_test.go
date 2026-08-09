@@ -12,12 +12,20 @@ func TestReasoningEffortParamForProtocol(t *testing.T) {
 		if !ok || path != "reasoning_effort" || value != "high" {
 			t.Fatalf("unexpected scalar mapping: path=%q value=%v ok=%v", path, value, ok)
 		}
+		path, value, ok = ReasoningEffortParamForProtocol(llm.AdapterOpenAIChatCompletions, ReasoningEffortMax)
+		if !ok || path != "reasoning_effort" || value != "max" {
+			t.Fatalf("unexpected max mapping: path=%q value=%v ok=%v", path, value, ok)
+		}
 	})
 
-	t.Run("xhigh truncated to high for three-level endpoints", func(t *testing.T) {
+	t.Run("responses pass through xhigh and truncate max", func(t *testing.T) {
 		path, value, ok := ReasoningEffortParamForProtocol(llm.AdapterOpenAIResponses, ReasoningEffortXHigh)
-		if !ok || path != "reasoning.effort" || value != "high" {
-			t.Fatalf("unexpected truncation: path=%q value=%v ok=%v", path, value, ok)
+		if !ok || path != "reasoning.effort" || value != "xhigh" {
+			t.Fatalf("unexpected xhigh mapping: path=%q value=%v ok=%v", path, value, ok)
+		}
+		path, value, ok = ReasoningEffortParamForProtocol(llm.AdapterOpenAIResponses, ReasoningEffortMax)
+		if !ok || path != "reasoning.effort" || value != "xhigh" {
+			t.Fatalf("expected max truncated to xhigh, got path=%q value=%v ok=%v", path, value, ok)
 		}
 	})
 
@@ -27,6 +35,7 @@ func TestReasoningEffortParamForProtocol(t *testing.T) {
 			ReasoningEffortMedium: 4096,
 			ReasoningEffortHigh:   8192,
 			ReasoningEffortXHigh:  16384,
+			ReasoningEffortMax:    32000,
 		}
 		for level, wantBudget := range wantBudgets {
 			path, value, ok := ReasoningEffortParamForProtocol(llm.AdapterAnthropicMessages, level)
@@ -44,7 +53,7 @@ func TestReasoningEffortParamForProtocol(t *testing.T) {
 		if _, _, ok := ReasoningEffortParamForProtocol(llm.AdapterGoogleGenerateContent, ReasoningEffortHigh); ok {
 			t.Fatal("expected unsupported protocol to be rejected")
 		}
-		if _, _, ok := ReasoningEffortParamForProtocol(llm.AdapterAnthropicMessages, "max"); ok {
+		if _, _, ok := ReasoningEffortParamForProtocol(llm.AdapterAnthropicMessages, "ultra"); ok {
 			t.Fatal("expected invalid level to be rejected")
 		}
 	})

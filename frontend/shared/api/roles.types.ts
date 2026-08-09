@@ -1,6 +1,6 @@
 export type ConversationRoleMCPDefaultMode = "inherit" | "custom";
 
-export type ConversationRoleReasoningEffort = "low" | "medium" | "high" | "xhigh";
+export type ConversationRoleReasoningEffort = "low" | "medium" | "high" | "xhigh" | "max";
 
 export type ConversationRoleDTO = {
   id: number;
@@ -18,6 +18,7 @@ export type ConversationRoleDTO = {
   groupName: string;
   reasoningEffort: string;
   sortOrder: number;
+  pinned: boolean;
   status: string;
   createdAt: string;
   updatedAt: string;
@@ -36,6 +37,7 @@ export type CreateConversationRoleRequest = {
   icon?: string;
   groupName?: string;
   reasoningEffort?: ConversationRoleReasoningEffort;
+  pinned?: boolean;
 };
 
 export type UpdateConversationRoleRequest = {
@@ -52,6 +54,7 @@ export type UpdateConversationRoleRequest = {
   status?: "active" | "archived";
   groupName?: string;
   reasoningEffort?: ConversationRoleReasoningEffort;
+  pinned?: boolean;
 };
 
 export type ReorderConversationRolesRequest = {
