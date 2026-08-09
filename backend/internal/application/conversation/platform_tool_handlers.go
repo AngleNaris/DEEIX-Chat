@@ -7,6 +7,7 @@ import (
 	"io"
 	"strings"
 
+	apppromptpreset "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/promptpreset"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/skill"
 )
 
@@ -326,4 +327,58 @@ func marshalPlatformResult(payload interface{}) (string, error) {
 		return "", fmt.Errorf("encode tool result: %w", err)
 	}
 	return string(data), nil
+}
+
+// platformListPromptPresets 列出用户可见提示词（含内置）。
+func (s *Service) platformListPromptPresets(ctx context.Context, call platformToolCallContext) (string, error) {
+	if s.promptPresets == nil {
+		return "", fmt.Errorf("prompt preset service is unavailable")
+	}
+	items, total, err := s.promptPresets.ListVisible(ctx, call.UserID, apppromptpreset.ListInput{
+		Page:     1,
+		PageSize: platformListPageSize,
+	})
+	if err != nil {
+		return "", err
+	}
+	summary := make([]map[string]interface{}, 0, len(items))
+	for _, item := range items {
+		summary = append(summary, map[string]interface{}{
+			"prompt_preset_id": item.ID,
+			"title":            item.Title,
+			"trigger":          item.Trigger,
+			"description":      item.Description,
+			"content":          item.Content,
+			"enabled":          item.Enabled,
+			"scope":            item.Scope,
+		})
+	}
+	return marshalPlatformResult(map[string]interface{}{
+		"prompt_presets": summary,
+		"total":          total,
+	})
+}
+
+// platformListDynamicPrompts 列出用户动态提示词脚本。
+func (s *Service) platformListDynamicPrompts(ctx context.Context, call platformToolCallContext) (string, error) {
+	if s.dynamicPrompts == nil {
+		return "", fmt.Errorf("dynamic prompt service is unavailable")
+	}
+	items, err := s.dynamicPrompts.ListDynamicPrompts(ctx, call.UserID)
+	if err != nil {
+		return "", err
+	}
+	summary := make([]map[string]interface{}, 0, len(items))
+	for _, item := range items {
+		summary = append(summary, map[string]interface{}{
+			"prompt_id": item.PublicID,
+			"name":      item.Name,
+			"kind":      item.Kind,
+			"enabled":   item.Enabled,
+			"content":   item.Content,
+		})
+	}
+	return marshalPlatformResult(map[string]interface{}{
+		"dynamic_prompts": summary,
+	})
 }

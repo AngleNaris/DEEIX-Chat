@@ -40,7 +40,10 @@ import {
   SkillsSection,
   type SkillsSectionHandle,
 } from "@/features/prompts/components/sections/skills-section";
-import { DynamicPromptsSection } from "@/features/settings/components/sections/chat/dynamic-prompts-section";
+import {
+  DynamicPromptsSection,
+  type DynamicPromptsSectionHandle,
+} from "@/features/settings/components/sections/chat/dynamic-prompts-section";
 import {
   promptPresetKey,
   useSkillsPromptPage,
@@ -153,6 +156,7 @@ export function SkillsPromptPage() {
   const commonStatesT = useTranslations("common.states");
   const [activeTab, setActiveTab] = React.useState("skills");
   const skillsSectionRef = React.useRef<SkillsSectionHandle>(null);
+  const dynamicPromptsSectionRef = React.useRef<DynamicPromptsSectionHandle>(null);
   const {
     items,
     filteredItems,
@@ -253,6 +257,16 @@ export function SkillsPromptPage() {
                 <Plus className="size-4" />
                 {t("add")}
               </Button>
+            ) : activeTab === "scripts" ? (
+              <Button
+                size="sm"
+                variant="default"
+                className="shrink-0"
+                onClick={() => dynamicPromptsSectionRef.current?.openCreate()}
+              >
+                <Plus className="size-4" />
+                {t("add")}
+              </Button>
             ) : null}
           </div>
 
@@ -269,7 +283,13 @@ export function SkillsPromptPage() {
             <Input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder={activeTab === "skills" ? t("skillsSearchPlaceholder") : t("searchPlaceholder")}
+              placeholder={
+                activeTab === "skills"
+                  ? t("skillsSearchPlaceholder")
+                  : activeTab === "scripts"
+                    ? t("scriptsSearchPlaceholder")
+                    : t("searchPlaceholder")
+              }
               className="rounded-xl bg-background pl-9"
             />
           </div>
@@ -292,7 +312,7 @@ export function SkillsPromptPage() {
           </TabsContent>
           <TabsContent value="scripts" className="flex h-full min-h-0">
             <section className="mt-6 flex min-h-0 flex-1 flex-col overflow-hidden">
-              <DynamicPromptsSection title="" />
+              <DynamicPromptsSection ref={dynamicPromptsSectionRef} title="" variant="cards" query={query} />
             </section>
           </TabsContent>
         </Tabs>

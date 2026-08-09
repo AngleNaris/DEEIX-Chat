@@ -19,14 +19,17 @@ import (
 	appartifact "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/artifact"
 	appstorage "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/objectstorage"
 	appprocessing "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/processing"
+	apppromptpreset "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/promptpreset"
 	apprag "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/rag"
 	appskill "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/skill"
 	appupload "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/upload"
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 	domainagentgroup "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/agentgroup"
 	domaindoccard "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/doccard"
+	domaindynamicprompt "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/dynamicprompt"
 	domainmcp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/mcp"
 	domainmemory "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/memory"
+	domainpromptpreset "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/promptpreset"
 	domainskill "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/skill"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/embedding"
@@ -66,6 +69,8 @@ type skillResolver interface {
 	ResolveAvailable(ctx context.Context, userID uint, id uint) (*domainskill.Skill, error)
 	ListVisible(ctx context.Context, userID uint, input appskill.ListInput) ([]domainskill.Skill, int64, error)
 	GetPackageFile(ctx context.Context, userID uint, skillID uint, filePath string) ([]byte, error)
+	// CreateUser 供平台工具 create_skill 创建用户自己的技能。
+	CreateUser(ctx context.Context, userID uint, input appskill.WriteInput) (*domainskill.Skill, error)
 	// UpdateUser 供平台工具 update_skill 更新用户自己的技能。
 	UpdateUser(ctx context.Context, userID uint, id uint, input appskill.PatchInput) (*domainskill.Skill, error)
 	// DeleteUser 供平台工具 delete_skill 删除用户自己的技能。
@@ -108,9 +113,21 @@ type docCardReader interface {
 }
 
 // dynamicPromptReader 动态提示词能力（由 dynamicprompt 服务注入），
-// 供提示词模板变量 {{script: name}} 展开使用。
+// 供提示词模板变量 {{script: name}} 展开与平台工具 create/update/delete/run_dynamic_prompt 使用。
 type dynamicPromptReader interface {
 	ListDynamicPrompts(ctx context.Context, userID uint) ([]appdynamicprompt.PromptView, error)
+	UpsertDynamicPrompt(ctx context.Context, userID uint, publicID string, input appdynamicprompt.UpsertInput, updatedBy string) (*domaindynamicprompt.DynamicPrompt, error)
+	DeleteDynamicPrompt(ctx context.Context, userID uint, publicID string) error
+	RunDynamicPrompt(ctx context.Context, userID uint, publicID string) (string, error)
+}
+
+// promptPresetResolver 预制提示词能力（由 promptpreset 服务注入），
+// 供平台工具 list/create/update/delete_prompt_preset 使用。
+type promptPresetResolver interface {
+	ListVisible(ctx context.Context, userID uint, input apppromptpreset.ListInput) ([]domainpromptpreset.PromptPreset, int64, error)
+	CreateUser(ctx context.Context, userID uint, input apppromptpreset.WriteInput) (*domainpromptpreset.PromptPreset, error)
+	UpdateUser(ctx context.Context, userID uint, id uint, input apppromptpreset.PatchInput) (*domainpromptpreset.PromptPreset, error)
+	DeleteUser(ctx context.Context, userID uint, id uint) error
 }
 
 // userSettingsWriter 读写用户个人设置（白名单 key，由 usersettings 服务注入）。
@@ -184,8 +201,9 @@ type Service struct {
 	artifactSvc           *appartifact.Service       // 制品保存/分享（平台工具 save/list/delete/share_artifact）
 	docCards              docCardReader              // 文档卡片读取（关键字触发注入）
 	docCardCache          sync.Map                   // userID (uint) → *cachedDocCards
-	dynamicPrompts        dynamicPromptReader        // 动态提示词读取（{{script: name}} 展开）
+	dynamicPrompts        dynamicPromptReader        // 动态提示词读取（{{script: name}} 展开 + 平台工具脚本管理）
 	dynamicPromptCache    sync.Map                   // userID (uint) → *cachedDynamicPrompts
+	promptPresets         promptPresetResolver       // 预制提示词（平台工具 list/create/update/delete_prompt_preset）
 	llmClient         *llm.Client
 	mcpClient         *mcp.Client
 	uploadSvc         *appupload.Service
@@ -505,9 +523,14 @@ func (s *Service) InvalidateDocCardCache(userID uint) {
 	}
 }
 
-// SetDynamicPromptReader 注入动态提示词读取（{{script: name}} 展开）。
+// SetDynamicPromptReader 注入动态提示词读取（{{script: name}} 展开 + 平台工具脚本管理）。
 func (s *Service) SetDynamicPromptReader(reader dynamicPromptReader) {
 	s.dynamicPrompts = reader
+}
+
+// SetPromptPresetResolver 注入预制提示词能力（平台工具 list/create/update/delete_prompt_preset）。
+func (s *Service) SetPromptPresetResolver(resolver promptPresetResolver) {
+	s.promptPresets = resolver
 }
 
 // InvalidateDynamicPromptCache 清除用户动态提示词缓存（写入/删除后即时生效）。

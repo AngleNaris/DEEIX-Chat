@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	appdynamicprompt "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/dynamicprompt"
+	apppromptpreset "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/promptpreset"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/skill"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/objectstore"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/pkg/traceid"
@@ -333,4 +335,289 @@ func (s *Service) recordPlatformAudit(ctx context.Context, call callCtx, action 
 		"",
 		detail,
 	)
+}
+
+// platformCreateSkill 创建用户自己的技能（写操作，受批准模式管控）。
+func (s *Service) platformCreateSkill(ctx context.Context, call platformToolCallContext) (string, error) {
+	var args struct {
+		Title       string `json:"title"`
+		Trigger     string `json:"trigger"`
+		Description string `json:"description"`
+		Markdown    string `json:"markdown"`
+		Enabled     *bool  `json:"enabled"`
+	}
+	if err := decodePlatformArgs(call.Arguments, &args); err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(args.Title) == "" {
+		return "", fmt.Errorf("title is required")
+	}
+	if s.skillResolver == nil {
+		return "", fmt.Errorf("skill service is unavailable")
+	}
+	enabled := true
+	if args.Enabled != nil {
+		enabled = *args.Enabled
+	}
+	created, err := s.skillResolver.CreateUser(ctx, call.UserID, skill.WriteInput{
+		Title:       strings.TrimSpace(args.Title),
+		Trigger:     strings.TrimSpace(args.Trigger),
+		Description: strings.TrimSpace(args.Description),
+		Markdown:    args.Markdown,
+		Enabled:     enabled,
+	})
+	if err != nil {
+		return "", err
+	}
+	s.recordPlatformAudit(ctx, callCtx{userID: call.UserID, requestID: call.RequestID}, "platform_tools.create_skill", fmt.Sprintf("%d", created.ID), map[string]interface{}{
+		"title":   created.Title,
+		"trigger": created.Trigger,
+	})
+	return marshalPlatformResult(map[string]interface{}{
+		"skill_id": created.ID,
+		"title":    created.Title,
+		"created":  true,
+	})
+}
+
+// platformCreatePromptPreset 创建用户自定义提示词（写操作，受批准模式管控）。
+func (s *Service) platformCreatePromptPreset(ctx context.Context, call platformToolCallContext) (string, error) {
+	var args struct {
+		Title       string `json:"title"`
+		Trigger     string `json:"trigger"`
+		Description string `json:"description"`
+		Content     string `json:"content"`
+		Enabled     *bool  `json:"enabled"`
+	}
+	if err := decodePlatformArgs(call.Arguments, &args); err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(args.Title) == "" {
+		return "", fmt.Errorf("title is required")
+	}
+	if s.promptPresets == nil {
+		return "", fmt.Errorf("prompt preset service is unavailable")
+	}
+	enabled := true
+	if args.Enabled != nil {
+		enabled = *args.Enabled
+	}
+	created, err := s.promptPresets.CreateUser(ctx, call.UserID, apppromptpreset.WriteInput{
+		Title:       strings.TrimSpace(args.Title),
+		Trigger:     strings.TrimSpace(args.Trigger),
+		Description: strings.TrimSpace(args.Description),
+		Content:     args.Content,
+		Enabled:     enabled,
+	})
+	if err != nil {
+		return "", err
+	}
+	s.recordPlatformAudit(ctx, callCtx{userID: call.UserID, requestID: call.RequestID}, "platform_tools.create_prompt_preset", fmt.Sprintf("%d", created.ID), map[string]interface{}{
+		"title":   created.Title,
+		"trigger": created.Trigger,
+	})
+	return marshalPlatformResult(map[string]interface{}{
+		"prompt_preset_id": created.ID,
+		"title":            created.Title,
+		"trigger":          created.Trigger,
+		"created":          true,
+	})
+}
+
+// platformUpdatePromptPreset 更新用户自定义提示词（写操作，受批准模式管控；内置提示词不可改）。
+func (s *Service) platformUpdatePromptPreset(ctx context.Context, call platformToolCallContext) (string, error) {
+	var args struct {
+		PromptPresetID uint    `json:"prompt_preset_id"`
+		Title          *string `json:"title"`
+		Trigger        *string `json:"trigger"`
+		Description    *string `json:"description"`
+		Content        *string `json:"content"`
+		Enabled        *bool   `json:"enabled"`
+	}
+	if err := decodePlatformArgs(call.Arguments, &args); err != nil {
+		return "", err
+	}
+	if args.PromptPresetID == 0 {
+		return "", fmt.Errorf("prompt_preset_id is required")
+	}
+	if s.promptPresets == nil {
+		return "", fmt.Errorf("prompt preset service is unavailable")
+	}
+	patch := apppromptpreset.PatchInput{
+		Title:       args.Title,
+		Trigger:     args.Trigger,
+		Description: args.Description,
+		Content:     args.Content,
+		Enabled:     args.Enabled,
+	}
+	updated, err := s.promptPresets.UpdateUser(ctx, call.UserID, args.PromptPresetID, patch)
+	if err != nil {
+		return "", err
+	}
+	s.recordPlatformAudit(ctx, callCtx{userID: call.UserID, requestID: call.RequestID}, "platform_tools.update_prompt_preset", fmt.Sprintf("%d", args.PromptPresetID), map[string]interface{}{
+		"title":   updated.Title,
+		"trigger": updated.Trigger,
+	})
+	return marshalPlatformResult(map[string]interface{}{
+		"prompt_preset_id": args.PromptPresetID,
+		"title":            updated.Title,
+		"trigger":          updated.Trigger,
+		"updated":          true,
+	})
+}
+
+// platformDeletePromptPreset 删除用户自定义提示词（写操作，受批准模式管控；内置提示词不可删）。
+func (s *Service) platformDeletePromptPreset(ctx context.Context, call platformToolCallContext) (string, error) {
+	var args struct {
+		PromptPresetID uint `json:"prompt_preset_id"`
+	}
+	if err := decodePlatformArgs(call.Arguments, &args); err != nil {
+		return "", err
+	}
+	if args.PromptPresetID == 0 {
+		return "", fmt.Errorf("prompt_preset_id is required")
+	}
+	if s.promptPresets == nil {
+		return "", fmt.Errorf("prompt preset service is unavailable")
+	}
+	if err := s.promptPresets.DeleteUser(ctx, call.UserID, args.PromptPresetID); err != nil {
+		return "", err
+	}
+	s.recordPlatformAudit(ctx, callCtx{userID: call.UserID, requestID: call.RequestID}, "platform_tools.delete_prompt_preset", fmt.Sprintf("%d", args.PromptPresetID), nil)
+	return marshalPlatformResult(map[string]interface{}{
+		"prompt_preset_id": args.PromptPresetID,
+		"deleted":          true,
+	})
+}
+
+// platformCreateDynamicPrompt 创建用户动态提示词脚本（写操作，受批准模式管控）。
+func (s *Service) platformCreateDynamicPrompt(ctx context.Context, call platformToolCallContext) (string, error) {
+	var args struct {
+		Name    string `json:"name"`
+		Kind    string `json:"kind"`
+		Content string `json:"content"`
+		Enabled *bool  `json:"enabled"`
+	}
+	if err := decodePlatformArgs(call.Arguments, &args); err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(args.Name) == "" {
+		return "", fmt.Errorf("name is required")
+	}
+	if s.dynamicPrompts == nil {
+		return "", fmt.Errorf("dynamic prompt service is unavailable")
+	}
+	created, err := s.dynamicPrompts.UpsertDynamicPrompt(ctx, call.UserID, "", appdynamicprompt.UpsertInput{
+		Name:    strings.TrimSpace(args.Name),
+		Kind:    strings.TrimSpace(args.Kind),
+		Content: args.Content,
+		Enabled: args.Enabled,
+	}, "ai")
+	if err != nil {
+		return "", err
+	}
+	s.recordPlatformAudit(ctx, callCtx{userID: call.UserID, requestID: call.RequestID}, "platform_tools.create_dynamic_prompt", created.PublicID, map[string]interface{}{
+		"name": created.Name,
+	})
+	return marshalPlatformResult(map[string]interface{}{
+		"prompt_id": created.PublicID,
+		"name":      created.Name,
+		"created":   true,
+	})
+}
+
+// platformUpdateDynamicPrompt 更新用户动态提示词脚本（写操作，受批准模式管控）。
+func (s *Service) platformUpdateDynamicPrompt(ctx context.Context, call platformToolCallContext) (string, error) {
+	var args struct {
+		PromptID string  `json:"prompt_id"`
+		Name     *string `json:"name"`
+		Kind     *string `json:"kind"`
+		Content  *string `json:"content"`
+		Enabled  *bool   `json:"enabled"`
+	}
+	if err := decodePlatformArgs(call.Arguments, &args); err != nil {
+		return "", err
+	}
+	promptID := strings.TrimSpace(args.PromptID)
+	if promptID == "" {
+		return "", fmt.Errorf("prompt_id is required")
+	}
+	if s.dynamicPrompts == nil {
+		return "", fmt.Errorf("dynamic prompt service is unavailable")
+	}
+	input := appdynamicprompt.UpsertInput{}
+	if args.Name != nil {
+		input.Name = strings.TrimSpace(*args.Name)
+	}
+	if args.Kind != nil {
+		input.Kind = strings.TrimSpace(*args.Kind)
+	}
+	if args.Content != nil {
+		input.Content = *args.Content
+	}
+	input.Enabled = args.Enabled
+	updated, err := s.dynamicPrompts.UpsertDynamicPrompt(ctx, call.UserID, promptID, input, "ai")
+	if err != nil {
+		return "", err
+	}
+	s.recordPlatformAudit(ctx, callCtx{userID: call.UserID, requestID: call.RequestID}, "platform_tools.update_dynamic_prompt", updated.PublicID, map[string]interface{}{
+		"name": updated.Name,
+	})
+	return marshalPlatformResult(map[string]interface{}{
+		"prompt_id": updated.PublicID,
+		"name":      updated.Name,
+		"updated":   true,
+	})
+}
+
+// platformDeleteDynamicPrompt 删除用户动态提示词脚本（写操作，受批准模式管控）。
+func (s *Service) platformDeleteDynamicPrompt(ctx context.Context, call platformToolCallContext) (string, error) {
+	var args struct {
+		PromptID string `json:"prompt_id"`
+	}
+	if err := decodePlatformArgs(call.Arguments, &args); err != nil {
+		return "", err
+	}
+	promptID := strings.TrimSpace(args.PromptID)
+	if promptID == "" {
+		return "", fmt.Errorf("prompt_id is required")
+	}
+	if s.dynamicPrompts == nil {
+		return "", fmt.Errorf("dynamic prompt service is unavailable")
+	}
+	if err := s.dynamicPrompts.DeleteDynamicPrompt(ctx, call.UserID, promptID); err != nil {
+		return "", err
+	}
+	s.recordPlatformAudit(ctx, callCtx{userID: call.UserID, requestID: call.RequestID}, "platform_tools.delete_dynamic_prompt", promptID, nil)
+	return marshalPlatformResult(map[string]interface{}{
+		"prompt_id": promptID,
+		"deleted":   true,
+	})
+}
+
+// platformRunDynamicPrompt 执行用户动态提示词脚本（js 沙箱 1s/4KB 截断；text 直返）。
+// 供 AI 验证自己创建的脚本；写类操作，受批准模式管控。
+func (s *Service) platformRunDynamicPrompt(ctx context.Context, call platformToolCallContext) (string, error) {
+	var args struct {
+		PromptID string `json:"prompt_id"`
+	}
+	if err := decodePlatformArgs(call.Arguments, &args); err != nil {
+		return "", err
+	}
+	promptID := strings.TrimSpace(args.PromptID)
+	if promptID == "" {
+		return "", fmt.Errorf("prompt_id is required")
+	}
+	if s.dynamicPrompts == nil {
+		return "", fmt.Errorf("dynamic prompt service is unavailable")
+	}
+	result, err := s.dynamicPrompts.RunDynamicPrompt(ctx, call.UserID, promptID)
+	if err != nil {
+		return "", err
+	}
+	s.recordPlatformAudit(ctx, callCtx{userID: call.UserID, requestID: call.RequestID}, "platform_tools.run_dynamic_prompt", promptID, nil)
+	return marshalPlatformResult(map[string]interface{}{
+		"prompt_id": promptID,
+		"result":    result,
+	})
 }

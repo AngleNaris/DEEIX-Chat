@@ -40,6 +40,10 @@ func (f *fakeSkillResolver) UpdateUser(ctx context.Context, userID uint, id uint
 	return nil, nil
 }
 
+func (f *fakeSkillResolver) CreateUser(ctx context.Context, userID uint, input appskill.WriteInput) (*domainskill.Skill, error) {
+	return nil, nil
+}
+
 func (f *fakeSkillResolver) DeleteUser(ctx context.Context, userID uint, id uint) error {
 	return nil
 }

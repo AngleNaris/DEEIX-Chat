@@ -19,6 +19,7 @@ import {
 import { StreamdownRender } from "@/shared/components/markdown/streamdown-render";
 import { cn } from "@/lib/utils";
 import { TRACE_ROOT_CLASS } from "@/features/chat/components/shared/message-process-trace-shared";
+import { useAutoScrollFollow } from "@/shared/hooks/use-scroll-follow";
 import type { TraceDisplayEvent } from "@/features/chat/model/message-process-trace";
 
 function traceEventToBlock(event: ChatTraceEvent): ChatTraceBlock {
@@ -232,6 +233,8 @@ export function MessageUpstreamThink({
   const resolvedTitle = title ?? (streaming ? labels.think.titleActive : labels.think.titleDone);
   const resolvedSubtitle = subtitle ?? (streaming ? labels.think.subtitleActive : labels.think.subtitleDone);
   const contentSegments = block.contentSegments?.filter((item) => item.trim()) ?? [];
+  // 流式思考内容自动跟随：用户未上滚时始终显示最新一段。
+  const { ref: thinkContentRef, onScroll: onThinkContentScroll } = useAutoScrollFollow<HTMLDivElement>(contentSegments);
 
   return (
     <div className={TRACE_ROOT_CLASS}>
@@ -271,8 +274,8 @@ export function MessageUpstreamThink({
             />
           </AccordionTrigger>
           <AccordionContent className="px-0 pb-0 pt-1.5 duration-[350ms] ease-in-out">
-            {/* 思维过程内容设最大高度并滚动，避免长思考将页面撑得过长 */}
-            <div className="max-h-80 space-y-3 overflow-y-auto pr-1">
+            {/* 思维过程内容设最大高度并滚动，避免长思考将页面撑得过长；流式时自动跟随最新内容 */}
+            <div ref={thinkContentRef} onScroll={onThinkContentScroll} className="max-h-80 space-y-3 overflow-y-auto pr-1">
               {contentSegments.length > 0 ? (
                 contentSegments.map((content, index) => (
                   <StreamdownRender

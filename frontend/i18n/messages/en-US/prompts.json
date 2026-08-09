@@ -8,6 +8,7 @@
   "addSkill": "New Skill",
   "searchPlaceholder": "Search prompts",
   "skillsSearchPlaceholder": "Search skills",
+  "scriptsSearchPlaceholder": "Search scripts",
   "loading": "Loading prompts",
   "empty": "No custom prompts yet",
   "emptyDescription": "Create one and type / in chat to insert it.",

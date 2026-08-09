@@ -427,6 +427,7 @@ func NewApp() (*App, error) {
 	dynamicPromptHandler := dynamicprompthttp.NewHandler(dynamicPromptService)
 	dynamicPromptModule := dynamicprompthttp.NewModule(dynamicPromptHandler)
 	conversationService.SetDynamicPromptReader(dynamicPromptService)
+	conversationService.SetPromptPresetResolver(promptPresetService)
 
 	hc := newHealthChecker(db, cfg.CacheDriver, redisClient)
 	rateLimiter := buildRateLimiter(cfg, redisClient, memoryCache)

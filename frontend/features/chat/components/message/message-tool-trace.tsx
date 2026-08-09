@@ -17,6 +17,7 @@ import {
 } from "@/features/chat/hooks/use-process-trace-labels";
 import { cn } from "@/lib/utils";
 import { TRACE_ROOT_CLASS } from "@/features/chat/components/shared/message-process-trace-shared";
+import { useAutoScrollFollow } from "@/shared/hooks/use-scroll-follow";
 import type { TraceDisplayEvent } from "@/features/chat/model/message-process-trace";
 
 type ToolTraceCall = {
@@ -295,9 +296,13 @@ function ToolMiniLabel({ children }: { children: React.ReactNode }) {
 }
 
 function ToolPre({ children, failed }: { children: string; failed?: boolean }) {
+  // 流式输出工具结果时自动跟随最新内容（用户上滚则暂停）。
+  const { ref, onScroll } = useAutoScrollFollow<HTMLPreElement>(children);
   if (!children.trim()) return null;
   return (
     <pre
+      ref={ref}
+      onScroll={onScroll}
       className={cn(
         "max-h-56 overflow-auto rounded-md border border-border/35 bg-muted/25 px-2.5 py-2 font-mono text-[11px] leading-5",
         "whitespace-pre-wrap break-words text-muted-foreground/88",
@@ -779,11 +784,13 @@ function buildToolChainStepsFromBlock(block: ChatTraceBlock | undefined, labels:
 
 function ToolChainRows({ steps, labels }: { steps: ToolChainStep[]; labels: ProcessTraceLabels }) {
   const [expanded, setExpanded] = React.useState<Set<string>>(() => new Set());
+  // 流式新增工具步骤时自动滚动到最新一步（用户上滚则暂停）。
+  const { ref: chainRef, onScroll: onChainScroll } = useAutoScrollFollow<HTMLOListElement>(steps);
 
   if (steps.length === 0) return null;
 
   return (
-    <ol className="space-y-0.5">
+    <ol ref={chainRef} onScroll={onChainScroll} className="max-h-80 space-y-0.5 overflow-y-auto pr-1">
       {steps.map((step, index) => {
         const open = expanded.has(step.key);
         const canExpand = shouldCollapseToolDetail(step.detail);

@@ -208,6 +208,7 @@ function DocCardEditorDialog({
  */
 export function DocCardSection() {
   const t = useTranslations("settings.chatPage.docCards");
+  const tNav = useTranslations("common.navigation");
   const resolveErrorMessage = useLocalizedErrorMessage();
   const [cards, setCards] = React.useState<DocCardDTO[]>([]);
   const [projects, setProjects] = React.useState<ConversationProjectDTO[]>([]);
@@ -321,14 +322,18 @@ export function DocCardSection() {
   };
 
   return (
-    <SettingsSection title={t("sectionTitle")}>
-      <div className="space-y-2">
-        <div className="flex h-8 items-center justify-end gap-3">
-          <Button size="sm" variant="ghost" className="h-7 gap-1.5 px-2 text-xs" onClick={openCreate}>
-            <Plus className="h-3.5 w-3.5" />
+    <>
+      <header className="mb-4">
+        <div className="flex items-start justify-between gap-4">
+          <h1 className="min-w-0 text-xl font-semibold tracking-[-0.03em] text-foreground md:text-2xl">{tNav("docCards")}</h1>
+          <Button size="sm" variant="default" className="shrink-0" onClick={openCreate}>
+            <Plus className="size-4" />
             {t("addCard")}
           </Button>
         </div>
+      </header>
+      <SettingsSection title="">
+      <div className="space-y-2">
 
         <DocCardEditorDialog
           open={dialogOpen}
@@ -426,7 +431,8 @@ export function DocCardSection() {
           </div>
         )}
       </div>
-    </SettingsSection>
+      </SettingsSection>
+    </>
   );
 }
 
@@ -435,6 +441,7 @@ export function DocCardSection() {
  */
 export function ArtifactsSection() {
   const t = useTranslations("settings.chatPage.artifacts");
+  const tNav = useTranslations("common.navigation");
   const resolveErrorMessage = useLocalizedErrorMessage();
   const [items, setItems] = React.useState<ArtifactListItemDTO[]>([]);
   const [loading, setLoading] = React.useState(true);
@@ -539,7 +546,13 @@ export function ArtifactsSection() {
   };
 
   return (
-    <SettingsSection title={t("sectionTitle")}>
+    <>
+      <header className="mb-4">
+        <div className="flex items-start justify-between gap-4">
+          <h1 className="min-w-0 text-xl font-semibold tracking-[-0.03em] text-foreground md:text-2xl">{tNav("artifacts")}</h1>
+        </div>
+      </header>
+      <SettingsSection title="">
       <div className="space-y-2">
         {loading ? (
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -682,6 +695,7 @@ export function ArtifactsSection() {
           </div>
         </DialogContent>
       </Dialog>
-    </SettingsSection>
+      </SettingsSection>
+    </>
   );
 }

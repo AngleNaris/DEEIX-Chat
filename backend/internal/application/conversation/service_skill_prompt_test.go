@@ -271,6 +271,10 @@ func (f *fakeSkillFileResolver) UpdateUser(ctx context.Context, userID uint, id 
 	return nil, nil
 }
 
+func (f *fakeSkillFileResolver) CreateUser(ctx context.Context, userID uint, input appskill.WriteInput) (*domainskill.Skill, error) {
+	return nil, nil
+}
+
 func (f *fakeSkillFileResolver) DeleteUser(ctx context.Context, userID uint, id uint) error {
 	return nil
 }

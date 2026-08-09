@@ -399,6 +399,171 @@ func platformToolRegistry() map[string]platformToolEntry {
 			handler:     (*Service).platformUpdateSkill,
 			auditAction: "platform_tools.update_skill",
 		},
+		"create_skill": {
+			definition: llm.ToolDefinition{
+				Name: "create_skill",
+				Description: "Create a new skill owned by the user (title required; optional trigger, description, markdown/SKILL.md, enabled). " +
+					"This is a WRITE operation: it may require user approval.",
+				InputSchema: json.RawMessage(`{
+					"type":"object","properties":{
+						"title":{"type":"string","description":"Skill title (required)"},
+						"trigger":{"type":"string","description":"Trigger keyword shown in the slash selector"},
+						"description":{"type":"string","description":"Short description"},
+						"markdown":{"type":"string","description":"SKILL.md content"},
+						"enabled":{"type":"boolean","description":"Whether the skill is enabled (default true)"}
+					},"required":["title"]
+				}`),
+			},
+			kind:        platformToolWrite,
+			handler:     (*Service).platformCreateSkill,
+			auditAction: "platform_tools.create_skill",
+		},
+		"list_prompt_presets": {
+			definition: llm.ToolDefinition{
+				Name: "list_prompt_presets",
+				Description: "List the prompt presets visible to the user (title, trigger, description, content, enabled, scope). " +
+					"Use before create/update/delete_prompt_preset to find prompt_preset_id.",
+				InputSchema: json.RawMessage(`{
+					"type":"object","properties":{},"required":[]
+				}`),
+			},
+			kind:    platformToolRead,
+			handler: (*Service).platformListPromptPresets,
+		},
+		"create_prompt_preset": {
+			definition: llm.ToolDefinition{
+				Name: "create_prompt_preset",
+				Description: "Create a user-owned prompt preset (title required; optional trigger, description, content, enabled). " +
+					"This is a WRITE operation: it may require user approval.",
+				InputSchema: json.RawMessage(`{
+					"type":"object","properties":{
+						"title":{"type":"string","description":"Prompt title (required)"},
+						"trigger":{"type":"string","description":"Slash trigger keyword"},
+						"description":{"type":"string","description":"Short description"},
+						"content":{"type":"string","description":"Prompt content inserted when triggered"},
+						"enabled":{"type":"boolean","description":"Whether the preset is enabled (default true)"}
+					},"required":["title"]
+				}`),
+			},
+			kind:        platformToolWrite,
+			handler:     (*Service).platformCreatePromptPreset,
+			auditAction: "platform_tools.create_prompt_preset",
+		},
+		"update_prompt_preset": {
+			definition: llm.ToolDefinition{
+				Name: "update_prompt_preset",
+				Description: "Update a user-owned prompt preset. All fields are optional; only provided fields are changed. " +
+					"Built-in presets cannot be updated. This is a WRITE operation: it may require user approval.",
+				InputSchema: json.RawMessage(`{
+					"type":"object","properties":{
+						"prompt_preset_id":{"type":"integer","description":"Numeric prompt preset id from list_prompt_presets"},
+						"title":{"type":"string","description":"New title"},
+						"trigger":{"type":"string","description":"New slash trigger keyword"},
+						"description":{"type":"string","description":"New description"},
+						"content":{"type":"string","description":"New prompt content"},
+						"enabled":{"type":"boolean","description":"Enable / disable the preset"}
+					},"required":["prompt_preset_id"]
+				}`),
+			},
+			kind:        platformToolWrite,
+			handler:     (*Service).platformUpdatePromptPreset,
+			auditAction: "platform_tools.update_prompt_preset",
+		},
+		"delete_prompt_preset": {
+			definition: llm.ToolDefinition{
+				Name: "delete_prompt_preset",
+				Description: "Delete a user-owned prompt preset. Built-in presets cannot be deleted. " +
+					"This is a WRITE operation: it may require user approval.",
+				InputSchema: json.RawMessage(`{
+					"type":"object","properties":{
+						"prompt_preset_id":{"type":"integer","description":"Numeric prompt preset id from list_prompt_presets"}
+					},"required":["prompt_preset_id"]
+				}`),
+			},
+			kind:        platformToolWrite,
+			handler:     (*Service).platformDeletePromptPreset,
+			auditAction: "platform_tools.delete_prompt_preset",
+		},
+		"list_dynamic_prompts": {
+			definition: llm.ToolDefinition{
+				Name: "list_dynamic_prompts",
+				Description: "List the user's dynamic prompt scripts (name, kind js|text, enabled, content). " +
+					"Use before create/update/delete/run_dynamic_prompt to find prompt_id.",
+				InputSchema: json.RawMessage(`{
+					"type":"object","properties":{},"required":[]
+				}`),
+			},
+			kind:    platformToolRead,
+			handler: (*Service).platformListDynamicPrompts,
+		},
+		"create_dynamic_prompt": {
+			definition: llm.ToolDefinition{
+				Name: "create_dynamic_prompt",
+				Description: "Create a user dynamic prompt script (name required; kind js|text, content, enabled). " +
+					"Scripts are referenced as {{script: name}} in prompts and expanded at send time. " +
+					"This is a WRITE operation: it may require user approval.",
+				InputSchema: json.RawMessage(`{
+					"type":"object","properties":{
+						"name":{"type":"string","description":"Script name (required, referenced as {{script: name}})"},
+						"kind":{"type":"string","enum":["js","text"],"description":"js executes in a sandbox; text is inserted verbatim"},
+						"content":{"type":"string","description":"Script content (js source or text)"},
+						"enabled":{"type":"boolean","description":"Whether the script is enabled (default true)"}
+					},"required":["name"]
+				}`),
+			},
+			kind:        platformToolWrite,
+			handler:     (*Service).platformCreateDynamicPrompt,
+			auditAction: "platform_tools.create_dynamic_prompt",
+		},
+		"update_dynamic_prompt": {
+			definition: llm.ToolDefinition{
+				Name: "update_dynamic_prompt",
+				Description: "Update a user dynamic prompt script. All fields are optional; only provided fields are changed. " +
+					"This is a WRITE operation: it may require user approval.",
+				InputSchema: json.RawMessage(`{
+					"type":"object","properties":{
+						"prompt_id":{"type":"string","description":"Public prompt id from list_dynamic_prompts"},
+						"name":{"type":"string","description":"New script name"},
+						"kind":{"type":"string","enum":["js","text"],"description":"New script kind"},
+						"content":{"type":"string","description":"New script content"},
+						"enabled":{"type":"boolean","description":"Enable / disable the script"}
+					},"required":["prompt_id"]
+				}`),
+			},
+			kind:        platformToolWrite,
+			handler:     (*Service).platformUpdateDynamicPrompt,
+			auditAction: "platform_tools.update_dynamic_prompt",
+		},
+		"delete_dynamic_prompt": {
+			definition: llm.ToolDefinition{
+				Name: "delete_dynamic_prompt",
+				Description: "Delete a user dynamic prompt script. This is a WRITE operation: it may require user approval.",
+				InputSchema: json.RawMessage(`{
+					"type":"object","properties":{
+						"prompt_id":{"type":"string","description":"Public prompt id from list_dynamic_prompts"}
+					},"required":["prompt_id"]
+				}`),
+			},
+			kind:        platformToolWrite,
+			handler:     (*Service).platformDeleteDynamicPrompt,
+			auditAction: "platform_tools.delete_dynamic_prompt",
+		},
+		"run_dynamic_prompt": {
+			definition: llm.ToolDefinition{
+				Name: "run_dynamic_prompt",
+				Description: "Execute a user dynamic prompt script and return its result: js runs in a sandbox (1s timeout, output truncated to 4KB), " +
+					"text returns the content verbatim. Use this to verify a script you created. " +
+					"This is a WRITE operation: it may require user approval.",
+				InputSchema: json.RawMessage(`{
+					"type":"object","properties":{
+						"prompt_id":{"type":"string","description":"Public prompt id from list_dynamic_prompts"}
+					},"required":["prompt_id"]
+				}`),
+			},
+			kind:        platformToolWrite,
+			handler:     (*Service).platformRunDynamicPrompt,
+			auditAction: "platform_tools.run_dynamic_prompt",
+		},
 		"delete_file": {
 			definition: llm.ToolDefinition{
 				Name: "delete_file",

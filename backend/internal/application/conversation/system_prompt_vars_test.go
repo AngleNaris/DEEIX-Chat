@@ -7,6 +7,7 @@ import (
 	"time"
 
 	appdynamicprompt "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/dynamicprompt"
+	domaindynamicprompt "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/dynamicprompt"
 )
 
 func TestExpandSystemPromptVars(t *testing.T) {
@@ -94,6 +95,18 @@ type fakeDynamicPromptReader struct {
 
 func (f *fakeDynamicPromptReader) ListDynamicPrompts(ctx context.Context, userID uint) ([]appdynamicprompt.PromptView, error) {
 	return f.items, nil
+}
+
+func (f *fakeDynamicPromptReader) UpsertDynamicPrompt(ctx context.Context, userID uint, publicID string, input appdynamicprompt.UpsertInput, updatedBy string) (*domaindynamicprompt.DynamicPrompt, error) {
+	return &domaindynamicprompt.DynamicPrompt{PublicID: publicID, Name: input.Name, Kind: input.Kind, Content: input.Content}, nil
+}
+
+func (f *fakeDynamicPromptReader) DeleteDynamicPrompt(ctx context.Context, userID uint, publicID string) error {
+	return nil
+}
+
+func (f *fakeDynamicPromptReader) RunDynamicPrompt(ctx context.Context, userID uint, publicID string) (string, error) {
+	return "", nil
 }
 
 func TestResolveSystemPromptScriptsAttached(t *testing.T) {
