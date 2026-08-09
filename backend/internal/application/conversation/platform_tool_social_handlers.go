@@ -248,6 +248,129 @@ func (s *Service) platformDeleteSkill(ctx context.Context, call platformToolCall
 	})
 }
 
+// platformUpdateRole 更新用户角色（写操作，受批准模式管控）。
+// 所有字段可选，仅更新显式提供的字段；group_name 传空字符串表示移出分组。
+func (s *Service) platformUpdateRole(ctx context.Context, call platformToolCallContext) (string, error) {
+	var args struct {
+		RoleID         string  `json:"role_id"`
+		Name           *string `json:"name"`
+		Description    *string `json:"description"`
+		SystemPrompt   *string `json:"system_prompt"`
+		Model          *string `json:"model"`
+		GroupName      *string `json:"group_name"`
+		Color          *string `json:"color"`
+		Icon           *string `json:"icon"`
+		Pinned         *bool   `json:"pinned"`
+		ReasoningEffort *string `json:"reasoning_effort"`
+	}
+	if err := decodePlatformArgs(call.Arguments, &args); err != nil {
+		return "", err
+	}
+	roleID := strings.TrimSpace(args.RoleID)
+	if roleID == "" {
+		return "", fmt.Errorf("role_id is required")
+	}
+	role, err := s.UpdateConversationRole(ctx, call.UserID, roleID, ConversationRolePatchInput{
+		Name:            args.Name,
+		Description:     args.Description,
+		SystemPrompt:    args.SystemPrompt,
+		Model:           args.Model,
+		GroupName:       args.GroupName,
+		Color:           args.Color,
+		Icon:            args.Icon,
+		Pinned:          args.Pinned,
+		ReasoningEffort: args.ReasoningEffort,
+	})
+	if err != nil {
+		return "", err
+	}
+	s.recordPlatformAudit(ctx, callCtx{userID: call.UserID, requestID: call.RequestID}, "platform_tools.update_role", role.PublicID, map[string]interface{}{
+		"name":       role.Name,
+		"group_name": role.GroupName,
+		"pinned":     role.PinnedAt != nil,
+	})
+	return marshalPlatformResult(map[string]interface{}{
+		"role_id":    role.PublicID,
+		"name":       role.Name,
+		"group_name": role.GroupName,
+		"pinned":     role.PinnedAt != nil,
+		"updated":    true,
+	})
+}
+
+// platformUpdateProject 更新用户项目（写操作，受批准模式管控）。
+func (s *Service) platformUpdateProject(ctx context.Context, call platformToolCallContext) (string, error) {
+	var args struct {
+		ProjectID    string  `json:"project_id"`
+		Name         *string `json:"name"`
+		Description  *string `json:"description"`
+		SystemPrompt *string `json:"system_prompt"`
+		Color        *string `json:"color"`
+		Icon         *string `json:"icon"`
+	}
+	if err := decodePlatformArgs(call.Arguments, &args); err != nil {
+		return "", err
+	}
+	projectID := strings.TrimSpace(args.ProjectID)
+	if projectID == "" {
+		return "", fmt.Errorf("project_id is required")
+	}
+	project, err := s.UpdateConversationProject(ctx, call.UserID, projectID, ConversationProjectPatchInput{
+		Name:         args.Name,
+		Description:  args.Description,
+		SystemPrompt: args.SystemPrompt,
+		Color:        args.Color,
+		Icon:         args.Icon,
+	})
+	if err != nil {
+		return "", err
+	}
+	s.recordPlatformAudit(ctx, callCtx{userID: call.UserID, requestID: call.RequestID}, "platform_tools.update_project", project.PublicID, map[string]interface{}{
+		"name": project.Name,
+	})
+	return marshalPlatformResult(map[string]interface{}{
+		"project_id": project.PublicID,
+		"name":       project.Name,
+		"updated":    true,
+	})
+}
+
+// platformUpdateAgentGroup 更新用户 Agent 群组元数据（写操作，受批准模式管控；群组开关关闭时报错）。
+func (s *Service) platformUpdateAgentGroup(ctx context.Context, call platformToolCallContext) (string, error) {
+	var args struct {
+		GroupID             string  `json:"group_id"`
+		Name                *string `json:"name"`
+		Description         *string `json:"description"`
+		CoordinationPrompt  *string `json:"coordination_prompt"`
+	}
+	if err := decodePlatformArgs(call.Arguments, &args); err != nil {
+		return "", err
+	}
+	groupID := strings.TrimSpace(args.GroupID)
+	if groupID == "" {
+		return "", fmt.Errorf("group_id is required")
+	}
+	if s.agentGroupWriter == nil {
+		return "", fmt.Errorf("agent group service is unavailable")
+	}
+	group, err := s.agentGroupWriter.UpdateAgentGroup(ctx, call.UserID, groupID, AgentGroupUpdateInput{
+		Name:               args.Name,
+		Description:        args.Description,
+		CoordinationPrompt: args.CoordinationPrompt,
+	})
+	if err != nil {
+		return "", err
+	}
+	s.recordPlatformAudit(ctx, callCtx{userID: call.UserID, requestID: call.RequestID}, "platform_tools.update_agent_group", group.PublicID, map[string]interface{}{
+		"name": group.Name,
+	})
+	return marshalPlatformResult(map[string]interface{}{
+		"group_id": group.PublicID,
+		"name":     group.Name,
+		"updated":  true,
+	})
+}
+
 // platformDeleteRole 删除用户角色（被群组引用时服务拒绝）。
 func (s *Service) platformDeleteRole(ctx context.Context, call platformToolCallContext) (string, error) {
 	var args struct {

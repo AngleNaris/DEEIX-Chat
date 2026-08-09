@@ -563,6 +563,71 @@ func platformToolRegistry() map[string]platformToolEntry {
 			handler:     (*Service).platformCreateAgentGroup,
 			auditAction: "platform_tools.create_agent_group",
 		},
+		"update_role": {
+			definition: llm.ToolDefinition{
+				Name: "update_role",
+				Description: "Update one of the user's conversation roles. All fields are optional; only provided fields are changed. " +
+					"Pass group_name as an empty string to move the role out of its group. " +
+					"This is a WRITE operation: it may require user approval.",
+				InputSchema: json.RawMessage(`{
+					"type":"object","properties":{
+						"role_id":{"type":"string","description":"Public role id from list_roles"},
+						"name":{"type":"string","description":"New role name"},
+						"description":{"type":"string","description":"New role description"},
+						"system_prompt":{"type":"string","description":"New system prompt for the role"},
+						"model":{"type":"string","description":"New default model name (empty = platform default)"},
+						"group_name":{"type":"string","description":"New display group; empty string removes the role from its group"},
+						"color":{"type":"string","description":"New role icon color"},
+						"icon":{"type":"string","description":"New role icon"},
+						"pinned":{"type":"boolean","description":"Pin / unpin the role to the top of the role list"},
+						"reasoning_effort":{"type":"string","description":"New reasoning effort level (low/medium/high/xhigh/max, empty = unset)"}
+					},"required":["role_id"]
+				}`),
+			},
+			kind:        platformToolWrite,
+			handler:     (*Service).platformUpdateRole,
+			auditAction: "platform_tools.update_role",
+		},
+		"update_project": {
+			definition: llm.ToolDefinition{
+				Name: "update_project",
+				Description: "Update one of the user's conversation projects. All fields are optional; only provided fields are changed. " +
+					"This is a WRITE operation: it may require user approval.",
+				InputSchema: json.RawMessage(`{
+					"type":"object","properties":{
+						"project_id":{"type":"string","description":"Public project id from list_projects"},
+						"name":{"type":"string","description":"New project name"},
+						"description":{"type":"string","description":"New project description"},
+						"system_prompt":{"type":"string","description":"New project system prompt applied to conversations"},
+						"color":{"type":"string","description":"New project color"},
+						"icon":{"type":"string","description":"New project icon"}
+					},"required":["project_id"]
+				}`),
+			},
+			kind:        platformToolWrite,
+			handler:     (*Service).platformUpdateProject,
+			auditAction: "platform_tools.update_project",
+		},
+		"update_agent_group": {
+			definition: llm.ToolDefinition{
+				Name: "update_agent_group",
+				Description: "Update the metadata of one of the user's agent groups (name, description, coordination prompt). " +
+					"All fields are optional; only provided fields are changed. " +
+					"Requires the agent group feature to be enabled. " +
+					"This is a WRITE operation: it may require user approval.",
+				InputSchema: json.RawMessage(`{
+					"type":"object","properties":{
+						"group_id":{"type":"string","description":"Public group id from list_agent_groups"},
+						"name":{"type":"string","description":"New group name"},
+						"description":{"type":"string","description":"New group description"},
+						"coordination_prompt":{"type":"string","description":"New coordination prompt shown to the supervisor"}
+					},"required":["group_id"]
+				}`),
+			},
+			kind:        platformToolWrite,
+			handler:     (*Service).platformUpdateAgentGroup,
+			auditAction: "platform_tools.update_agent_group",
+		},
 		"delete_skill": {
 			definition: llm.ToolDefinition{
 				Name: "delete_skill",

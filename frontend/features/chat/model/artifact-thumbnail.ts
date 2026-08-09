@@ -44,6 +44,23 @@ function isThumbnailResponse(value: unknown): value is ArtifactThumbnailResponse
   );
 }
 
+// waitForFrameLoad 等待预览 iframe 完成加载后再发起快照请求。
+// 快照脚本以同步脚本形式位于文档 head 中，load 事件触发时脚本必然已执行，
+// 因此等待 load 即可保证消息监听器就绪（复杂制品渲染慢、主题样式触发
+// iframe 重载时，避免请求发出后无人响应导致超时）。
+function waitForFrameLoad(frame: HTMLIFrameElement, timeoutMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    const finish = () => {
+      frame.removeEventListener("load", onLoad);
+      window.clearTimeout(timer);
+      resolve();
+    };
+    const onLoad = () => finish();
+    const timer = window.setTimeout(finish, timeoutMs);
+    frame.addEventListener("load", onLoad);
+  });
+}
+
 function requestArtifactSnapshot(frame: HTMLIFrameElement): Promise<ArtifactThumbnailSnapshot> {
   const frameWindow = frame.contentWindow;
   if (!frameWindow) {
@@ -94,6 +111,13 @@ function requestArtifactSnapshot(frame: HTMLIFrameElement): Promise<ArtifactThum
       "*",
     );
   });
+}
+
+async function requestArtifactSnapshotWhenReady(
+  frame: HTMLIFrameElement,
+): Promise<ArtifactThumbnailSnapshot> {
+  await waitForFrameLoad(frame, CAPTURE_TIMEOUT_MS);
+  return requestArtifactSnapshot(frame);
 }
 
 function loadSnapshotFrame(frame: HTMLIFrameElement, html: string): Promise<void> {
@@ -189,16 +213,26 @@ export async function captureArtifactPreviewThumbnail(
     return null;
   }
 
-  const snapshot = await requestArtifactSnapshot(frame);
-  let thumbnail = await renderSnapshot(snapshot, 0.5, 0.76);
-  if (thumbnail.length > MAX_THUMBNAIL_DATA_URL_LENGTH) {
-    thumbnail = await renderSnapshot(snapshot, 0.4, 0.62);
+  // 复杂制品渲染慢 / 主题样式触发 iframe 重载时首次请求可能超时，重试一次兜底。
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const snapshot = await requestArtifactSnapshotWhenReady(frame);
+      let thumbnail = await renderSnapshot(snapshot, 0.5, 0.76);
+      if (thumbnail.length > MAX_THUMBNAIL_DATA_URL_LENGTH) {
+        thumbnail = await renderSnapshot(snapshot, 0.4, 0.62);
+      }
+      if (
+        thumbnail.length > MAX_THUMBNAIL_DATA_URL_LENGTH ||
+        !isSupportedThumbnail(thumbnail)
+      ) {
+        return null;
+      }
+      return thumbnail;
+    } catch (error) {
+      if (attempt === 1) {
+        throw error;
+      }
+    }
   }
-  if (
-    thumbnail.length > MAX_THUMBNAIL_DATA_URL_LENGTH ||
-    !isSupportedThumbnail(thumbnail)
-  ) {
-    return null;
-  }
-  return thumbnail;
+  return null;
 }

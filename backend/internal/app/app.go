@@ -142,6 +142,14 @@ func (a agentGroupWriterAdapter) ListAgentGroups(ctx context.Context, userID uin
 	return a.inner.ListAgentGroups(ctx, userID)
 }
 
+func (a agentGroupWriterAdapter) UpdateAgentGroup(ctx context.Context, userID uint, publicID string, input conversation.AgentGroupUpdateInput) (*domainagentgroup.Group, error) {
+	return a.inner.UpdateAgentGroup(ctx, userID, publicID, agentgroup.UpdateGroupInput{
+		Name:               input.Name,
+		Description:        input.Description,
+		CoordinationPrompt: input.CoordinationPrompt,
+	})
+}
+
 func (a agentGroupWriterAdapter) DeleteAgentGroup(ctx context.Context, userID uint, publicID string) error {
 	return a.inner.DeleteAgentGroup(ctx, userID, publicID)
 }

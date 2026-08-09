@@ -137,10 +137,18 @@ type AgentGroupCreateInput struct {
 	Workers            []AgentGroupMemberCreateInput
 }
 
-// agentGroupWriter 创建/列出/删除 Agent 群组（由 agentgroup 服务注入，平台工具 create/list/delete_agent_group 使用）。
+// AgentGroupUpdateInput 平台工具更新群组元数据输入。
+type AgentGroupUpdateInput struct {
+	Name               *string
+	Description        *string
+	CoordinationPrompt *string
+}
+
+// agentGroupWriter 创建/列出/更新/删除 Agent 群组（由 agentgroup 服务注入，平台工具 create/list/update/delete_agent_group 使用）。
 type agentGroupWriter interface {
 	CreateAgentGroup(ctx context.Context, userID uint, input AgentGroupCreateInput) (*domainagentgroup.Group, error)
 	ListAgentGroups(ctx context.Context, userID uint) ([]domainagentgroup.Group, error)
+	UpdateAgentGroup(ctx context.Context, userID uint, publicID string, input AgentGroupUpdateInput) (*domainagentgroup.Group, error)
 	DeleteAgentGroup(ctx context.Context, userID uint, publicID string) error
 }
 
