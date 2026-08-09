@@ -15,7 +15,7 @@ export type ArtifactListItemDTO = {
   artifact_id: string;
   kind: ArtifactKind;
   title: string;
-  code: string;
+  thumbnail?: string;
   conversation_id: number;
   message_id: number;
   share?: ArtifactShareDTO | null;
@@ -28,6 +28,7 @@ export type ArtifactDetailDTO = {
   kind: ArtifactKind;
   title: string;
   code: string;
+  thumbnail?: string;
   conversation_id: number;
   message_id: number;
   created_at: string;
@@ -47,6 +48,7 @@ export type CreateArtifactInput = {
   title: string;
   kind: ArtifactKind;
   code: string;
+  thumbnail?: string;
 };
 
 export async function listArtifacts(
@@ -64,6 +66,9 @@ export async function createArtifact(accessToken: string, input: CreateArtifactI
   const body: Record<string, unknown> = { title: input.title, kind: input.kind, code: input.code };
   if (input.artifactId) {
     body.artifactId = input.artifactId;
+  }
+  if (input.thumbnail) {
+    body.thumbnail = input.thumbnail;
   }
   return authedRequest("/api/v1/artifacts", {
     method: "POST",

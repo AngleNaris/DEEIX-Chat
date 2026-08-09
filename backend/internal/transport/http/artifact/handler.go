@@ -31,9 +31,10 @@ func (h *Handler) CreateArtifact(c *gin.Context) {
 		return
 	}
 	input := appartifact.CreateInput{
-		Title: req.Title,
-		Kind:  sanitizeKind(req.Kind),
-		Code:  req.Code,
+		Title:     req.Title,
+		Kind:      sanitizeKind(req.Kind),
+		Code:      req.Code,
+		Thumbnail: req.Thumbnail,
 	}
 	var item interface{}
 	var err error

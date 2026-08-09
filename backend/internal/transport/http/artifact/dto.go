@@ -10,6 +10,7 @@ type CreateArtifactRequest struct {
 	Title      string `json:"title" binding:"required,max=255"`
 	Kind       string `json:"kind" binding:"omitempty,oneof=html js css text"`
 	Code       string `json:"code" binding:"required,max=262144"`
+	Thumbnail  string `json:"thumbnail" binding:"omitempty,max=524288"`
 }
 
 // ArtifactIDParam 路径参数。

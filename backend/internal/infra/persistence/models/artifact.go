@@ -12,6 +12,7 @@ type Artifact struct {
 	Kind             string `gorm:"size:16;not null;default:'text';index:idx_chat_artifacts_kind;comment:制品类型(html/js/css/text)"`
 	Title            string `gorm:"size:255;not null;default:'';comment:制品标题"`
 	Code             string `gorm:"type:text;not null;default:'';comment:制品代码"`
+	Thumbnail        string `gorm:"type:text;not null;default:'';comment:静态缩略图(data URL)"`
 }
 
 // TableName 指定表名。

@@ -14,9 +14,11 @@ import (
 
 // 错误定义。
 var (
-	ErrArtifactNotFound = errors.New("artifact not found")
-	ErrShareNotFound    = errors.New("artifact share not found")
-	ErrShareRevoked     = errors.New("artifact share revoked")
+	ErrArtifactNotFound  = errors.New("artifact not found")
+	ErrShareNotFound     = errors.New("artifact share not found")
+	ErrShareRevoked      = errors.New("artifact share revoked")
+	ErrInvalidThumbnail  = errors.New("artifact thumbnail must be a supported raster data URL")
+	ErrThumbnailTooLarge = errors.New("artifact thumbnail is too large")
 )
 
 // 制品类型枚举与长度限制。
@@ -26,8 +28,9 @@ const (
 	KindCSS  = "css"
 	KindText = "text"
 
-	MaxTitleLen = 255
-	MaxCodeLen  = 256 * 1024
+	MaxTitleLen     = 255
+	MaxCodeLen      = 256 * 1024
+	MaxThumbnailLen = 512 * 1024
 )
 
 // ValidKind 判断制品类型是否合法。
@@ -40,11 +43,32 @@ func ValidKind(kind string) bool {
 	}
 }
 
+func normalizeThumbnail(thumbnail string) (string, error) {
+	thumbnail = strings.TrimSpace(thumbnail)
+	if thumbnail == "" {
+		return "", nil
+	}
+	if len(thumbnail) > MaxThumbnailLen {
+		return "", ErrThumbnailTooLarge
+	}
+	for _, prefix := range []string{
+		"data:image/webp;base64,",
+		"data:image/png;base64,",
+		"data:image/jpeg;base64,",
+	} {
+		if strings.HasPrefix(thumbnail, prefix) {
+			return thumbnail, nil
+		}
+	}
+	return "", ErrInvalidThumbnail
+}
+
 // CreateInput 创建/更新制品的输入。
 type CreateInput struct {
 	Title          string
 	Kind           string
 	Code           string
+	Thumbnail      string
 	ConversationID uint
 	MessageID      uint
 }
@@ -57,12 +81,12 @@ type ShareView struct {
 	CreatedAt     string `json:"created_at"`
 }
 
-// ArtifactView 制品视图（列表用，含完整代码用于前端缩略图渲染）。
+// ArtifactView 制品视图（列表用，仅返回静态缩略图，不下发完整代码）。
 type ArtifactView struct {
 	ArtifactPublicID string     `json:"artifact_id"`
 	Kind             string     `json:"kind"`
 	Title            string     `json:"title"`
-	Code             string     `json:"code"`
+	Thumbnail        string     `json:"thumbnail,omitempty"`
 	ConversationID   uint       `json:"conversation_id"`
 	MessageID        uint       `json:"message_id"`
 	Share            *ShareView `json:"share,omitempty"`
@@ -76,6 +100,7 @@ type ArtifactDetailView struct {
 	Kind             string `json:"kind"`
 	Title            string `json:"title"`
 	Code             string `json:"code"`
+	Thumbnail        string `json:"thumbnail,omitempty"`
 	ConversationID   uint   `json:"conversation_id"`
 	MessageID        uint   `json:"message_id"`
 	CreatedAt        string `json:"created_at"`
@@ -89,6 +114,7 @@ func ToDetailView(item *domainartifact.Artifact) ArtifactDetailView {
 		Kind:             item.Kind,
 		Title:            item.Title,
 		Code:             item.Code,
+		Thumbnail:        item.Thumbnail,
 		ConversationID:   item.ConversationID,
 		MessageID:        item.MessageID,
 		CreatedAt:        item.CreatedAt.Format("2006-01-02 15:04:05"),
@@ -120,6 +146,10 @@ func (s *Service) CreateArtifact(ctx context.Context, userID uint, publicID stri
 	if !ValidKind(input.Kind) {
 		input.Kind = KindText
 	}
+	thumbnail, err := normalizeThumbnail(input.Thumbnail)
+	if err != nil {
+		return nil, err
+	}
 	item := &domainartifact.Artifact{
 		ArtifactPublicID: strings.TrimSpace(publicID),
 		UserID:           userID,
@@ -128,6 +158,7 @@ func (s *Service) CreateArtifact(ctx context.Context, userID uint, publicID stri
 		Kind:             strings.ToLower(strings.TrimSpace(input.Kind)),
 		Title:            strings.TrimSpace(input.Title),
 		Code:             input.Code,
+		Thumbnail:        thumbnail,
 	}
 	if item.ArtifactPublicID == "" {
 		item.ArtifactPublicID = conv.NormalizePublicID(uuid.NewString())
@@ -147,9 +178,14 @@ func (s *Service) UpdateArtifact(ctx context.Context, userID uint, publicID stri
 	if !ValidKind(input.Kind) {
 		input.Kind = KindText
 	}
+	thumbnail, err := normalizeThumbnail(input.Thumbnail)
+	if err != nil {
+		return nil, err
+	}
 	existing.Title = strings.TrimSpace(input.Title)
 	existing.Kind = strings.ToLower(strings.TrimSpace(input.Kind))
 	existing.Code = input.Code
+	existing.Thumbnail = thumbnail
 	if err := s.repo.UpdateArtifact(ctx, existing); err != nil {
 		return nil, err
 	}
@@ -173,7 +209,7 @@ func (s *Service) ListArtifacts(ctx context.Context, userID uint, page int, page
 			ArtifactPublicID: item.ArtifactPublicID,
 			Kind:             item.Kind,
 			Title:            item.Title,
-			Code:             item.Code,
+			Thumbnail:        item.Thumbnail,
 			ConversationID:   item.ConversationID,
 			MessageID:        item.MessageID,
 			CreatedAt:        item.CreatedAt.Format("2006-01-02 15:04:05"),

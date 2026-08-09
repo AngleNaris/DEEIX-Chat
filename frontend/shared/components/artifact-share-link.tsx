@@ -32,10 +32,10 @@ export function ArtifactShareLink({
   const url = artifactShareUrl(share.share_id, previewWidth);
 
   return (
-    <div className="space-y-2">
+    <div className="min-w-0 space-y-2">
       <div className="space-y-1">
         <p className="text-xs text-muted-foreground">{t("previewWidth")}</p>
-        <div className="flex gap-1">
+        <div className="flex flex-wrap gap-1">
           {(["full", "fixed"] as const).map((width) => (
             <button
               key={width}
@@ -53,8 +53,10 @@ export function ArtifactShareLink({
           ))}
         </div>
       </div>
-      <div className="flex items-center gap-2 rounded-md bg-muted/30 px-2.5 py-2">
-        <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">{url}</span>
+      <div className="flex min-w-0 items-center gap-2 overflow-hidden rounded-md bg-muted/30 px-2.5 py-2">
+        <span dir="ltr" className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">
+          {url}
+        </span>
         <CopyActionButton
           value={url}
           messages={{ copied: t("linkCopied"), failed: t("copyFailed") }}

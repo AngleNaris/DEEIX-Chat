@@ -1,5 +1,9 @@
 import type { ChatAreaMessage } from "@/features/chat/types/messages";
 import {
+  ARTIFACT_THUMBNAIL_REQUEST,
+  ARTIFACT_THUMBNAIL_RESPONSE,
+} from "@/features/chat/model/artifact-thumbnail-protocol";
+import {
   resolveArtifactPreviewKind,
   type ArtifactPreviewKind,
 } from "@/shared/lib/artifact-preview";
@@ -110,6 +114,122 @@ function artifactRuntimeScript(): string {
 </script>`;
 }
 
+function artifactThumbnailSnapshotScript(): string {
+  return `<script>
+(() => {
+  const REQUEST_TYPE = ${JSON.stringify(ARTIFACT_THUMBNAIL_REQUEST)};
+  const RESPONSE_TYPE = ${JSON.stringify(ARTIFACT_THUMBNAIL_RESPONSE)};
+
+  const copyCanvas = (source, cloned) => {
+    try {
+      const image = document.createElement("img");
+      for (const attribute of Array.from(cloned.attributes)) {
+        image.setAttribute(attribute.name, attribute.value);
+      }
+      image.src = source.toDataURL("image/webp", 0.82);
+      cloned.replaceWith(image);
+    } catch {
+      // A tainted canvas cannot be exported; keep the empty clone as fallback.
+    }
+  };
+
+  const syncFormState = (source, cloned) => {
+    if (source instanceof HTMLInputElement && cloned instanceof HTMLInputElement) {
+      cloned.setAttribute("value", source.value);
+      cloned.toggleAttribute("checked", source.checked);
+      return;
+    }
+    if (source instanceof HTMLTextAreaElement && cloned instanceof HTMLTextAreaElement) {
+      cloned.textContent = source.value;
+      return;
+    }
+    if (source instanceof HTMLSelectElement && cloned instanceof HTMLSelectElement) {
+      Array.from(cloned.options).forEach((option, index) => {
+        option.toggleAttribute("selected", Boolean(source.options[index]?.selected));
+      });
+    }
+  };
+
+  const resolveBackgroundColor = () => {
+    const bodyColor = getComputedStyle(document.body).backgroundColor;
+    if (bodyColor && bodyColor !== "transparent" && bodyColor !== "rgba(0, 0, 0, 0)") {
+      return bodyColor;
+    }
+    const rootColor = getComputedStyle(document.documentElement).backgroundColor;
+    if (rootColor && rootColor !== "transparent" && rootColor !== "rgba(0, 0, 0, 0)") {
+      return rootColor;
+    }
+    return "#ffffff";
+  };
+
+  const createSnapshot = () => {
+    const sourceRoot = document.documentElement;
+    const clonedRoot = sourceRoot.cloneNode(true);
+    const sourceElements = [sourceRoot, ...sourceRoot.querySelectorAll("*")];
+    const clonedElements = [clonedRoot, ...clonedRoot.querySelectorAll("*")];
+
+    for (let index = 0; index < sourceElements.length; index += 1) {
+      const source = sourceElements[index];
+      const cloned = clonedElements[index];
+      if (!cloned) continue;
+      if (source instanceof HTMLCanvasElement && cloned instanceof HTMLCanvasElement) {
+        copyCanvas(source, cloned);
+        continue;
+      }
+      syncFormState(source, cloned);
+    }
+
+    clonedRoot.querySelectorAll("script").forEach((node) => node.remove());
+    clonedRoot.querySelectorAll("meta[http-equiv]").forEach((node) => {
+      if ((node.getAttribute("http-equiv") || "").toLowerCase() === "content-security-policy") {
+        node.remove();
+      }
+    });
+    clonedRoot.style.margin = "0";
+    clonedRoot.style.overflow = "hidden";
+
+    return {
+      html: "<!doctype html>" + new XMLSerializer().serializeToString(clonedRoot),
+      backgroundColor: resolveBackgroundColor(),
+    };
+  };
+
+  window.addEventListener("message", (event) => {
+    const payload = event.data;
+    if (
+      event.source !== window.parent ||
+      !payload ||
+      payload.type !== REQUEST_TYPE ||
+      typeof payload.requestId !== "string"
+    ) {
+      return;
+    }
+
+    try {
+      const snapshot = createSnapshot();
+      window.parent.postMessage(
+        {
+          type: RESPONSE_TYPE,
+          requestId: payload.requestId,
+          ...snapshot,
+        },
+        "*",
+      );
+    } catch (error) {
+      window.parent.postMessage(
+        {
+          type: RESPONSE_TYPE,
+          requestId: payload.requestId,
+          error: error instanceof Error ? error.message : String(error),
+        },
+        "*",
+      );
+    }
+  });
+})();
+</script>`;
+}
+
 function artifactPreviewResetStyle(): string {
   return `<style data-deeix-artifact-reset>
 html,
@@ -148,6 +268,7 @@ function previewHead(title: string, theme: HTMLVisualThemeSnapshot): string {
     artifactThemeStyle(theme),
     artifactPreviewResetStyle(),
     artifactRuntimeScript(),
+    artifactThumbnailSnapshotScript(),
   ].join("");
 }
 

@@ -31,7 +31,6 @@ import {
   revokeArtifactShare,
   artifactShareUrl,
   type ArtifactListItemDTO,
-  type ArtifactShareDTO,
 } from "@/shared/api/artifacts";
 import {
   createDocCard,
@@ -546,12 +545,14 @@ export function ArtifactsSection() {
                 className="group flex flex-col gap-2 rounded-lg border border-border/55 bg-card p-3 transition-colors hover:border-border"
               >
                 <div className="h-28 shrink-0 overflow-hidden rounded-md border border-border/40 bg-muted/20">
-                  {item.kind === "html" && item.code ? (
-                    <iframe
-                      title={item.title}
-                      sandbox="allow-scripts"
-                      srcDoc={item.code}
-                      className="pointer-events-none h-28 w-full bg-background"
+                  {item.thumbnail ? (
+                    <img
+                      src={item.thumbnail}
+                      alt=""
+                      aria-hidden="true"
+                      loading="lazy"
+                      decoding="async"
+                      className="h-full w-full select-none object-cover object-top"
                     />
                   ) : (
                     <div className="flex h-full items-center justify-center gap-1.5 text-muted-foreground">

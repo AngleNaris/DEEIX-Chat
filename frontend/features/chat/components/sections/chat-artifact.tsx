@@ -55,6 +55,7 @@ type ChatArtifactPanelProps = {
 
 type ArtifactPreviewFrameProps = {
   documentHTML: string;
+  frameRef: React.RefObject<HTMLIFrameElement | null>;
   title: string;
 };
 
@@ -121,17 +122,7 @@ function ArtifactActionButton({
   );
 }
 
-function ArtifactPreviewFrame({ documentHTML, title }: ArtifactPreviewFrameProps) {
-  const frameRef = React.useRef<HTMLIFrameElement | null>(null);
-
-  React.useEffect(() => {
-    const frame = frameRef.current;
-    if (!frame || frame.srcdoc === documentHTML) {
-      return;
-    }
-    frame.srcdoc = documentHTML;
-  }, [documentHTML]);
-
+function ArtifactPreviewFrame({ documentHTML, frameRef, title }: ArtifactPreviewFrameProps) {
   return (
     <iframe
       ref={frameRef}
@@ -162,6 +153,7 @@ function ChatArtifactPanel({
     variables: [],
   });
   const [previewWidth, setPreviewWidth] = React.useState<"full" | "fixed">("full");
+  const previewFrameRef = React.useRef<HTMLIFrameElement | null>(null);
 
   React.useEffect(() => {
     setPreviewTheme(captureHTMLVisualThemeSnapshot(resolvedTheme));
@@ -247,19 +239,24 @@ function ChatArtifactPanel({
             <ArtifactActionButton label={t("downloadHtml")} disabled={!canPreview} onClick={handleDownload}>
               <Download className="size-3" />
             </ArtifactActionButton>
-            <SaveArtifactButton artifact={artifact} />
+            <SaveArtifactButton artifact={artifact} previewFrameRef={previewFrameRef} />
             <ArtifactActionButton label={t("close")} onClick={onClose}>
               <X className="size-3" />
             </ArtifactActionButton>
           </div>
         </div>
 
-        <TabsContent value="preview" className="mt-0 min-h-0 flex-1 overflow-hidden">
+        <TabsContent
+          forceMount
+          value="preview"
+          className="mt-0 min-h-0 flex-1 overflow-hidden data-[state=inactive]:hidden"
+        >
           {canPreview ? (
             <div className={previewWidth === "fixed" ? "mx-auto h-full max-w-3xl" : "h-full"}>
               <ArtifactPreviewFrame
                 key={artifact.id}
                 documentHTML={previewHTML}
+                frameRef={previewFrameRef}
                 title={t("previewTitle")}
               />
             </div>

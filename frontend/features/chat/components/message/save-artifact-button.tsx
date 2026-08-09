@@ -20,6 +20,7 @@ import { ArtifactShareLink } from "@/shared/components/artifact-share-link";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 import { useLocalizedErrorMessage } from "@/i18n/use-localized-error";
 import type { ChatArtifact } from "@/features/chat/model/chat-artifacts";
+import { captureArtifactPreviewThumbnail } from "@/features/chat/model/artifact-thumbnail";
 import {
   createArtifact,
   createArtifactShare,
@@ -36,8 +37,15 @@ function mapArtifactKind(kind: ChatArtifact["kind"]): ArtifactKind {
 /**
  * SaveArtifactButton 制品展示面板操作栏按钮：把当前展示的制品保存到制品库并生成分享链接。
  */
-export function SaveArtifactButton({ artifact }: { artifact: ChatArtifact | null }) {
+export function SaveArtifactButton({
+  artifact,
+  previewFrameRef,
+}: {
+  artifact: ChatArtifact | null;
+  previewFrameRef: React.RefObject<HTMLIFrameElement | null>;
+}) {
   const t = useTranslations("chat.artifacts");
+  const tCommon = useTranslations("common.actions");
   const resolveErrorMessage = useLocalizedErrorMessage();
   const [open, setOpen] = React.useState(false);
   const [title, setTitle] = React.useState("");
@@ -61,10 +69,17 @@ export function SaveArtifactButton({ artifact }: { artifact: ChatArtifact | null
         toast.error(t("authTokenMissing"));
         return;
       }
+      const thumbnail = await captureArtifactPreviewThumbnail(previewFrameRef.current).catch(
+        (error) => {
+          console.warn("Failed to capture artifact thumbnail", error);
+          return null;
+        },
+      );
       const saved = await createArtifact(token, {
         title: title.trim(),
         kind: mapArtifactKind(artifact.kind),
         code: artifact.code.trim(),
+        thumbnail: thumbnail ?? undefined,
       });
       // 保存成功后直接创建公开分享，用户可复制链接或打开。
       const createdShare = await createArtifactShare(token, saved.artifact_id);
@@ -96,9 +111,14 @@ export function SaveArtifactButton({ artifact }: { artifact: ChatArtifact | null
         </TooltipTrigger>
         <TooltipContent side="bottom">{t("save")}</TooltipContent>
       </Tooltip>
-      <Dialog open={open} onOpenChange={(next) => { if (!saving) setOpen(next); }}>
-        <DialogContent className="sm:max-w-[460px]">
-          <div className="space-y-4">
+      <Dialog
+        open={open}
+        onOpenChange={(next) => {
+          if (!saving) setOpen(next);
+        }}
+      >
+        <DialogContent className="min-w-0 overflow-x-hidden sm:max-w-[460px]">
+          <div className="min-w-0 space-y-4">
             <DialogHeader>
               <DialogTitle>{t("saveTitle")}</DialogTitle>
               <DialogDescription>{t("saveDescription")}</DialogDescription>
@@ -110,7 +130,7 @@ export function SaveArtifactButton({ artifact }: { artifact: ChatArtifact | null
                 autoFocus
                 maxLength={255}
                 value={title}
-                disabled={saving}
+                disabled={saving || Boolean(share)}
                 onChange={(event) => setTitle(event.target.value)}
               />
             </div>
@@ -118,11 +138,23 @@ export function SaveArtifactButton({ artifact }: { artifact: ChatArtifact | null
             {share ? <ArtifactShareLink share={share} disabled={saving} /> : null}
 
             <DialogFooter>
-              <Button type="button" variant="ghost" disabled={saving} onClick={() => setOpen(false)}>
-                {t("cancel")}
-              </Button>
-              <Button type="button" disabled={saving || !title.trim()} onClick={() => void submit()}>
-                {saving ? t("saving") : t("saveAndShare")}
+              {!share ? (
+                <Button type="button" variant="ghost" disabled={saving} onClick={() => setOpen(false)}>
+                  {t("cancel")}
+                </Button>
+              ) : null}
+              <Button
+                type="button"
+                disabled={saving || (!share && !title.trim())}
+                onClick={() => {
+                  if (share) {
+                    setOpen(false);
+                    return;
+                  }
+                  void submit();
+                }}
+              >
+                {saving ? t("saving") : share ? tCommon("confirm") : t("saveAndShare")}
               </Button>
             </DialogFooter>
           </div>
@@ -135,7 +167,7 @@ export function SaveArtifactButton({ artifact }: { artifact: ChatArtifact | null
 function defaultArtifactTitle(artifact: ChatArtifact | null): string {
   if (!artifact) return "";
   const firstLine = artifact.code.trim().split("\n")[0] ?? "";
-  const cleaned = firstLine.replace(/^[\/#\*\-<\s]+/, "").trim();
+  const cleaned = firstLine.replace(/^[/#*<\s-]+/, "").trim();
   if (cleaned && cleaned.length <= 40) {
     return cleaned;
   }

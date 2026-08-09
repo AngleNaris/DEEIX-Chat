@@ -13,6 +13,7 @@ type Artifact struct {
 	Kind             string
 	Title            string
 	Code             string
+	Thumbnail        string
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
 }

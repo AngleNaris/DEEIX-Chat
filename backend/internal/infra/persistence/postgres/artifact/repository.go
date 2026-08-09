@@ -38,6 +38,7 @@ func toDomain(item model.Artifact) domainartifact.Artifact {
 		Kind:             item.Kind,
 		Title:            item.Title,
 		Code:             item.Code,
+		Thumbnail:        item.Thumbnail,
 		CreatedAt:        item.CreatedAt,
 		UpdatedAt:        item.UpdatedAt,
 	}
@@ -55,6 +56,7 @@ func (r *Repo) CreateArtifact(ctx context.Context, item *domainartifact.Artifact
 		Kind:             item.Kind,
 		Title:            item.Title,
 		Code:             item.Code,
+		Thumbnail:        item.Thumbnail,
 	}
 	if err := r.db.WithContext(ctx).Create(&record).Error; err != nil {
 		return translateError(err)
@@ -70,9 +72,10 @@ func (r *Repo) UpdateArtifact(ctx context.Context, item *domainartifact.Artifact
 	return translateError(r.db.WithContext(ctx).Model(&model.Artifact{}).
 		Where("id = ? AND user_id = ?", item.ID, item.UserID).
 		Updates(map[string]interface{}{
-			"title": item.Title,
-			"kind":  item.Kind,
-			"code":  item.Code,
+			"title":     item.Title,
+			"kind":      item.Kind,
+			"code":      item.Code,
+			"thumbnail": item.Thumbnail,
 		}).Error)
 }
 
@@ -111,7 +114,18 @@ func (r *Repo) ListArtifacts(ctx context.Context, userID uint, page int, pageSiz
 	if pageSize < 1 {
 		pageSize = 20
 	}
-	if err := query.Order("updated_at DESC").
+	if err := query.Select([]string{
+		"id",
+		"artifact_public_id",
+		"user_id",
+		"conversation_id",
+		"message_id",
+		"kind",
+		"title",
+		"thumbnail",
+		"created_at",
+		"updated_at",
+	}).Order("updated_at DESC").
 		Offset((page - 1) * pageSize).Limit(pageSize).
 		Find(&records).Error; err != nil {
 		return nil, 0, translateError(err)
