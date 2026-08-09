@@ -12,6 +12,7 @@ import (
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
 	mineruextract "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/extract/mineru"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/security"
 )
 
 // Service 封装 settings 业务逻辑。
@@ -95,7 +96,10 @@ func (s *Service) Seed(ctx context.Context, cfg config.Config) error {
 	if err := s.repo.UpsertWithDescription(ctx, items); err != nil {
 		return err
 	}
-	return s.migrateDefaultAllowedMIMETypes(ctx)
+	if err := s.migrateDefaultAllowedMIMETypes(ctx); err != nil {
+		return err
+	}
+	return s.migrateDefaultModelOptionAllowedPaths(ctx)
 }
 
 // ListAll 查询全部配置，按 namespace 分组。
@@ -163,6 +167,72 @@ func (s *Service) migrateDefaultAllowedMIMETypes(ctx context.Context) error {
 		return s.repo.Upsert(ctx, updates)
 	}
 	return nil
+}
+
+func (s *Service) migrateDefaultModelOptionAllowedPaths(ctx context.Context) error {
+	items, err := s.repo.ListByNamespace(ctx, "chat")
+	if err != nil {
+		return err
+	}
+	for _, item := range items {
+		if item.Key != "model_option_allowed_paths" || !isLegacyDefaultModelOptionAllowedPaths(item.Value) {
+			continue
+		}
+		updates, encryptErr := s.encryptSettingsForStorage([]domainsettings.SystemSetting{{
+			Namespace:   "chat",
+			Key:         "model_option_allowed_paths",
+			Value:       config.DefaultModelOptionAllowedPathsJSON(),
+			ValueType:   "json",
+			Description: "模型 options 白名单路径 JSON，default 对所有协议生效",
+		}})
+		if encryptErr != nil {
+			return encryptErr
+		}
+		return s.repo.Upsert(ctx, updates)
+	}
+	return nil
+}
+
+func isLegacyDefaultModelOptionAllowedPaths(value string) bool {
+	current := map[string][]string{}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(value)), &current); err != nil {
+		return false
+	}
+	previousDefault := map[string][]string{}
+	if err := json.Unmarshal([]byte(config.DefaultModelOptionAllowedPathsJSON()), &previousDefault); err != nil {
+		return false
+	}
+	delete(previousDefault, "xai_video")
+	if sameStringSliceMap(current, previousDefault) {
+		return true
+	}
+	previousDefault["xai_responses"] = []string{"reasoning.effort"}
+	return sameStringSliceMap(current, previousDefault)
+}
+
+func sameStringSliceMap(left map[string][]string, right map[string][]string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for key, leftValues := range left {
+		rightValues, ok := right[key]
+		if !ok || len(leftValues) != len(rightValues) {
+			return false
+		}
+		values := make(map[string]int, len(leftValues))
+		for _, value := range leftValues {
+			values[value]++
+		}
+		for _, value := range rightValues {
+			values[value]--
+		}
+		for _, count := range values {
+			if count != 0 {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func sameCSVSet(left string, right string) bool {
@@ -383,8 +453,8 @@ func validatePatchItem(item PatchItem) error {
 		if value == "" {
 			return nil
 		}
-		if !strings.HasPrefix(value, "http://") && !strings.HasPrefix(value, "https://") {
-			return fmt.Errorf("%s must start with http:// or https://", key)
+		if err := security.ValidateTrustedOutboundHTTPURL(value); err != nil {
+			return fmt.Errorf("%s must be a valid trusted HTTP endpoint", key)
 		}
 		return nil
 	case "file:embedding_output_dimensions":

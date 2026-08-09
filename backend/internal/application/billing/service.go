@@ -117,6 +117,7 @@ type platformModelIdentityResolver interface {
 
 type modelPricingCatalogProvider interface {
 	ListActivePlatformModelNames(ctx context.Context) (map[string]struct{}, error)
+	SupportsVideoGeneration(ctx context.Context, platformModelName string) (bool, error)
 }
 
 type nativeToolCatalogProvider interface {
@@ -148,7 +149,10 @@ type UsagePricingInput struct {
 	OutputTokens        int64
 	ReasoningTokens     int64
 	CallCount           int64
+	DurationBillable    bool
 	DurationSeconds     int64
+	MediaType           string
+	InputImageCount     int64
 	LatencyMS           int64
 	ServerSideToolUsage map[string]int64
 	ServiceItems        []ServiceUsageInput
@@ -203,7 +207,6 @@ type ServiceUsageInput struct {
 	OutputTokens       int64
 	ReasoningTokens    int64
 	CallCount          int64
-	DurationSeconds    int64
 }
 
 // NativeToolPricingView 描述内置原生工具默认计费价格。
@@ -1173,6 +1176,18 @@ func (s *Service) AuthorizeUsage(ctx context.Context, userID uint, platformModel
 	if pricing.IsFree {
 		return authorization, nil
 	}
+	if normalizePricingMode(pricing.PricingMode) == domainbilling.PricingModeDuration {
+		if s.modelPricingCatalog == nil {
+			return nil, ErrModelPricingRequired
+		}
+		supported, supportErr := s.modelPricingCatalog.SupportsVideoGeneration(ctx, platformModelName)
+		if supportErr != nil {
+			return nil, supportErr
+		}
+		if !supported {
+			return nil, ErrModelPricingRequired
+		}
+	}
 	reservationNanousd, err := s.repo.GetBillingPrepaidAmountNanousd(ctx)
 	if err != nil {
 		return nil, err
@@ -1522,6 +1537,12 @@ func (s *Service) BuildUsageLedger(ctx context.Context, input UsagePricingInput)
 		// 授权后价格被删除时必须进入待核对流程，不能把已发生的上游用量静默记为 0。
 		return nil, ErrModelPricingRequired
 	}
+	if mode != "self" && !input.ServiceOnly && pricing != nil && !pricing.IsFree && normalizePricingMode(pricing.PricingMode) == domainbilling.PricingModeDuration {
+		if !input.DurationBillable || input.DurationSeconds <= 0 {
+			// 请求开始后的模型能力或结果状态发生变化时，宁可进入待核对流程，也不能静默记成零费用。
+			return nil, ErrModelPricingRequired
+		}
+	}
 
 	currency := "USD"
 	var inputNanousdPerMTokens int64
@@ -1594,12 +1615,12 @@ func (s *Service) BuildUsageLedger(ctx context.Context, input UsagePricingInput)
 	if callCount <= 0 {
 		callCount = 1
 	}
-	durationSeconds := input.DurationSeconds
-	if durationSeconds < 0 {
-		durationSeconds = 0
-	}
-	if pricingMode == domainbilling.PricingModeDuration && durationSeconds <= 0 {
-		durationSeconds = 1
+	durationSeconds := int64(0)
+	if input.DurationBillable {
+		durationSeconds = input.DurationSeconds
+		if durationSeconds < 0 {
+			durationSeconds = 0
+		}
 	}
 	var inputBilledNanousd int64
 	var cacheReadBilledNanousd int64
@@ -1709,6 +1730,7 @@ func (s *Service) BuildUsageLedger(ctx context.Context, input UsagePricingInput)
 		"rate_multiplier":                          billingRateMultiplierValue(rateMultiplier),
 		"billing_mode":                             mode,
 		"pricing_mode":                             pricingMode,
+		"duration_billable":                        input.DurationBillable,
 		"is_free_model":                            isFreeModel,
 		"currency":                                 currency,
 		"input_nanousd_per_m_tokens":               inputNanousdPerMTokens,
@@ -1747,6 +1769,14 @@ func (s *Service) BuildUsageLedger(ctx context.Context, input UsagePricingInput)
 		"native_tool_billed_nanousd":               nativeToolBilledNanousd,
 		"base_service_billed_nanousd":              serviceBilledNanousd,
 		"service_items":                            usageServiceItemSnapshots(serviceItems),
+	}
+	if strings.EqualFold(strings.TrimSpace(input.MediaType), "video") {
+		inputImageCount := input.InputImageCount
+		if inputImageCount < 0 {
+			inputImageCount = 0
+		}
+		snapshot["media_type"] = "video"
+		snapshot["input_image_count"] = inputImageCount
 	}
 	if usageSource := strings.TrimSpace(input.UsageSource); usageSource != "" {
 		snapshot["usage_source"] = usageSource
@@ -1951,6 +1981,18 @@ func (s *Service) UpsertModelPricing(ctx context.Context, input ModelPricingInpu
 		return nil, err
 	}
 	pricingMode := normalizePricingMode(input.PricingMode)
+	if pricingMode == domainbilling.PricingModeDuration {
+		if s.modelPricingCatalog == nil {
+			return nil, ErrInvalidModelPricing
+		}
+		supported, supportErr := s.modelPricingCatalog.SupportsVideoGeneration(ctx, platformModelName)
+		if supportErr != nil {
+			return nil, supportErr
+		}
+		if !supported {
+			return nil, ErrInvalidModelPricing
+		}
+	}
 	var inputNanousdPerMTokens int64
 	var cacheReadNanousdPerMTokens int64
 	var cacheWriteNanousdPerMTokens int64
@@ -2109,16 +2151,12 @@ func (s *Service) buildUsageServiceItem(ctx context.Context, input ServiceUsageI
 		OutputTokens:       clampNonNegative(input.OutputTokens),
 		ReasoningTokens:    clampNonNegative(input.ReasoningTokens),
 		CallCount:          input.CallCount,
-		DurationSeconds:    input.DurationSeconds,
 	}
 	if item.ServiceName == "" {
 		item.ServiceName = item.ServiceCode
 	}
 	if item.CallCount <= 0 {
 		item.CallCount = 1
-	}
-	if item.DurationSeconds < 0 {
-		item.DurationSeconds = 0
 	}
 	identity, err := s.resolvePlatformModelIdentity(ctx, item.PlatformModelName)
 	if err != nil && !errors.Is(err, repository.ErrNotFound) {
@@ -2159,9 +2197,6 @@ func (s *Service) buildUsageServiceItem(ctx context.Context, input ServiceUsageI
 		item.CallBilledNanousd = item.CallCount * item.CallNanousdPerCall
 	case domainbilling.PricingModeDuration:
 		item.DurationNanousdPerSecond = applyRateMultiplier(pricing.DurationNanousdPerSecond, rateMultiplier)
-		if item.DurationSeconds <= 0 {
-			item.DurationSeconds = 1
-		}
 		item.DurationBilledNanousd = item.DurationSeconds * item.DurationNanousdPerSecond
 	case domainbilling.PricingModeTiered:
 		tiers, parseErr := parseTieredPricingTiers(pricing.TieredPricingJSON)

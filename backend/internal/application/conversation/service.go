@@ -2,6 +2,7 @@ package conversation
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -67,6 +68,23 @@ type auditWriter interface {
 	Write(ctx context.Context, requestID string, actorUserID uint, action string, resource string, resourceID string, ip string, userAgent string, detail interface{})
 }
 
+// generatedMediaDownloader 定义会话用例所需的最小媒体下载端口，避免应用层感知 HTTP 细节。
+type generatedMediaDownloader interface {
+	DownloadImage(ctx context.Context, sourceURL string, trustedProviderEndpoint string, maxBytes int64) ([]byte, string, error)
+	DownloadVideo(ctx context.Context, sourceURL string, trustedProviderEndpoint string, apiKey string, maxBytes int64) ([]byte, string, error)
+}
+
+// mediaArtifactResponseTooLarge 是跨层错误能力契约，不要求应用层依赖具体适配器错误类型。
+type mediaArtifactResponseTooLarge interface {
+	MediaArtifactResponseTooLarge()
+}
+
+// isMediaArtifactResponseTooLarge 判断下载错误是否应映射为既有文件大小业务错误。
+func isMediaArtifactResponseTooLarge(err error) bool {
+	var target mediaArtifactResponseTooLarge
+	return errors.As(err, &target)
+}
+
 type basicServiceBillingContextKey struct{}
 
 type basicServiceBillingContext struct {
@@ -83,6 +101,7 @@ type Service struct {
 	memoryRecorder    memoryRecorder
 	mcpRepo           mcpToolResolver
 	llmClient         *llm.Client
+	mediaDownloader   generatedMediaDownloader
 	mcpClient         *mcp.Client
 	uploadSvc         *appupload.Service
 	compactSvc        *appcompact.Service
@@ -137,6 +156,7 @@ type AttachmentInput struct {
 	Current                bool // 是否为本轮用户显式上传的附件
 	MessageRole            string
 	ContextMode            string
+	DurationSeconds        int64 // 仅生成视频附件使用。
 }
 
 // SendMessageInput 定义消息发送请求。
@@ -209,6 +229,7 @@ func NewService(
 	routeResolver routeResolver,
 	memoryRecorder memoryRecorder,
 	llmClient *llm.Client,
+	mediaDownloader generatedMediaDownloader,
 	mcpClient *mcp.Client,
 	embedClient *embedding.Client,
 	uploadSvc *appupload.Service,
@@ -219,7 +240,7 @@ func NewService(
 	ragSvc *apprag.Service,
 	logger *zap.Logger,
 ) *Service {
-	return NewServiceWithRuntime(config.NewRuntime(cfg), repo, cache, routeResolver, memoryRecorder, llmClient, mcpClient, embedClient, uploadSvc, compactSvc, embeddingSvc, processingSvc, extractSvc, ragSvc, logger)
+	return NewServiceWithRuntime(config.NewRuntime(cfg), repo, cache, routeResolver, memoryRecorder, llmClient, mediaDownloader, mcpClient, embedClient, uploadSvc, compactSvc, embeddingSvc, processingSvc, extractSvc, ragSvc, logger)
 }
 
 // NewServiceWithRuntime 创建使用运行时配置容器的服务。
@@ -230,6 +251,7 @@ func NewServiceWithRuntime(
 	routeResolver routeResolver,
 	memoryRecorder memoryRecorder,
 	llmClient *llm.Client,
+	mediaDownloader generatedMediaDownloader,
 	mcpClient *mcp.Client,
 	embedClient *embedding.Client,
 	uploadSvc *appupload.Service,
@@ -247,6 +269,7 @@ func NewServiceWithRuntime(
 		routeResolver:     routeResolver,
 		memoryRecorder:    memoryRecorder,
 		llmClient:         llmClient,
+		mediaDownloader:   mediaDownloader,
 		mcpClient:         mcpClient,
 		compactSvc:        compactSvc,
 		embeddingSvc:      embeddingSvc,

@@ -238,6 +238,29 @@ func TestFilterModelOptionsRejectsUnsupportedOpenAIServiceTier(t *testing.T) {
 	}
 }
 
+func TestFilterModelOptionsRejectsUserOpenAIPromptCacheFields(t *testing.T) {
+	for _, mode := range []string{modelOptionPolicyAllowlist, modelOptionPolicyDenylist} {
+		filtered := filterModelOptions(map[string]interface{}{
+			"temperature":             0.2,
+			"prompt_cache_key":        "user-controlled-key",
+			"prompt_cache_options":    map[string]interface{}{"mode": "explicit", "ttl": "30m"},
+			"prompt_cache_breakpoint": map[string]interface{}{"mode": "explicit"},
+			"prompt_cache_retention":  "24h",
+		}, llm.AdapterOpenAIResponses, modelOptionPolicyConfig{
+			Mode:             mode,
+			AllowedPathsJSON: `{"default":["temperature","prompt_cache_key","prompt_cache_options.mode","prompt_cache_options.ttl","prompt_cache_breakpoint","prompt_cache_retention"]}`,
+		})
+		for _, key := range []string{"prompt_cache_key", "prompt_cache_options", "prompt_cache_breakpoint", "prompt_cache_retention"} {
+			if _, ok := filtered[key]; ok {
+				t.Fatalf("expected %s to remain server-controlled in %s mode, got %#v", key, mode, filtered)
+			}
+		}
+		if filtered["temperature"] != 0.2 {
+			t.Fatalf("expected unrelated options to remain in %s mode, got %#v", mode, filtered)
+		}
+	}
+}
+
 func TestFilterModelOptionsKeepsOpenRouterChatServiceTierOutOfDefaultAllowlist(t *testing.T) {
 	filtered := filterModelOptions(map[string]interface{}{
 		"service_tier":     "priority",
@@ -1036,6 +1059,49 @@ func TestFilterModelOptionsXAIImageAllowsImageParams(t *testing.T) {
 		if _, ok := filtered[key]; ok {
 			t.Fatalf("expected %s to be removed, got %#v", key, filtered)
 		}
+	}
+}
+
+func TestFilterModelOptionsXAIVideoAllowsVideoParams(t *testing.T) {
+	filtered := filterModelOptions(map[string]interface{}{
+		"aspect_ratio": " 16:9 ",
+		"duration":     float64(8),
+		"resolution":   "720P",
+		"prompt":       "override",
+		"image":        map[string]interface{}{"url": "https://example.com/source.png"},
+		"output":       "must not pass through",
+	}, llm.AdapterXAIVideo, modelOptionPolicyConfig{
+		Mode:             modelOptionPolicyAllowlist,
+		AllowedPathsJSON: config.DefaultModelOptionAllowedPathsJSON(),
+		DeniedPathsJSON:  config.DefaultModelOptionDeniedPathsJSON(),
+	})
+
+	if filtered["aspect_ratio"] != "16:9" || filtered["duration"] != 8 || filtered["resolution"] != "720p" {
+		t.Fatalf("expected xAI video params to pass, got %#v", filtered)
+	}
+	for _, key := range []string{"prompt", "image", "output"} {
+		if _, ok := filtered[key]; ok {
+			t.Fatalf("expected %s to be removed, got %#v", key, filtered)
+		}
+	}
+}
+
+func TestFilterModelOptionsXAIVideoDropsInvalidBillableParams(t *testing.T) {
+	filtered := filterModelOptions(map[string]interface{}{
+		"aspect_ratio": "21:9",
+		"duration":     999,
+		"resolution":   "4k",
+	}, llm.AdapterXAIVideo, modelOptionPolicyConfig{
+		Mode:             modelOptionPolicyAllowlist,
+		AllowedPathsJSON: config.DefaultModelOptionAllowedPathsJSON(),
+		DeniedPathsJSON:  config.DefaultModelOptionDeniedPathsJSON(),
+	})
+
+	if len(filtered) != 0 {
+		t.Fatalf("expected invalid xAI video params to be removed, got %#v", filtered)
+	}
+	if duration := mediaDurationSecondsFromOptions(filtered); duration != 0 {
+		t.Fatalf("expected removed duration not to affect billing, got %d", duration)
 	}
 }
 

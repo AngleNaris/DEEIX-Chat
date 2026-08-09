@@ -297,31 +297,33 @@ func (ConversationRun) TableName() string {
 // ChatRunEvent 存储运行轨迹、事件流和工具调用明细。
 type ChatRunEvent struct {
 	BaseModel
-	MessageID       uint       `gorm:"not null;default:0;index:idx_chat_run_events_message_id;comment:消息ID"`
-	ConversationID  uint       `gorm:"not null;default:0;index:idx_chat_run_events_conversation_id;comment:会话ID"`
-	UserID          uint       `gorm:"not null;default:0;index:idx_chat_run_events_user_id;comment:用户ID"`
-	RunID           string     `gorm:"size:64;not null;default:'';index:idx_chat_run_events_run_id;uniqueIndex:uk_chat_run_events_run_scope_event,priority:1;comment:运行ID"`
-	EventScope      string     `gorm:"size:32;not null;default:'';index:idx_chat_run_events_scope;uniqueIndex:uk_chat_run_events_run_scope_event,priority:2;comment:事件范围(trace_block/trace_event/tool_call)"`
-	EventID         string     `gorm:"size:255;not null;default:'';uniqueIndex:uk_chat_run_events_run_scope_event,priority:3;comment:事件ID"`
-	EventType       string     `gorm:"size:32;not null;default:'';index:idx_chat_run_events_type;comment:事件类型"`
-	Phase           string     `gorm:"size:32;not null;default:'';index:idx_chat_run_events_phase;comment:阶段(process/tools/upstream_think)"`
-	Stage           string     `gorm:"size:32;not null;default:'';index:idx_chat_run_events_stage;comment:链路阶段(process/think/tool/answer)"`
-	RoundID         string     `gorm:"size:64;not null;default:'';index:idx_chat_run_events_round_id;comment:链路轮次ID"`
-	ParentEventID   string     `gorm:"size:255;not null;default:'';index:idx_chat_run_events_parent_event_id;comment:父事件ID"`
-	Status          string     `gorm:"size:32;not null;default:'';index:idx_chat_run_events_status;comment:事件状态(streaming/completed/error)"`
-	Title           string     `gorm:"size:255;not null;default:'';comment:轨迹标题"`
-	Summary         string     `gorm:"size:255;not null;default:'';comment:轨迹摘要"`
-	ContentMarkdown string     `gorm:"type:text;not null;default:'';comment:轨迹Markdown内容"`
-	PayloadJSON     string     `gorm:"type:text;not null;default:'';comment:轨迹负载JSON"`
-	Seq             int        `gorm:"not null;default:0;index:idx_chat_run_events_seq;comment:事件顺序"`
-	ToolCallID      string     `gorm:"size:255;not null;default:'';index:idx_chat_run_events_tool_call_id;comment:工具调用ID"`
-	ToolName        string     `gorm:"size:128;not null;default:'';index:idx_chat_run_events_tool_name;comment:工具名称"`
-	LatencyMS       int64      `gorm:"not null;default:0;comment:调用时长毫秒"`
-	InputJSON       string     `gorm:"type:text;not null;default:'';comment:输入JSON"`
-	OutputJSON      string     `gorm:"type:text;not null;default:'';comment:输出JSON"`
-	ErrorJSON       string     `gorm:"type:text;not null;default:'';comment:错误JSON"`
-	StartedAt       time.Time  `gorm:"not null;comment:开始时间"`
-	EndedAt         *time.Time `gorm:"comment:结束时间"`
+	MessageID        uint       `gorm:"not null;default:0;index:idx_chat_run_events_message_id;comment:消息ID"`
+	ConversationID   uint       `gorm:"not null;default:0;index:idx_chat_run_events_conversation_id;comment:会话ID"`
+	UserID           uint       `gorm:"not null;default:0;index:idx_chat_run_events_user_id;comment:用户ID"`
+	RunID            string     `gorm:"size:64;not null;default:'';index:idx_chat_run_events_run_id;uniqueIndex:uk_chat_run_events_run_scope_event,priority:1;comment:运行ID"`
+	EventScope       string     `gorm:"size:32;not null;default:'';index:idx_chat_run_events_scope;uniqueIndex:uk_chat_run_events_run_scope_event,priority:2;comment:事件范围(trace_block/trace_event/tool_call)"`
+	EventID          string     `gorm:"size:255;not null;default:'';uniqueIndex:uk_chat_run_events_run_scope_event,priority:3;comment:事件ID"`
+	EventType        string     `gorm:"size:32;not null;default:'';index:idx_chat_run_events_type;comment:事件类型"`
+	Phase            string     `gorm:"size:32;not null;default:'';index:idx_chat_run_events_phase;comment:阶段(process/tools/upstream_think)"`
+	Stage            string     `gorm:"size:32;not null;default:'';index:idx_chat_run_events_stage;comment:链路阶段(process/think/tool/answer)"`
+	RoundID          string     `gorm:"size:64;not null;default:'';index:idx_chat_run_events_round_id;comment:链路轮次ID"`
+	ParentEventID    string     `gorm:"size:255;not null;default:'';index:idx_chat_run_events_parent_event_id;comment:父事件ID"`
+	Status           string     `gorm:"size:32;not null;default:'';index:idx_chat_run_events_status;comment:事件状态(streaming/completed/error)"`
+	Title            string     `gorm:"size:255;not null;default:'';comment:轨迹标题"`
+	Summary          string     `gorm:"size:255;not null;default:'';comment:轨迹摘要"`
+	ContentMarkdown  string     `gorm:"type:text;not null;default:'';comment:轨迹Markdown内容"`
+	PayloadJSON      string     `gorm:"type:text;not null;default:'';comment:轨迹负载JSON"`
+	PayloadSizeBytes int64      `gorm:"->;-:migration;column:payload_size_bytes"`
+	PayloadOmitted   bool       `gorm:"->;-:migration;column:payload_omitted"`
+	Seq              int        `gorm:"not null;default:0;index:idx_chat_run_events_seq;comment:事件顺序"`
+	ToolCallID       string     `gorm:"size:255;not null;default:'';index:idx_chat_run_events_tool_call_id;comment:工具调用ID"`
+	ToolName         string     `gorm:"size:128;not null;default:'';index:idx_chat_run_events_tool_name;comment:工具名称"`
+	LatencyMS        int64      `gorm:"not null;default:0;comment:调用时长毫秒"`
+	InputJSON        string     `gorm:"type:text;not null;default:'';comment:输入JSON"`
+	OutputJSON       string     `gorm:"type:text;not null;default:'';comment:输出JSON"`
+	ErrorJSON        string     `gorm:"type:text;not null;default:'';comment:错误JSON"`
+	StartedAt        time.Time  `gorm:"not null;comment:开始时间"`
+	EndedAt          *time.Time `gorm:"comment:结束时间"`
 }
 
 func (ChatRunEvent) TableName() string {
@@ -333,7 +335,7 @@ type ChatContextRecord struct {
 	BaseModel
 	RecordType            string     `gorm:"size:32;not null;default:'';index:idx_chat_context_records_type;comment:记录类型(snapshot/artifact)"`
 	ConversationID        uint       `gorm:"not null;default:0;index:idx_chat_context_records_conversation_id;index:idx_chat_context_records_conversation_message,priority:1;index:idx_chat_context_records_conversation_kind,priority:1;comment:会话ID"`
-	MessageID             uint       `gorm:"not null;default:0;index:idx_chat_context_records_message_id;index:idx_chat_context_records_conversation_message,priority:2;comment:触发消息ID"`
+	MessageID             uint       `gorm:"not null;default:0;index:idx_chat_context_records_message_id;index:idx_chat_context_records_conversation_message,priority:2;comment:证据归属助手消息ID"`
 	UserID                uint       `gorm:"not null;default:0;index:idx_chat_context_records_user_id;comment:用户ID"`
 	RunID                 string     `gorm:"size:64;not null;default:'';index:idx_chat_context_records_run_id;comment:运行ID"`
 	FromTurn              int        `gorm:"not null;default:0;comment:压缩快照起始轮次"`

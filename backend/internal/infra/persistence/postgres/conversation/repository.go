@@ -1630,6 +1630,63 @@ const (
 	chatContextRecordArtifact   = "artifact"
 )
 
+const maxConversationEventDetailPayloadBytes = 1024 * 1024
+
+func conversationEventPayloadSizeExpression(db *gorm.DB) string {
+	if db != nil && db.Dialector != nil {
+		switch db.Dialector.Name() {
+		case "postgres":
+			return "OCTET_LENGTH(payload_json)"
+		case "sqlite":
+			return "LENGTH(CAST(payload_json AS BLOB))"
+		}
+	}
+	return "LENGTH(payload_json)"
+}
+
+func conversationEventSummarySelectColumns(db *gorm.DB) []string {
+	payloadSize := conversationEventPayloadSizeExpression(db)
+	return []string{
+		"id",
+		"message_id",
+		"conversation_id",
+		"user_id",
+		"run_id",
+		"event_scope",
+		"event_id",
+		"event_type",
+		"phase",
+		"stage",
+		"round_id",
+		"parent_event_id",
+		"status",
+		"title",
+		"summary",
+		"seq",
+		"tool_call_id",
+		"tool_name",
+		"latency_ms",
+		"started_at",
+		"ended_at",
+		"created_at",
+		"updated_at",
+		payloadSize + " AS payload_size_bytes",
+		fmt.Sprintf("CASE WHEN %s > %d THEN TRUE ELSE FALSE END AS payload_omitted", payloadSize, maxConversationEventDetailPayloadBytes),
+	}
+}
+
+func conversationEventDetailSelectColumns(db *gorm.DB) []string {
+	payloadSize := conversationEventPayloadSizeExpression(db)
+	return append(
+		conversationEventSummarySelectColumns(db),
+		"content_markdown",
+		fmt.Sprintf("CASE WHEN %s <= %d THEN payload_json ELSE '' END AS payload_json", payloadSize, maxConversationEventDetailPayloadBytes),
+		"input_json",
+		"output_json",
+		"error_json",
+	)
+}
+
 // CreateConversationRun 写入会话运行日志。
 func (r *Repo) CreateConversationRun(ctx context.Context, item *domainconversation.Run) error {
 	entity := toConversationRunModel(item)
@@ -1683,6 +1740,7 @@ func (r *Repo) ListConversationMessageTracesByMessageIDs(ctx context.Context, me
 		return []domainconversation.MessageTrace{}, nil
 	}
 	if err := r.db.WithContext(ctx).
+		Select(conversationEventDetailSelectColumns(r.db)).
 		Where("message_id IN ? AND event_scope = ?", messageIDs, chatRunEventScopeTraceBlock).
 		Order("message_id ASC, seq ASC, id ASC").
 		Find(&items).Error; err != nil {
@@ -1734,6 +1792,7 @@ func (r *Repo) ListConversationMessageTraceEventsByMessageIDs(ctx context.Contex
 		return []domainconversation.MessageTraceEventRow{}, nil
 	}
 	if err := r.db.WithContext(ctx).
+		Select(conversationEventDetailSelectColumns(r.db)).
 		Where("message_id IN ? AND event_scope = ?", messageIDs, chatRunEventScopeTraceEvent).
 		Order("message_id ASC, seq ASC, id ASC").
 		Find(&items).Error; err != nil {
@@ -1863,6 +1922,7 @@ func (r *Repo) ListConversationEventLogs(
 		order = "run_id ASC, seq ASC, id ASC"
 	}
 	if err := query.
+		Select(conversationEventSummarySelectColumns(r.db)).
 		Order(order).
 		Offset(offset).
 		Limit(limit).
@@ -1870,6 +1930,32 @@ func (r *Repo) ListConversationEventLogs(
 		return nil, 0, translateError(err)
 	}
 	results := toConversationEventLogDomains(items)
+	if err := r.hydrateConversationEventRunMetadata(ctx, results); err != nil {
+		return nil, 0, err
+	}
+	return results, total, nil
+}
+
+// GetConversationEventLog 查询单条管理员对话事件日志详情。
+func (r *Repo) GetConversationEventLog(ctx context.Context, eventID uint) (*domainconversation.EventLog, error) {
+	var item models.ChatRunEvent
+	if err := r.db.WithContext(ctx).
+		Select(conversationEventDetailSelectColumns(r.db)).
+		Where("id = ?", eventID).
+		First(&item).Error; err != nil {
+		return nil, translateError(err)
+	}
+	results := toConversationEventLogDomains([]models.ChatRunEvent{item})
+	if err := r.hydrateConversationEventRunMetadata(ctx, results); err != nil {
+		return nil, err
+	}
+	if len(results) == 0 {
+		return nil, repository.ErrNotFound
+	}
+	return &results[0], nil
+}
+
+func (r *Repo) hydrateConversationEventRunMetadata(ctx context.Context, results []domainconversation.EventLog) error {
 	runIDs := make([]string, 0, len(results))
 	seenRunIDs := make(map[string]struct{}, len(results))
 	for _, item := range results {
@@ -1884,7 +1970,7 @@ func (r *Repo) ListConversationEventLogs(
 		runIDs = append(runIDs, runID)
 	}
 	if len(runIDs) == 0 {
-		return results, total, nil
+		return nil
 	}
 
 	runs := make([]models.ConversationRun, 0, len(runIDs))
@@ -1892,7 +1978,7 @@ func (r *Repo) ListConversationEventLogs(
 		Select("run_id", "provider_protocol", "upstream_name", "platform_model_name", "routed_binding_code", "upstream_model_name").
 		Where("run_id IN ?", runIDs).
 		Find(&runs).Error; err != nil {
-		return nil, 0, translateError(err)
+		return translateError(err)
 	}
 	runsByID := make(map[string]models.ConversationRun, len(runs))
 	for _, run := range runs {
@@ -1909,7 +1995,7 @@ func (r *Repo) ListConversationEventLogs(
 		results[index].RoutedBindingCode = run.RoutedBindingCode
 		results[index].UpstreamModelName = run.UpstreamModelName
 	}
-	return results, total, nil
+	return nil
 }
 
 // ListConversationRunsByRunIDs 按运行 ID 查询会话运行快照。
@@ -3270,6 +3356,17 @@ type messageAttachmentSnapshotRow struct {
 	ProcessingReady        bool   `gorm:"column:processing_ready"`
 	ProcessingErrorCode    string `gorm:"column:processing_error_code"`
 	ProcessingErrorMessage string `gorm:"column:processing_error_message"`
+	MetaJSON               string `gorm:"column:meta_json"`
+}
+
+func attachmentDurationSecondsFromMetaJSON(raw string) int64 {
+	var metadata struct {
+		DurationSeconds int64 `json:"duration_seconds"`
+	}
+	if json.Unmarshal([]byte(strings.TrimSpace(raw)), &metadata) != nil || metadata.DurationSeconds <= 0 {
+		return 0
+	}
+	return metadata.DurationSeconds
 }
 
 func (r *Repo) hydrateMessageAttachments(ctx context.Context, items []models.Message) error {
@@ -3297,6 +3394,7 @@ func (r *Repo) hydrateMessageAttachments(ctx context.Context, items []models.Mes
 			"a.file_name",
 			"a.mime_type",
 			"a.file_size",
+			"a.meta_json",
 			"fo.detected_mime",
 			"fo.file_category",
 			"fo.processing_status",
@@ -3313,7 +3411,7 @@ func (r *Repo) hydrateMessageAttachments(ctx context.Context, items []models.Mes
 
 	grouped := make(map[uint][]map[string]interface{}, len(rows))
 	for _, row := range rows {
-		grouped[row.MessageID] = append(grouped[row.MessageID], map[string]interface{}{
+		payload := map[string]interface{}{
 			"file_id":                  row.FileID,
 			"kind":                     row.Kind,
 			"file_name":                row.FileName,
@@ -3325,7 +3423,11 @@ func (r *Repo) hydrateMessageAttachments(ctx context.Context, items []models.Mes
 			"processing_ready":         row.ProcessingReady,
 			"processing_error_code":    row.ProcessingErrorCode,
 			"processing_error_message": row.ProcessingErrorMessage,
-		})
+		}
+		if durationSeconds := attachmentDurationSecondsFromMetaJSON(row.MetaJSON); durationSeconds > 0 {
+			payload["duration_seconds"] = durationSeconds
+		}
+		grouped[row.MessageID] = append(grouped[row.MessageID], payload)
 	}
 	for i := range items {
 		payload := grouped[items[i].ID]
@@ -3632,34 +3734,36 @@ func toConversationEventLogDomains(items []models.ChatRunEvent) []domainconversa
 	results := make([]domainconversation.EventLog, 0, len(items))
 	for _, item := range items {
 		results = append(results, domainconversation.EventLog{
-			ID:              item.ID,
-			MessageID:       item.MessageID,
-			ConversationID:  item.ConversationID,
-			UserID:          item.UserID,
-			RunID:           item.RunID,
-			EventScope:      item.EventScope,
-			EventID:         item.EventID,
-			EventType:       item.EventType,
-			Phase:           item.Phase,
-			Stage:           item.Stage,
-			RoundID:         item.RoundID,
-			ParentEventID:   item.ParentEventID,
-			Status:          item.Status,
-			Title:           item.Title,
-			Summary:         item.Summary,
-			ContentMarkdown: item.ContentMarkdown,
-			PayloadJSON:     item.PayloadJSON,
-			Seq:             item.Seq,
-			ToolCallID:      item.ToolCallID,
-			ToolName:        item.ToolName,
-			LatencyMS:       item.LatencyMS,
-			InputJSON:       item.InputJSON,
-			OutputJSON:      item.OutputJSON,
-			ErrorJSON:       item.ErrorJSON,
-			StartedAt:       item.StartedAt,
-			EndedAt:         item.EndedAt,
-			CreatedAt:       item.CreatedAt,
-			UpdatedAt:       item.UpdatedAt,
+			ID:               item.ID,
+			MessageID:        item.MessageID,
+			ConversationID:   item.ConversationID,
+			UserID:           item.UserID,
+			RunID:            item.RunID,
+			EventScope:       item.EventScope,
+			EventID:          item.EventID,
+			EventType:        item.EventType,
+			Phase:            item.Phase,
+			Stage:            item.Stage,
+			RoundID:          item.RoundID,
+			ParentEventID:    item.ParentEventID,
+			Status:           item.Status,
+			Title:            item.Title,
+			Summary:          item.Summary,
+			ContentMarkdown:  item.ContentMarkdown,
+			PayloadJSON:      item.PayloadJSON,
+			PayloadSizeBytes: item.PayloadSizeBytes,
+			PayloadOmitted:   item.PayloadOmitted,
+			Seq:              item.Seq,
+			ToolCallID:       item.ToolCallID,
+			ToolName:         item.ToolName,
+			LatencyMS:        item.LatencyMS,
+			InputJSON:        item.InputJSON,
+			OutputJSON:       item.OutputJSON,
+			ErrorJSON:        item.ErrorJSON,
+			StartedAt:        item.StartedAt,
+			EndedAt:          item.EndedAt,
+			CreatedAt:        item.CreatedAt,
+			UpdatedAt:        item.UpdatedAt,
 		})
 	}
 	return results
@@ -4228,12 +4332,12 @@ func insertSQLiteMessageChunkVectors(tx *gorm.DB, entities []models.MessageChunk
 	return nil
 }
 
-func (r *Repo) searchSQLiteMessageChunks(ctx context.Context, conversationID uint, userID uint, queryEmbedding []float32, topK int, minSimilarity float64) ([]domainconversation.MessageChunk, error) {
-	vector, err := sqlitevec.SerializeFloat32(queryEmbedding)
+func (r *Repo) searchSQLiteMessageChunks(ctx context.Context, input repository.MessageChunkSearchInput) ([]domainconversation.MessageChunk, error) {
+	vector, err := sqlitevec.SerializeFloat32(input.QueryEmbedding)
 	if err != nil {
 		return nil, err
 	}
-	query := fmt.Sprintf(`
+	query := historicalMessageScopeCTE + fmt.Sprintf(`
 		SELECT chunks.id, chunks.conversation_id, chunks.message_id, chunks.user_id, chunks.role,
 		       chunks.chunk_index, chunks.content, chunks.token_count, chunks.created_at,
 		       (1.0 - vectors.distance) AS similarity
@@ -4244,16 +4348,27 @@ func (r *Repo) searchSQLiteMessageChunks(ctx context.Context, conversationID uin
 			AND vectors.k = ?
 			AND vectors.user_id = ?
 			AND vectors.conversation_id = ?
+			AND vectors.message_id IN (
+				SELECT id
+				FROM valid_historical_message_scope
+			)
 		ORDER BY vectors.distance ASC`,
 		sqlitevec.MessageChunkVectorTable,
 	)
+	args := historicalMessageScopeArgs(input.Scope)
+	args = append(args,
+		vector,
+		input.TopK,
+		input.Scope.UserID,
+		input.Scope.ConversationID,
+	)
 	var rows []messageChunkSearchRow
-	if err := r.db.WithContext(ctx).Raw(query, vector, topK, userID, conversationID).Scan(&rows).Error; err != nil {
+	if err := r.db.WithContext(ctx).Raw(query, args...).Scan(&rows).Error; err != nil {
 		return nil, translateError(err)
 	}
 	results := make([]domainconversation.MessageChunk, 0, len(rows))
 	for _, row := range rows {
-		if row.Similarity < minSimilarity {
+		if row.Similarity < input.MinSimilarity {
 			continue
 		}
 		results = append(results, domainconversation.MessageChunk{
@@ -4272,29 +4387,47 @@ func (r *Repo) searchSQLiteMessageChunks(ctx context.Context, conversationID uin
 	return results, nil
 }
 
-// SearchMessageChunks 按查询向量检索最相关的历史消息分片。
-func (r *Repo) SearchMessageChunks(ctx context.Context, conversationID uint, userID uint, queryEmbedding []float32, topK int, minSimilarity float64) ([]domainconversation.MessageChunk, error) {
-	if len(queryEmbedding) == 0 || topK <= 0 {
+// SearchMessageChunks 在当前活跃分支内按查询向量检索最相关的历史消息分片。
+func (r *Repo) SearchMessageChunks(ctx context.Context, input repository.MessageChunkSearchInput) ([]domainconversation.MessageChunk, error) {
+	if !input.Scope.Valid() || len(input.QueryEmbedding) == 0 || input.TopK <= 0 {
 		return nil, nil
 	}
 	if r.sqliteDialect() {
-		return r.searchSQLiteMessageChunks(ctx, conversationID, userID, queryEmbedding, topK, minSimilarity)
+		return r.searchSQLiteMessageChunks(ctx, input)
 	}
-	vec := float32SliceToPostgresVector(queryEmbedding)
-	query := `
-		SELECT id, conversation_id, message_id, user_id, role, chunk_index, content, token_count, created_at,
+	vec := float32SliceToPostgresVector(input.QueryEmbedding)
+	// PostgreSQL 的 IVFFlat 会在近似索引扫描后应用普通过滤条件；直接 JOIN 分支范围可能让 sibling
+	// 候选先占满 Top-K。先物化当前分支分片，再执行精确距离排序，保证过滤严格发生在 Top-K 之前。
+	query := historicalMessageScopeCTE + `,
+		branch_message_chunks AS MATERIALIZED (
+			SELECT chunks.id, chunks.conversation_id, chunks.message_id, chunks.user_id, chunks.role,
+			       chunks.chunk_index, chunks.content, chunks.token_count, chunks.created_at, chunks.embedding
+			FROM chat_message_chunks AS chunks
+			JOIN valid_historical_message_scope AS branch_scope ON branch_scope.id = chunks.message_id
+			WHERE chunks.conversation_id = ?
+			  AND chunks.user_id = ?
+			  AND chunks.embedding IS NOT NULL
+		)
+		SELECT id, conversation_id, message_id, user_id, role,
+		       chunk_index, content, token_count, created_at,
 		       (1 - (embedding <=> ?::vector)) AS similarity
-		FROM chat_message_chunks
-		WHERE conversation_id = ? AND user_id = ? AND embedding IS NOT NULL
+		FROM branch_message_chunks
 		ORDER BY similarity DESC
 		LIMIT ?`
+	args := historicalMessageScopeArgs(input.Scope)
+	args = append(args,
+		input.Scope.ConversationID,
+		input.Scope.UserID,
+		vec,
+		input.TopK,
+	)
 	var rows []messageChunkSearchRow
-	if err := r.db.WithContext(ctx).Raw(query, vec, conversationID, userID, topK).Scan(&rows).Error; err != nil {
+	if err := r.db.WithContext(ctx).Raw(query, args...).Scan(&rows).Error; err != nil {
 		return nil, translateError(err)
 	}
 	results := make([]domainconversation.MessageChunk, 0, len(rows))
 	for _, row := range rows {
-		if row.Similarity < minSimilarity {
+		if row.Similarity < input.MinSimilarity {
 			continue
 		}
 		results = append(results, domainconversation.MessageChunk{

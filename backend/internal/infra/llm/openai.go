@@ -52,7 +52,7 @@ func (c *Client) generateOpenAICompatible(ctx context.Context, route RouteConfig
 	setOpenRouterAttributionHeaders(req, route)
 	setAdditionalHeadersForInput(req, route.HeadersJSON, &input)
 
-	resp, err := doGenerationRequest(c.httpClientForRoute(route), req)
+	resp, err := c.doRouteGenerationRequest(route, req)
 	if err != nil {
 		return nil, err
 	}
@@ -127,7 +127,7 @@ func (c *Client) generateStreamOpenAICompatible(
 	setOpenRouterAttributionHeaders(req, route)
 	setAdditionalHeadersForInput(req, route.HeadersJSON, &input)
 
-	resp, err := doGenerationRequest(c.httpClientForRoute(route), req)
+	resp, err := c.doRouteGenerationRequest(route, req)
 	firstByteTimer.Stop()
 	if err != nil {
 		return nil, err
@@ -181,7 +181,7 @@ func (c *Client) listModelsOpenAICompatible(ctx context.Context, route RouteConf
 	setOpenRouterAttributionHeaders(req, route)
 	setAdditionalHeaders(req, route.HeadersJSON)
 
-	resp, err := c.httpClientForRoute(route).Do(req)
+	resp, err := c.doRouteRequest(route, req)
 	if err != nil {
 		return nil, err
 	}
@@ -226,7 +226,7 @@ func (c *Client) fetchOpenAIResponse(ctx context.Context, route RouteConfig, met
 	}
 	setAdditionalHeaders(req, route.HeadersJSON)
 
-	resp, err := c.httpClientForRoute(route).Do(req)
+	resp, err := c.doRouteRequest(route, req)
 	if err != nil {
 		return nil, err
 	}
@@ -346,11 +346,9 @@ func setOpenAIResponseTextParam(payload map[string]interface{}, key string, valu
 }
 
 func normalizePromptCacheRetention(value string) string {
-	switch strings.TrimSpace(value) {
-	case "in-memory":
-		return "in-memory"
-	case "in_memory":
-		return "in-memory"
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "in-memory", "in_memory":
+		return "in_memory"
 	case "24h":
 		return "24h"
 	default:
@@ -366,6 +364,8 @@ func buildOpenAIRequestURL(baseURL string, endpoint string) string {
 		return buildVersionedEndpointURL(baseURL, "v1", "/images/generations")
 	case EndpointImageEdits:
 		return buildVersionedEndpointURL(baseURL, "v1", "/images/edits")
+	case EndpointVideoGenerations:
+		return buildVersionedEndpointURL(baseURL, "v1", "/videos/generations")
 	default:
 		return buildVersionedEndpointURL(baseURL, "v1", "/responses")
 	}

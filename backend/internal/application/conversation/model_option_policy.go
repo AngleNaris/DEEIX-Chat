@@ -29,6 +29,10 @@ var hardDeniedModelOptionPaths = [][]string{
 	{"baseURL"},
 	{"stream"},
 	{"previous_response_id"},
+	{"prompt_cache_key"},
+	{"prompt_cache_options"},
+	{"prompt_cache_breakpoint"},
+	{"prompt_cache_retention"},
 }
 
 type modelOptionPolicyConfig struct {
@@ -492,21 +496,9 @@ func sanitizeModelOptionValues(options map[string]interface{}, protocolKey strin
 	}
 	switch protocolKey {
 	case "openai_chat_completions", "openai_responses", "openrouter_responses":
-		serviceTier, ok := options["service_tier"]
-		if !ok {
-			return
-		}
-		value, ok := serviceTier.(string)
-		if !ok {
-			delete(options, "service_tier")
-			return
-		}
-		switch strings.TrimSpace(strings.ToLower(value)) {
-		case "default", "flex", "priority":
-			options["service_tier"] = strings.TrimSpace(strings.ToLower(value))
-		default:
-			delete(options, "service_tier")
-		}
+		sanitizeOpenAIServiceTier(options)
+	case "xai_video":
+		llm.SanitizeXAIVideoOptions(options)
 	case "openai_image_generations", "openai_image_edits":
 		value, ok := modelParamIntFromOption(options["partial_images"])
 		if !ok {
@@ -516,6 +508,24 @@ func sanitizeModelOptionValues(options map[string]interface{}, protocolKey strin
 		if value < 0 || value > 3 {
 			delete(options, "partial_images")
 		}
+	}
+}
+
+func sanitizeOpenAIServiceTier(options map[string]interface{}) {
+	serviceTier, ok := options["service_tier"]
+	if !ok {
+		return
+	}
+	value, ok := serviceTier.(string)
+	if !ok {
+		delete(options, "service_tier")
+		return
+	}
+	switch strings.TrimSpace(strings.ToLower(value)) {
+	case "default", "flex", "priority":
+		options["service_tier"] = strings.TrimSpace(strings.ToLower(value))
+	default:
+		delete(options, "service_tier")
 	}
 }
 
@@ -566,6 +576,8 @@ func modelOptionPolicyProtocolKey(protocol string) string {
 		return "xai_image"
 	case llm.AdapterXAIImageEdits:
 		return "xai_image_edits"
+	case llm.AdapterXAIVideo:
+		return "xai_video"
 	case llm.AdapterXAIResponses:
 		return "xai_responses"
 	default:

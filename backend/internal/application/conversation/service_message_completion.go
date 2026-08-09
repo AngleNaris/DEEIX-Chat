@@ -32,6 +32,7 @@ type persistMessageGenerationInput struct {
 	StatefulPromptFingerprint string
 	ToolCallRows              []model.ToolCall
 	PersistedToolCallKeys     map[string]struct{}
+	Route                     *channel.ResolvedRoute
 	ReuseUserMessage          bool
 }
 
@@ -77,7 +78,6 @@ const (
 
 type persistMessageToolCallsInput struct {
 	SendInput             SendMessageInput
-	UserMessageID         uint
 	AssistantMessageID    uint
 	RunID                 string
 	Rows                  []model.ToolCall
@@ -167,12 +167,17 @@ func (s *Service) persistAssistantImagePayloadIfPresent(ctx context.Context, inp
 	var normalized *assistantImageContentNormalization
 	var err error
 	if len(input.GeneratedImages) > 0 {
+		trustedProviderEndpoint := ""
+		if input.Route != nil {
+			trustedProviderEndpoint = input.Route.BaseURL
+		}
 		normalized, err = s.normalizeAssistantGeneratedImages(
 			ctx,
 			input.SendInput.UserID,
 			input.SendInput.ConversationID,
 			input.AssistantMessage.ID,
 			successfulMessageGenerationModelName(input),
+			trustedProviderEndpoint,
 			input.GeneratedImages,
 		)
 	} else {
@@ -272,7 +277,6 @@ func successfulMessageGenerationModelName(input persistMessageGenerationInput) s
 func (s *Service) finishSuccessfulMessageGeneration(ctx context.Context, input persistMessageGenerationInput) error {
 	if err := s.persistMessageToolCalls(ctx, persistMessageToolCallsInput{
 		SendInput:             input.SendInput,
-		UserMessageID:         input.UserMessage.ID,
 		AssistantMessageID:    input.AssistantMessage.ID,
 		RunID:                 input.AssistantMessage.RunID,
 		Rows:                  input.ToolCallRows,
@@ -365,7 +369,6 @@ func (s *Service) persistInterruptedMessageGeneration(ctx context.Context, input
 
 	if err := s.persistMessageToolCalls(persistCtx, persistMessageToolCallsInput{
 		SendInput:             input.SendInput,
-		UserMessageID:         input.UserMessage.ID,
 		AssistantMessageID:    input.AssistantMessage.ID,
 		RunID:                 input.AssistantMessage.RunID,
 		Rows:                  input.ToolCallRows,
@@ -576,7 +579,7 @@ func (s *Service) persistMessageToolCalls(ctx context.Context, input persistMess
 	s.persistToolContextArtifacts(ctx, toolContextArtifactInput{
 		ConversationID: input.SendInput.ConversationID,
 		UserID:         input.SendInput.UserID,
-		MessageID:      input.UserMessageID,
+		MessageID:      input.AssistantMessageID,
 		RunID:          input.RunID,
 		Rows:           rows,
 	})

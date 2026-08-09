@@ -553,6 +553,21 @@ func (s *Service) ListConversationEventLogs(ctx context.Context, page int, pageS
 	}, offset, limit)
 }
 
+// GetConversationEventLog 查询单条管理员对话事件详情。
+func (s *Service) GetConversationEventLog(ctx context.Context, eventID uint) (*model.EventLog, error) {
+	if eventID == 0 {
+		return nil, ErrConversationEventNotFound
+	}
+	item, err := s.repo.GetConversationEventLog(ctx, eventID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, ErrConversationEventNotFound
+		}
+		return nil, err
+	}
+	return item, nil
+}
+
 // ListConversationRunsByRunIDs 批量查询消息对应的运行快照。
 func (s *Service) ListConversationRunsByRunIDs(
 	ctx context.Context,

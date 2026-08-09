@@ -120,6 +120,16 @@ observability:
 
 启用 Turnstile 需要同时启用 `auth:email_registration_enabled`，并配置 Site Key 与 Secret Key。开启邮箱验证码注册时，前端在 `/api/v1/auth/register/email/start` 提交 `turnstileToken`；关闭邮箱验证码但允许邮箱注册时，前端在 `/api/v1/auth/register/email/complete` 提交 `turnstileToken`。
 
+## OAuth 公共客户端授权桥（多端暂未发布）
+
+Web、App 和桌面端统一通过当前实例完成第三方 OAuth 回调。部署必须提供外部可访问的 `PUBLIC_API_BASE_URL`，身份源回调格式为：
+
+```text
+<PUBLIC_API_BASE_URL>/api/v1/auth/providers/<provider-slug>/callback
+```
+
+`POST /auth/providers/:slug/authorize` 创建短时事务并使用服务端独立 PKCE 访问上游；`GET /auth/providers/:slug/callback` 在服务端兑换上游授权码；`POST /auth/providers/:slug/exchange` 使用公共客户端 PKCE verifier 原子兑换一次性 DEEIX grant。事务与 grant 使用现有 Redis/内存缓存后端，外部 provider code、Client Secret 和 Token 均不会进入公共客户端。旧 `/start` 与 `POST /callback` 流程继续保留，用于账号身份绑定与旧版 Web 客户端兼容。
+
 生产环境安全校验：
 
 - `APP_ENV` 支持 `dev`/`development` 和 `prod`/`production`，其他值会启动失败。
@@ -223,7 +233,7 @@ MinerU 可在设置中选择处理的文件类型；云端 MinerU 支持 `.doc/.
 
 OCR 引擎配置由后台文件设置管理，当前支持 RapidOCR、Tesseract OCR、Paddle OCR、腾讯云 OCR、阿里云 OCR 与 LLM OCR。服务地址、鉴权密钥和超时时间按具体引擎配置。
 
-用户文件存储配额由运行时设置 `storage:user_storage_quota_bytes` 管理，单位为字节。值为 `0` 表示不限制；非零时，上传、分享克隆和文件复用链路都会按用户维度校验并同步最新配额。前端 `/files` 页支持单个删除和批量删除，后端会在删除后释放对应配额。
+用户文件存储配额由运行时设置 `storage:user_storage_quota_bytes` 管理。后台 `/admin/chat-files` 页面中的 `storage:max_upload_file_bytes`、`storage:user_storage_quota_bytes`、`file:image_max_bytes`、`file:doc_max_bytes` 和 `file:file_full_context_max_bytes` 统一按 MB 输入，设置值在 API、数据库和运行时内部统一按字节保存与计算；值为 `0` 表示不限制。非零时，上传、分享克隆和文件复用链路都会按用户维度校验并同步最新配额。前端 `/files` 页支持单个删除和批量删除，后端会在删除后释放对应配额。
 
 ## 模型能力与官方原生工具
 
@@ -251,11 +261,65 @@ OCR 引擎配置由后台文件设置管理，当前支持 RapidOCR、Tesseract 
 ```json
 {
   "X-Conversation-Id": "${DEEIX_CONVERSATION_ID}",
+  "X-Session-Id": "${DEEIX_SESSION_ID}",
   "X-Request-Id": "${DEEIX_REQUEST_ID}"
 }
 ```
 
 OpenAI 的 `X-Client-Request-Id` 要求每次请求使用唯一值，应配置为 `${DEEIX_UPSTREAM_REQUEST_ID}`，不要使用稳定的会话或链路标识。
+
+部分 Codex 兼容中转站会把 Codex CLI 使用的会话头作为账号或缓存分片的亲和键。仅在中转站明确支持该约定时，可在目标路由（不要在官方 OpenAI 上游）配置：
+
+```json
+{
+  "session-id": "${DEEIX_SESSION_ID}",
+  "thread-id": "${DEEIX_CONVERSATION_ID}",
+  "x-client-request-id": "${DEEIX_CONVERSATION_ID}"
+}
+```
+
+其中 `session-id` 与 DEEIX 发送的 `prompt_cache_key` 使用同一个会话上下文键。该配置只提供中转站亲和提示，不能替代 `promptCache` 能力声明，也不应作为所有 OpenAI 兼容上游的全局默认值。
+
+## OpenAI Prompt Cache
+
+官方 OpenAI Responses 与 Chat Completions 请求会使用同一会话上下文键作为服务端受控的 `prompt_cache_key`，以保持跨轮缓存亲和；未启用显式模式时仍使用 OpenAI 默认的 implicit breakpoint 行为。兼容中转站默认不接收 OpenAI Prompt Cache 新字段；确认中转站支持后，需要在模型能力 JSON 中显式声明：
+
+```json
+{
+  "promptCache": {
+    "enabled": true
+  }
+}
+```
+
+官方 OpenAI 也可以用 `promptCache.enabled=false` 显式关闭。缓存策略完全由模型能力配置控制，用户消息请求中的同名 Options 会被忽略。启用显式缓存时，官方 OpenAI 默认发送消息块断点；兼容中转站必须再声明 `messageBreakpoints=true` 才会收到 `prompt_cache_breakpoint`。DEEIX 会把最后一条非空的前导 system 消息和每条非空历史 user 消息保留为断点；本轮 user、动态 RAG、本轮图片及其他当前轮上下文始终不标记。旧轮次断点必须继续保留，避免删除 marker 后改写后续缓存前缀；正常连续对话每轮只为上一轮 user 新增一个断点。OpenAI 每个请求最多创建 4 个新写入，并从最近 50 个对话断点中读取最长匹配前缀。该历史策略只作用于 explicit 模式，不改变仅使用稳定 `prompt_cache_key` 的 implicit 行为：
+
+```json
+{
+  "promptCache": {
+    "enabled": true,
+    "mode": "explicit",
+    "ttl": "30m",
+    "messageBreakpoints": true
+  }
+}
+```
+
+若中转站接受顶层 `prompt_cache_options`，但拒绝消息内容中的 `prompt_cache_breakpoint`，省略 `messageBreakpoints` 或将其设为 `false`。此时 DEEIX 仍发送稳定的 `prompt_cache_key` 和显式缓存选项，由中转站选择缓存边界。
+
+隐式缓存可独立配置保留策略：
+
+```json
+{
+  "promptCache": {
+    "enabled": true,
+    "mode": "implicit",
+    "retention": "24h"
+  }
+}
+```
+
+显式缓存当前只接受 `ttl=30m`；隐式缓存的 `retention` 接受 `in_memory` 或 `24h`，两者语义不互相替代。已有模型中的 `defaultOptions.prompt_cache_retention` 配置仍会生效。未声明能力的兼容中转站不会收到 `prompt_cache_key`、`prompt_cache_options`、`prompt_cache_retention` 或 `prompt_cache_breakpoint`。DEEIX 不再依赖上游错误文本执行无记忆缓存重试。
 
 ## MCP 工具
 

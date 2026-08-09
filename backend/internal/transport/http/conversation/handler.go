@@ -120,6 +120,12 @@ func mapStreamError(err error) streamError {
 	case errors.Is(err, appconversation.ErrInvalidFileReference):
 		status = http.StatusBadRequest
 		message = "invalid file reference"
+	case errors.Is(err, appconversation.ErrFileNotFound):
+		status = http.StatusNotFound
+		message = "file not found"
+	case errors.Is(err, appconversation.ErrFileTooLarge):
+		status = http.StatusRequestEntityTooLarge
+		message = "file too large"
 	case errors.Is(err, appconversation.ErrInvalidMessageBranch):
 		status = http.StatusBadRequest
 		message = "invalid message branch"
@@ -129,6 +135,12 @@ func mapStreamError(err error) streamError {
 	case errors.Is(err, appconversation.ErrTooManySelectedTools):
 		status = http.StatusBadRequest
 		message = "too many selected tools"
+	case errors.Is(err, appconversation.ErrMultipleImageAttachmentProcessors):
+		status = http.StatusBadRequest
+		message = "multiple image attachment processors selected"
+	case errors.Is(err, appconversation.ErrImageAttachmentProcessingFailed):
+		status = http.StatusBadGateway
+		message = "image attachment processing failed"
 	case errors.Is(err, appconversation.ErrTooManySelectedSkills):
 		status = http.StatusBadRequest
 		message = "too many selected skills"
@@ -150,6 +162,10 @@ func mapStreamError(err error) streamError {
 	case errors.Is(err, appconversation.ErrModelRouteNotConfigured):
 		status = http.StatusServiceUnavailable
 		message = "model route not configured"
+	case errors.Is(err, appconversation.ErrGeneratedMediaArtifactUnavailable):
+		status = http.StatusBadGateway
+		code = appconversation.MessageErrorCode(err)
+		message = "generated media artifact is temporarily unavailable"
 	case errors.Is(err, appconversation.ErrUpstreamEmptyResponse):
 		status = http.StatusBadGateway
 		message = "model returned empty response"
@@ -231,6 +247,9 @@ func mapClientErrorMessage(err error) string {
 	}
 	if errors.Is(err, appconversation.ErrUpstreamEmptyResponse) {
 		return "model returned empty response"
+	}
+	if errors.Is(err, appconversation.ErrGeneratedMediaArtifactUnavailable) {
+		return "generated media artifact is temporarily unavailable"
 	}
 	if errors.Is(err, appconversation.ErrUpstreamRequestFailed) {
 		detail := appconversation.MessageErrorSummary(err)

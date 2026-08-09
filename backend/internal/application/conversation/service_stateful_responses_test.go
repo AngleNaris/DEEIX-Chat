@@ -144,21 +144,23 @@ func TestShouldRetryWithoutPreviousResponseIDPreservesSameRouteFallback(t *testi
 	}
 }
 
-func TestBuildStatefulResponseMessagesKeepsLatestUserOnly(t *testing.T) {
-	messages := []llm.Message{
+func TestApplyStatefulResponseContinuationKeepsLatestUserOnly(t *testing.T) {
+	input := llm.GenerateInput{Messages: []llm.Message{
 		{Role: "system", Content: "behavior"},
 		{Role: "system", Content: "tool policy"},
 		{Role: "user", Content: "Q1"},
 		{Role: "assistant", Content: "A1"},
 		{Role: "user", Content: "<ctx>files</ctx><q>Q2</q>"},
-	}
+	}}
 
-	got := buildStatefulResponseMessages(messages)
-	if len(got) != 1 {
-		t.Fatalf("expected 1 message, got %#v", got)
+	if !applyStatefulResponseContinuation(llm.EndpointResponses, statefulResponseDecision{PreviousResponseID: "resp_123"}, &input) {
+		t.Fatal("expected valid implicit Responses continuation to be applied")
 	}
-	if got[0].Role != "user" || got[0].Content != "<ctx>files</ctx><q>Q2</q>" {
-		t.Fatalf("expected latest user message, got %#v", got[0])
+	if input.PreviousResponseID != "resp_123" || len(input.Messages) != 1 {
+		t.Fatalf("expected response id and one message, got %#v", input)
+	}
+	if input.Messages[0].Role != "user" || input.Messages[0].Content != "<ctx>files</ctx><q>Q2</q>" {
+		t.Fatalf("expected latest user message, got %#v", input.Messages[0])
 	}
 }
 
@@ -196,25 +198,125 @@ func TestApplyOpenAIResponsesInstructionsOnlyForOfficialRoute(t *testing.T) {
 	}
 }
 
+func TestApplyOpenAIResponsesInstructionsPreservesExplicitCacheableSystemPrefix(t *testing.T) {
+	official := &channel.ResolvedRoute{
+		Protocol: llm.AdapterOpenAIResponses,
+		BaseURL:  "https://api.openai.com/v1",
+	}
+	input := llm.GenerateInput{
+		Messages: []llm.Message{
+			{
+				Role:         "system",
+				Content:      "stable platform policy",
+				CacheControl: &llm.CacheControl{Type: "ephemeral"},
+			},
+			{Role: "user", Content: "dynamic question"},
+		},
+		Options: map[string]interface{}{
+			"prompt_cache_options": map[string]interface{}{"mode": "explicit", "ttl": "30m"},
+		},
+	}
+
+	applyOpenAIResponsesInstructions(official, llm.EndpointResponses, &input)
+
+	if input.Instructions != "" {
+		t.Fatalf("expected explicit cache policy not to move system content into instructions, got %q", input.Instructions)
+	}
+	if len(input.Messages) != 2 || input.Messages[0].Role != "system" || input.Messages[0].CacheControl == nil {
+		t.Fatalf("expected cacheable system prefix to remain in Responses input, got %#v", input.Messages)
+	}
+}
+
 func TestResolveStatefulPreviousResponseIDRequiresMatchingFingerprint(t *testing.T) {
 	route := &channel.ResolvedRoute{
 		Protocol: llm.AdapterOpenAIResponses,
 		BaseURL:  "https://api.openai.com/v1",
 	}
 
-	enabled := resolveStatefulPreviousResponseID(route, "default", "resp_123", "fp_a", "fp_a")
+	enabled := resolveStatefulPreviousResponseID(route, "default", "resp_123", "fp_a", "fp_a", nil)
 	if enabled.PreviousResponseID != "resp_123" || enabled.DisabledReason != "" {
 		t.Fatalf("expected enabled decision, got %#v", enabled)
 	}
 
-	missing := resolveStatefulPreviousResponseID(route, "default", "resp_123", "", "fp_a")
+	missing := resolveStatefulPreviousResponseID(route, "default", "resp_123", "", "fp_a", nil)
 	if missing.PreviousResponseID != "" || missing.DisabledReason != "missing_stored_fingerprint" {
 		t.Fatalf("expected missing fingerprint decision, got %#v", missing)
 	}
 
-	mismatch := resolveStatefulPreviousResponseID(route, "default", "resp_123", "fp_a", "fp_b")
+	mismatch := resolveStatefulPreviousResponseID(route, "default", "resp_123", "fp_a", "fp_b", nil)
 	if mismatch.PreviousResponseID != "" || mismatch.DisabledReason != "prompt_fingerprint_mismatch" {
 		t.Fatalf("expected mismatch decision, got %#v", mismatch)
+	}
+}
+
+func TestExplicitPromptCacheSecondResponsesTurnKeepsHistoricalUserBreakpoint(t *testing.T) {
+	route := &channel.ResolvedRoute{
+		Protocol:              llm.AdapterOpenAIResponses,
+		BaseURL:               "https://api.openai.com/v1",
+		ModelCapabilitiesJSON: `{"promptCache":{"mode":"explicit","ttl":"30m"}}`,
+	}
+	secondTurn := []llm.Message{
+		{Role: "system", Content: "stable policy"},
+		{Role: "user", Content: "first question"},
+		{Role: "assistant", Content: "first answer"},
+		{Role: "user", Content: "second question"},
+	}
+	_, options, configuredMessages := configureOpenAIPromptCacheRequestForRoute(route, "session-1", nil, secondTurn)
+	input := llm.GenerateInput{Messages: configuredMessages, Options: options}
+	applyOpenAIResponsesInstructions(route, llm.EndpointResponses, &input)
+
+	decision := resolveStatefulPreviousResponseID(route, "default", "resp_123", "fp_a", "fp_a", options)
+	if decision.PreviousResponseID != "" || decision.DisabledReason != "explicit_prompt_cache" {
+		t.Fatalf("expected explicit cache to disable stateful continuation, got %#v", decision)
+	}
+	if applyStatefulResponseContinuation(llm.EndpointResponses, decision, &input) {
+		t.Fatal("expected explicit cache request to keep the full Responses input")
+	}
+	if input.PreviousResponseID != "" || len(input.Messages) != len(secondTurn) {
+		t.Fatalf("expected full second-turn history without previous_response_id, got %#v", input)
+	}
+	if input.Messages[1].CacheControl == nil {
+		t.Fatalf("expected first user to become a historical cache breakpoint, got %#v", input.Messages[1])
+	}
+	if input.Messages[3].CacheControl != nil {
+		t.Fatalf("expected current user to remain outside the cache prefix, got %#v", input.Messages[3])
+	}
+}
+
+func TestExplicitPromptCacheWithoutMessageBreakpointsKeepsStatefulResponses(t *testing.T) {
+	route := &channel.ResolvedRoute{
+		Protocol:              llm.AdapterOpenAIResponses,
+		BaseURL:               "https://api.openai.com/v1",
+		ModelCapabilitiesJSON: `{"promptCache":{"mode":"explicit","ttl":"30m","messageBreakpoints":false}}`,
+	}
+	secondTurn := []llm.Message{
+		{Role: "system", Content: "stable policy"},
+		{Role: "user", Content: "first question"},
+		{Role: "assistant", Content: "first answer"},
+		{Role: "user", Content: "second question"},
+	}
+	_, options, configuredMessages := configureOpenAIPromptCacheRequestForRoute(route, "session-1", nil, secondTurn)
+	input := llm.GenerateInput{Messages: configuredMessages, Options: options}
+	applyOpenAIResponsesInstructions(route, llm.EndpointResponses, &input)
+
+	if input.Instructions != "stable policy" {
+		t.Fatalf("expected instructions to remain available for stateful continuation, got %q", input.Instructions)
+	}
+	for index, message := range input.Messages {
+		if message.CacheControl != nil {
+			t.Fatalf("expected message %d to remain unmarked, got %#v", index, message.CacheControl)
+		}
+	}
+
+	decision := resolveStatefulPreviousResponseID(route, "default", "resp_123", "fp_a", "fp_a", options)
+	if decision.PreviousResponseID != "resp_123" || decision.DisabledReason != "" {
+		t.Fatalf("expected stateful continuation without message breakpoints, got %#v", decision)
+	}
+	if !applyStatefulResponseContinuation(llm.EndpointResponses, decision, &input) {
+		t.Fatal("expected stateful continuation to be applied")
+	}
+	if input.PreviousResponseID != "resp_123" || len(input.Messages) != 1 || input.Messages[0].Content != "second question" {
+		t.Fatalf("expected latest user message with previous_response_id, got %#v", input)
 	}
 }
 

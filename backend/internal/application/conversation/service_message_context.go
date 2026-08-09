@@ -181,6 +181,9 @@ func inferProvider(platformModelName string) string {
 }
 
 func classifyRunErrorCode(err error) string {
+	if errors.Is(err, ErrGeneratedMediaArtifactUnavailable) {
+		return MessageErrorCodeMediaArtifactUnavailable
+	}
 	var upstreamErr *llm.UpstreamError
 	if errors.As(err, &upstreamErr) && isImageStreamConfigurationFailure(upstreamErr) {
 		return MessageErrorCodeMediaImageStreamUnsupported
@@ -279,13 +282,19 @@ func sanitizeUpstreamDebugSnapshot(debug *llm.UpstreamDebugSnapshot) *llm.Upstre
 	}
 	return &llm.UpstreamDebugSnapshot{
 		Request: llm.UpstreamDebugRequest{
-			Method: debug.Request.Method,
-			Path:   debug.Request.Path,
-			Body:   sanitizeUpstreamNameJSON(debug.Request.Body),
+			Method:        debug.Request.Method,
+			Path:          debug.Request.Path,
+			Body:          sanitizeUpstreamNameJSON(llm.SanitizeUpstreamDebugBody(debug.Request.Body)),
+			BodyBytes:     debug.Request.BodyBytes,
+			BodyTruncated: debug.Request.BodyTruncated,
+			RedactedParts: debug.Request.RedactedParts,
 		},
 		Response: llm.UpstreamDebugResponse{
-			StatusCode: debug.Response.StatusCode,
-			Body:       sanitizeUpstreamNameJSON(debug.Response.Body),
+			StatusCode:    debug.Response.StatusCode,
+			Body:          sanitizeUpstreamNameJSON(llm.SanitizeUpstreamDebugBody(debug.Response.Body)),
+			BodyBytes:     debug.Response.BodyBytes,
+			BodyTruncated: debug.Response.BodyTruncated,
+			RedactedParts: debug.Response.RedactedParts,
 		},
 	}
 }
@@ -483,6 +492,9 @@ func MessageErrorCode(err error) string {
 	if err == nil {
 		return ""
 	}
+	if errors.Is(err, ErrGeneratedMediaArtifactUnavailable) {
+		return MessageErrorCodeMediaArtifactUnavailable
+	}
 	var upstreamErr *llm.UpstreamError
 	if errors.As(err, &upstreamErr) && isImageStreamConfigurationFailure(upstreamErr) {
 		return MessageErrorCodeMediaImageStreamUnsupported
@@ -593,6 +605,10 @@ func (o *generationAttemptObservation) markObservable() {
 	}
 }
 
+func (o *generationAttemptObservation) canRetry(err error, classify func(error) bool) bool {
+	return o != nil && err != nil && !o.emitted && classify != nil && classify(err)
+}
+
 func isStreamUnsupportedError(err *llm.UpstreamError) bool {
 	detail := strings.ToLower(strings.TrimSpace(err.Message + " " + err.Body))
 	if detail == "" || !strings.Contains(detail, "stream") {
@@ -683,6 +699,7 @@ func isTextMIMEForEmbed(mimeType, fileName string) bool {
 
 type userContextInput struct {
 	Attachments         []AttachmentInput
+	ImageAnalyses       []imageAttachmentAnalysis
 	RAGChunks           []domainconversation.RAGChunk
 	HistoricalArtifacts []domainconversation.ContextArtifact
 	CurrentArtifacts    []domainconversation.ContextArtifact
@@ -938,6 +955,7 @@ func injectUserContext(
 	storeProvider appstorage.Provider,
 ) []llm.Message {
 	if len(input.Attachments) == 0 &&
+		len(input.ImageAnalyses) == 0 &&
 		len(input.RAGChunks) == 0 &&
 		len(input.HistoricalArtifacts) == 0 &&
 		input.Snapshot == nil &&
@@ -1066,6 +1084,7 @@ type userContextXML struct {
 	summary  string
 	memory   []string
 	files    []string
+	images   []string
 	evidence []string
 	rag      []string
 	recall   []string
@@ -1075,6 +1094,7 @@ func (x userContextXML) empty() bool {
 	return strings.TrimSpace(x.summary) == "" &&
 		len(x.memory) == 0 &&
 		len(x.files) == 0 &&
+		len(x.images) == 0 &&
 		len(x.evidence) == 0 &&
 		len(x.rag) == 0 &&
 		len(x.recall) == 0
@@ -1084,10 +1104,28 @@ func buildUserContextXML(input userContextInput) userContextXML {
 	return userContextXML{
 		summary:  formatSnapshotContext(input.Snapshot),
 		memory:   formatMemoryContext(input.Memory),
+		images:   formatImageAnalysisContext(input.ImageAnalyses),
 		evidence: formatHistoricalEvidenceContext(input.HistoricalArtifacts),
 		rag:      formatRAGFileContext(input.RAGChunks),
 		recall:   formatRecallContext(input.RecallChunks),
 	}
+}
+
+func formatImageAnalysisContext(analyses []imageAttachmentAnalysis) []string {
+	if len(analyses) == 0 {
+		return nil
+	}
+	items := make([]string, 0, len(analyses))
+	for _, analysis := range analyses {
+		content := strings.TrimSpace(analysis.Content)
+		if content == "" {
+			continue
+		}
+		name := firstNonEmptyString(analysis.FileName, analysis.FileID, "unknown")
+		toolName := firstNonEmptyString(analysis.ToolName, "MCP")
+		items = append(items, `<img name="`+xmlEscapeAttr(name)+`" via="`+xmlEscapeAttr(toolName)+`">`+xmlEscapeText(content)+`</img>`)
+	}
+	return items
 }
 
 func formatSnapshotContext(snapshot *snapshotContext) string {
@@ -1208,6 +1246,11 @@ func buildUserContextPrompt(userRequest string, contextXML userContextXML) strin
 		builder.WriteString("\n<files>\n")
 		builder.WriteString(strings.Join(contextXML.files, "\n"))
 		builder.WriteString("\n</files>")
+	}
+	if len(contextXML.images) > 0 {
+		builder.WriteString("\n<images>\n")
+		builder.WriteString(strings.Join(contextXML.images, "\n"))
+		builder.WriteString("\n</images>")
 	}
 	if len(contextXML.evidence) > 0 {
 		builder.WriteString("\n<evs>\n")
