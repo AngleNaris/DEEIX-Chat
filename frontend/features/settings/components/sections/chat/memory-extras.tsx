@@ -150,7 +150,7 @@ function DocCardEditorDialog({
                   <SelectContent>
                     <SelectItem value="0">{t("projectGlobal")}</SelectItem>
                     {projects.map((project) => (
-                      <SelectItem key={project.publicID} value={project.publicID}>
+                      <SelectItem key={project.publicID} value={String(project.id)}>
                         {project.name}
                       </SelectItem>
                     ))}
@@ -171,7 +171,7 @@ function DocCardEditorDialog({
                 <SelectContent>
                   <SelectItem value="0">{t("roleGlobal")}</SelectItem>
                   {roles.map((role) => (
-                    <SelectItem key={role.publicID} value={role.publicID}>
+                    <SelectItem key={role.publicID} value={String(role.id)}>
                       {role.name}
                     </SelectItem>
                   ))}
