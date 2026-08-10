@@ -19,18 +19,83 @@ var (
 	dsmlAttributeRE      = regexp.MustCompile(`(?is)([A-Za-z_][A-Za-z0-9_-]*)\s*=\s*("([^"]*)"|'([^']*)')`)
 )
 
+// textEncodedToolCallMode 控制 DeepSeek DSML 文本工具调用的解析行为。
+type textEncodedToolCallMode int
+
+const (
+	// textEncodedToolCallsInactive 路由未启用 DSML 文本解析。
+	textEncodedToolCallsInactive textEncodedToolCallMode = iota
+	// textEncodedToolCallsStripOnly 工具已禁用（强制收尾/阶段合并轮）：只剥离文本中的
+	// DSML 标记，不生成 ToolCall，避免残留调用把本应收尾的轮次误判为工具调用。
+	textEncodedToolCallsStripOnly
+	// textEncodedToolCallsActive 完整解析：剥离标记并生成结构化 ToolCall 供循环执行。
+	textEncodedToolCallsActive
+)
+
+// resolveTextEncodedToolCallMode 决定给定路由与调用形态下的 DSML 解析模式。
+// DeepSeek V4 即使收到"禁用工具"指令仍可能在文本里输出 DSML 标记，
+// 因此工具禁用轮次必须剥离标记但不生成 ToolCall。
+func resolveTextEncodedToolCallMode(route RouteConfig, disableTools bool) textEncodedToolCallMode {
+	if !deepSeekTextEncodedToolCallsEnabled(route) {
+		return textEncodedToolCallsInactive
+	}
+	if disableTools {
+		return textEncodedToolCallsStripOnly
+	}
+	return textEncodedToolCallsActive
+}
+
 // applyTextEncodedToolCalls 将 DeepSeek V4 文本编码的工具调用转换为内部结构化 ToolCall。
 // 这段兼容只在路由层显式判定为 DeepSeek Chat Completions 时调用，避免影响其他 OpenAI-compatible 模型。
-func applyTextEncodedToolCalls(output *GenerateOutput) {
-	if output == nil {
+// 工具禁用轮（strip-only）只剥离标记；若剥离后模型仍试图调用工具，置 TextToolCallsStripped
+// 供上层判断（例如触发阶段合并续轮），而不是静默丢失。
+func applyTextEncodedToolCalls(output *GenerateOutput, mode textEncodedToolCallMode) {
+	if output == nil || mode == textEncodedToolCallsInactive {
 		return
 	}
 	cleanText, toolCalls, ok := parseDSMLToolCalls(output.Text)
-	if !ok {
+	if ok {
+		output.Text = cleanText
+	}
+	if mode == textEncodedToolCallsActive {
+		if ok {
+			output.ToolCalls = append(output.ToolCalls, toolCalls...)
+		}
 		return
 	}
-	output.Text = cleanText
-	output.ToolCalls = append(output.ToolCalls, toolCalls...)
+	// strip-only：残留的未闭合 DSML 标记属于工具禁用轮的模型噪音，直接移除。
+	if stripped := stripRemainingDSMLToolCallMarkers(&output.Text); stripped {
+		output.TextToolCallsStripped = true
+	}
+	if ok {
+		output.TextToolCallsStripped = true
+	}
+}
+
+// stripRemainingDSMLToolCallMarkers 移除文本中第一个 DSML 工具调用起始标记之后的内容。
+// 完整块已被 parseDSMLToolCalls 剥离，此处剩余的标记必然未闭合或畸形，属于模型噪音。
+func stripRemainingDSMLToolCallMarkers(text *string) bool {
+	if text == nil {
+		return false
+	}
+	lower := strings.ToLower(*text)
+	markers := []string{
+		"<｜dsml｜tool_calls",
+		"<｜｜dsml｜｜tool_calls",
+		"<||dsml||tool_calls",
+		"<|dsml|tool_calls",
+	}
+	index := -1
+	for _, marker := range markers {
+		if found := strings.Index(lower, marker); found >= 0 && (index < 0 || found < index) {
+			index = found
+		}
+	}
+	if index < 0 {
+		return false
+	}
+	*text = strings.TrimSpace((*text)[:index])
+	return true
 }
 
 // deepSeekTextEncodedToolCallsEnabled 判断当前路由是否需要启用 DeepSeek DSML 文本工具调用解析。

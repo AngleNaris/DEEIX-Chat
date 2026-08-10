@@ -205,7 +205,8 @@ func classifyRunErrorCode(err error) string {
 	case errors.Is(err, ErrUpstreamEmptyResponse):
 		return "upstream_empty_response"
 	case errors.Is(err, ErrToolRunFinalAnswerMissing):
-		return "tool_run_final_answer_missing"
+		// 带点分段，与前端 errors.json 的 toolRun.finalAnswerMissing 嵌套结构一致。
+		return "tool_run.final_answer_missing"
 	case errors.Is(err, ErrMessageGenerationCanceled):
 		return "generation_canceled"
 	case errors.Is(err, ErrMediaImagePromptRequired):

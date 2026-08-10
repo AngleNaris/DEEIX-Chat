@@ -115,7 +115,7 @@ func TestParseChatCompletionsOutputSeparatesReasoningContentParts(t *testing.T) 
 				},
 			},
 		},
-	}, result, false)
+	}, result, textEncodedToolCallsInactive)
 
 	if result.Text != "visible answer" {
 		t.Fatalf("expected only visible content, got %q", result.Text)
@@ -149,7 +149,7 @@ func TestApplyChatStreamEventSeparatesReasoningContentParts(t *testing.T) {
 			reasoning += event.Reasoning.Text
 		}
 		return nil
-	}, false)
+	}, textEncodedToolCallsInactive)
 	if err != nil {
 		t.Fatalf("apply chat stream event: %v", err)
 	}
@@ -699,7 +699,7 @@ func TestChatStreamToolCallArgumentsAreConcatenatedWithoutDefaultPrefix(t *testi
 	}
 
 	for _, chunk := range chunks {
-		if err := applyChatStreamEvent(AdapterOpenAIChatCompletions, chunk, result, nil, false); err != nil {
+		if err := applyChatStreamEvent(AdapterOpenAIChatCompletions, chunk, result, nil, textEncodedToolCallsInactive); err != nil {
 			t.Fatalf("apply stream event: %v", err)
 		}
 	}
@@ -756,7 +756,7 @@ func TestChatStreamCustomToolCallInputIsConcatenated(t *testing.T) {
 	}
 
 	for _, chunk := range chunks {
-		if err := applyChatStreamEvent(AdapterOpenAIChatCompletions, chunk, result, nil, false); err != nil {
+		if err := applyChatStreamEvent(AdapterOpenAIChatCompletions, chunk, result, nil, textEncodedToolCallsInactive); err != nil {
 			t.Fatalf("apply stream event: %v", err)
 		}
 	}
@@ -800,7 +800,7 @@ func TestParseChatCompletionsDSMLToolCalls(t *testing.T) {
 		}]
 	}`)
 
-	result := buildGenerateOutputFromParsedForAdapter(EndpointChatCompletions, AdapterOpenAIChatCompletions, payload, true)
+	result := buildGenerateOutputFromParsedForAdapter(EndpointChatCompletions, AdapterOpenAIChatCompletions, payload, textEncodedToolCallsActive)
 	if result.Text != "" {
 		t.Fatalf("expected DSML envelope to be removed from visible text, got %q", result.Text)
 	}
@@ -827,7 +827,7 @@ func TestParseChatCompletionsDSMLToolCallsDecodesJSONParameters(t *testing.T) {
 		}]
 	}`)
 
-	result := buildGenerateOutputFromParsedForAdapter(EndpointChatCompletions, AdapterOpenAIChatCompletions, payload, true)
+	result := buildGenerateOutputFromParsedForAdapter(EndpointChatCompletions, AdapterOpenAIChatCompletions, payload, textEncodedToolCallsActive)
 	if len(result.ToolCalls) != 1 {
 		t.Fatalf("expected one parsed DSML tool call, got %#v", result.ToolCalls)
 	}
@@ -892,7 +892,7 @@ func TestConsumeChatStreamDSMLToolCallsAreNotEmittedAsText(t *testing.T) {
 			deltas = append(deltas, event.Delta)
 		}
 		return nil
-	}, true)
+	}, textEncodedToolCallsActive)
 	if err != nil {
 		t.Fatalf("consume stream: %v", err)
 	}
@@ -912,7 +912,7 @@ func TestConsumeChatStreamIncompleteDSMLToolCallsReturnsError(t *testing.T) {
 	}, "\n\n")
 	result := &GenerateOutput{ToolCalls: make([]ToolCall, 0)}
 
-	err := consumeOpenAIGenerateStream(EndpointChatCompletions, AdapterOpenAIChatCompletions, strings.NewReader(rawStream), result, nil, true)
+	err := consumeOpenAIGenerateStream(EndpointChatCompletions, AdapterOpenAIChatCompletions, strings.NewReader(rawStream), result, nil, textEncodedToolCallsActive)
 	if !errors.Is(err, errDeepSeekDSMLToolCallsIncomplete) {
 		t.Fatalf("expected incomplete DSML error, got %v", err)
 	}
@@ -932,7 +932,7 @@ func TestParseOpenAIGenerateOutputIncompleteDSMLToolCallsReturnsError(t *testing
 		}]
 	}`)
 
-	_, err := parseOpenAIGenerateOutput(EndpointChatCompletions, AdapterOpenAIChatCompletions, body, true)
+	_, err := parseOpenAIGenerateOutput(EndpointChatCompletions, AdapterOpenAIChatCompletions, body, textEncodedToolCallsActive)
 	if !errors.Is(err, errDeepSeekDSMLToolCallsIncomplete) {
 		t.Fatalf("expected incomplete DSML error, got %v", err)
 	}
@@ -953,7 +953,7 @@ func TestConsumeChatStreamAngleBracketTextStillEmits(t *testing.T) {
 			deltas = append(deltas, event.Delta)
 		}
 		return nil
-	}, true)
+	}, textEncodedToolCallsActive)
 	if err != nil {
 		t.Fatalf("consume stream: %v", err)
 	}
@@ -969,7 +969,7 @@ func TestConsumeChatStreamErrorPayloadReturnsUpstreamError(t *testing.T) {
 	result := &GenerateOutput{ToolCalls: make([]ToolCall, 0)}
 	stream := bytes.NewBufferString("data: {\"error\":{\"message\":\"Param Incorrect\",\"code\":400}}\n\n")
 
-	err := consumeOpenAIGenerateStream(EndpointChatCompletions, AdapterOpenAIChatCompletions, stream, result, nil, false)
+	err := consumeOpenAIGenerateStream(EndpointChatCompletions, AdapterOpenAIChatCompletions, stream, result, nil, textEncodedToolCallsInactive)
 	var upstreamErr *UpstreamError
 	if !errors.As(err, &upstreamErr) {
 		t.Fatalf("expected upstream error, got %T %v", err, err)
@@ -1057,7 +1057,7 @@ func TestStreamDebugSnapshotPreservesRawSSEBody(t *testing.T) {
 	rawStream := "event: response.error\ndata: {\"type\":\"response.error\",\"error\":{\"message\":\"Argument not supported: metadata\"}}\n\n"
 	recorder := newUpstreamBodyRecorder(bytes.NewBufferString(rawStream))
 
-	err := consumeOpenAIGenerateStream(EndpointResponses, AdapterXAIResponses, recorder, result, nil, false)
+	err := consumeOpenAIGenerateStream(EndpointResponses, AdapterXAIResponses, recorder, result, nil, textEncodedToolCallsInactive)
 	req, reqErr := http.NewRequest(http.MethodPost, "https://api.x.ai/v1/responses", strings.NewReader(`{"model":"grok-4.3"}`))
 	if reqErr != nil {
 		t.Fatal(reqErr)
@@ -1090,7 +1090,7 @@ func TestResponsesStreamReasoningSummaryDeltaIsEmittedAndStored(t *testing.T) {
 			reasoningText += event.Reasoning.Text
 		}
 		return nil
-	}, false)
+	}, textEncodedToolCallsInactive)
 	if err != nil {
 		t.Fatalf("consume stream: %v", err)
 	}
@@ -1116,7 +1116,7 @@ func TestResponsesCompletedReasoningSummaryIsEmittedWhenNoDeltaArrived(t *testin
 			reasoningText += event.Reasoning.Text
 		}
 		return nil
-	}, false)
+	}, textEncodedToolCallsInactive)
 	if err != nil {
 		t.Fatalf("consume stream: %v", err)
 	}
@@ -1145,7 +1145,7 @@ func TestResponsesStreamDoneEventsAreMergedWithoutDuplicateText(t *testing.T) {
 		``,
 	}, "\n")
 
-	if err := consumeOpenAIGenerateStream(EndpointResponses, AdapterOpenAIResponses, strings.NewReader(rawStream), result, nil, false); err != nil {
+	if err := consumeOpenAIGenerateStream(EndpointResponses, AdapterOpenAIResponses, strings.NewReader(rawStream), result, nil, textEncodedToolCallsInactive); err != nil {
 		t.Fatalf("consume stream: %v", err)
 	}
 	if result.Text != "Hello" {
@@ -1390,7 +1390,7 @@ func TestResponsesStreamAcceptsLargePartialImageAndKeepsOnlyFinalImage(t *testin
 			t.Fatalf("unexpected partial image event: %#v", event.GeneratedImage)
 		}
 		return nil
-	}, false)
+	}, textEncodedToolCallsInactive)
 	if err != nil {
 		t.Fatalf("consume large image stream: %v", err)
 	}
@@ -1543,7 +1543,7 @@ func TestResponsesOutputItemDoneCapturesServerSideToolCall(t *testing.T) {
 		``,
 	}, "\n")
 
-	err := consumeOpenAIGenerateStream(EndpointResponses, AdapterOpenAIResponses, strings.NewReader(rawStream), result, nil, false)
+	err := consumeOpenAIGenerateStream(EndpointResponses, AdapterOpenAIResponses, strings.NewReader(rawStream), result, nil, textEncodedToolCallsInactive)
 	if err != nil {
 		t.Fatalf("consume stream: %v", err)
 	}
@@ -1575,7 +1575,7 @@ func TestResponsesStreamEmitsServerSideToolStatusEvents(t *testing.T) {
 			statuses = append(statuses, event.ServerToolCall.Status)
 		}
 		return nil
-	}, false)
+	}, textEncodedToolCallsInactive)
 	if err != nil {
 		t.Fatalf("consume stream: %v", err)
 	}
@@ -1598,7 +1598,7 @@ func TestResponsesServerToolFinalItemReplacesStreamingPlaceholder(t *testing.T) 
 		``,
 	}, "\n")
 
-	if err := consumeOpenAIGenerateStream(EndpointResponses, AdapterOpenAIResponses, strings.NewReader(rawStream), result, nil, false); err != nil {
+	if err := consumeOpenAIGenerateStream(EndpointResponses, AdapterOpenAIResponses, strings.NewReader(rawStream), result, nil, textEncodedToolCallsInactive); err != nil {
 		t.Fatalf("consume stream: %v", err)
 	}
 	if len(result.ServerToolCalls) != 1 {
@@ -1625,7 +1625,7 @@ func TestResponsesStreamStatusEventCapturesNestedServerToolItem(t *testing.T) {
 			streamed = &value
 		}
 		return nil
-	}, false)
+	}, textEncodedToolCallsInactive)
 	if err != nil {
 		t.Fatalf("consume stream: %v", err)
 	}
@@ -1660,7 +1660,7 @@ func TestResponsesStreamCapturesXSearchCustomToolInput(t *testing.T) {
 			events = append(events, *event.ServerToolCall)
 		}
 		return nil
-	}, false)
+	}, textEncodedToolCallsInactive)
 	if err != nil {
 		t.Fatalf("consume stream: %v", err)
 	}
@@ -1940,5 +1940,104 @@ func TestBuildGeminiToolCallPartsPreserveThoughtSignature(t *testing.T) {
 
 	if parts[0]["thoughtSignature"] != "thought-signature-1" {
 		t.Fatalf("expected thoughtSignature on Gemini functionCall part, got %#v", parts[0])
+	}
+}
+
+func TestConsumeChatStreamStripOnlyDropsToolCalls(t *testing.T) {
+	rawStream := strings.Join([]string{
+		`data: {"id":"chatcmpl_1","choices":[{"delta":{"content":"已查到：DEEIX 支持 MCP。"}}]}`,
+		`data: {"id":"chatcmpl_1","choices":[{"delta":{"content":"<｜DSML｜tool_calls>\n<｜DSML｜invoke name=\"searchGitHub\">\n<｜DSML｜parameter name=\"query\">more</｜DSML｜parameter>\n</｜DSML｜invoke>\n</｜DSML｜tool_calls>"}}]}`,
+		`data: [DONE]`,
+		``,
+	}, "\n\n")
+	result := &GenerateOutput{ToolCalls: make([]ToolCall, 0)}
+	var deltas []string
+
+	err := consumeOpenAIGenerateStream(EndpointChatCompletions, AdapterOpenAIChatCompletions, strings.NewReader(rawStream), result, func(event GenerateStreamEvent) error {
+		if event.Delta != "" {
+			deltas = append(deltas, event.Delta)
+		}
+		return nil
+	}, textEncodedToolCallsStripOnly)
+	if err != nil {
+		t.Fatalf("consume stream: %v", err)
+	}
+	if got := strings.Join(deltas, ""); got != "已查到：DEEIX 支持 MCP。" || result.Text != got {
+		t.Fatalf("expected answer text to stream without DSML block, deltas=%#v text=%q", deltas, result.Text)
+	}
+	if len(result.ToolCalls) != 0 {
+		t.Fatalf("expected no tool calls in strip-only mode, got %#v", result.ToolCalls)
+	}
+	if !result.TextToolCallsStripped {
+		t.Fatalf("expected TextToolCallsStripped to be set")
+	}
+}
+
+func TestConsumeChatStreamStripOnlyIncompleteBlockDropsSilently(t *testing.T) {
+	rawStream := strings.Join([]string{
+		`data: {"id":"chatcmpl_1","choices":[{"delta":{"content":"<｜DSML｜tool_calls>\n<｜DSML｜invoke name=\"searchGitHub\">\n"}}]}`,
+		`data: [DONE]`,
+		``,
+	}, "\n\n")
+	result := &GenerateOutput{ToolCalls: make([]ToolCall, 0)}
+
+	err := consumeOpenAIGenerateStream(EndpointChatCompletions, AdapterOpenAIChatCompletions, strings.NewReader(rawStream), result, nil, textEncodedToolCallsStripOnly)
+	if err != nil {
+		t.Fatalf("expected strip-only incomplete DSML to drop silently, got %v", err)
+	}
+	if result.Text != "" || len(result.ToolCalls) != 0 {
+		t.Fatalf("expected incomplete DSML to stay out of output, text=%q toolCalls=%#v", result.Text, result.ToolCalls)
+	}
+	if !result.TextToolCallsStripped {
+		t.Fatalf("expected TextToolCallsStripped to be set for dangling block")
+	}
+}
+
+func TestParseOpenAIGenerateOutputStripOnlyKeepsAnswerText(t *testing.T) {
+	body := []byte(`{
+		"id": "chatcmpl_1",
+		"choices": [{
+			"message": {
+				"role": "assistant",
+				"content": "创建失败了，可能是 frontmatter 冲突。\n<｜DSML｜tool_calls>\n<｜DSML｜invoke name=\"create_role\">\n<｜DSML｜parameter name=\"name\" string=\"true\">助手</｜DSML｜parameter>\n</｜DSML｜invoke>\n</｜DSML｜tool_calls>"
+			}
+		}]
+	}`)
+
+	output, err := parseOpenAIGenerateOutput(EndpointChatCompletions, AdapterOpenAIChatCompletions, body, textEncodedToolCallsStripOnly)
+	if err != nil {
+		t.Fatalf("parse output: %v", err)
+	}
+	if got := strings.TrimSpace(output.Text); got != "创建失败了，可能是 frontmatter 冲突。" {
+		t.Fatalf("expected DSML block stripped from text, got %q", output.Text)
+	}
+	if len(output.ToolCalls) != 0 {
+		t.Fatalf("expected no tool calls in strip-only mode, got %#v", output.ToolCalls)
+	}
+	if !output.TextToolCallsStripped {
+		t.Fatalf("expected TextToolCallsStripped to be set")
+	}
+}
+
+func TestParseOpenAIGenerateOutputStripOnlyIncompleteBlockDropsText(t *testing.T) {
+	body := []byte(`{
+		"id": "chatcmpl_1",
+		"choices": [{
+			"message": {
+				"role": "assistant",
+				"content": "<｜DSML｜tool_calls>\n<｜DSML｜invoke name=\"searchGitHub\">"
+			}
+		}]
+	}`)
+
+	output, err := parseOpenAIGenerateOutput(EndpointChatCompletions, AdapterOpenAIChatCompletions, body, textEncodedToolCallsStripOnly)
+	if err != nil {
+		t.Fatalf("expected dangling DSML prefix to drop silently in strip-only mode, got %v", err)
+	}
+	if output.Text != "" || len(output.ToolCalls) != 0 {
+		t.Fatalf("expected dangling block to stay out of output, text=%q toolCalls=%#v", output.Text, output.ToolCalls)
+	}
+	if !output.TextToolCallsStripped {
+		t.Fatalf("expected TextToolCallsStripped to be set")
 	}
 }

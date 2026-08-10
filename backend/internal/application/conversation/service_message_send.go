@@ -9,7 +9,6 @@ import (
 
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/channel"
 	appcompact "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/compact"
-	appdoccard "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/doccard"
 	apprag "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/rag"
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 	domainmemory "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/memory"
@@ -188,12 +187,6 @@ func (s *Service) sendMessageInternal(
 		return nil, err
 	}
 
-	// 用户消息正文支持 {{script: name}} / {{js: ...}} / {{date}} 等提示词变量展开
-	// （与系统提示词同一逻辑：js 沙箱执行、text 直插、3 分钟缓存）。
-	if strings.Contains(input.Content, "{{") {
-		input.Content = expandSystemPromptVars(input.Content, s.resolveSystemPromptVars(ctx, input.UserID))
-	}
-
 	startedAt := time.Now()
 	runID := normalizeRunID(input.ClientRunID)
 	if runID == "" {
@@ -203,11 +196,6 @@ func (s *Service) sendMessageInternal(
 	conversation, err := s.repo.GetConversationByUser(ctx, input.ConversationID, input.UserID)
 	if err != nil {
 		return nil, ErrConversationNotFound
-	}
-
-	// Agent 群组会话走独立的串行编排器（主管/成员状态机，逐 Attempt 计费）。
-	if conversation.AgentGroupID != nil && s.agentGroupRunStore != nil {
-		return s.executeAgentGroupRun(ctx, input, onDelta, preferStream, conversation, runID, startedAt)
 	}
 
 	branchPreparation, err := s.prepareMessageSendBranch(ctx, &input)
@@ -392,11 +380,10 @@ func (s *Service) sendMessageInternal(
 	cfg := s.cfg.Snapshot()
 	compactPolicy := s.resolveContextCompactionPolicy(ctx, cfg, input.UserID)
 
-	// 并行预取：Snapshot + UserMemory + DocCards 提前加载，隐藏 DB 延迟。
+	// 并行预取：Snapshot + UserMemory 提前加载，隐藏 DB 延迟。
 	type prefetchData struct {
 		snapshot     *model.ContextSnapshot
 		userMemories []domainmemory.UserMemory
-		docCards     []appdoccard.CardView
 	}
 	prefetchCh := make(chan prefetchData, 1)
 	go func() {
@@ -407,7 +394,6 @@ func (s *Service) sendMessageInternal(
 		if s.memoryRecorder != nil {
 			r.userMemories, _ = s.getCachedUserMemories(ctx, input.UserID)
 		}
-		r.docCards = s.getCachedDocCards(ctx, input.UserID)
 		prefetchCh <- r
 	}()
 
@@ -514,18 +500,6 @@ func (s *Service) sendMessageInternal(
 		if len(otherMems) > 0 {
 			userCtx.Memory = s.selectRelevantUserMemories(ctx, input.UserID, input.Content, otherMems, 5)
 		}
-	}
-	// 文档卡片：关键字子串匹配最新用户消息，命中的启用卡片注入用户上下文。
-	// 绑定项目/角色的卡片仅在该会话对应维度命中时触发。
-	if len(prefetch.docCards) > 0 {
-		var projectID, roleID uint
-		if conversation.ProjectID != nil {
-			projectID = *conversation.ProjectID
-		}
-		if conversation.RoleID != nil {
-			roleID = *conversation.RoleID
-		}
-		userCtx.DocCards = matchDocCards(input.Content, prefetch.docCards, projectID, roleID, docCardMaxMatched)
 	}
 	processTraceAttachments := attachmentProcessTraceItems(fileContextPlan.Attachments)
 	if traceRecorder != nil && shouldShowAttachmentProcessTrace(processTraceAttachments) {
@@ -692,17 +666,9 @@ func (s *Service) sendMessageInternal(
 			messageTraceStatusStreaming,
 		)
 	}
-	combinedSystemPrompt := strings.TrimSpace(conversation.ProjectSystemPrompt)
-	if rolePrompt := strings.TrimSpace(conversation.RoleSystemPrompt); rolePrompt != "" {
-		if combinedSystemPrompt != "" {
-			combinedSystemPrompt += "\n\n"
-		}
-		combinedSystemPrompt += rolePrompt
-	}
 	routePromptInput := messageRoutePromptInput{
 		UserContent:             input.Content,
-		UserID:                  input.UserID,
-		ProjectSystemPrompt:     combinedSystemPrompt,
+		ProjectSystemPrompt:     conversation.ProjectSystemPrompt,
 		HTMLVisualPromptEnabled: input.HTMLVisualPromptEnabled,
 		DomainMessages:          promptScope.activeMessages(),
 		StableAttachments:       stableFullContextAttachments,
@@ -1298,241 +1264,357 @@ func (s *Service) sendMessageInternal(
 	}
 	totalServerSideToolUsage = addServerSideToolUsage(nil, upstreamOutput.ServerSideToolUsage)
 	remainingToolCalls := max(s.resolveMaxToolCallsPerRun()-len(imageProcessing.Rows), 0)
-	llmCallCount := llmRequestCount
+	// windowCallCount 统计当前阶段窗口内已发生的 LLM 调用次数；阶段合并后重置，
+	// 保证"不扩大连续轮"：每个窗口的调用数仍受 maxLLMCalls 约束。
+	windowBaseCalls := 0
+	windowCallCount := llmRequestCount
 	toolLedger := newToolExecutionLedger()
 	toolHistoryTrimmedForRun := false
+	toolStageMerges := 0
+	const maxToolStageMergesPerRun = 4 // 阶段合并续轮安全上限：复杂任务最多额外开启 4 个工具窗口
 
-	for len(upstreamOutput.ToolCalls) > 0 && llmCallCount < maxLLMCalls && remainingToolCalls > 0 {
-		pendingToolCalls := upstreamOutput.ToolCalls
-		if len(pendingToolCalls) > remainingToolCalls {
-			pendingToolCalls = pendingToolCalls[:remainingToolCalls]
-		}
-		reasoningContent := ""
-		if reasoningContentPassback {
-			reasoningContent = outputReasoningContent(upstreamOutput)
-		}
-		assistantToolMessage := llm.Message{
-			Role:             "assistant",
-			Content:          assistantText,
-			ReasoningContent: reasoningContent,
-			ToolCalls:        pendingToolCalls,
-		}
-		toolResultTokenBudget := resolveToolResultTokenBudget(
-			generateInput,
-			llmMessages,
-			assistantToolMessage,
-			route.UpstreamModel,
-			route.ModelCapabilitiesJSON,
-		)
-		toolCtx, toolSpan := platformtracing.Start(ctx, "conversation.tool.execute",
-			trace.WithAttributes(
-				attribute.Int64("conversation.id", int64(input.ConversationID)),
-				attribute.Int64("user.id", int64(input.UserID)),
-				attribute.Int("conversation.tool.request_count", len(upstreamOutput.ToolCalls)),
-				attribute.Int("conversation.tool.remaining_count", remainingToolCalls),
-				attribute.Int64("conversation.tool.result_token_budget", toolResultTokenBudget),
-			),
-		)
-		toolResult := s.executeAssistantToolCalls(toolCtx, executeAssistantToolCallsInput{
-			UserID:            input.UserID,
-			ConversationID:    input.ConversationID,
-			MessageID:         assistantMessage.ID,
-			RequestID:         input.RequestID,
-			RunID:             runID,
-			ToolCalls:         pendingToolCalls,
-			ToolCallLimit:     remainingToolCalls,
-			TraceRecorder:     traceRecorder,
-			ToolNameMap:       toolRuntime.nameMap,
-			MCPConfigs:        toolRuntime.mcpConfigs,
-			ToolSchemas:       toolRuntime.schemas,
-			PlatformTools:     toolRuntime.platformEntries,
-			Ledger:            toolLedger,
-			ResultTokenBudget: toolResultTokenBudget,
-		})
-		toolSpan.SetAttributes(
-			attribute.Int("conversation.tool.executed_count", len(toolResult.Rows)),
-			attribute.Int("conversation.tool.result_count", len(toolResult.ToolResults)),
-		)
-		if toolExecutionHasError(toolResult.Rows) {
-			toolSpan.SetStatus(codes.Error, "tool execution failed")
-		}
-		toolSpan.End()
-		toolCallRows = append(toolCallRows, toolResult.Rows...)
-		mergeToolCallPersistenceKeys(&persistedToolCallKeys, toolResult.PersistedToolCallKeys)
-		remainingToolCalls -= len(toolResult.Rows)
-		if toolResult.FatalErr != nil {
-			retErr = wrapUpstreamRequestError(toolResult.FatalErr)
-			return nil, retErr
-		}
-		if len(toolResult.ToolResults) == 0 {
-			break
-		}
-		assistantToolMessage.ToolCalls = toolResult.ExecutedToolCalls
-		llmMessages = append(llmMessages,
-			assistantToolMessage,
-			llm.Message{
-				Role:        "tool",
-				ToolResults: toolResult.ToolResults,
-			},
-		)
-		var toolHistoryTrimmed bool
-		llmMessages, toolHistoryTrimmed = trimToolFollowUpHistory(
-			generateInput,
-			llmMessages,
-			route.UpstreamModel,
-			route.ModelCapabilitiesJSON,
-		)
-		if toolHistoryTrimmed {
-			toolHistoryTrimmedForRun = true
-			sendSpan.SetAttributes(attribute.Bool("conversation.tool.history_trimmed", true))
-		}
-		var toolResultsRebalanced bool
-		llmMessages, toolResultsRebalanced = rebalanceToolFollowUpResults(
-			generateInput,
-			llmMessages,
-			route.UpstreamModel,
-			route.ModelCapabilitiesJSON,
-		)
-		if toolResultsRebalanced {
-			sendSpan.SetAttributes(attribute.Bool("conversation.tool.results_rebalanced", true))
-		}
-
-		followUpInput := generateInput
-		if llmCallCount+1 >= maxLLMCalls {
-			followUpInput.Messages = buildFinalToolSynthesisMessages(llmMessages, "The maximum number of LLM calls for this run has been reached. Stop calling tools and produce the final answer based on the tool results already available. If the information is insufficient, state the missing information directly.")
-			followUpInput.Tools = nil
-			followUpInput.DisableTools = true
-			followUpInput.PreviousResponseID = ""
-			applyOpenAIResponsesInstructions(route, routeConfig.Endpoint, &followUpInput)
-		} else if !toolHistoryTrimmed && !toolResultsRebalanced && routeConfig.Endpoint == llm.EndpointResponses && supportsPreviousResponseIDRoute(route) && strings.TrimSpace(upstreamOutput.ResponseID) != "" {
-			followUpInput.PreviousResponseID = strings.TrimSpace(upstreamOutput.ResponseID)
-			followUpInput.Messages = []llm.Message{{Role: "tool", ToolResults: toolResult.ToolResults}}
-		} else {
-			followUpInput.Messages = llmMessages
-			followUpInput.PreviousResponseID = ""
-			applyOpenAIResponsesInstructions(route, routeConfig.Endpoint, &followUpInput)
-		}
-
-		nextOutput, nextErr := runGenerate(followUpInput)
-		if handleCanceledGeneration(nextErr) {
-			return nil, retErr
-		}
-		if nextErr != nil {
-			s.routeResolver.MarkRouteFailure(ctx, route, nextErr)
-			retErr = wrapUpstreamRequestError(nextErr)
-			return nil, retErr
-		}
-		s.routeResolver.MarkRouteSuccess(ctx, route)
-		totalUsage = addLLMUsage(totalUsage, nextOutput.Usage)
-		if nextOutput.Usage != (llm.Usage{}) {
-			usageAccumulator.setObservedUsage(totalUsage)
-		} else if usageAccumulator.usage() != (llm.Usage{}) {
-			totalUsage = usageAccumulator.usage()
-		}
-		totalServerSideToolUsage = addServerSideToolUsage(totalServerSideToolUsage, nextOutput.ServerSideToolUsage)
-		upstreamOutput = nextOutput
-		llmCallCount = llmRequestCount
-		var nextNativeToolRows []model.ToolCall
-		assistantText, nextNativeToolRows = syncUpstreamOutputTrace(traceRecorder, upstreamOutput, runID)
-		toolCallRows = append(toolCallRows, nextNativeToolRows...)
-	}
-	if len(upstreamOutput.ToolCalls) > 0 && remainingToolCalls <= 0 && llmCallCount < maxLLMCalls {
-		finalInput := generateInput
-		finalInput.Messages = buildFinalToolSynthesisMessages(llmMessages, "The maximum number of tool calls for this run has been reached. Stop calling tools and produce the final answer based on the tool results already available. If the information is insufficient, state the missing information directly.")
-		finalInput.Tools = nil
-		finalInput.DisableTools = true
-		finalInput.PreviousResponseID = ""
-		applyOpenAIResponsesInstructions(route, routeConfig.Endpoint, &finalInput)
-		nextOutput, nextErr := runGenerate(finalInput)
-		if handleCanceledGeneration(nextErr) {
-			return nil, retErr
-		}
-		if nextErr != nil {
-			s.routeResolver.MarkRouteFailure(ctx, route, nextErr)
-			retErr = wrapUpstreamRequestError(nextErr)
-			return nil, retErr
-		}
-		s.routeResolver.MarkRouteSuccess(ctx, route)
-		totalUsage = addLLMUsage(totalUsage, nextOutput.Usage)
-		if nextOutput.Usage != (llm.Usage{}) {
-			usageAccumulator.setObservedUsage(totalUsage)
-		} else if usageAccumulator.usage() != (llm.Usage{}) {
-			totalUsage = usageAccumulator.usage()
-		}
-		totalServerSideToolUsage = addServerSideToolUsage(totalServerSideToolUsage, nextOutput.ServerSideToolUsage)
-		upstreamOutput = nextOutput
-		llmCallCount++
-		var nextNativeToolRows []model.ToolCall
-		assistantText, nextNativeToolRows = syncUpstreamOutputTrace(traceRecorder, upstreamOutput, runID)
-		toolCallRows = append(toolCallRows, nextNativeToolRows...)
-	}
-
-	// 请求式披露：模型通过 <read_file> 标记请求技能包内文件内容。
-	// 标记已在流式输出中被剥离；此处读取文件内容并追加 system 消息后再次调用模型（无工具），
-	// 最多补充一轮。第二轮输出中的标记同样被剥离且不再补充。
-	if len(lastReadFileRequests) > 0 && llmCallCount < maxLLMCalls {
-		fileMessages, loadedPaths := s.resolveSkillFileRequests(ctx, input.UserID, skillPrompts, lastReadFileRequests)
-		if len(fileMessages) > 0 {
-			followUpInput := generateInput
-			followUpInput.Messages = append(cloneLLMMessages(llmMessages), fileMessages...)
-			followUpInput.Tools = nil
-			followUpInput.DisableTools = true
-			followUpInput.PreviousResponseID = ""
-			applyOpenAIResponsesInstructions(route, routeConfig.Endpoint, &followUpInput)
-			fileOutput, fileErr := runGenerate(followUpInput)
-			if handleCanceledGeneration(fileErr) {
+	// —— 阶段窗口循环 ——
+	// 窗口内 LLM 调用不超过 maxLLMCalls；预算耗尽仍残留工具调用时，先让模型无工具
+	// 总结阶段进展（阶段合并），再以新预算开启下一个窗口，直到模型产出最终回答。
+	for {
+		for len(upstreamOutput.ToolCalls) > 0 && windowCallCount < maxLLMCalls && remainingToolCalls > 0 {
+			pendingToolCalls := upstreamOutput.ToolCalls
+			if len(pendingToolCalls) > remainingToolCalls {
+				pendingToolCalls = pendingToolCalls[:remainingToolCalls]
+			}
+			reasoningContent := ""
+			if reasoningContentPassback {
+				reasoningContent = outputReasoningContent(upstreamOutput)
+			}
+			assistantToolMessage := llm.Message{
+				Role:             "assistant",
+				Content:          assistantText,
+				ReasoningContent: reasoningContent,
+				ToolCalls:        pendingToolCalls,
+			}
+			toolResultTokenBudget := resolveToolResultTokenBudget(
+				generateInput,
+				llmMessages,
+				assistantToolMessage,
+				route.UpstreamModel,
+				route.ModelCapabilitiesJSON,
+			)
+			toolCtx, toolSpan := platformtracing.Start(ctx, "conversation.tool.execute",
+				trace.WithAttributes(
+					attribute.Int64("conversation.id", int64(input.ConversationID)),
+					attribute.Int64("user.id", int64(input.UserID)),
+					attribute.Int("conversation.tool.request_count", len(upstreamOutput.ToolCalls)),
+					attribute.Int("conversation.tool.remaining_count", remainingToolCalls),
+					attribute.Int64("conversation.tool.result_token_budget", toolResultTokenBudget),
+				),
+			)
+			toolResult := s.executeAssistantToolCalls(toolCtx, executeAssistantToolCallsInput{
+				UserID:            input.UserID,
+				ConversationID:    input.ConversationID,
+				MessageID:         assistantMessage.ID,
+				RequestID:         input.RequestID,
+				RunID:             runID,
+				ToolCalls:         pendingToolCalls,
+				ToolCallLimit:     remainingToolCalls,
+				TraceRecorder:     traceRecorder,
+				ToolNameMap:       toolRuntime.nameMap,
+				MCPConfigs:        toolRuntime.mcpConfigs,
+				ToolSchemas:       toolRuntime.schemas,
+				PlatformTools:     toolRuntime.platformEntries,
+				Ledger:            toolLedger,
+				ResultTokenBudget: toolResultTokenBudget,
+			})
+			toolSpan.SetAttributes(
+				attribute.Int("conversation.tool.executed_count", len(toolResult.Rows)),
+				attribute.Int("conversation.tool.result_count", len(toolResult.ToolResults)),
+			)
+			if toolExecutionHasError(toolResult.Rows) {
+				toolSpan.SetStatus(codes.Error, "tool execution failed")
+			}
+			toolSpan.End()
+			toolCallRows = append(toolCallRows, toolResult.Rows...)
+			mergeToolCallPersistenceKeys(&persistedToolCallKeys, toolResult.PersistedToolCallKeys)
+			remainingToolCalls -= len(toolResult.Rows)
+			if toolResult.FatalErr != nil {
+				retErr = wrapUpstreamRequestError(toolResult.FatalErr)
 				return nil, retErr
 			}
-			if fileErr == nil && fileOutput != nil {
-				totalUsage = addLLMUsage(totalUsage, fileOutput.Usage)
-				if fileOutput.Usage != (llm.Usage{}) {
-					usageAccumulator.setObservedUsage(totalUsage)
-				} else if usageAccumulator.usage() != (llm.Usage{}) {
-					totalUsage = usageAccumulator.usage()
+			if len(toolResult.ToolResults) == 0 {
+				break
+			}
+			assistantToolMessage.ToolCalls = toolResult.ExecutedToolCalls
+			llmMessages = append(llmMessages,
+				assistantToolMessage,
+				llm.Message{
+					Role:        "tool",
+					ToolResults: toolResult.ToolResults,
+				},
+			)
+			var toolHistoryTrimmed bool
+			llmMessages, toolHistoryTrimmed = trimToolFollowUpHistory(
+				generateInput,
+				llmMessages,
+				route.UpstreamModel,
+				route.ModelCapabilitiesJSON,
+			)
+			if toolHistoryTrimmed {
+				toolHistoryTrimmedForRun = true
+				sendSpan.SetAttributes(attribute.Bool("conversation.tool.history_trimmed", true))
+			}
+			var toolResultsRebalanced bool
+			llmMessages, toolResultsRebalanced = rebalanceToolFollowUpResults(
+				generateInput,
+				llmMessages,
+				route.UpstreamModel,
+				route.ModelCapabilitiesJSON,
+			)
+			if toolResultsRebalanced {
+				sendSpan.SetAttributes(attribute.Bool("conversation.tool.results_rebalanced", true))
+			}
+
+			followUpInput := generateInput
+			if windowCallCount+1 >= maxLLMCalls {
+				followUpInput.Messages = buildFinalToolSynthesisMessages(llmMessages, "The maximum number of LLM calls for this run has been reached. Stop calling tools and produce the final answer based on the tool results already available. If the information is insufficient, state the missing information directly.")
+				followUpInput.Tools = nil
+				followUpInput.DisableTools = true
+				followUpInput.PreviousResponseID = ""
+				applyOpenAIResponsesInstructions(route, routeConfig.Endpoint, &followUpInput)
+			} else if !toolHistoryTrimmed && !toolResultsRebalanced && routeConfig.Endpoint == llm.EndpointResponses && supportsPreviousResponseIDRoute(route) && strings.TrimSpace(upstreamOutput.ResponseID) != "" {
+				followUpInput.PreviousResponseID = strings.TrimSpace(upstreamOutput.ResponseID)
+				followUpInput.Messages = []llm.Message{{Role: "tool", ToolResults: toolResult.ToolResults}}
+			} else {
+				followUpInput.Messages = llmMessages
+				followUpInput.PreviousResponseID = ""
+				applyOpenAIResponsesInstructions(route, routeConfig.Endpoint, &followUpInput)
+			}
+
+			nextOutput, nextErr := runGenerate(followUpInput)
+			if handleCanceledGeneration(nextErr) {
+				return nil, retErr
+			}
+			if nextErr != nil {
+				s.routeResolver.MarkRouteFailure(ctx, route, nextErr)
+				retErr = wrapUpstreamRequestError(nextErr)
+				return nil, retErr
+			}
+			s.routeResolver.MarkRouteSuccess(ctx, route)
+			totalUsage = addLLMUsage(totalUsage, nextOutput.Usage)
+			if nextOutput.Usage != (llm.Usage{}) {
+				usageAccumulator.setObservedUsage(totalUsage)
+			} else if usageAccumulator.usage() != (llm.Usage{}) {
+				totalUsage = usageAccumulator.usage()
+			}
+			totalServerSideToolUsage = addServerSideToolUsage(totalServerSideToolUsage, nextOutput.ServerSideToolUsage)
+			upstreamOutput = nextOutput
+			windowCallCount = llmRequestCount - windowBaseCalls
+			var nextNativeToolRows []model.ToolCall
+			assistantText, nextNativeToolRows = syncUpstreamOutputTrace(traceRecorder, upstreamOutput, runID)
+			toolCallRows = append(toolCallRows, nextNativeToolRows...)
+		}
+		if len(upstreamOutput.ToolCalls) > 0 && remainingToolCalls <= 0 && windowCallCount < maxLLMCalls {
+			finalInput := generateInput
+			finalInput.Messages = buildFinalToolSynthesisMessages(llmMessages, "The maximum number of tool calls for this run has been reached. Stop calling tools and produce the final answer based on the tool results already available. If the information is insufficient, state the missing information directly.")
+			finalInput.Tools = nil
+			finalInput.DisableTools = true
+			finalInput.PreviousResponseID = ""
+			applyOpenAIResponsesInstructions(route, routeConfig.Endpoint, &finalInput)
+			nextOutput, nextErr := runGenerate(finalInput)
+			if handleCanceledGeneration(nextErr) {
+				return nil, retErr
+			}
+			if nextErr != nil {
+				s.routeResolver.MarkRouteFailure(ctx, route, nextErr)
+				retErr = wrapUpstreamRequestError(nextErr)
+				return nil, retErr
+			}
+			s.routeResolver.MarkRouteSuccess(ctx, route)
+			totalUsage = addLLMUsage(totalUsage, nextOutput.Usage)
+			if nextOutput.Usage != (llm.Usage{}) {
+				usageAccumulator.setObservedUsage(totalUsage)
+			} else if usageAccumulator.usage() != (llm.Usage{}) {
+				totalUsage = usageAccumulator.usage()
+			}
+			totalServerSideToolUsage = addServerSideToolUsage(totalServerSideToolUsage, nextOutput.ServerSideToolUsage)
+			upstreamOutput = nextOutput
+			windowCallCount = llmRequestCount - windowBaseCalls
+			var nextNativeToolRows []model.ToolCall
+			assistantText, nextNativeToolRows = syncUpstreamOutputTrace(traceRecorder, upstreamOutput, runID)
+			toolCallRows = append(toolCallRows, nextNativeToolRows...)
+		}
+
+		// 请求式披露：模型通过 <read_file> 标记请求技能包内文件内容。
+		// 标记已在流式输出中被剥离；此处读取文件内容并追加 system 消息后再次调用模型（无工具），
+		// 每个阶段窗口内最多补充一轮。第二轮输出中的标记同样被剥离且不再补充。
+		if len(lastReadFileRequests) > 0 && windowCallCount < maxLLMCalls {
+			fileMessages, loadedPaths := s.resolveSkillFileRequests(ctx, input.UserID, skillPrompts, lastReadFileRequests)
+			if len(fileMessages) > 0 {
+				followUpInput := generateInput
+				followUpInput.Messages = append(cloneLLMMessages(llmMessages), fileMessages...)
+				followUpInput.Tools = nil
+				followUpInput.DisableTools = true
+				followUpInput.PreviousResponseID = ""
+				applyOpenAIResponsesInstructions(route, routeConfig.Endpoint, &followUpInput)
+				fileOutput, fileErr := runGenerate(followUpInput)
+				if handleCanceledGeneration(fileErr) {
+					return nil, retErr
 				}
-				totalServerSideToolUsage = addServerSideToolUsage(totalServerSideToolUsage, fileOutput.ServerSideToolUsage)
-				if text := strings.TrimSpace(fileOutput.Text); text != "" {
-					if strings.TrimSpace(assistantText) != "" {
-						assistantText = strings.TrimSpace(assistantText) + "\n\n" + text
-					} else {
-						assistantText = text
+				if fileErr == nil && fileOutput != nil {
+					totalUsage = addLLMUsage(totalUsage, fileOutput.Usage)
+					if fileOutput.Usage != (llm.Usage{}) {
+						usageAccumulator.setObservedUsage(totalUsage)
+					} else if usageAccumulator.usage() != (llm.Usage{}) {
+						totalUsage = usageAccumulator.usage()
+					}
+					totalServerSideToolUsage = addServerSideToolUsage(totalServerSideToolUsage, fileOutput.ServerSideToolUsage)
+					if text := strings.TrimSpace(fileOutput.Text); text != "" {
+						if strings.TrimSpace(assistantText) != "" {
+							assistantText = strings.TrimSpace(assistantText) + "\n\n" + text
+						} else {
+							assistantText = text
+						}
+					}
+					windowCallCount = llmRequestCount - windowBaseCalls
+				} else if fileErr != nil {
+					// 补充轮失败不影响已生成内容；记录但不 failover（首轮已成功）。
+					if s.logger != nil {
+						s.logger.Warn("skill_file_followup_failed",
+							zap.String("trace_id", traceid.FromContext(ctx)),
+							zap.Uint("conversation_id", input.ConversationID),
+							zap.Int("requested_files", len(lastReadFileRequests)),
+							zap.Int("loaded_files", len(loadedPaths)),
+							zap.Error(fileErr),
+						)
 					}
 				}
-				llmCallCount = llmRequestCount
-			} else if fileErr != nil {
-				// 补充轮失败不影响已生成内容；记录但不 failover（首轮已成功）。
-				if s.logger != nil {
-					s.logger.Warn("skill_file_followup_failed",
-						zap.String("trace_id", traceid.FromContext(ctx)),
-						zap.Uint("conversation_id", input.ConversationID),
-						zap.Int("requested_files", len(lastReadFileRequests)),
-						zap.Int("loaded_files", len(loadedPaths)),
-						zap.Error(fileErr),
-					)
-				}
 			}
+			if traceRecorder != nil && len(loadedPaths) > 0 {
+				traceRecorder.appendProcessSection(
+					fmt.Sprintf("已读取 %d 个技能包文件", len(loadedPaths)),
+					formatTraceStep("Skill 文件", fmt.Sprintf("根据 <read_file> 请求补充注入 %d 个文件内容：%s。", len(loadedPaths), strings.Join(loadedPaths, "、"))),
+					map[string]interface{}{
+						processTracePayloadStage: map[string]interface{}{
+							"kind":   "skill_context",
+							"status": messageTraceStatusStreaming,
+						},
+						"skill_file_read":  len(loadedPaths),
+						"skill_file_paths": loadedPaths,
+					},
+					messageTraceStatusStreaming,
+				)
+			}
+			// 已处理的文件请求移出队列，避免后续窗口重复加载。
+			lastReadFileRequests = nil
 		}
-		if traceRecorder != nil && len(loadedPaths) > 0 {
+
+		if !toolRunFinalAnswerMissing(upstreamOutput, len(toolCallRows) > 0, windowCallCount, maxLLMCalls, remainingToolCalls) {
+			break
+		}
+		// 模型已产出可见内容：忽略残留工具调用，降级接受为最终回答。
+		// 工具禁用轮中模型仍可能违规输出文本编码工具调用，剥离后已有答案不应再判失败。
+		if strings.TrimSpace(assistantText) != "" || len(upstreamOutput.GeneratedImages) > 0 {
+			if s.logger != nil {
+				s.logger.Warn("tool_run_final_answer_degraded",
+					zap.String("trace_id", traceid.FromContext(ctx)),
+					zap.Uint("conversation_id", input.ConversationID),
+					zap.Int("stage_merges", toolStageMerges),
+					zap.Int("pending_tool_calls", len(upstreamOutput.ToolCalls)),
+					zap.Bool("text_tool_calls_stripped", upstreamOutput.TextToolCallsStripped),
+				)
+			}
+			break
+		}
+		if toolStageMerges >= maxToolStageMergesPerRun {
+			break
+		}
+		toolStageMerges++
+
+		// —— 阶段合并：禁用工具让模型总结已获取信息与剩余工作，随后开启新预算窗口继续。 ——
+		mergeInput := generateInput
+		mergeInput.Messages = append(cloneLLMMessages(llmMessages), llm.Message{Role: "system", Content: buildToolStageMergeInstruction()})
+		mergeInput.Tools = nil
+		mergeInput.DisableTools = true
+		mergeInput.PreviousResponseID = ""
+		applyOpenAIResponsesInstructions(route, routeConfig.Endpoint, &mergeInput)
+		silentDelta := onDelta
+		onDelta = nil // 阶段总结只注入上下文与轨迹，不流入可见回答
+		mergeOutput, mergeErr := runGenerate(mergeInput)
+		onDelta = silentDelta
+		if handleCanceledGeneration(mergeErr) {
+			return nil, retErr
+		}
+		if mergeErr != nil {
+			s.routeResolver.MarkRouteFailure(ctx, route, mergeErr)
+			retErr = wrapUpstreamRequestError(mergeErr)
+			return nil, retErr
+		}
+		s.routeResolver.MarkRouteSuccess(ctx, route)
+		totalUsage = addLLMUsage(totalUsage, mergeOutput.Usage)
+		if mergeOutput.Usage != (llm.Usage{}) {
+			usageAccumulator.setObservedUsage(totalUsage)
+		} else if usageAccumulator.usage() != (llm.Usage{}) {
+			totalUsage = usageAccumulator.usage()
+		}
+		totalServerSideToolUsage = addServerSideToolUsage(totalServerSideToolUsage, mergeOutput.ServerSideToolUsage)
+		mergeText := strings.TrimSpace(mergeOutput.Text)
+		if mergeText == "" {
+			break
+		}
+		mergeText = headTailToolOutput(mergeText, 1600)
+		llmMessages = append(llmMessages, llm.Message{
+			Role:    "system",
+			Content: fmt.Sprintf("【阶段性进展（第 %d 轮）】\n%s", toolStageMerges, mergeText),
+		})
+		if traceRecorder != nil {
 			traceRecorder.appendProcessSection(
-				fmt.Sprintf("已读取 %d 个技能包文件", len(loadedPaths)),
-				formatTraceStep("Skill 文件", fmt.Sprintf("根据 <read_file> 请求补充注入 %d 个文件内容：%s。", len(loadedPaths), strings.Join(loadedPaths, "、"))),
+				fmt.Sprintf("阶段性总结（第 %d 轮）：工具预算已耗尽，模型整理进展后开启新一轮", toolStageMerges),
+				formatTraceStep("阶段合并", mergeText),
 				map[string]interface{}{
 					processTracePayloadStage: map[string]interface{}{
-						"kind":   "skill_context",
-						"status": messageTraceStatusStreaming,
+						"kind":   "stage_merge",
+						"status": messageTraceStatusCompleted,
 					},
-					"skill_file_read":  len(loadedPaths),
-					"skill_file_paths": loadedPaths,
+					"stage_merge_round": toolStageMerges,
 				},
-				messageTraceStatusStreaming,
+				messageTraceStatusCompleted,
 			)
 		}
+		// 开启新窗口：重置窗口内调用计数与工具额度，随后发起一次普通调用让模型继续工作。
+		windowBaseCalls = llmRequestCount
+		windowCallCount = 0
+		remainingToolCalls = max(s.resolveMaxToolCallsPerRun()-len(imageProcessing.Rows), 0)
+		continueInput := generateInput
+		continueInput.Messages = llmMessages
+		continueInput.PreviousResponseID = ""
+		applyOpenAIResponsesInstructions(route, routeConfig.Endpoint, &continueInput)
+		nextOutput, nextErr := runGenerate(continueInput)
+		if handleCanceledGeneration(nextErr) {
+			return nil, retErr
+		}
+		if nextErr != nil {
+			s.routeResolver.MarkRouteFailure(ctx, route, nextErr)
+			retErr = wrapUpstreamRequestError(nextErr)
+			return nil, retErr
+		}
+		s.routeResolver.MarkRouteSuccess(ctx, route)
+		totalUsage = addLLMUsage(totalUsage, nextOutput.Usage)
+		if nextOutput.Usage != (llm.Usage{}) {
+			usageAccumulator.setObservedUsage(totalUsage)
+		} else if usageAccumulator.usage() != (llm.Usage{}) {
+			totalUsage = usageAccumulator.usage()
+		}
+		totalServerSideToolUsage = addServerSideToolUsage(totalServerSideToolUsage, nextOutput.ServerSideToolUsage)
+		upstreamOutput = nextOutput
+		windowCallCount = llmRequestCount - windowBaseCalls
+		var nextNativeToolRows []model.ToolCall
+		assistantText, nextNativeToolRows = syncUpstreamOutputTrace(traceRecorder, upstreamOutput, runID)
+		toolCallRows = append(toolCallRows, nextNativeToolRows...)
 	}
 
 	effectiveInputTokens := usageAccumulator.effectiveInputTokens(estimatedPromptTokens)
 	effectiveOutputTokens := resolveObservedOrEstimatedOutputTokens(totalUsage.OutputTokens, assistantText)
 
-	if toolRunFinalAnswerMissing(upstreamOutput, len(toolCallRows) > 0, llmCallCount, maxLLMCalls, remainingToolCalls) {
+	if toolRunFinalAnswerMissing(upstreamOutput, len(toolCallRows) > 0, windowCallCount, maxLLMCalls, remainingToolCalls) &&
+		strings.TrimSpace(assistantText) == "" && len(upstreamOutput.GeneratedImages) == 0 {
 		retErr = ErrToolRunFinalAnswerMissing
 		return nil, retErr
 	}

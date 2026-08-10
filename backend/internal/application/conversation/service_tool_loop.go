@@ -268,9 +268,22 @@ func buildFinalToolSynthesisMessages(messages []llm.Message, instruction string)
 }
 
 // toolRunFinalAnswerMissing 判断工具循环在预算耗尽时是否只剩未执行的结构化工具调用。
+// 工具禁用轮中被剥离的文本编码调用（TextToolCallsStripped）同样视为模型尚未收尾。
 func toolRunFinalAnswerMissing(output *llm.GenerateOutput, toolLoopStarted bool, llmCallCount int, maxLLMCalls int, remainingToolCalls int) bool {
 	if output == nil || !toolLoopStarted {
 		return false
 	}
-	return len(output.ToolCalls) > 0 && (llmCallCount >= maxLLMCalls || remainingToolCalls <= 0)
+	if len(output.ToolCalls) == 0 && !output.TextToolCallsStripped {
+		return false
+	}
+	return llmCallCount >= maxLLMCalls || remainingToolCalls <= 0
+}
+
+// buildToolStageMergeInstruction 构造阶段合并轮指令：模型在无工具下总结已获信息与剩余工作，
+// 系统随后开启新一轮工具预算继续，直到模型认为任务完成。
+func buildToolStageMergeInstruction() string {
+	return "The tool call budget for this run has been exhausted and you may not call tools in this round. " +
+		"First write a concise stage summary (a few sentences): the key information you have obtained so far and the remaining work. " +
+		"The system will grant a fresh tool budget after your summary so you can continue the remaining work. " +
+		"If you already have enough information, produce the final answer directly instead of a summary."
 }
