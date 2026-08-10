@@ -111,6 +111,17 @@ docker build -t x-deeix:local .
 | `dev` | 上游基线线：与上游 DEEIX-Chat 同步（upstream/dev），**不承载定制开发** |
 | `custom` | 定制版功能开发分支（当前版本基于此分支构建、部署、发布 ghcr） |
 
+### 代码布局（worktree）
+
+本仓库使用两个 git worktree，分支不重叠：
+
+| 目录 | 检出分支 | 职责 |
+| --- | --- | --- |
+| `C:\_MY_WORK\DEEIX-Chat` | `dev` | 上游基线（同步 upstream/dev） |
+| `C:\_MY_WORK\X-DEEIX-custom` | `custom` | 定制开发、构建部署镜像 |
+
+同一分支只能在一个 worktree 检出——在 custom worktree 里 `git checkout dev` 会报「目标分支已在其他 worktree 中被检出」；要操作 dev 请到主目录。
+
 ### 开发规范（必读）
 
 **所有自定义功能必须在 `custom` 分支上开发**，禁止直接在 `dev` 分支开发定制功能：
