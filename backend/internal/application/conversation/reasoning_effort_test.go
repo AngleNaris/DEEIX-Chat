@@ -77,6 +77,29 @@ func TestApplyReasoningEffortInjection(t *testing.T) {
 		}
 	})
 
+	t.Run("injects into nil base without panic", func(t *testing.T) {
+		// 群组会话 supervisor turn 的 options 为 nil（agentGroupSupervisorOptions(nil)），
+		// 曾触发 "assignment to entry in nil map" panic。
+		result := applyReasoningEffortInjection(llm.AdapterOpenAIChatCompletions, ReasoningEffortLow, ReasoningEffortLow, nil)
+		if result == nil {
+			t.Fatal("expected non-nil result map")
+		}
+		if result["reasoning_effort"] != "low" {
+			t.Fatalf("expected level injected into fresh map, got %v", result["reasoning_effort"])
+		}
+	})
+
+	t.Run("anthropic injects into nil base without panic", func(t *testing.T) {
+		result := applyReasoningEffortInjection(llm.AdapterAnthropicMessages, "", ReasoningEffortHigh, nil)
+		if result == nil {
+			t.Fatal("expected non-nil result map")
+		}
+		thinking, isMap := result["thinking"].(map[string]interface{})
+		if !isMap || thinking["type"] != "enabled" || thinking["budget_tokens"] != 8192 {
+			t.Fatalf("unexpected anthropic thinking injection: %v", result["thinking"])
+		}
+	})
+
 	t.Run("explicit input level overrides existing option", func(t *testing.T) {
 		base := map[string]interface{}{
 			"reasoning_effort": "high",

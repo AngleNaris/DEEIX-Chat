@@ -224,6 +224,10 @@ func applyReasoningEffortInjection(protocol, inputLevel, level string, base map[
 		return base
 	}
 	options := cloneModelOptionMap(base)
+	if options == nil {
+		// 群组会话成员/无 options 场景下 base 可能为 nil，注入需从空 map 开始。
+		options = make(map[string]interface{}, 2)
+	}
 	if thinking, isThinking := value.(map[string]interface{}); isThinking {
 		clamped := clampAnthropicThinkingBudget(options, thinking)
 		if clamped == nil {
