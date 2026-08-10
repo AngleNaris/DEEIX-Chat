@@ -147,7 +147,7 @@ function DocCardEditorDialog({
                   <SelectTrigger className="h-8 text-xs">
                     <SelectValue placeholder={t("projectGlobal")} />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className="max-h-56 overflow-y-auto">
                     <SelectItem value="0">{t("projectGlobal")}</SelectItem>
                     {projects.map((project) => (
                       <SelectItem key={project.publicID} value={String(project.id)}>
@@ -168,7 +168,7 @@ function DocCardEditorDialog({
                 <SelectTrigger className="h-8 text-xs">
                   <SelectValue placeholder={t("roleGlobal")} />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="max-h-56 overflow-y-auto">
                   <SelectItem value="0">{t("roleGlobal")}</SelectItem>
                   {roles.map((role) => (
                     <SelectItem key={role.publicID} value={String(role.id)}>

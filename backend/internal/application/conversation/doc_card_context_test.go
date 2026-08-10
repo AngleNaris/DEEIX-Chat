@@ -70,10 +70,21 @@ func TestMatchDocCardsScopeBinding(t *testing.T) {
 	if len(got) != 2 || got[0] != "g" || got[1] != "p" {
 		t.Fatalf("project scope mismatch: %+v", got)
 	}
-	// 会话在项目 B、角色 A：命中 global + role A + both（任一维度命中）。
+	// 会话在项目 B、角色 A：命中 global + role A + both（两维度均匹配，交集语义）。
 	got = ids(matchDocCards("k", boundCards, projectB, roleA, 0))
 	if len(got) != 3 {
 		t.Fatalf("combined scope mismatch: %+v", got)
+	}
+	// AND 语义：both（项目 B + 角色 A）在只满足单一维度时不命中。
+	// 会话在项目 B、无角色：角色绑定卡（role）也不命中（会话无角色维度），仅 global。
+	got = ids(matchDocCards("k", boundCards, projectB, 0, 0))
+	if len(got) != 1 || got[0] != "g" {
+		t.Fatalf("intersection must reject missing role dimension: %+v", got)
+	}
+	// 会话在项目 A、角色 A：global + project A + role A 命中，both（绑定项目 B）不命中。
+	got = ids(matchDocCards("k", boundCards, projectA, roleA, 0))
+	if len(got) != 3 || got[0] != "g" || got[1] != "p" || got[2] != "r" {
+		t.Fatalf("intersection must reject missing project dimension: %+v", got)
 	}
 	// 会话无绑定：只命中全局。
 	got = ids(matchDocCards("k", boundCards, 0, 0, 0))
