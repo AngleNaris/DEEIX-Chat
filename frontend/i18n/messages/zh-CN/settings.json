@@ -502,9 +502,9 @@
       "category": "分类",
       "categoryPlaceholder": "例如：世界观、人物",
       "binding": "绑定项目",
-      "projectGlobal": "全局（所有项目）",
+      "projectGlobal": "不绑定",
       "role": "绑定角色",
-      "roleGlobal": "全局（所有角色）",
+      "roleGlobal": "不绑定",
       "boundProject": "项目",
       "boundRole": "角色"
     },

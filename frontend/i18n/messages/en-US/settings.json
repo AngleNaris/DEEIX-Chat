@@ -502,9 +502,9 @@
       "category": "Category",
       "categoryPlaceholder": "e.g. world, characters",
       "binding": "Project",
-      "projectGlobal": "Global (all projects)",
+      "projectGlobal": "Not bound",
       "role": "Role",
-      "roleGlobal": "Global (all roles)",
+      "roleGlobal": "Not bound",
       "boundProject": "project",
       "boundRole": "role"
     },
