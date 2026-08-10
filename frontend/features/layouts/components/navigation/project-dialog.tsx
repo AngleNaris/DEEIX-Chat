@@ -19,6 +19,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Spinner } from "@/components/ui/spinner";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { listAvailableMCPTools } from "@/shared/api/mcp";
 import type { MCPToolDTO } from "@/shared/api/mcp.types";
@@ -220,52 +221,27 @@ export function ProjectDialog({
             <div className="space-y-3 border-t border-border/60 pt-4">
               <div className="space-y-1">
                 <p className="text-xs text-muted-foreground">{t("mcpDefaultsLabel")}</p>
-                <div
-                  role="group"
-                  aria-label={t("mcpDefaultsLabel")}
-                  className="grid h-8 grid-cols-2 gap-0.5 rounded-md bg-muted/70 p-0.5"
+                <Tabs
+                  value={stableDraft?.mcpDefaultMode ?? "inherit"}
+                  onValueChange={(value) => {
+                    setDraft((current) => (
+                      current
+                        ? { ...current, mcpDefaultMode: value === "custom" ? "custom" : "inherit" }
+                        : current
+                    ));
+                  }}
                 >
-                  <Button
-                    type="button"
-                    aria-pressed={inheritGlobalMCPDefaults}
-                    variant="ghost"
-                    size="sm"
-                    className={inheritGlobalMCPDefaults
-                      ? "h-7 min-w-0 gap-1.5 rounded-sm bg-background px-2 text-foreground shadow-sm hover:bg-background"
-                      : "h-7 min-w-0 gap-1.5 rounded-sm px-2 text-muted-foreground hover:bg-transparent hover:text-foreground"}
-                    disabled={submitting}
-                    onClick={() => {
-                      setDraft((current) => (
-                        current
-                          ? { ...current, mcpDefaultMode: "inherit" }
-                          : current
-                      ));
-                    }}
-                  >
-                    <Globe2 className="size-3.5 shrink-0" strokeWidth={1.7} />
-                    <span className="truncate">{t("inheritGlobalMCPDefaults")}</span>
-                  </Button>
-                  <Button
-                    type="button"
-                    aria-pressed={!inheritGlobalMCPDefaults}
-                    variant="ghost"
-                    size="sm"
-                    className={!inheritGlobalMCPDefaults
-                      ? "h-7 min-w-0 gap-1.5 rounded-sm bg-background px-2 text-foreground shadow-sm hover:bg-background"
-                      : "h-7 min-w-0 gap-1.5 rounded-sm px-2 text-muted-foreground hover:bg-transparent hover:text-foreground"}
-                    disabled={submitting}
-                    onClick={() => {
-                      setDraft((current) => (
-                        current
-                          ? { ...current, mcpDefaultMode: "custom" }
-                          : current
-                      ));
-                    }}
-                  >
-                    <SlidersHorizontal className="size-3.5 shrink-0" strokeWidth={1.7} />
-                    <span className="truncate">{t("customMCPDefaults")}</span>
-                  </Button>
-                </div>
+                  <TabsList aria-label={t("mcpDefaultsLabel")} className="grid w-full grid-cols-2">
+                    <TabsTrigger value="inherit" className="min-w-0" disabled={submitting}>
+                      <Globe2 strokeWidth={1.7} />
+                      <span className="truncate">{t("inheritGlobalMCPDefaults")}</span>
+                    </TabsTrigger>
+                    <TabsTrigger value="custom" className="min-w-0" disabled={submitting}>
+                      <SlidersHorizontal strokeWidth={1.7} />
+                      <span className="truncate">{t("customMCPDefaults")}</span>
+                    </TabsTrigger>
+                  </TabsList>
+                </Tabs>
                 <DialogCollapsible open={!inheritGlobalMCPDefaults}>
                   <ProjectDefaultSelector
                     icon={Wrench}

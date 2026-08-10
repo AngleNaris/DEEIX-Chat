@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"strings"
 	"time"
 
@@ -18,7 +17,6 @@ import (
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/llm"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/pkg/traceid"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
-	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/security"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 )
@@ -320,6 +318,7 @@ func (s *Service) StreamMediaImage(ctx context.Context, input MediaImageInput) (
 			Usage:            usage,
 			StartedAt:        startedAt,
 			Failure:          failure,
+			Billable:         true,
 		})
 		applyMediaRunUsage(run, result)
 		return result
@@ -383,6 +382,7 @@ func (s *Service) StreamMediaImage(ctx context.Context, input MediaImageInput) (
 				EffectiveOptions: filteredOptions,
 				GenerateInput:    generateInput,
 				StartedAt:        startedAt,
+				Billable:         true,
 			})
 			if cancelErr != nil {
 				retErr = cancelErr
@@ -411,11 +411,10 @@ func (s *Service) StreamMediaImage(ctx context.Context, input MediaImageInput) (
 	attachmentRows := make([]model.Attachment, 0, len(output.GeneratedImages))
 	now := time.Now()
 	for i, image := range output.GeneratedImages {
-		data, mimeType, readErr := s.readGeneratedImage(ctx, image)
+		data, mimeType, readErr := s.readGeneratedImage(ctx, image, route.BaseURL)
 		if readErr != nil {
-			retErr = readErr
-			_ = s.repo.UpdateMessageState(ctx, assistantMessage.ID, "error", classifyRunErrorCode(retErr), truncateError(messageErrorSummary(retErr), 255))
-			return buildBillableFailure(readErr, output.Usage), readErr
+			retErr = s.finalizeGeneratedMediaArtifactFailure(ctx, run, assistantMessage.ID, i+1, len(output.GeneratedImages), readErr)
+			return buildBillableFailure(retErr, output.Usage), retErr
 		}
 		fileName := generatedImageFileName(route.PlatformModelName, now, i, len(output.GeneratedImages), mimeType)
 		uploadResult, uploadErr := s.UploadFile(ctx, appupload.UploadFileInput{
@@ -717,7 +716,7 @@ func mediaImageStreamExplicitlyDisabled(capabilitiesJSON string) bool {
 
 // readGeneratedImage 读取上游图片结果，并统一校验为可保存的图片字节。
 // 上游临时 URL 只用于服务端下载，最终不会直接写入消息内容，避免长期依赖外部地址。
-func (s *Service) readGeneratedImage(ctx context.Context, image llm.GeneratedImage) ([]byte, string, error) {
+func (s *Service) readGeneratedImage(ctx context.Context, image llm.GeneratedImage, trustedProviderEndpoint string) ([]byte, string, error) {
 	mimeType := strings.TrimSpace(image.MIMEType)
 	if mimeType == "" {
 		mimeType = "image/png"
@@ -725,46 +724,41 @@ func (s *Service) readGeneratedImage(ctx context.Context, image llm.GeneratedIma
 	if b64 := strings.TrimSpace(image.B64JSON); b64 != "" {
 		data, err := base64.StdEncoding.DecodeString(stripBase64DataURLPrefix(b64))
 		if err != nil {
-			return nil, mimeType, err
+			return nil, mimeType, newGeneratedMediaArtifactError("image", "decode", err)
 		}
-		return validateGeneratedImageBytes(data, mimeType)
+		validated, detectedMIME, validationErr := validateGeneratedImageBytes(data, mimeType)
+		if validationErr != nil {
+			return nil, mimeType, newGeneratedMediaArtifactError("image", "validation", validationErr)
+		}
+		return validated, detectedMIME, nil
 	}
 	url := strings.TrimSpace(image.URL)
 	if url == "" {
 		return nil, mimeType, ErrUpstreamEmptyResponse
 	}
-	if isGeminiFilesURL(url) {
-		return nil, mimeType, fmt.Errorf("Gemini Files generated image URI is not supported")
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, mimeType, err
+	if s.mediaDownloader == nil {
+		return nil, mimeType, newGeneratedMediaArtifactError("image", "configuration", fmt.Errorf("generated media downloader is not configured"))
 	}
 	cfg := s.cfg.Snapshot()
-	client := security.NewOutboundHTTPClient(cfg.StrictOutboundPolicy(), 60*time.Second)
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, mimeType, err
-	}
-	defer resp.Body.Close() //nolint:errcheck
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, mimeType, fmt.Errorf("download generated image failed: HTTP %d", resp.StatusCode)
-	}
-	if contentType := strings.TrimSpace(resp.Header.Get("Content-Type")); strings.HasPrefix(strings.ToLower(contentType), "image/") {
-		mimeType = strings.Split(contentType, ";")[0]
-	}
 	limit := cfg.MaxUploadFileBytes
 	if limit <= 0 {
 		limit = 20 * 1024 * 1024
 	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
+	data, downloadedMIME, err := s.mediaDownloader.DownloadImage(ctx, url, trustedProviderEndpoint, limit)
 	if err != nil {
-		return nil, mimeType, err
+		if isMediaArtifactResponseTooLarge(err) {
+			return nil, mimeType, ErrFileTooLarge
+		}
+		return nil, mimeType, newGeneratedMediaArtifactError("image", "download", err)
 	}
-	if int64(len(data)) > limit {
-		return nil, mimeType, ErrFileTooLarge
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(downloadedMIME)), "image/") {
+		mimeType = strings.TrimSpace(downloadedMIME)
 	}
-	return validateGeneratedImageBytes(data, mimeType)
+	validated, detectedMIME, validationErr := validateGeneratedImageBytes(data, mimeType)
+	if validationErr != nil {
+		return nil, mimeType, newGeneratedMediaArtifactError("image", "validation", validationErr)
+	}
+	return validated, detectedMIME, nil
 }
 
 // stripBase64DataURLPrefix 兼容 data URL 和纯 base64 两种上游返回格式。

@@ -337,7 +337,7 @@ type ChatContextRecord struct {
 	BaseModel
 	RecordType            string     `gorm:"size:32;not null;default:'';index:idx_chat_context_records_type;comment:记录类型(snapshot/artifact)"`
 	ConversationID        uint       `gorm:"not null;default:0;index:idx_chat_context_records_conversation_id;index:idx_chat_context_records_conversation_message,priority:1;index:idx_chat_context_records_conversation_kind,priority:1;comment:会话ID"`
-	MessageID             uint       `gorm:"not null;default:0;index:idx_chat_context_records_message_id;index:idx_chat_context_records_conversation_message,priority:2;comment:触发消息ID"`
+	MessageID             uint       `gorm:"not null;default:0;index:idx_chat_context_records_message_id;index:idx_chat_context_records_conversation_message,priority:2;comment:证据归属助手消息ID"`
 	UserID                uint       `gorm:"not null;default:0;index:idx_chat_context_records_user_id;comment:用户ID"`
 	RunID                 string     `gorm:"size:64;not null;default:'';index:idx_chat_context_records_run_id;comment:运行ID"`
 	FromTurn              int        `gorm:"not null;default:0;comment:压缩快照起始轮次"`

@@ -64,11 +64,7 @@ func TestClientCallToolUsesStreamableHTTPJSONRPC(t *testing.T) {
 	}))
 	defer server.Close()
 
-	policy, err := security.NewOutboundPolicy(true, nil, []string{"127.0.0.0/8", "::1/128"})
-	if err != nil {
-		t.Fatalf("build outbound policy: %v", err)
-	}
-	client := NewClient(policy)
+	client := NewClient(security.NewStrictOutboundPolicy(true))
 	output, err := client.CallTool(context.Background(), CallConfig{BaseURL: server.URL + "/mcp"}, CallInput{
 		ToolName:      "memory.list",
 		ArgumentsJSON: `{"scope":"user"}`,

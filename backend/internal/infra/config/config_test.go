@@ -233,6 +233,34 @@ func TestValidateRejectsInvalidSSRFAllowlist(t *testing.T) {
 	}
 }
 
+func TestValidateTurnstileSiteverifyURL(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		value   string
+		wantErr bool
+	}{
+		{name: "default fallback", value: ""},
+		{name: "public HTTPS", value: "https://turnstile.example.test/siteverify"},
+		{name: "private administrator endpoint", value: "http://turnstile:8080/siteverify"},
+		{name: "metadata endpoint", value: "http://169.254.169.254/latest/meta-data", wantErr: true},
+		{name: "credentials", value: "http://user:password@turnstile:8080/siteverify", wantErr: true},
+		{name: "unsupported scheme", value: "file:///etc/passwd", wantErr: true},
+		{name: "relative URL", value: "/siteverify", wantErr: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := validConfigForEnv("dev")
+			cfg.TurnstileSiteverifyURL = test.value
+			err := cfg.Validate()
+			if test.wantErr && err == nil {
+				t.Fatal("expected invalid Turnstile endpoint to be rejected")
+			}
+			if !test.wantErr && err != nil {
+				t.Fatalf("expected Turnstile endpoint to be accepted, got %v", err)
+			}
+		})
+	}
+}
+
 func TestTrustedAndStrictOutboundPoliciesRemainSeparated(t *testing.T) {
 	cfg := validConfigForEnv("prod")
 	cfg.SSRFProtectionEnabled = true

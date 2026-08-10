@@ -368,10 +368,10 @@ func (s *Service) BatchDeleteUpstreams(ctx context.Context, upstreamIDs []uint) 
 }
 
 func (s *Service) validateUpstreamBaseURL(raw string) error {
-	if s == nil || s.cfg == nil {
+	if s == nil {
 		return ErrInvalidUpstreamBaseURL
 	}
-	if err := security.ValidateOutboundHTTPURL(raw, s.cfg.Snapshot().TrustedOutboundPolicy()); err != nil {
+	if err := security.ValidateTrustedOutboundHTTPURL(raw); err != nil {
 		return ErrInvalidUpstreamBaseURL
 	}
 	return nil

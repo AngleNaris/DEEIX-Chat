@@ -55,8 +55,6 @@ type snapshotContextArtifactInput struct {
 type historicalContextArtifactInput struct {
 	CurrentMessageID   uint
 	HasCurrentSnapshot bool
-	CoveredUntilID     uint
-	AllowedMessageIDs  map[uint]struct{}
 	Query              string
 	Candidates         []domainconversation.ContextArtifact
 	CurrentRAGChunks   []domainconversation.RAGChunk
@@ -167,17 +165,14 @@ func (s *Service) applyContextArtifactRetention(items []domainconversation.Conte
 // recallHistoricalContextArtifacts 读取近期上下文证据并按当前问题筛选。
 func (s *Service) recallHistoricalContextArtifacts(
 	ctx context.Context,
-	conversationID uint,
-	currentMessageID uint,
+	scope repository.HistoricalMessageScope,
 	hasCurrentSnapshot bool,
-	coveredUntilID uint,
-	allowedMessageIDs map[uint]struct{},
 	query string,
 	currentRAGChunks []domainconversation.RAGChunk,
 	currentFallbacks []AttachmentInput,
 	currentRecall []domainconversation.MessageChunk,
 ) []domainconversation.ContextArtifact {
-	if strings.TrimSpace(query) == "" {
+	if !scope.Valid() || strings.TrimSpace(query) == "" {
 		return nil
 	}
 	kinds := []domainconversation.ContextArtifactKind{
@@ -190,22 +185,24 @@ func (s *Service) recallHistoricalContextArtifacts(
 	if !hasCurrentSnapshot {
 		kinds = append(kinds, domainconversation.ContextArtifactSummary)
 	}
-	candidates, err := s.repo.ListRecentContextArtifacts(ctx, conversationID, kinds, historicalArtifactScanLimit)
+	candidates, err := s.repo.ListRecentContextArtifacts(ctx, repository.ContextArtifactListFilter{
+		Scope: scope,
+		Kinds: kinds,
+		Limit: historicalArtifactScanLimit,
+	})
 	if err != nil {
 		if s.logger != nil {
 			s.logger.Warn("historical_context_artifact_recall_failed",
 				zap.String("trace_id", traceid.FromContext(ctx)),
-				zap.Uint("conversation_id", conversationID),
+				zap.Uint("conversation_id", scope.ConversationID),
 				zap.Error(err),
 			)
 		}
 		return nil
 	}
 	return selectHistoricalContextArtifacts(historicalContextArtifactInput{
-		CurrentMessageID:   currentMessageID,
+		CurrentMessageID:   scope.LeafMessageID,
 		HasCurrentSnapshot: hasCurrentSnapshot,
-		CoveredUntilID:     coveredUntilID,
-		AllowedMessageIDs:  allowedMessageIDs,
 		Query:              query,
 		Candidates:         candidates,
 		CurrentRAGChunks:   currentRAGChunks,
@@ -440,17 +437,6 @@ func selectHistoricalContextArtifacts(input historicalContextArtifactInput) []do
 	for index, item := range input.Candidates {
 		if input.HasCurrentSnapshot && item.Kind == domainconversation.ContextArtifactSummary {
 			continue
-		}
-		if input.CoveredUntilID > 0 && item.MessageID > 0 && item.MessageID <= input.CoveredUntilID {
-			continue
-		}
-		if len(input.AllowedMessageIDs) > 0 {
-			if item.MessageID == 0 {
-				continue
-			}
-			if _, ok := input.AllowedMessageIDs[item.MessageID]; !ok {
-				continue
-			}
 		}
 		content := strings.TrimSpace(item.Content)
 		if content == "" || item.MessageID == input.CurrentMessageID {

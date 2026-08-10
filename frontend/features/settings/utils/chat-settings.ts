@@ -3,13 +3,14 @@ import type {
   ChatInputHeight,
   ChatSettings,
   FileMode,
-  ModelVendorGroup,
+  ModelPresentationGroup,
   PlatformToolsWriteApproval,
   SendShortcut,
 } from "@/features/settings/types/settings";
 import type { UserSettingsMap } from "@/shared/api/user-settings";
 import type { PublicModelDTO } from "@/shared/api/model.types";
 import { platformSendShortcut } from "@/shared/lib/platform-shortcuts";
+import { resolveModelPresentationGroup } from "@/shared/lib/model-presentation";
 
 const FILE_MODES: FileMode[] = ["auto", "full_context", "rag"];
 const INPUT_HEIGHTS: ChatInputHeight[] = ["compact", "standard", "loose"];
@@ -82,14 +83,14 @@ export function parseSendShortcut(value: string | undefined): SendShortcut {
   return "enter";
 }
 
-export function groupModelsByVendor(models: PublicModelDTO[]): ModelVendorGroup[] {
+export function groupModelsForPresentation(models: PublicModelDTO[]): ModelPresentationGroup[] {
   const groups = new Map<string, PublicModelDTO[]>();
 
   for (const model of models) {
-    const vendor = model.vendor || "other";
-    const items = groups.get(vendor) ?? [];
+    const groupKey = resolveModelPresentationGroup(model).key;
+    const items = groups.get(groupKey) ?? [];
     items.push(model);
-    groups.set(vendor, items);
+    groups.set(groupKey, items);
   }
 
   return Array.from(groups.entries());

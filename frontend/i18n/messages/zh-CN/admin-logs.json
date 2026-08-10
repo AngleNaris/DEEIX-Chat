@@ -104,6 +104,7 @@
     "message": "消息",
     "caller": "调用人",
     "model": "模型",
+    "usage": "用量",
     "billing": "计费",
     "balanceAfter": "结算后余额",
     "latency": "延迟",
@@ -203,7 +204,13 @@
       "inputShort": "入",
       "outputShort": "出",
       "cacheReadShort": "读",
-      "cacheWriteShort": "写"
+      "cacheWriteShort": "写",
+      "input": "输入",
+      "output": "输出",
+      "reasoning": "推理",
+      "outputTotal": "输出合计",
+      "imageCount": "{count} 张",
+      "secondCount": "{count} 秒"
     },
     "billing": {
       "cacheWrite": "缓存(写)",

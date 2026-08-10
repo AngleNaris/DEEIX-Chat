@@ -46,6 +46,72 @@ func TestValidateOutboundHTTPURLUsesExplicitAllowlist(t *testing.T) {
 	}
 }
 
+func TestWithTrustedHTTPURLsAddsExactTargetsWithoutMutatingBasePolicy(t *testing.T) {
+	base := NewStrictOutboundPolicy(true)
+	trusted, err := base.WithTrustedHTTPURLs(
+		"http://new-api:3000/oidc",
+		"http://127.0.0.1:8080/verify",
+	)
+	if err != nil {
+		t.Fatalf("derive trusted policy: %v", err)
+	}
+
+	for _, rawURL := range []string{
+		"http://new-api:3000/.well-known/openid-configuration",
+		"http://127.0.0.1:8080/token",
+	} {
+		if err = ValidateOutboundHTTPURL(rawURL, trusted); err != nil {
+			t.Fatalf("expected trusted target %s to be allowed: %v", rawURL, err)
+		}
+	}
+	if trusted.allowsHost("different-service") {
+		t.Fatal("unrelated hostname was added to the trusted policy")
+	}
+	for _, rawURL := range []string{
+		"http://127.0.0.2:8080/token",
+	} {
+		if err = ValidateOutboundHTTPURL(rawURL, trusted); !errors.Is(err, ErrUnsafeOutboundURL) {
+			t.Fatalf("expected unrelated target %s to remain blocked, got %v", rawURL, err)
+		}
+	}
+	if base.allowsHost("new-api") {
+		t.Fatal("base policy was mutated")
+	}
+}
+
+func TestWithTrustedHTTPURLsRejectsPermanentlyBlockedTargets(t *testing.T) {
+	base := NewStrictOutboundPolicy(true)
+	for _, rawURL := range []string{
+		"http://metadata.google.internal/computeMetadata/v1",
+		"http://169.254.169.254/latest/meta-data",
+		"http://[fe80::1]/",
+		"file:///etc/passwd",
+		"http://user:password@localhost:8080/",
+	} {
+		if _, err := base.WithTrustedHTTPURLs(rawURL); !errors.Is(err, ErrInvalidOutboundPolicy) {
+			t.Fatalf("expected trusted target %s to be rejected, got %v", rawURL, err)
+		}
+	}
+}
+
+func TestHTTPOriginNormalizesSchemeHostAndDefaultPort(t *testing.T) {
+	origin, err := HTTPOrigin("HTTPS://Example.COM.:443/provider/path?query=1")
+	if err != nil {
+		t.Fatalf("normalize origin: %v", err)
+	}
+	if origin != "https://example.com" {
+		t.Fatalf("origin = %q, want https://example.com", origin)
+	}
+
+	origin, err = HTTPOrigin("http://[::1]:8080/v1")
+	if err != nil {
+		t.Fatalf("normalize IPv6 origin: %v", err)
+	}
+	if origin != "http://[::1]:8080" {
+		t.Fatalf("origin = %q, want http://[::1]:8080", origin)
+	}
+}
+
 func TestValidateOutboundHTTPURLNeverAllowsMetadataTargets(t *testing.T) {
 	policy := mustOutboundPolicy(t, true, nil, []string{"0.0.0.0/0", "::/0"})
 	for _, rawURL := range []string{

@@ -467,7 +467,7 @@ export function SettingsChat() {
     loading,
     billingMode,
     contextCompressionEnabled,
-    vendorGroups,
+    modelGroups,
     handleBool,
     handleEnum,
     handleDefaultModel,
@@ -481,7 +481,7 @@ export function SettingsChat() {
   const modelOptions = React.useMemo<ModelOption[]>(
     () => [
       { label: t("defaultModel.systemRecommended"), value: SYSTEM_RECOMMENDED_MODEL, iconUrl: null },
-      ...vendorGroups.flatMap(([, items]) =>
+      ...modelGroups.flatMap(([, items]) =>
         items
           .filter((model) => model.platformModelName.trim() && parseKindsJSON(model.kindsJSON).includes("chat"))
           .map((model) => ({
@@ -495,7 +495,7 @@ export function SettingsChat() {
           })),
       ),
     ],
-    [t, vendorGroups],
+    [modelGroups, t],
   );
 
   React.useEffect(() => {

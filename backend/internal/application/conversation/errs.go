@@ -117,6 +117,8 @@ var (
 	ErrModelAccessDenied = errors.New("model access denied by group policy")
 	// ErrUpstreamRequestFailed 上游请求失败。
 	ErrUpstreamRequestFailed = errors.New("upstream request failed")
+	// ErrGeneratedMediaArtifactUnavailable 上游已完成媒体生成，但结果制品暂时无法获取或校验。
+	ErrGeneratedMediaArtifactUnavailable = errors.New("generated media artifact is temporarily unavailable")
 	// ErrUpstreamEmptyResponse 上游返回空响应。
 	ErrUpstreamEmptyResponse = errors.New("upstream returned empty response")
 	// ErrToolRunFinalAnswerMissing 工具循环结束后上游仍未产出最终回答。

@@ -432,10 +432,10 @@ func (s *Service) normalizeServerInput(input ServerInput, requireToken bool) (Se
 }
 
 func (s *Service) validateServerBaseURL(raw string) error {
-	if s == nil || s.cfg == nil {
+	if s == nil {
 		return ErrInvalidServerBaseURL
 	}
-	return security.ValidateOutboundHTTPURL(raw, s.cfg.Snapshot().TrustedOutboundPolicy())
+	return security.ValidateTrustedOutboundHTTPURL(raw)
 }
 
 func normalizeToolInput(input ToolInput) (repository.UpdateMCPToolInput, error) {

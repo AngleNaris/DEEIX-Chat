@@ -738,7 +738,6 @@ function MessageInlineVideoPreview({
   const detectedMime = attachment.detectedMime;
   const previewURL = attachment.previewURL;
   const sizeBytes = attachment.sizeBytes;
-
   const revokeObjectURL = React.useCallback(() => {
     if (!objectURLRef.current) {
       return;

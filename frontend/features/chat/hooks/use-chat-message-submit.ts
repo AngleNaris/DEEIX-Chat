@@ -21,6 +21,7 @@ import {
 import { sanitizeConversationOptions } from "@/features/chat/model/conversation-options";
 import { buildMediaImagePreviewMarkdown } from "@/features/chat/model/media-image-preview";
 import {
+  resolveAssistantInputSideUsageValue,
   resolveDefaultSubmissionParentMessage,
   resolvePersistedPublicID,
   toPendingAttachments,
@@ -116,15 +117,6 @@ function streamEventErrorToApiError(
   fallback: string,
 ): ApiError {
   return new ApiError(event.message || fallback, 502, event.debug, event.errorCode);
-}
-
-function resolveInputSideUsageValue(...values: Array<number | null | undefined>): number {
-  for (const value of values) {
-    if (typeof value === "number" && Number.isFinite(value) && value > 0) {
-      return value;
-    }
-  }
-  return 0;
 }
 
 function resolveMediaStatusLabel(
@@ -1277,18 +1269,21 @@ export function useChatMessageSubmit({
             assistantUpdatedAt: completed.assistantMessage.updatedAt,
             assistantContentType: completed.assistantMessage.contentType || current.assistantContentType,
             assistantAttachments: parseAttachments(completed.assistantMessage.attachments),
-            assistantInputTokens: resolveInputSideUsageValue(
+            assistantInputTokens: resolveAssistantInputSideUsageValue(
+              assistantOnlyBranch,
               completed.assistantMessage.inputTokens,
               completed.userMessage.inputTokens,
               current.assistantInputTokens,
             ),
             assistantOutputTokens: completed.assistantMessage.outputTokens,
-            assistantCacheReadTokens: resolveInputSideUsageValue(
+            assistantCacheReadTokens: resolveAssistantInputSideUsageValue(
+              assistantOnlyBranch,
               completed.assistantMessage.cacheReadTokens,
               completed.userMessage.cacheReadTokens,
               current.assistantCacheReadTokens,
             ),
-            assistantCacheWriteTokens: resolveInputSideUsageValue(
+            assistantCacheWriteTokens: resolveAssistantInputSideUsageValue(
+              assistantOnlyBranch,
               completed.assistantMessage.cacheWriteTokens,
               completed.userMessage.cacheWriteTokens,
               current.assistantCacheWriteTokens,

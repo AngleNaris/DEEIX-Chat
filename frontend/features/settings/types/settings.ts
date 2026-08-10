@@ -32,7 +32,7 @@ export type ChatSettings = {
   platformToolsWriteApproval: PlatformToolsWriteApproval;
 };
 
-export type ModelVendorGroup = [vendor: string, items: PublicModelDTO[]];
+export type ModelPresentationGroup = [groupKey: string, items: PublicModelDTO[]];
 
 export type ProfileDraft = {
   avatarUrl: string;

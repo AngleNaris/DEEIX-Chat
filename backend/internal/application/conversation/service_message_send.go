@@ -411,19 +411,6 @@ func (s *Service) sendMessageInternal(
 		prefetchCh <- r
 	}()
 
-	// 异步语义召回：200ms 截止时限，不阻塞 LLM 关键路径。
-	// 超时后优雅跳过；召回依赖 Embedding 服务。
-	// 召回结果稍后作为用户上下文 XML 注入，避免把历史片段提升为 system 指令。
-	var recallCh chan []model.MessageChunk
-	if cfg.EmbeddingEnabled && cfg.SemanticContextEnabled {
-		recallCh = make(chan []model.MessageChunk, 1)
-		go func() {
-			recallCtx, cancel := context.WithTimeout(ctx, semanticRecallDeadline)
-			defer cancel()
-			recallCh <- s.recallSemanticContext(recallCtx, input.ConversationID, input.UserID, input.Content)
-		}()
-	}
-
 	// 读取用户的文件处理模式偏好（auto / full_context / rag）。
 	fileMode := "auto"
 	capability := s.resolveChatFileCapability(ctx)
@@ -439,6 +426,19 @@ func (s *Service) sendMessageInternal(
 	promptScope := buildPromptScope(contextMessages, prefetch.snapshot, compactPolicy)
 	promptMessages := s.applyContextTokenBudget(promptScope.activeMessages(), route.UpstreamModel, route.ModelCapabilitiesJSON, reasoningContentPassback)
 	ragQuery := buildRAGQuery(promptMessages, input.Content, cfg.RAGQueryHistoryTurns)
+	historicalScope := promptScope.historicalMessageScope(input.ConversationID, input.UserID, userMessage.ID)
+
+	// 语义召回必须先限定到当前活跃分支，再由向量存储执行 Top-K，避免 sibling 分支占用名额。
+	// 召回仍与附件和 RAG 处理并行，200ms 超时后按原行为优雅跳过。
+	var recallCh chan []model.MessageChunk
+	if cfg.EmbeddingEnabled && cfg.SemanticContextEnabled && historicalScope.Valid() {
+		recallCh = make(chan []model.MessageChunk, 1)
+		go func() {
+			recallCtx, cancel := context.WithTimeout(ctx, semanticRecallDeadline)
+			defer cancel()
+			recallCh <- s.recallSemanticContext(recallCtx, historicalScope, input.Content)
+		}()
+	}
 
 	conversationFileIDs := collectConversationFileIDs(promptMessages, input.FileIDs)
 	conversationAttachments, err := s.resolveConversationFileContext(ctx, input.UserID, conversationFileIDs, input.FileIDs)
@@ -638,7 +638,7 @@ func (s *Service) sendMessageInternal(
 	userCtx.Attachments = imageAttachmentsForCurrentUser(stableFullContextAttachments)
 	userCtx.RAGChunks = ragContextChunks
 	// 语义召回注入：收集异步结果（与 RAG 解耦，独立运行）。
-	// recallCh 为 nil 时（SemanticContextEnabled=false）直接跳过。
+	// recallCh 为 nil 时（未启用语义召回或当前分支没有历史消息）直接跳过。
 	//
 	// 必须阻塞等待（不用 select default），原因：
 	//   - 无附件时 hydrateAttachmentsForSend 几乎瞬间返回（~5ms），
@@ -647,16 +647,12 @@ func (s *Service) sendMessageInternal(
 	//     因此 <-recallCh 最多阻塞 semanticRecallDeadline（200ms），不会死锁。
 	//   - 有附件时 goroutine 早已完成（附件处理 >1s >> 200ms），等待开销为零。
 	if recallCh != nil {
-		recalled := <-recallCh // 阻塞等待，最多 semanticRecallDeadline（200ms）
-		userCtx.RecallChunks = promptScope.filterRecallChunks(recalled)
+		userCtx.RecallChunks = <-recallCh // 阻塞等待，最多 semanticRecallDeadline（200ms）
 	}
 	userCtx.HistoricalArtifacts = s.recallHistoricalContextArtifacts(
 		ctx,
-		input.ConversationID,
-		userMessage.ID,
+		historicalScope,
 		promptScope.Snapshot != nil,
-		promptScope.CoveredUntilID,
-		promptScope.retainedMessageIDSet(),
 		input.Content,
 		ragContextChunks,
 		ragFallbackEvidenceAttachments(ragFallbacks),
@@ -665,7 +661,7 @@ func (s *Service) sendMessageInternal(
 	userCtx.CurrentArtifacts = s.persistPromptContextArtifacts(ctx, promptContextArtifactInput{
 		ConversationID: input.ConversationID,
 		UserID:         input.UserID,
-		MessageID:      userMessage.ID,
+		MessageID:      assistantMessage.ID,
 		RunID:          run.RunID,
 		Query:          ragQuery,
 		RAGChunks:      ragContextChunks,
@@ -857,9 +853,9 @@ func (s *Service) sendMessageInternal(
 		streamedText.WriteString(delta)
 		return nil
 	}
-	var lastGenerationAttemptObservation *generationAttemptObservation
 	// lastReadFileRequests 记录最近一次 LLM 调用的 read_file 请求（标记已从可见流中剥离）。
 	var lastReadFileRequests []skillFileRequest
+	var lastGenerationAttemptObservation *generationAttemptObservation
 	runGenerate := func(currentInput llm.GenerateInput) (*llm.GenerateOutput, error) {
 		attemptObservation := &generationAttemptObservation{}
 		lastGenerationAttemptObservation = attemptObservation
@@ -1634,6 +1630,7 @@ func (s *Service) sendMessageInternal(
 		StatefulPromptFingerprint: statefulPromptFingerprint,
 		ToolCallRows:              toolCallRows,
 		PersistedToolCallKeys:     persistedToolCallKeys,
+		Route:                     resolvedRoute,
 		ReuseUserMessage:          reuseUserMessage,
 	})
 	platformtracing.RecordError(persistSpan, err)

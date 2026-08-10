@@ -67,6 +67,99 @@ func NewStrictOutboundPolicy(enforce bool) OutboundPolicy {
 	return OutboundPolicy{enforce: enforce}
 }
 
+// ValidateTrustedOutboundHTTPURL 校验管理员可显式授权的 HTTP(S) 端点格式。
+// 私网和回环端点允许被授权，但链路本地、元数据和无效主机始终拒绝。
+func ValidateTrustedOutboundHTTPURL(raw string) error {
+	_, err := parseTrustedHTTPURL(raw)
+	return err
+}
+
+// HTTPOrigin 返回经过规范化的 HTTP(S) origin，用于把管理员配置的端点信任限制在 scheme、host 和 port。
+// 默认端口会被折叠，路径、查询参数和片段不会进入 origin。
+func HTTPOrigin(raw string) (string, error) {
+	parsed, err := parseTrustedHTTPURL(raw)
+	if err != nil {
+		return "", err
+	}
+	scheme := strings.ToLower(strings.TrimSpace(parsed.Scheme))
+	hostname := normalizeURLHostname(parsed.Hostname())
+	host := hostname
+	if strings.Contains(hostname, ":") {
+		host = "[" + hostname + "]"
+	}
+	port := parsed.Port()
+	if port != "" && !isDefaultHTTPPort(scheme, port) {
+		host += ":" + port
+	}
+	return scheme + "://" + host, nil
+}
+
+// WithTrustedHTTPURLs 返回一份仅额外信任指定 HTTP(S) 端点主机的策略副本。
+// 该能力用于管理员显式配置的集成端点；不会修改原策略，也不能放行链路本地或元数据目标。
+func (p OutboundPolicy) WithTrustedHTTPURLs(rawURLs ...string) (OutboundPolicy, error) {
+	trusted := OutboundPolicy{
+		enforce:         p.enforce,
+		allowedHosts:    make(map[string]struct{}, len(p.allowedHosts)+len(rawURLs)),
+		allowedPrefixes: append([]netip.Prefix(nil), p.allowedPrefixes...),
+	}
+	for host := range p.allowedHosts {
+		trusted.allowedHosts[host] = struct{}{}
+	}
+
+	seenPrefixes := make(map[netip.Prefix]struct{}, len(trusted.allowedPrefixes)+len(rawURLs))
+	for _, prefix := range trusted.allowedPrefixes {
+		seenPrefixes[prefix] = struct{}{}
+	}
+	for _, raw := range rawURLs {
+		parsed, err := parseTrustedHTTPURL(raw)
+		if err != nil {
+			return OutboundPolicy{}, err
+		}
+		host := normalizeURLHostname(parsed.Hostname())
+		if ip, err := netip.ParseAddr(host); err == nil {
+			ip = ip.Unmap()
+			prefix := netip.PrefixFrom(ip, ip.BitLen())
+			if _, exists := seenPrefixes[prefix]; !exists {
+				seenPrefixes[prefix] = struct{}{}
+				trusted.allowedPrefixes = append(trusted.allowedPrefixes, prefix)
+			}
+			continue
+		}
+		trusted.allowedHosts[host] = struct{}{}
+	}
+	return trusted, nil
+}
+
+func parseTrustedHTTPURL(raw string) (*url.URL, error) {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed == nil || parsed.Host == "" || parsed.User != nil {
+		return nil, fmt.Errorf("%w: invalid trusted HTTP URL", ErrInvalidOutboundPolicy)
+	}
+	scheme := strings.ToLower(strings.TrimSpace(parsed.Scheme))
+	if scheme != "http" && scheme != "https" {
+		return nil, fmt.Errorf("%w: trusted URL must use HTTP or HTTPS", ErrInvalidOutboundPolicy)
+	}
+	host := normalizeURLHostname(parsed.Hostname())
+	if host == "" || strings.Contains(host, "%") {
+		return nil, fmt.Errorf("%w: invalid trusted URL host", ErrInvalidOutboundPolicy)
+	}
+	if ip, err := netip.ParseAddr(host); err == nil {
+		ip = ip.Unmap()
+		if isNeverAllowedIP(net.IP(ip.AsSlice())) {
+			return nil, fmt.Errorf("%w: target %q cannot be trusted", ErrInvalidOutboundPolicy, host)
+		}
+		return parsed, nil
+	}
+	if !isValidAllowlistedHostname(host) || isNeverAllowedHostname(host) {
+		return nil, fmt.Errorf("%w: target host %q cannot be trusted", ErrInvalidOutboundPolicy, host)
+	}
+	return parsed, nil
+}
+
+func isDefaultHTTPPort(scheme string, port string) bool {
+	return (scheme == "http" && port == "80") || (scheme == "https" && port == "443")
+}
+
 // ValidateOutboundHTTPURL 校验外联 HTTP 地址；启用 SSRF 防护时仅允许策略授权的本机/内网目标，并始终阻断链路本地和元数据地址。
 func ValidateOutboundHTTPURL(raw string, policy OutboundPolicy) error {
 	value := strings.TrimSpace(raw)

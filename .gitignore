@@ -173,3 +173,6 @@ docker-compose.local.yml
 
 # Local agent workspace (never commit)
 .zcode/
+
+# Runtime data (per-service)
+backend/data/

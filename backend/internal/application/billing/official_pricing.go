@@ -4,18 +4,38 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
+	"sync"
+	"time"
+
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 )
+
+const openRouterPricingCacheTTL = 24 * time.Hour
 
 var (
 	// ErrOfficialPricingProviderUnavailable 表示官方定价提供方未完成装配。
 	ErrOfficialPricingProviderUnavailable = errors.New("official pricing provider unavailable")
 	// ErrOfficialPricingEmpty 表示上游返回的官方定价目录没有有效模型。
 	ErrOfficialPricingEmpty = errors.New("official pricing catalog is empty")
+	// ErrOfficialPricingCacheUnavailable 表示官方定价缓存仓储未完成装配。
+	ErrOfficialPricingCacheUnavailable = errors.New("official pricing cache unavailable")
+	// ErrOfficialPricingCacheReadFailed 表示官方定价持久缓存读取失败。
+	ErrOfficialPricingCacheReadFailed = errors.New("official pricing cache read failed")
+	// ErrOfficialPricingCacheWriteFailed 表示官方定价已刷新但持久缓存写入失败。
+	ErrOfficialPricingCacheWriteFailed = errors.New("official pricing cache write failed")
 )
 
 type openRouterPricingProvider interface {
 	FetchModels(ctx context.Context) ([]byte, error)
+}
+
+// OfficialPricingService 编排 OpenRouter 官方定价读取、持久缓存和降级策略。
+type OfficialPricingService struct {
+	provider openRouterPricingProvider
+	cache    repository.OpenRouterPricingCacheRepository
+	mu       sync.Mutex
 }
 
 // OfficialPricingItem 表示第三方官方模型定价项。
@@ -32,6 +52,14 @@ type OfficialUnitPricing struct {
 	Completion      string
 	InputCacheRead  string
 	InputCacheWrite string
+}
+
+// OfficialPricingResult 表示官方定价查询结果及其缓存状态。
+type OfficialPricingResult struct {
+	FetchedAt time.Time
+	Cached    bool
+	Stale     bool
+	Items     []OfficialPricingItem
 }
 
 type openRouterModelsResponse struct {
@@ -52,20 +80,138 @@ type openRouterModelPricing struct {
 	InputCacheWrite string `json:"input_cache_write"`
 }
 
-// SetOpenRouterPricingProvider 注入 OpenRouter 官方模型目录提供方。
-func (s *Service) SetOpenRouterPricingProvider(provider openRouterPricingProvider) {
-	if s == nil {
-		return
+type openRouterPricingCacheFile struct {
+	FetchedAt time.Time                    `json:"fetchedAt"`
+	Items     []openRouterPricingCacheItem `json:"items"`
+}
+
+type openRouterPricingCacheItem struct {
+	ID            string                            `json:"id"`
+	CanonicalSlug string                            `json:"canonicalSlug"`
+	Name          string                            `json:"name"`
+	Pricing       openRouterPricingCacheUnitPricing `json:"pricing"`
+}
+
+type openRouterPricingCacheUnitPricing struct {
+	Prompt          string `json:"prompt"`
+	Completion      string `json:"completion"`
+	InputCacheRead  string `json:"inputCacheRead"`
+	InputCacheWrite string `json:"inputCacheWrite"`
+}
+
+// NewOfficialPricingService 创建依赖完整的官方定价应用服务。
+func NewOfficialPricingService(provider openRouterPricingProvider, cache repository.OpenRouterPricingCacheRepository) *OfficialPricingService {
+	return &OfficialPricingService{provider: provider, cache: cache}
+}
+
+// GetOpenRouterOfficialPricing 按缓存策略获取 OpenRouter 官方模型定价。
+// 同一进程内串行刷新，避免缓存过期时并发请求击穿上游。
+func (s *OfficialPricingService) GetOpenRouterOfficialPricing(ctx context.Context, refresh bool) (OfficialPricingResult, error) {
+	if s == nil || s.cache == nil {
+		return OfficialPricingResult{}, ErrOfficialPricingCacheUnavailable
 	}
-	s.openRouterPricingProvider = provider
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	cache, cacheOK, err := s.loadOpenRouterPricingCache(ctx)
+	if err != nil {
+		return OfficialPricingResult{}, fmt.Errorf("%w: %w", ErrOfficialPricingCacheReadFailed, err)
+	}
+	if cacheOK && !refresh && !openRouterOfficialPricingCacheStale(cache.FetchedAt) {
+		return officialPricingResultFromCache(cache, true, false), nil
+	}
+
+	items, err := s.FetchOpenRouterOfficialPricing(ctx)
+	if err != nil {
+		if cacheOK {
+			return officialPricingResultFromCache(cache, true, true), nil
+		}
+		return OfficialPricingResult{}, err
+	}
+
+	nextCache := openRouterPricingCacheFile{
+		FetchedAt: time.Now().UTC(),
+		Items:     officialPricingCacheItems(items),
+	}
+	data, err := json.MarshalIndent(nextCache, "", "  ")
+	if err != nil {
+		return OfficialPricingResult{}, fmt.Errorf("encode openrouter official pricing cache: %w", err)
+	}
+	if err := s.cache.Store(ctx, data); err != nil {
+		return OfficialPricingResult{}, fmt.Errorf("%w: %w", ErrOfficialPricingCacheWriteFailed, err)
+	}
+	return OfficialPricingResult{
+		FetchedAt: nextCache.FetchedAt,
+		Items:     append([]OfficialPricingItem(nil), items...),
+	}, nil
+}
+
+func (s *OfficialPricingService) loadOpenRouterPricingCache(ctx context.Context) (openRouterPricingCacheFile, bool, error) {
+	data, found, err := s.cache.Load(ctx)
+	if err != nil {
+		return openRouterPricingCacheFile{}, false, err
+	}
+	if !found {
+		return openRouterPricingCacheFile{}, false, nil
+	}
+	var cache openRouterPricingCacheFile
+	if err := json.Unmarshal(data, &cache); err != nil || cache.FetchedAt.IsZero() || len(cache.Items) == 0 {
+		return openRouterPricingCacheFile{}, false, nil
+	}
+	return cache, true, nil
+}
+
+func officialPricingResultFromCache(cache openRouterPricingCacheFile, cached bool, stale bool) OfficialPricingResult {
+	items := make([]OfficialPricingItem, 0, len(cache.Items))
+	for _, item := range cache.Items {
+		items = append(items, OfficialPricingItem{
+			ID:            item.ID,
+			CanonicalSlug: item.CanonicalSlug,
+			Name:          item.Name,
+			Pricing: OfficialUnitPricing{
+				Prompt:          item.Pricing.Prompt,
+				Completion:      item.Pricing.Completion,
+				InputCacheRead:  item.Pricing.InputCacheRead,
+				InputCacheWrite: item.Pricing.InputCacheWrite,
+			},
+		})
+	}
+	return OfficialPricingResult{
+		FetchedAt: cache.FetchedAt,
+		Cached:    cached,
+		Stale:     stale,
+		Items:     items,
+	}
+}
+
+func officialPricingCacheItems(items []OfficialPricingItem) []openRouterPricingCacheItem {
+	result := make([]openRouterPricingCacheItem, 0, len(items))
+	for _, item := range items {
+		result = append(result, openRouterPricingCacheItem{
+			ID:            item.ID,
+			CanonicalSlug: item.CanonicalSlug,
+			Name:          item.Name,
+			Pricing: openRouterPricingCacheUnitPricing{
+				Prompt:          item.Pricing.Prompt,
+				Completion:      item.Pricing.Completion,
+				InputCacheRead:  item.Pricing.InputCacheRead,
+				InputCacheWrite: item.Pricing.InputCacheWrite,
+			},
+		})
+	}
+	return result
+}
+
+func openRouterOfficialPricingCacheStale(fetchedAt time.Time) bool {
+	return fetchedAt.IsZero() || time.Since(fetchedAt) > openRouterPricingCacheTTL
 }
 
 // FetchOpenRouterOfficialPricing 获取并规范化 OpenRouter 官方模型定价。
-func (s *Service) FetchOpenRouterOfficialPricing(ctx context.Context) ([]OfficialPricingItem, error) {
-	if s == nil || s.openRouterPricingProvider == nil {
+func (s *OfficialPricingService) FetchOpenRouterOfficialPricing(ctx context.Context) ([]OfficialPricingItem, error) {
+	if s == nil || s.provider == nil {
 		return nil, ErrOfficialPricingProviderUnavailable
 	}
-	body, err := s.openRouterPricingProvider.FetchModels(ctx)
+	body, err := s.provider.FetchModels(ctx)
 	if err != nil {
 		return nil, err
 	}

@@ -104,6 +104,7 @@
     "message": "Message",
     "caller": "Caller",
     "model": "Model",
+    "usage": "Usage",
     "billing": "Billing",
     "balanceAfter": "Balance after settlement",
     "latency": "Latency",
@@ -203,7 +204,13 @@
       "inputShort": "In",
       "outputShort": "Out",
       "cacheReadShort": "Read",
-      "cacheWriteShort": "Write"
+      "cacheWriteShort": "Write",
+      "input": "Input",
+      "output": "Output",
+      "reasoning": "Reasoning",
+      "outputTotal": "Output total",
+      "imageCount": "{count, plural, one {# image} other {# images}}",
+      "secondCount": "{count, plural, one {# second} other {# seconds}}"
     },
     "billing": {
       "cacheWrite": "Cache write",

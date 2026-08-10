@@ -182,6 +182,9 @@ func inferProvider(platformModelName string) string {
 }
 
 func classifyRunErrorCode(err error) string {
+	if errors.Is(err, ErrGeneratedMediaArtifactUnavailable) {
+		return MessageErrorCodeMediaArtifactUnavailable
+	}
 	var upstreamErr *llm.UpstreamError
 	if errors.As(err, &upstreamErr) && isImageStreamConfigurationFailure(upstreamErr) {
 		return MessageErrorCodeMediaImageStreamUnsupported
@@ -490,6 +493,9 @@ func MessageErrorCode(err error) string {
 	if err == nil {
 		return ""
 	}
+	if errors.Is(err, ErrGeneratedMediaArtifactUnavailable) {
+		return MessageErrorCodeMediaArtifactUnavailable
+	}
 	var upstreamErr *llm.UpstreamError
 	if errors.As(err, &upstreamErr) && isImageStreamConfigurationFailure(upstreamErr) {
 		return MessageErrorCodeMediaImageStreamUnsupported
@@ -588,6 +594,8 @@ func shouldFallbackToNonStreaming(err error) bool {
 	}
 }
 
+// generationAttemptObservation 记录单次 LLM 生成尝试是否已向用户输出可见内容，
+// 用于区分"重试失败"与"已产生部分输出"（技能文件补充轮等场景）。
 type generationAttemptObservation struct {
 	emitted bool
 }
