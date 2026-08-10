@@ -297,6 +297,85 @@ function RoleDragHandle({
   );
 }
 
+// RoleGroupHeader 渲染可拖拽排序的分组头：点击标题折叠/展开，拖拽右侧手柄调整分组顺序。
+function RoleGroupHeader({
+  collapsed,
+  count,
+  disabled,
+  groupName,
+  onToggle,
+}: {
+  collapsed: boolean;
+  count: number;
+  disabled: boolean;
+  groupName: string;
+  onToggle: () => void;
+}) {
+  const { attributes, isDragging, listeners, setNodeRef, transform, transition } = useSortable({
+    id: `group:${groupName}`,
+    disabled,
+  });
+  const [hovered, setHovered] = React.useState(false);
+  const iconRef = React.useRef<GripVerticalIconHandle>(null);
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  } satisfies React.CSSProperties;
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={cn("px-1 pb-0.5 pt-1 transition-opacity", isDragging && "opacity-45")}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      <div className="relative">
+        <Button
+          type="button"
+          variant="ghost"
+          className="flex h-7 w-full min-w-0 items-center gap-1 rounded-md pr-7 text-xs font-medium text-sidebar-foreground/75 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+          aria-expanded={!collapsed}
+          onClick={onToggle}
+        >
+          <ChevronDown
+            aria-hidden
+            className={cn(
+              "size-3.5 shrink-0 text-muted-foreground/60 transition-transform duration-200",
+              !collapsed && "rotate-180",
+            )}
+          />
+          <span className="min-w-0 flex-1 truncate text-left">{groupName}</span>
+          <span className="shrink-0 text-[10px] text-sidebar-foreground/45">{count}</span>
+        </Button>
+        <Button
+          {...attributes}
+          {...listeners}
+          type="button"
+          variant="ghost"
+          size="icon"
+          aria-label={`拖动调整「${groupName}」分组顺序`}
+          title={`拖动调整「${groupName}」分组顺序`}
+          disabled={disabled}
+          className={cn(
+            "absolute right-0 top-0 z-20 h-7 w-6 cursor-grab text-sidebar-foreground/45 opacity-0 transition-[color,opacity] duration-150 hover:bg-transparent hover:text-sidebar-foreground active:cursor-grabbing group-hover/role-group:opacity-100 disabled:cursor-not-allowed disabled:text-sidebar-foreground/40 dark:hover:bg-transparent",
+            (hovered || isDragging) && "opacity-100",
+          )}
+          style={{ touchAction: "none" }}
+          onMouseEnter={() => iconRef.current?.startAnimation()}
+          onMouseLeave={() => iconRef.current?.stopAnimation()}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+        >
+          <GripVerticalIcon aria-hidden ref={iconRef} size={14} className="size-4 text-current" />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function RoleTreeButton({
   actionPaddingClassName,
   active,
@@ -595,7 +674,50 @@ export function NavRoles() {
         return;
       }
 
-      const activeRoleID = String(active.id);
+      const activeID = String(active.id);
+      const overID = String(over.id);
+      // 分组头拖拽：仅在分组之间重排顺序，组内角色顺序保持不变。
+      if (activeID.startsWith("group:") || overID.startsWith("group:")) {
+        if (!activeID.startsWith("group:") || !overID.startsWith("group:")) {
+          return;
+        }
+        const groupNames = roleGroups.groups.map((group) => group.name);
+        const fromIndex = groupNames.indexOf(activeID.slice("group:".length));
+        const toIndex = groupNames.indexOf(overID.slice("group:".length));
+        if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) {
+          return;
+        }
+        const reorderedGroupNames = arrayMove(groupNames, fromIndex, toIndex);
+        const rolesByGroup = new Map(roleGroups.groups.map((group) => [group.name, group.roles]));
+        const roleByID = new Map(roles.map((role) => [role.publicID, role]));
+        const orderedRoleIDs = [
+          ...roleGroups.pinned.map((role) => role.publicID),
+          ...reorderedGroupNames.flatMap((name) => rolesByGroup.get(name)?.map((role) => role.publicID) ?? []),
+          ...roleGroups.ungrouped.map((role) => role.publicID),
+        ];
+        const nextRoles = orderedRoleIDs
+          .map((id) => roleByID.get(id))
+          .filter((role): role is ConversationRoleDTO => Boolean(role));
+        setRoles(nextRoles);
+        setSavingRoleOrder(true);
+        try {
+          const token = await resolveAccessToken();
+          if (!token) {
+            throw new Error("missing access token");
+          }
+          await reorderConversationRoles(token, {
+            roleIDs: nextRoles.map((role) => role.publicID),
+          });
+        } catch {
+          toast.error("角色排序保存失败");
+          await loadRoles();
+        } finally {
+          setSavingRoleOrder(false);
+        }
+        return;
+      }
+
+      const activeRoleID = activeID;
       const overRoleID = String(over.id);
       const activeGroupName = groupNameOfRole(activeRoleID);
       if (activeGroupName !== groupNameOfRole(overRoleID)) {
@@ -1069,54 +1191,47 @@ export function NavRoles() {
                     </div>
                   ) : null}
 
-                  {roleGroups.groups.map((group) => {
-                    const groupCollapsed = collapsedRoleGroups.has(group.name);
-                    const groupRoleIDs = group.roles.map((role) => role.publicID);
-                    const canSortRoleGroup = group.roles.length >= 2;
-                    return (
-                      <React.Fragment key={group.name}>
-                        {showRoleGroupHeaders ? (
-                          <div className="px-1 pb-0.5 pt-1">
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              className="flex h-7 w-full min-w-0 items-center gap-1 rounded-md px-2 text-xs font-medium text-sidebar-foreground/75 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-                              aria-expanded={!groupCollapsed}
-                              onClick={() => toggleRoleGroup(group.name)}
-                            >
-                              <ChevronDown
-                                aria-hidden
-                                className={cn(
-                                  "size-3.5 shrink-0 text-muted-foreground/60 transition-transform duration-200",
-                                  !groupCollapsed && "rotate-180",
-                                )}
-                              />
-                              <span className="min-w-0 flex-1 truncate text-left">{group.name}</span>
-                              <span className="shrink-0 text-[10px] text-sidebar-foreground/45">{group.roles.length}</span>
-                            </Button>
-                          </div>
-                        ) : null}
-                        <AnimatePresence initial={false}>
-                          {!groupCollapsed ? (
-                            <motion.div
-                              key={`${group.name}-roles`}
-                              initial={{ height: 0, opacity: 0, "--mask-stop": "0%", y: 6 }}
-                              animate={{ height: "auto", opacity: 1, "--mask-stop": "100%", y: 0 }}
-                              exit={{ height: 0, opacity: 0, "--mask-stop": "0%", y: 6 }}
-                              transition={ROLE_TREE_ACCORDION_TRANSITION}
-                              style={ROLE_TREE_ACCORDION_MASK_STYLE}
-                            >
-                              <SortableContext items={groupRoleIDs} strategy={verticalListSortingStrategy}>
-                                <SidebarMenu className="gap-0.5">
-                                  {group.roles.map((role) => renderRoleRow(role, canSortRoleGroup, `group:${group.name}`))}
-                                </SidebarMenu>
-                              </SortableContext>
-                            </motion.div>
+                  <SortableContext
+                    items={roleGroups.groups.map((group) => `group:${group.name}`)}
+                    strategy={verticalListSortingStrategy}
+                  >
+                    {roleGroups.groups.map((group) => {
+                      const groupCollapsed = collapsedRoleGroups.has(group.name);
+                      const groupRoleIDs = group.roles.map((role) => role.publicID);
+                      const canSortRoleGroup = group.roles.length >= 2;
+                      return (
+                        <React.Fragment key={group.name}>
+                          {showRoleGroupHeaders ? (
+                            <RoleGroupHeader
+                              collapsed={groupCollapsed}
+                              count={group.roles.length}
+                              disabled={savingRoleOrder}
+                              groupName={group.name}
+                              onToggle={() => toggleRoleGroup(group.name)}
+                            />
                           ) : null}
-                        </AnimatePresence>
-                      </React.Fragment>
-                    );
-                  })}
+                          <AnimatePresence initial={false}>
+                            {!groupCollapsed ? (
+                              <motion.div
+                                key={`${group.name}-roles`}
+                                initial={{ height: 0, opacity: 0, "--mask-stop": "0%", y: 6 }}
+                                animate={{ height: "auto", opacity: 1, "--mask-stop": "100%", y: 0 }}
+                                exit={{ height: 0, opacity: 0, "--mask-stop": "0%", y: 6 }}
+                                transition={ROLE_TREE_ACCORDION_TRANSITION}
+                                style={ROLE_TREE_ACCORDION_MASK_STYLE}
+                              >
+                                <SortableContext items={groupRoleIDs} strategy={verticalListSortingStrategy}>
+                                  <SidebarMenu className="gap-0.5">
+                                    {group.roles.map((role) => renderRoleRow(role, canSortRoleGroup, `group:${group.name}`))}
+                                  </SidebarMenu>
+                                </SortableContext>
+                              </motion.div>
+                            ) : null}
+                          </AnimatePresence>
+                        </React.Fragment>
+                      );
+                    })}
+                  </SortableContext>
 
                   {roleGroups.ungrouped.length > 0 ? (
                     <SortableContext items={roleGroups.ungrouped.map((role) => role.publicID)} strategy={verticalListSortingStrategy}>
