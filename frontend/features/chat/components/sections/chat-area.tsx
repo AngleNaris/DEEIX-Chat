@@ -76,6 +76,66 @@ function ScrollToPendingUser({ scrollKey }: { scrollKey: string }) {
   return null;
 }
 
+// 恢复被 anchor 替换打断的底部跟随：消息确认（temp 的 local-exchange-* key 被
+// server-* key 替换）或分支切换会让 MessageScroller 把视口重新锚定回旧的
+// scrollAnchor 消息并进入 anchored-to-message 模式——此后流式内容（如思维过程）
+// 增长不再自动跟随底部，且用户滚回底部也无法恢复（库的滚动处理排除该模式）。
+// 这里在 anchor key 变化时，若替换前视口位于底部附近，两帧后 scrollToEnd 把
+// 跟随状态恢复回来。
+function RecoverFollowAfterAnchorReplacement({
+  anchorKey,
+  viewportRef,
+}: {
+  anchorKey: string;
+  viewportRef: React.RefObject<HTMLDivElement | null>;
+}) {
+  const handledAnchorKeyRef = React.useRef("");
+  const { scrollToEnd } = useMessageScroller();
+
+  React.useLayoutEffect(() => {
+    if (!anchorKey) {
+      handledAnchorKeyRef.current = "";
+      return;
+    }
+    if (handledAnchorKeyRef.current === anchorKey) {
+      return;
+    }
+
+    const previousAnchorKey = handledAnchorKeyRef.current;
+    handledAnchorKeyRef.current = anchorKey;
+    if (!previousAnchorKey) {
+      // anchor 首次出现（新一轮发送）由 ScrollToPendingUser 处理。
+      return;
+    }
+
+    // 替换发生在 layout effect 之后、MutationObserver 锚定跳转之前，此刻视口
+    // 仍在原位——用它判断替换前是否处于底部跟随状态，避免打断用户手动滚动。
+    const viewport = viewportRef.current;
+    if (!viewport) {
+      return;
+    }
+    const wasNearBottom = viewport.scrollTop + viewport.clientHeight >= viewport.scrollHeight - 96;
+    if (!wasNearBottom) {
+      return;
+    }
+
+    let secondFrameID: number | null = null;
+    const firstFrameID = window.requestAnimationFrame(() => {
+      secondFrameID = window.requestAnimationFrame(() => {
+        scrollToEnd({ behavior: "auto" });
+      });
+    });
+    return () => {
+      window.cancelAnimationFrame(firstFrameID);
+      if (secondFrameID !== null) {
+        window.cancelAnimationFrame(secondFrameID);
+      }
+    };
+  }, [anchorKey, scrollToEnd, viewportRef]);
+
+  return null;
+}
+
 function CompactDivider({ summaryPreview }: { summaryPreview: string }) {
   const t = useTranslations("chat.messages");
   const [expanded, setExpanded] = React.useState(false);
@@ -608,6 +668,10 @@ export function ChatArea({
         <MessageScrollerProvider autoScroll defaultScrollPosition="end" scrollEdgeThreshold={16}>
           <MessageScroller>
             <ScrollToPendingUser scrollKey={pendingUserScrollKey} />
+            <RecoverFollowAfterAnchorReplacement
+              anchorKey={liveAnchorMessageKey}
+              viewportRef={messageViewportBoundaryRef}
+            />
             <MessageScrollerViewport
               ref={messageViewportBoundaryRef}
               className="px-3 pb-8 pt-2 [overflow-anchor:none] md:px-6"

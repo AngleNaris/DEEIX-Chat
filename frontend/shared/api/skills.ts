@@ -2,6 +2,10 @@ import { authedRequest } from "@/shared/api/authed-client";
 import { pathParam } from "@/shared/api/http-client";
 import type { PagePayload } from "@/shared/api/common.types";
 import type {
+  PackagePreviewDataResponse,
+  SkillPackageFileDataResponse,
+} from "@deeix/api-contract";
+import type {
   PatchSkillRequest,
   SkillDTO,
   SkillData,
@@ -146,11 +150,13 @@ function packageFilePathParam(path: string): string {
 }
 
 export async function previewMySkillPackage(accessToken: string, file: File): Promise<SkillPackagePreview> {
-  return authedRequest<SkillPackagePreview>(
+  // 响应为 {preview: ...} 信封（PackagePreviewDataResponse），需解包一层。
+  const data = await authedRequest<PackagePreviewDataResponse>(
     "/api/v1/skills/mine/import/preview",
     { method: "POST", accessToken, body: packageUploadForm(file) },
     true,
   );
+  return data.preview;
 }
 
 export async function importMySkillPackage(accessToken: string, file: File): Promise<SkillData> {
@@ -170,11 +176,13 @@ export async function replaceMySkillPackage(accessToken: string, id: number, fil
 }
 
 export async function previewAdminSkillPackage(accessToken: string, file: File): Promise<SkillPackagePreview> {
-  return authedRequest<SkillPackagePreview>(
+  // 响应为 {preview: ...} 信封（PackagePreviewDataResponse），需解包一层。
+  const data = await authedRequest<PackagePreviewDataResponse>(
     "/api/v1/admin/skills/import/preview",
     { method: "POST", accessToken, body: packageUploadForm(file) },
     true,
   );
+  return data.preview;
 }
 
 export async function importAdminSkillPackage(accessToken: string, file: File): Promise<SkillData> {
@@ -194,9 +202,11 @@ export async function replaceAdminSkillPackage(accessToken: string, id: number, 
 }
 
 export async function getSkillPackageFile(accessToken: string, id: number, path: string): Promise<SkillPackageFile> {
-  return authedRequest<SkillPackageFile>(
+  // 响应为 {file: ...} 信封（SkillPackageFileDataResponse），需解包一层。
+  const data = await authedRequest<SkillPackageFileDataResponse>(
     `/api/v1/skills/${pathParam(id)}/files/${packageFilePathParam(path)}`,
     { accessToken },
     true,
   );
+  return data.file;
 }
