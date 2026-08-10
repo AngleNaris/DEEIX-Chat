@@ -417,7 +417,7 @@ func applyResponsesStreamEvent(
 			mergeReasoningDeltaOutput(&result.Reasoning, reasoning)
 		}
 	case "response.completed":
-		output := buildGenerateOutputFromParsedForAdapter(EndpointResponses, adapter, asMap(parsed["response"]), false)
+		output := buildGenerateOutputFromParsedForAdapter(EndpointResponses, adapter, asMap(parsed["response"]), textEncodedToolCallsInactive)
 		if result.Reasoning == nil && output.Reasoning != nil && onEvent != nil {
 			if text := firstNonEmptyString(output.Reasoning.Text, output.Reasoning.Summary); text != "" {
 				if err := onEvent(GenerateStreamEvent{

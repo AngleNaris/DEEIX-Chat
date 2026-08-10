@@ -160,3 +160,24 @@ func TestToolRunFinalAnswerMissingAcceptsNaturalFinalAnswer(t *testing.T) {
 		t.Fatalf("expected natural final answer to be accepted")
 	}
 }
+
+func TestToolRunFinalAnswerMissingSeesStrippedTextToolCalls(t *testing.T) {
+	// 工具禁用轮中模型仍输出文本编码工具调用（DSML 已剥离）时，同样视为尚未收尾。
+	output := &llm.GenerateOutput{
+		Text:                  "已查询到部分结果",
+		TextToolCallsStripped: true,
+	}
+	if !toolRunFinalAnswerMissing(output, true, 5, 5, 1) {
+		t.Fatalf("expected stripped text tool calls at budget end to be missing a final answer")
+	}
+	if toolRunFinalAnswerMissing(output, true, 3, 5, 4) {
+		t.Fatalf("expected stripped text tool calls inside budget to be accepted")
+	}
+	plain := &llm.GenerateOutput{Text: "普通回答"}
+	if toolRunFinalAnswerMissing(plain, true, 5, 5, 1) {
+		t.Fatalf("expected plain answer without tool attempts to be accepted")
+	}
+	if toolRunFinalAnswerMissing(nil, true, 5, 5, 1) {
+		t.Fatalf("expected nil output to be accepted")
+	}
+}

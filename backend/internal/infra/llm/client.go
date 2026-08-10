@@ -652,6 +652,10 @@ type GenerateOutput struct {
 	RawJSON             string
 	Debug               *UpstreamDebugSnapshot `json:"-"`
 
+	// TextToolCallsStripped 表示工具禁用轮中模型仍输出文本编码工具调用（DSML），
+	// 标记已从文本剥离但未生成 ToolCall。上层据此判断模型尚未收尾。
+	TextToolCallsStripped bool
+
 	chatTextBuffer string
 }
 

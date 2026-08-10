@@ -71,7 +71,7 @@ func (c *Client) generateOpenAICompatible(ctx context.Context, route RouteConfig
 	}
 
 	debug := upstreamDebugSnapshot(req, payload, resp, body)
-	output, err := parseOpenAIGenerateOutput(endpoint, route.Protocol, body, deepSeekTextEncodedToolCallsEnabled(route))
+	output, err := parseOpenAIGenerateOutput(endpoint, route.Protocol, body, resolveTextEncodedToolCallMode(route, input.DisableTools))
 	if err != nil {
 		return nil, MarkRequestAccepted(attachUpstreamDebug(err, debug))
 	}
@@ -154,7 +154,7 @@ func (c *Client) generateStreamOpenAICompatible(
 	idleTimeout := resolveStreamIdleTimeout(route.StreamIdleTimeoutMS)
 	idleReader := newIdleTimeoutReader(resp.Body, idleTimeout)
 	streamBody := newUpstreamBodyRecorder(idleReader)
-	if err = consumeOpenAIGenerateStream(endpoint, route.Protocol, streamBody, result, onEvent, deepSeekTextEncodedToolCallsEnabled(route)); err != nil {
+	if err = consumeOpenAIGenerateStream(endpoint, route.Protocol, streamBody, result, onEvent, resolveTextEncodedToolCallMode(route, input.DisableTools)); err != nil {
 		return nil, MarkRequestAccepted(attachUpstreamDebug(err, upstreamDebugSnapshot(req, payload, resp, streamErrorBody(streamBody, err))))
 	}
 	return result, nil
@@ -241,7 +241,7 @@ func (c *Client) fetchOpenAIResponse(ctx context.Context, route RouteConfig, met
 	}
 
 	debug := upstreamDebugSnapshot(req, nil, resp, body)
-	output, err := parseOpenAIGenerateOutput(EndpointResponses, AdapterOpenAIResponses, body, false)
+	output, err := parseOpenAIGenerateOutput(EndpointResponses, AdapterOpenAIResponses, body, textEncodedToolCallsInactive)
 	if err != nil {
 		return nil, attachUpstreamDebug(err, debug)
 	}
@@ -451,7 +451,7 @@ func consumeOpenAIGenerateStream(
 	reader io.Reader,
 	result *GenerateOutput,
 	onEvent func(GenerateStreamEvent) error,
-	allowTextEncodedToolCalls bool,
+	mode textEncodedToolCallMode,
 ) error {
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 0, 64*1024), maxUpstreamBodyBytes)
@@ -471,8 +471,8 @@ func consumeOpenAIGenerateStream(
 			return nil
 		}
 		if strings.TrimSpace(payloadText) == "[DONE]" {
-			if normalizeEndpoint(endpoint) == EndpointChatCompletions && allowTextEncodedToolCalls {
-				if err := flushChatVisibleBuffer(result, onEvent, true); err != nil {
+			if normalizeEndpoint(endpoint) == EndpointChatCompletions && mode != textEncodedToolCallsInactive {
+				if err := flushChatVisibleBuffer(result, onEvent, true, mode); err != nil {
 					return err
 				}
 			}
@@ -489,7 +489,7 @@ func consumeOpenAIGenerateStream(
 
 		switch normalizeEndpoint(endpoint) {
 		case EndpointChatCompletions:
-			return applyChatStreamEvent(adapter, parsed, result, onEvent, allowTextEncodedToolCalls)
+			return applyChatStreamEvent(adapter, parsed, result, onEvent, mode)
 		default:
 			return applyResponsesStreamEvent(adapter, currentEvent, parsed, payloadText, result, onEvent)
 		}
@@ -523,22 +523,22 @@ func consumeOpenAIGenerateStream(
 	if err := dispatch(); err != nil && !errors.Is(err, errStreamDone) {
 		return err
 	}
-	if normalizeEndpoint(endpoint) == EndpointChatCompletions && allowTextEncodedToolCalls {
-		if err := flushChatVisibleBuffer(result, onEvent, true); err != nil {
+	if normalizeEndpoint(endpoint) == EndpointChatCompletions && mode != textEncodedToolCallsInactive {
+		if err := flushChatVisibleBuffer(result, onEvent, true, mode); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func parseOpenAIGenerateOutput(endpoint string, adapter string, body []byte, allowTextEncodedToolCalls bool) (*GenerateOutput, error) {
+func parseOpenAIGenerateOutput(endpoint string, adapter string, body []byte, mode textEncodedToolCallMode) (*GenerateOutput, error) {
 	parsed := make(map[string]interface{})
 	if err := json.Unmarshal(body, &parsed); err != nil {
 		return nil, err
 	}
 
-	result := buildGenerateOutputFromParsedForAdapter(endpoint, adapter, parsed, allowTextEncodedToolCalls)
-	if normalizeEndpoint(endpoint) == EndpointChatCompletions && allowTextEncodedToolCalls && maybeDSMLToolCallsPrefix(result.Text) {
+	result := buildGenerateOutputFromParsedForAdapter(endpoint, adapter, parsed, mode)
+	if normalizeEndpoint(endpoint) == EndpointChatCompletions && mode == textEncodedToolCallsActive && maybeDSMLToolCallsPrefix(result.Text) {
 		return nil, errDeepSeekDSMLToolCallsIncomplete
 	}
 	result.RawJSON = string(body)
@@ -546,10 +546,10 @@ func parseOpenAIGenerateOutput(endpoint string, adapter string, body []byte, all
 }
 
 func buildGenerateOutputFromParsed(endpoint string, parsed map[string]interface{}) *GenerateOutput {
-	return buildGenerateOutputFromParsedForAdapter(endpoint, AdapterOpenAIResponses, parsed, false)
+	return buildGenerateOutputFromParsedForAdapter(endpoint, AdapterOpenAIResponses, parsed, textEncodedToolCallsInactive)
 }
 
-func buildGenerateOutputFromParsedForAdapter(endpoint string, adapter string, parsed map[string]interface{}, allowTextEncodedToolCalls bool) *GenerateOutput {
+func buildGenerateOutputFromParsedForAdapter(endpoint string, adapter string, parsed map[string]interface{}, mode textEncodedToolCallMode) *GenerateOutput {
 	result := &GenerateOutput{
 		ResponseID:      strings.TrimSpace(getString(parsed["id"])),
 		Text:            "",
@@ -561,7 +561,7 @@ func buildGenerateOutputFromParsedForAdapter(endpoint string, adapter string, pa
 
 	switch normalizeEndpoint(endpoint) {
 	case EndpointChatCompletions:
-		parseChatCompletionsOutput(adapter, parsed, result, allowTextEncodedToolCalls)
+		parseChatCompletionsOutput(adapter, parsed, result, mode)
 	default:
 		parseResponsesOutput(adapter, parsed, result)
 	}
