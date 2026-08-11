@@ -34,6 +34,9 @@ export type SidebarConversationsControllerValue = {
   loadMoreFailed: boolean;
   transferringStarPublicID: string | null;
   lastChange: SidebarConversationChange | null;
+  /** 正在进行流式生成的会话 publicID 集合（侧边栏标题"进行中"动效）。 */
+  streamingPublicIDs: ReadonlySet<string>;
+  setConversationStreaming: (publicID: string, streaming: boolean) => void;
   loadMore: () => Promise<void>;
   retryLoadMore: () => Promise<void>;
   prependNewConversation: (platformModelName?: string, projectID?: string, roleID?: string, agentGroupID?: string) => Promise<ConversationDTO | null>;

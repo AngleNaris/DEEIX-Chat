@@ -17,10 +17,12 @@ import {
   toBranchKey,
 } from "@/features/chat/model/chat-thread";
 import type { ChatAreaMessage } from "@/features/chat/types/messages";
+import type { GroupRunState } from "@/features/agent-groups/model/group-run-store";
 import { cloneSharedConversation, getSharedConversation } from "@/shared/api/conversation";
 import type {
   MessageDTO,
   PublicSharedConversationDTO,
+  PublicSharedGroupRunTimelineDTO,
   PublicSharedMessageDTO,
 } from "@/shared/api/conversation.types";
 import { fetchSharedFileContent, type FileContentResult } from "@/shared/api/file";
@@ -137,6 +139,51 @@ function mapPublicSharedMessage(item: PublicSharedMessageDTO, fallbackModel: str
 const noop = () => undefined;
 const noopAsync = async () => undefined;
 
+// 将分享快照中的群组时间线转换为前端 GroupRunState（无实时流，lastEventAt 置 0 仅占位；
+// 静态时间线均为终态，等待计时不生效）。
+function toStaticGroupRun(timeline: PublicSharedGroupRunTimelineDTO): GroupRunState {
+  return {
+    groupRunID: timeline.groupRunID,
+    status: timeline.status,
+    steps: timeline.steps.map((step) => ({
+      stepID: step.stepID,
+      sequence: step.sequence,
+      stepType: step.stepType,
+      actor: {
+        memberID: step.actor.memberID,
+        name: step.actor.name,
+        type: step.actor.type,
+        icon: step.actor.icon,
+        color: step.actor.color,
+        model: step.actor.model,
+      },
+      status: step.status,
+      attempts: step.attempts.map((attempt) => ({
+        attemptID: attempt.attemptID,
+        attemptNumber: attempt.attemptNumber,
+        status: attempt.status,
+        output: attempt.output,
+        errorCode: attempt.errorCode,
+        startedAt: attempt.startedAt,
+        endedAt: attempt.endedAt ?? undefined,
+        updatedAt: attempt.updatedAt,
+        lastEventAt: 0,
+      })),
+      startedAt: step.startedAt,
+      endedAt: step.endedAt ?? undefined,
+      updatedAt: step.updatedAt,
+      lastEventAt: 0,
+    })),
+    currentStepID: timeline.currentStepID,
+    currentAttemptID: timeline.currentAttemptID,
+    errorCode: timeline.errorCode,
+    startedAt: timeline.startedAt,
+    endedAt: timeline.endedAt ?? undefined,
+    updatedAt: timeline.updatedAt,
+    lastEventAt: 0,
+  };
+}
+
 function branchSelectionsFromDefaultPath(
   messages: ChatAreaMessage[],
   defaultMessagePublicIDs: string[],
@@ -157,10 +204,12 @@ function PublicSharedMessage({
   item,
   loadContent,
   onCycleBranch,
+  staticGroupRun,
 }: {
   item: ChatAreaMessage;
   loadContent: (file: PreviewDialogFile) => Promise<FileContentResult>;
   onCycleBranch: (parentPublicID: string | null, direction: "previous" | "next") => void;
+  staticGroupRun?: GroupRunState | null;
 }) {
   if (item.role === "user") {
     return (
@@ -194,6 +243,7 @@ function PublicSharedMessage({
         readOnly
         attachmentContentLoader={loadContent}
         showBranchNavigator
+        staticGroupRun={staticGroupRun}
       />
     );
   }
@@ -400,15 +450,19 @@ export function PublicSharePage() {
         </div>
 
         <div className="space-y-7">
-          {visibleMessages.map((message) => (
-            <div key={message.publicID} className="min-w-0">
-              <PublicSharedMessage
-                item={message}
-                loadContent={loadSharedContent}
-                onCycleBranch={onCycleBranch}
-              />
-            </div>
-          ))}
+          {visibleMessages.map((message) => {
+            const timeline = data.groupRuns?.[message.runID];
+            return (
+              <div key={message.publicID} className="min-w-0">
+                <PublicSharedMessage
+                  item={message}
+                  loadContent={loadSharedContent}
+                  onCycleBranch={onCycleBranch}
+                  staticGroupRun={timeline ? toStaticGroupRun(timeline) : undefined}
+                />
+              </div>
+            );
+          })}
         </div>
 
         <div className="mt-12 flex items-center justify-center border-t border-border/50 pt-3">

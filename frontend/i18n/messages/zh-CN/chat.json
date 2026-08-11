@@ -487,7 +487,8 @@
         "model": "模型",
         "skill": "Skills",
         "prompt": "Prompts",
-        "group": "群组"
+        "group": "群组",
+        "script": "脚本"
       }
     },
     "mediaMode": {
@@ -551,7 +552,11 @@
     "perCall": "每次",
     "perSecond": "每秒",
     "callUnit": "次",
-    "secondUnit": "秒"
+    "secondUnit": "秒",
+    "viewGrouped": "按厂商分组",
+    "viewCustom": "自定义排序",
+    "sortHint": "拖拽调整模型顺序，自动保存",
+    "sortTitle": "模型顺序"
   },
   "processTrace": {
     "fileBadges": {

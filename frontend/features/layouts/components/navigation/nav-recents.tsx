@@ -78,6 +78,7 @@ export function NavRecents() {
     deleteByPublicID,
     touchByPublicID,
     setProjectByPublicID,
+    streamingPublicIDs,
   } = useSidebarConversations();
 
   const [deleteTarget, setDeleteTarget] = React.useState<SidebarConversationDeleteTarget>(null);
@@ -293,6 +294,7 @@ export function NavRecents() {
                                 },
                               }}
                               isTransferring={transferringStarPublicID === publicID}
+                              streaming={streamingPublicIDs.has(publicID)}
                               onRename={onRename}
                               isRenaming={renameTarget?.publicID === publicID}
                               renameValue={renameTarget?.publicID === publicID ? renameValue : title}

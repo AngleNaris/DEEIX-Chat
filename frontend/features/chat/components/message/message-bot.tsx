@@ -50,6 +50,7 @@ import {
   readLiveGroupRun,
   resolveRetryableGroupStep,
   useLiveGroupRun,
+  type GroupRunState,
 } from "@/features/agent-groups/model/group-run-store";
 import type { BillingDisplayCurrency } from "@/shared/lib/billing-display";
 import { useBranding } from "@/shared/config/branding-provider";
@@ -168,6 +169,8 @@ type ChatMessageBotProps = {
   showBranchNavigator?: boolean;
   contentWidthClassName?: string;
   screenshotMeta?: React.ReactNode;
+  /** 分享页等无实时流的场景：静态群组运行时间线（无则回退实时 store）。 */
+  staticGroupRun?: GroupRunState | null;
 };
 
 export function ChatMessageBot({
@@ -195,6 +198,7 @@ export function ChatMessageBot({
   showBranchNavigator = true,
   contentWidthClassName = "max-w-[1080px]",
   screenshotMeta,
+  staticGroupRun = null,
 }: ChatMessageBotProps) {
   const tCommon = useTranslations("common.actions");
   const submitT = useTranslations("chat.submit");
@@ -231,7 +235,8 @@ export function ChatMessageBot({
       clearLiveUpstreamThinkTrace(item.runID);
     }
   }, [item.isStreaming, item.processTrace?.upstreamThink, item.runID]);
-  const liveGroupRun = useLiveGroupRun(item.runID);
+  // 实时流优先；分享页等无流场景回退静态时间线（后端分享快照重建）。
+  const liveGroupRun = useLiveGroupRun(item.runID) ?? staticGroupRun ?? undefined;
   // 群组会话（§16.10）：运行暂停可重试时，meta 重试按钮原地重试失败步骤；
   // 无目标步骤（非群组 / 运行未暂停）时回退到常规重试语义。
   const retryableGroupStep = React.useMemo(() => {
@@ -408,7 +413,12 @@ export function ChatMessageBot({
         autoCollapseReady={hasStreamdownContent || Boolean(item.inlineAlert)}
       />
       <PlatformToolApprovalCard tracePayloadJson={toolTrace?.payloadJson} />
-      <MessageAgentGroupTrace run={liveGroupRun} streaming={messageStreaming} clientRunID={item.runID} />
+      <MessageAgentGroupTrace
+        run={liveGroupRun}
+        streaming={messageStreaming}
+        clientRunID={item.runID}
+        readOnly={Boolean(readOnly)}
+      />
 
       <div
         className="w-full min-w-0 max-w-none overflow-hidden text-[15px] leading-8 text-foreground [overflow-wrap:anywhere]"

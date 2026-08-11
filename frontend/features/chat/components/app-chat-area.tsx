@@ -284,6 +284,7 @@ export function AppChatArea() {
     setStarByPublicID,
     setProjectByPublicID,
     deleteByPublicID,
+    setConversationStreaming,
   } = useSidebarConversations();
   // 群组会话标志：useChatData 先于 activeAgentGroup memo 执行，需提前从 items 计算（§16.8 占位恢复）。
   const groupConversationAgentGroupID = React.useMemo(() => {
@@ -309,6 +310,14 @@ export function AppChatArea() {
     failedGenerationRunsRef,
     isGroupConversation: Boolean(groupConversationAgentGroupID),
   });
+  // 进行中标记：当前会话有活跃流式 run 时通知侧边栏标题显示"进行中"动效。
+  React.useEffect(() => {
+    const normalizedConversationID = conversationID?.trim() || "";
+    if (!normalizedConversationID) {
+      return;
+    }
+    setConversationStreaming(normalizedConversationID, Boolean(resumingRunID));
+  }, [conversationID, resumingRunID, setConversationStreaming]);
   const { greetingTitle } = useChatViewerProfile();
   const [manualConversationTitle, setManualConversationTitle] = React.useState("");
   const [shareDialogOpen, setShareDialogOpen] = React.useState(false);

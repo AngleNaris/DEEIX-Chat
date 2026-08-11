@@ -82,6 +82,7 @@ export function NavStarred() {
     deleteByPublicID,
     touchByPublicID,
     setProjectByPublicID,
+    streamingPublicIDs,
   } = useSidebarConversations();
 
   const [showAllStarredDialog, setShowAllStarredDialog] = React.useState(false);
@@ -326,6 +327,7 @@ export function NavStarred() {
                         }}
                         active={activeConversationID === item.publicID}
                         isTransferring={transferringStarPublicID === item.publicID}
+                        streaming={streamingPublicIDs.has(item.publicID)}
                         starAction={{
                           label: t("row.unstar"),
                           icon: StarOff,

@@ -236,6 +236,7 @@ function AgentGroupStepTrace({
   labels,
   clientRunID,
   memberNameByID,
+  readOnly = false,
 }: {
   step: GroupRunStepState;
   run: GroupRunState;
@@ -243,6 +244,7 @@ function AgentGroupStepTrace({
   labels: AgentGroupRunLabels;
   clientRunID: string;
   memberNameByID: ReadonlyMap<string, string>;
+  readOnly?: boolean;
 }) {
   const isRunning = step.status === "running";
   const isFailed = step.status === "failed" || step.status === "error";
@@ -273,6 +275,7 @@ function AgentGroupStepTrace({
   // §16.10：只有被暂停/阻塞运行的最后一个未成功步骤可操作（其余成功步骤不可变）。
   // 重试统一由消息 meta 的重试按钮发起，此处只保留“停止重试”与“放弃本轮”。
   const runActionable =
+    !readOnly &&
     (run.status === "paused_retryable" || run.status === "blocked") &&
     step.stepID === run.currentStepID &&
     step.status !== "success";
@@ -310,7 +313,10 @@ function AgentGroupStepTrace({
       }}
       className="w-full"
     >
-      <AccordionItem value="open" className="border-b-0">
+      <AccordionItem
+        value="open"
+        className={cn("border-b-0", isRunning && "trace-sweep")}
+      >
         <AccordionTrigger
           iconPosition="none"
           className="group items-start justify-between gap-1.5 py-0 text-left no-underline hover:no-underline"
@@ -445,10 +451,13 @@ export function MessageAgentGroupTrace({
   run,
   streaming,
   clientRunID,
+  readOnly = false,
 }: {
   run?: GroupRunState;
   streaming?: boolean;
   clientRunID: string;
+  /** 只读展示（分享页等）：隐藏重试/放弃等操作按钮。 */
+  readOnly?: boolean;
 }) {
   const labels = useAgentGroupRunLabels();
   const seconds = useElapsedSeconds(run);
@@ -498,6 +507,7 @@ export function MessageAgentGroupTrace({
             labels={labels}
             clientRunID={clientRunID}
             memberNameByID={memberNameByID}
+            readOnly={readOnly}
           />
         ))}
         {run.status === "paused_retryable" || run.status === "blocked" ? (

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	appupload "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/upload"
+	domainagentgroup "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/agentgroup"
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 	"github.com/google/uuid"
@@ -43,7 +44,59 @@ type PublicSharedConversationResult struct {
 	LastAccessedAt    *time.Time
 	Messages          []model.Message
 	RunModels         map[string]PublicSharedRunModel
+	// GroupRuns 是群组会话的中间过程时间线（key: 消息 RunID）。
+	// 由 chat_agent_group_runs/steps/attempts 重建并脱敏：剥离成员内部指令、
+	// 工具输入与失败诊断，仅保留公开可展示的成员活动过程。
+	GroupRuns         map[string]PublicGroupRunTimeline
 	DefaultMessageIDs []string
+}
+
+// PublicGroupRunTimeline 是公开分享页可展示的群组运行中间过程（对齐前端 GroupRunState）。
+type PublicGroupRunTimeline struct {
+	GroupRunID       string                     `json:"groupRunID"`
+	Status           string                     `json:"status"`
+	Steps            []PublicGroupRunStep       `json:"steps"`
+	CurrentStepID    string                     `json:"currentStepID"`
+	CurrentAttemptID string                     `json:"currentAttemptID"`
+	ErrorCode        string                     `json:"errorCode,omitempty"`
+	StartedAt        time.Time                  `json:"startedAt"`
+	EndedAt          *time.Time                 `json:"endedAt" extensions:"x-nullable,!x-omitempty"`
+	UpdatedAt        time.Time                  `json:"updatedAt"`
+}
+
+// PublicGroupRunStep 群组中间过程的单个逻辑步骤。
+type PublicGroupRunStep struct {
+	StepID       string                   `json:"stepID"`
+	Sequence     int                      `json:"sequence"`
+	StepType     string                   `json:"stepType"` // supervisor_decide | member_execute
+	Actor        PublicGroupRunActor      `json:"actor"`
+	Status       string                   `json:"status"`
+	Attempts     []PublicGroupRunAttempt  `json:"attempts"`
+	StartedAt    time.Time                `json:"startedAt"`
+	EndedAt      *time.Time               `json:"endedAt" extensions:"x-nullable,!x-omitempty"`
+	UpdatedAt    time.Time                `json:"updatedAt"`
+}
+
+// PublicGroupRunActor 步骤执行者（主管/成员）的公开展示信息。
+type PublicGroupRunActor struct {
+	MemberID string `json:"memberID"`
+	Name     string `json:"name"`
+	Type     string `json:"type"` // supervisor | worker
+	Icon     string `json:"icon"`
+	Color    string `json:"color"`
+	Model    string `json:"model"`
+}
+
+// PublicGroupRunAttempt 步骤的一次执行尝试（只保留正文输出与状态）。
+type PublicGroupRunAttempt struct {
+	AttemptID      string     `json:"attemptID"`
+	AttemptNumber  int        `json:"attemptNumber"`
+	Status         string     `json:"status"`
+	Output         string     `json:"output"`
+	ErrorCode      string     `json:"errorCode,omitempty"`
+	StartedAt      time.Time  `json:"startedAt"`
+	EndedAt        *time.Time `json:"endedAt" extensions:"x-nullable,!x-omitempty"`
+	UpdatedAt      time.Time  `json:"updatedAt"`
 }
 
 // PublicSharedRunModel 是公开分享页可展示的模型快照。
@@ -240,6 +293,14 @@ func (s *Service) GetPublicSharedConversation(ctx context.Context, shareID strin
 	if err != nil {
 		return nil, err
 	}
+	// 群组会话：重建并脱敏成员中间过程时间线，供分享页展示（与本地群组活动卡片一致）。
+	var groupRuns map[string]PublicGroupRunTimeline
+	if conversation.AgentGroupID != nil {
+		groupRuns, err = s.loadPublicSharedGroupRuns(ctx, share.UserID, conversation.ID, messages)
+		if err != nil {
+			return nil, err
+		}
+	}
 	_ = s.repo.TouchConversationShareAccess(ctx, share.ShareID, time.Now().UTC())
 	title := strings.TrimSpace(share.TitleSnapshot)
 	if title == "" {
@@ -257,6 +318,7 @@ func (s *Service) GetPublicSharedConversation(ctx context.Context, shareID strin
 		LastAccessedAt:    share.LastAccessedAt,
 		Messages:          messages,
 		RunModels:         runModels,
+		GroupRuns:         groupRuns,
 		DefaultMessageIDs: resolvePublicDefaultMessageIDs(share.DefaultMessageIDsJSON, messages),
 	}, nil
 }
@@ -1069,6 +1131,151 @@ func (s *Service) loadPublicSharedRunModels(
 		}
 	}
 	return result, nil
+}
+
+// loadPublicSharedGroupRuns 按分享消息的 RunID 重建群组中间过程时间线（公开脱敏版）。
+// 群组运行仓储可能未注入（能力降级）或运行记录不存在，此时静默跳过该 RunID。
+func (s *Service) loadPublicSharedGroupRuns(
+	ctx context.Context,
+	userID uint,
+	conversationID uint,
+	messages []model.Message,
+) (map[string]PublicGroupRunTimeline, error) {
+	if s.agentGroupRunStore == nil {
+		return map[string]PublicGroupRunTimeline{}, nil
+	}
+	runIDs := make([]string, 0, len(messages))
+	seen := make(map[string]struct{}, len(messages))
+	for _, item := range messages {
+		runID := strings.TrimSpace(item.RunID)
+		if runID == "" {
+			continue
+		}
+		if _, exists := seen[runID]; exists {
+			continue
+		}
+		seen[runID] = struct{}{}
+		runIDs = append(runIDs, runID)
+	}
+	result := make(map[string]PublicGroupRunTimeline, len(runIDs))
+	for _, runID := range runIDs {
+		run, err := s.agentGroupRunStore.GetAgentGroupRunByClientRunID(ctx, conversationID, runID)
+		if err != nil {
+			if errors.Is(err, repository.ErrNotFound) {
+				continue
+			}
+			return nil, err
+		}
+		detail, err := s.agentGroupRunStore.GetAgentGroupRunDetail(ctx, userID, run.PublicID)
+		if err != nil {
+			if errors.Is(err, repository.ErrNotFound) {
+				continue
+			}
+			return nil, err
+		}
+		result[runID] = buildPublicGroupRunTimeline(detail)
+	}
+	return result, nil
+}
+
+// buildPublicGroupRunTimeline 将运行详情转换为公开时间线：
+// 剥离成员内部指令、工具输入与失败诊断；保留成员身份（名称/类型/图标/颜色/模型）
+// 与正文输出，使分享页能够还原群组"谁在做什么、结果如何"的中间过程。
+func buildPublicGroupRunTimeline(detail *domainagentgroup.RunDetail) PublicGroupRunTimeline {
+	timeline := PublicGroupRunTimeline{
+		GroupRunID:    detail.Run.PublicID,
+		Status:        detail.Run.Status,
+		CurrentStepID: publicStepID(detail.Run.CurrentStepID, detail.Steps),
+		ErrorCode:     detail.Run.ErrorCode,
+		StartedAt:     detail.Run.StartedAt,
+		EndedAt:       detail.Run.EndedAt,
+		UpdatedAt:     detail.Run.UpdatedAt,
+	}
+	memberByPublicID := resolvePublicSnapshotMembers(detail.Run.ConfigSnapshotJSON)
+	for i := range detail.Steps {
+		stepDetail := detail.Steps[i]
+		step := stepDetail.Step
+		publicStep := PublicGroupRunStep{
+			StepID:    step.PublicID,
+			Sequence:  step.Sequence,
+			StepType:  step.StepType,
+			Status:    step.Status,
+			StartedAt: step.CreatedAt,
+			UpdatedAt: step.UpdatedAt,
+		}
+		publicStep.Actor = PublicGroupRunActor{
+			MemberID: step.ActorMemberPublicID,
+			Name:     step.ActorNameSnapshot,
+			Type:     step.ActorTypeSnapshot,
+		}
+		if member, ok := memberByPublicID[step.ActorMemberPublicID]; ok {
+			publicStep.Actor.Icon = member.Icon
+			publicStep.Actor.Color = member.Color
+			publicStep.Actor.Model = member.EffectiveModel
+		}
+		publicStep.Attempts = make([]PublicGroupRunAttempt, 0, len(stepDetail.Attempts))
+		for _, attempt := range stepDetail.Attempts {
+			publicStep.Attempts = append(publicStep.Attempts, PublicGroupRunAttempt{
+				AttemptID:     attempt.PublicID,
+				AttemptNumber: attempt.AttemptNo,
+				Status:        attempt.Status,
+				// 失败诊断不进入公开快照（§18：内部失败诊断不外泄）。
+				Output:    attempt.OutputMarkdown,
+				ErrorCode: attempt.ErrorCode,
+				StartedAt: attempt.StartedAt,
+				EndedAt:   attempt.EndedAt,
+				UpdatedAt: attempt.UpdatedAt,
+			})
+			if publicStep.Actor.Model == "" && attempt.ResolvedModel != "" {
+				publicStep.Actor.Model = attempt.ResolvedModel
+			}
+			if publicStep.Actor.Model == "" && attempt.RequestedModel != "" {
+				publicStep.Actor.Model = attempt.RequestedModel
+			}
+		}
+		timeline.Steps = append(timeline.Steps, publicStep)
+	}
+	if len(timeline.Steps) > 0 {
+		lastAttempt := timeline.Steps[len(timeline.Steps)-1].Attempts
+		if len(lastAttempt) > 0 {
+			timeline.CurrentAttemptID = lastAttempt[len(lastAttempt)-1].AttemptID
+		}
+	}
+	return timeline
+}
+
+// publicStepID 将内部步骤 ID 映射为公开步骤 ID（用于 currentStepID 展示）。
+func publicStepID(stepID *uint, steps []domainagentgroup.StepDetail) string {
+	if stepID == nil {
+		return ""
+	}
+	for i := range steps {
+		if steps[i].Step.ID == *stepID {
+			return steps[i].Step.PublicID
+		}
+	}
+	return ""
+}
+
+// resolvePublicSnapshotMembers 解析运行配置快照中的成员展示信息（图标/颜色/模型）。
+func resolvePublicSnapshotMembers(configSnapshotJSON string) map[string]domainagentgroup.RunSnapshotMember {
+	result := make(map[string]domainagentgroup.RunSnapshotMember)
+	if strings.TrimSpace(configSnapshotJSON) == "" {
+		return result
+	}
+	var snapshot domainagentgroup.RunSnapshot
+	if err := json.Unmarshal([]byte(configSnapshotJSON), &snapshot); err != nil {
+		return result
+	}
+	if snapshot.Supervisor.PublicID != "" {
+		result[snapshot.Supervisor.PublicID] = snapshot.Supervisor
+	}
+	for _, member := range snapshot.Members {
+		if member.PublicID != "" {
+			result[member.PublicID] = member
+		}
+	}
+	return result
 }
 
 // OpenSharedConversationFileContent 按公开分享快照范围读取附件内容。

@@ -415,12 +415,66 @@ type PublicSharedConversationResponse struct {
 	LastAccessedAt          *time.Time                    `json:"lastAccessedAt" extensions:"x-nullable,!x-omitempty"`
 	DefaultMessagePublicIDs []string                      `json:"defaultMessagePublicIDs"`
 	Messages                []PublicSharedMessageResponse `json:"messages"`
+	// GroupRuns 群组会话中间过程时间线（key: 消息 RunID），非群组会话为空。
+	GroupRuns               map[string]PublicGroupRunTimelineResponse `json:"groupRuns,omitempty"`
+}
+
+// PublicGroupRunTimelineResponse 公开分享页群组运行中间过程。
+type PublicGroupRunTimelineResponse struct {
+	GroupRunID       string                         `json:"groupRunID"`
+	Status           string                         `json:"status"`
+	Steps            []PublicGroupRunStepResponse   `json:"steps"`
+	CurrentStepID    string                         `json:"currentStepID"`
+	CurrentAttemptID string                         `json:"currentAttemptID"`
+	ErrorCode        string                         `json:"errorCode,omitempty"`
+	StartedAt        time.Time                      `json:"startedAt"`
+	EndedAt          *time.Time                     `json:"endedAt" extensions:"x-nullable,!x-omitempty"`
+	UpdatedAt        time.Time                      `json:"updatedAt"`
+}
+
+// PublicGroupRunStepResponse 群组中间过程单个逻辑步骤。
+type PublicGroupRunStepResponse struct {
+	StepID    string                        `json:"stepID"`
+	Sequence  int                           `json:"sequence"`
+	StepType  string                        `json:"stepType"`
+	Actor     PublicGroupRunActorResponse   `json:"actor"`
+	Status    string                        `json:"status"`
+	Attempts  []PublicGroupRunAttemptResponse `json:"attempts"`
+	StartedAt time.Time                     `json:"startedAt"`
+	EndedAt   *time.Time                    `json:"endedAt" extensions:"x-nullable,!x-omitempty"`
+	UpdatedAt time.Time                     `json:"updatedAt"`
+}
+
+// PublicGroupRunActorResponse 步骤执行者公开展示信息。
+type PublicGroupRunActorResponse struct {
+	MemberID string `json:"memberID"`
+	Name     string `json:"name"`
+	Type     string `json:"type"`
+	Icon     string `json:"icon"`
+	Color    string `json:"color"`
+	Model    string `json:"model"`
+}
+
+// PublicGroupRunAttemptResponse 步骤的一次执行尝试。
+type PublicGroupRunAttemptResponse struct {
+	AttemptID     string     `json:"attemptID"`
+	AttemptNumber int        `json:"attemptNumber"`
+	Status        string     `json:"status"`
+	Output        string     `json:"output"`
+	ErrorCode     string     `json:"errorCode,omitempty"`
+	StartedAt     time.Time  `json:"startedAt"`
+	EndedAt       *time.Time `json:"endedAt" extensions:"x-nullable,!x-omitempty"`
+	UpdatedAt     time.Time  `json:"updatedAt"`
 }
 
 func toPublicSharedConversationResponse(item *appconversation.PublicSharedConversationResult) PublicSharedConversationResponse {
 	messages := make([]PublicSharedMessageResponse, 0, len(item.Messages))
 	for _, message := range item.Messages {
 		messages = append(messages, toPublicSharedMessageResponse(message, item.RunModels[message.RunID], item.Model))
+	}
+	groupRuns := make(map[string]PublicGroupRunTimelineResponse, len(item.GroupRuns))
+	for runID, timeline := range item.GroupRuns {
+		groupRuns[runID] = toPublicGroupRunTimelineResponse(timeline)
 	}
 	return PublicSharedConversationResponse{
 		ShareID:                 item.ShareID,
@@ -430,7 +484,56 @@ func toPublicSharedConversationResponse(item *appconversation.PublicSharedConver
 		LastAccessedAt:          item.LastAccessedAt,
 		DefaultMessagePublicIDs: item.DefaultMessageIDs,
 		Messages:                messages,
+		GroupRuns:               groupRuns,
 	}
+}
+
+func toPublicGroupRunTimelineResponse(item appconversation.PublicGroupRunTimeline) PublicGroupRunTimelineResponse {
+	response := PublicGroupRunTimelineResponse{
+		GroupRunID:       item.GroupRunID,
+		Status:           item.Status,
+		CurrentStepID:    item.CurrentStepID,
+		CurrentAttemptID: item.CurrentAttemptID,
+		ErrorCode:        item.ErrorCode,
+		StartedAt:        item.StartedAt,
+		EndedAt:          item.EndedAt,
+		UpdatedAt:        item.UpdatedAt,
+		Steps:            make([]PublicGroupRunStepResponse, 0, len(item.Steps)),
+	}
+	for _, step := range item.Steps {
+		response.Steps = append(response.Steps, PublicGroupRunStepResponse{
+			StepID:    step.StepID,
+			Sequence:  step.Sequence,
+			StepType:  step.StepType,
+			Actor: PublicGroupRunActorResponse{
+				MemberID: step.Actor.MemberID,
+				Name:     step.Actor.Name,
+				Type:     step.Actor.Type,
+				Icon:     step.Actor.Icon,
+				Color:    step.Actor.Color,
+				Model:    step.Actor.Model,
+			},
+			Status:    step.Status,
+			StartedAt: step.StartedAt,
+			EndedAt:   step.EndedAt,
+			UpdatedAt: step.UpdatedAt,
+			Attempts:  make([]PublicGroupRunAttemptResponse, 0, len(step.Attempts)),
+		})
+		lastStep := &response.Steps[len(response.Steps)-1]
+		for _, attempt := range step.Attempts {
+			lastStep.Attempts = append(lastStep.Attempts, PublicGroupRunAttemptResponse{
+				AttemptID:     attempt.AttemptID,
+				AttemptNumber: attempt.AttemptNumber,
+				Status:        attempt.Status,
+				Output:        attempt.Output,
+				ErrorCode:     attempt.ErrorCode,
+				StartedAt:     attempt.StartedAt,
+				EndedAt:       attempt.EndedAt,
+				UpdatedAt:     attempt.UpdatedAt,
+			})
+		}
+	}
+	return response
 }
 
 // ConversationDeleteResponse 删除会话响应 DTO。

@@ -62,6 +62,8 @@ type SidebarConversationItemProps = {
   projectMenu?: SidebarConversationProjectMenu;
   rowClassName?: string;
   linkClassName?: string;
+  /** 会话正在进行流式生成：标题显示呼吸点 + 扫光提示动效。 */
+  streaming?: boolean;
   onRenameValueChange: (value: string) => void;
   onRenameCommit: (publicID: string, currentTitle: string) => void;
   onRenameCancel: () => void;
@@ -99,6 +101,7 @@ export function SidebarConversationItem({
   onExport,
   onDelete,
   onNavigate,
+  streaming = false,
 }: SidebarConversationItemProps) {
   const t = useTranslations("recent.row");
   const [isMenuOpen, setIsMenuOpen] = React.useState(false);
@@ -171,10 +174,11 @@ export function SidebarConversationItem({
         className={cn("flex h-full min-w-0 flex-1 items-center pl-2 pr-9", linkClassName)}
         onClick={(event) => onNavigate?.(item.url, event)}
       >
+        {streaming ? <span className="streaming-dot mr-1.5" aria-hidden="true" /> : null}
         <AnimatedText
           text={item.title}
           className="flex-1"
-          textClassName="text-current"
+          textClassName={cn("text-current", streaming && "shimmer")}
         />
       </Link>
 

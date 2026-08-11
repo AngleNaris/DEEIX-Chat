@@ -53,7 +53,6 @@ import {
 } from "@/features/chat/hooks/use-chat-mention-menu";
 import { ChatMentionMenuPortal } from "@/features/chat/components/shared/chat-mention-menu";
 import { ChatMCP } from "@/features/chat/components/sections/chat-mcp";
-import { ScriptInsertButton } from "@/features/chat/components/sections/chat-script-insert";
 import { ChatModelPicker } from "@/features/chat/components/sections/chat-model-picker";
 import { ChatModelConfig } from "@/features/chat/components/sections/chat-model-config";
 import { ReasoningEffortSelector } from "@/shared/components/reasoning-effort-selector";
@@ -122,6 +121,7 @@ const COMPOSER_MENTION_KINDS_WITHOUT_MODEL: readonly ChatMentionMenuKind[] = [
   "tool",
   "skill",
   "prompt",
+  "script",
   "group",
 ];
 
@@ -132,6 +132,7 @@ const COMPOSER_MENTION_KINDS_WITHOUT_GROUP: readonly ChatMentionMenuKind[] = [
   "tool",
   "skill",
   "prompt",
+  "script",
 ];
 
 const FilePreviewDialog = dynamic(
@@ -1257,20 +1258,6 @@ function ChatInputComponent({
                   </TooltipContent>
                 </Tooltip>
               ) : null}
-
-              <ScriptInsertButton
-                disabled={loading || uploading}
-                onInsert={(text) => {
-                  const el = textareaRef.current;
-                  const start = el?.selectionStart ?? draft.length;
-                  const end = el?.selectionEnd ?? draft.length;
-                  const next = draft.slice(0, start) + text + draft.slice(end);
-                  handleMentionChange(next);
-                  window.requestAnimationFrame(() => {
-                    textareaRef.current?.setSelectionRange(start + text.length, start + text.length);
-                  });
-                }}
-              />
 
               {hasDraftText ? (
                 <Tooltip>

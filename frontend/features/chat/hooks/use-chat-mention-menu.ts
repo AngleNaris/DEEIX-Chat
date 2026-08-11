@@ -15,6 +15,8 @@ import { listVisiblePromptPresets } from "@/shared/api/prompt-presets";
 import type { PromptPresetDTO } from "@/shared/api/prompt-presets.types";
 import { listVisibleSkills } from "@/shared/api/skills";
 import type { SkillSummaryDTO } from "@/shared/api/skills.types";
+import { listDynamicPrompts } from "@/shared/api/dynamic-prompts";
+import type { DynamicPromptDTO } from "@/shared/api/dynamic-prompts";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 import { readSessionRevision } from "@/shared/auth/session";
 
@@ -35,10 +37,11 @@ const DEFAULT_MENTION_MENU_KINDS: readonly ChatMentionMenuKind[] = [
   "tool",
   "skill",
   "prompt",
+  "script",
   "group",
 ];
 
-export type ChatMentionMenuKind = "file" | "tool" | "model" | "skill" | "prompt" | "group";
+export type ChatMentionMenuKind = "file" | "tool" | "model" | "skill" | "prompt" | "script" | "group";
 
 type ChatMentionFileMenuItem = {
   id: string;
@@ -85,6 +88,15 @@ type ChatMentionSkillMenuItem = {
   selected: boolean;
 };
 
+type ChatMentionScriptMenuItem = {
+  id: string;
+  kind: "script";
+  label: string;
+  description: string;
+  script: DynamicPromptDTO;
+  selected: boolean;
+};
+
 type ChatMentionGroupMenuItem = {
   id: string;
   kind: "group";
@@ -99,6 +111,7 @@ export type ChatMentionMenuItem =
   | ChatMentionToolMenuItem
   | ChatMentionModelMenuItem
   | ChatMentionSkillMenuItem
+  | ChatMentionScriptMenuItem
   | ChatMentionPromptMenuItem
   | ChatMentionGroupMenuItem;
 
@@ -366,6 +379,17 @@ function skillsToItems(skills: SkillSummaryDTO[], selectedSkills: SkillSummaryDT
   }));
 }
 
+function scriptsToItems(scripts: DynamicPromptDTO[]): ChatMentionScriptMenuItem[] {
+  return scripts.map((script) => ({
+    id: `script:${script.prompt_id}`,
+    kind: "script" as const,
+    label: script.name,
+    description: script.kind,
+    script,
+    selected: false,
+  }));
+}
+
 function groupsToItems(groups: AgentGroupDTO[], query: string): ChatMentionGroupMenuItem[] {
   return groups
     .filter((group) => itemMatchesQuery([group.name, group.description], query))
@@ -425,9 +449,11 @@ function buildSections({
   groups,
   groupLoading,
   promptLoading,
+  scriptLoading,
   skillLoading,
   modelOptions,
   prompts,
+  scripts,
   skills,
   query,
   queryKind,
@@ -448,6 +474,8 @@ function buildSections({
   modelOptions: ChatModelOption[];
   prompts: PromptPresetDTO[];
   promptLoading: boolean;
+  scripts: DynamicPromptDTO[];
+  scriptLoading: boolean;
   skills: SkillSummaryDTO[];
   skillLoading: boolean;
   query: string | null;
@@ -465,6 +493,12 @@ function buildSections({
   const normalizedQuery = query.trim().toLowerCase();
   if (queryKind === "prompt") {
     const sections: ChatMentionMenuSection[] = [];
+    if (enabledKinds.has("script")) {
+      const scriptItems = scriptLoading ? [] : scriptsToItems(scripts);
+      if (scriptItems.length > 0) {
+        sections.push({ kind: "script" as const, items: scriptItems });
+      }
+    }
     if (enabledKinds.has("skill")) {
       const skillItems = skillLoading ? [] : skillsToItems(skills, selectedSkills);
       if (skillItems.length > 0) {
@@ -643,6 +677,8 @@ export function useChatMentionMenu({
   const [filesQuery, setFilesQuery] = React.useState("");
   const [prompts, setPrompts] = React.useState<PromptPresetDTO[]>([]);
   const [promptsLoading, setPromptsLoading] = React.useState(false);
+  const [scripts, setScripts] = React.useState<DynamicPromptDTO[]>([]);
+  const [scriptsLoading, setScriptsLoading] = React.useState(false);
   const [skills, setSkills] = React.useState<SkillSummaryDTO[]>([]);
   const [skillsLoading, setSkillsLoading] = React.useState(false);
   const [groups, setGroups] = React.useState<AgentGroupDTO[]>([]);
@@ -780,6 +816,45 @@ export function useChatMentionMenu({
   }, [disabled, enabledKindSet, promptQuery]);
 
   React.useEffect(() => {
+    if (promptQuery === null || disabled || !enabledKindSet.has("script")) {
+      setScripts([]);
+      setScriptsLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      setScriptsLoading(true);
+      void (async () => {
+        try {
+          const token = await resolveAccessToken();
+          if (!token || controller.signal.aborted) {
+            return;
+          }
+          const data = await listDynamicPrompts(token);
+          if (!controller.signal.aborted) {
+            // 动态提示词接口不支持服务端查询，拉取全量后在 buildSections 内按输入过滤。
+            setScripts(data);
+          }
+        } catch {
+          if (!controller.signal.aborted) {
+            setScripts([]);
+          }
+        } finally {
+          if (!controller.signal.aborted) {
+            setScriptsLoading(false);
+          }
+        }
+      })();
+    }, MENTION_MENU_PROMPT_QUERY_DELAY_MS);
+
+    return () => {
+      controller.abort();
+      window.clearTimeout(timer);
+    };
+  }, [disabled, enabledKindSet, promptQuery]);
+
+  React.useEffect(() => {
     if (promptQuery === null || disabled || !enabledKindSet.has("skill")) {
       setSkills([]);
       setSkillsLoading(false);
@@ -870,6 +945,8 @@ export function useChatMentionMenu({
         modelOptions,
         prompts,
         promptLoading: promptsLoading,
+        scripts,
+        scriptLoading: scriptsLoading,
         skills,
         skillLoading: skillsLoading,
         query,
@@ -892,6 +969,8 @@ export function useChatMentionMenu({
       modelOptions,
       prompts,
       promptsLoading,
+      scripts,
+      scriptsLoading,
       skills,
       skillsLoading,
       query,
@@ -1018,6 +1097,19 @@ export function useChatMentionMenu({
             : [...selectedSkills, item.skill],
         );
         finishSelection();
+        return;
+      }
+
+      if (item.kind === "script") {
+        // 脚本插入与提示词标签一致：移除 "/" 触发词后在光标处插入 {{script: name}}。
+        const insert = `{{script: ${item.script.name}}}`;
+        const nextDraft = removeTriggerRange(draft, triggerQuery.range);
+        const caretIndex = nextDraft.caretIndex;
+        onDraftChange(
+          nextDraft.value.slice(0, caretIndex) + insert + nextDraft.value.slice(caretIndex),
+        );
+        setDismissedTriggerKey(null);
+        focusTextarea(caretIndex + insert.length);
         return;
       }
 

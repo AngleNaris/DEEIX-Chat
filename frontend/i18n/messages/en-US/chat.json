@@ -487,7 +487,8 @@
         "model": "Models",
         "skill": "Skills",
         "prompt": "Prompts",
-        "group": "Agent Groups"
+        "group": "Agent Groups",
+        "script": "Scripts"
       }
     },
     "mediaMode": {
@@ -551,7 +552,11 @@
     "perCall": "Per call",
     "perSecond": "Per second",
     "callUnit": "call",
-    "secondUnit": "second"
+    "secondUnit": "second",
+    "viewGrouped": "Grouped",
+    "viewCustom": "Custom order",
+    "sortHint": "Drag to reorder models, saved automatically",
+    "sortTitle": "Model order"
   },
   "processTrace": {
     "fileBadges": {

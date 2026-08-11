@@ -245,6 +245,7 @@ export function useSidebarConversationsController({
   const [loadMoreFailed, setLoadMoreFailed] = React.useState(false);
   const [transferringStarPublicID, setTransferringStarPublicID] = React.useState<string | null>(null);
   const [lastChange, setLastChange] = React.useState<SidebarConversationChange | null>(null);
+  const [streamingPublicIDs, setStreamingPublicIDs] = React.useState<ReadonlySet<string>>(new Set());
   const pageRef = React.useRef(initialCache?.page ?? 1);
   const changeSequenceRef = React.useRef(0);
   const initialRequestVersionRef = React.useRef(0);
@@ -898,6 +899,28 @@ export function useSidebarConversationsController({
     return fetchAllStarred(token);
   }, []);
 
+  const setConversationStreaming = React.useCallback((publicID: string, streaming: boolean) => {
+    const normalizedPublicID = publicID.trim();
+    if (!normalizedPublicID) {
+      return;
+    }
+    setStreamingPublicIDs((current) => {
+      if (streaming && current.has(normalizedPublicID)) {
+        return current;
+      }
+      if (!streaming && !current.has(normalizedPublicID)) {
+        return current;
+      }
+      const next = new Set(current);
+      if (streaming) {
+        next.add(normalizedPublicID);
+      } else {
+        next.delete(normalizedPublicID);
+      }
+      return next;
+    });
+  }, []);
+
   return React.useMemo(
     () => ({
       items,
@@ -911,6 +934,8 @@ export function useSidebarConversationsController({
       loadMoreFailed,
       transferringStarPublicID,
       lastChange,
+      streamingPublicIDs,
+      setConversationStreaming,
       loadMore,
       retryLoadMore,
       prependNewConversation,
@@ -950,9 +975,11 @@ export function useSidebarConversationsController({
       recentItems,
       reorderProjects,
       retryLoadMore,
+      setConversationStreaming,
       setProjectByPublicID,
       starredItems,
       starredTotal,
+      streamingPublicIDs,
       touchByPublicID,
       updateProject,
       renameByPublicID,

@@ -232,7 +232,10 @@ export function MessageUpstreamThink({
   const open = accordionValue === "upstream-think";
   const resolvedTitle = title ?? (streaming ? labels.think.titleActive : labels.think.titleDone);
   const resolvedSubtitle = subtitle ?? (streaming ? labels.think.subtitleActive : labels.think.subtitleDone);
-  const contentSegments = block.contentSegments?.filter((item) => item.trim()) ?? [];
+  const contentSegments = React.useMemo(
+    () => block.contentSegments?.filter((item) => item.trim()) ?? [],
+    [block.contentSegments],
+  );
   // 流式思考内容自动跟随：用户未上滚时始终显示最新一段。
   const { ref: thinkContentRef, onScroll: onThinkContentScroll } = useAutoScrollFollow<HTMLDivElement>(contentSegments);
 

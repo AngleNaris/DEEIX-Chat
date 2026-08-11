@@ -13,7 +13,11 @@ import {
   resolveDesktopMenuListMaxHeight,
   resolveDesktopModelMenuListMaxHeight,
 } from "./chat-model-picker-layout";
+import { ChatModelSortPanel } from "./chat-model-sort-panel";
+import { ChatModelIdentity } from "./chat-model-identity";
 import { useIsMobile } from "@/shared/hooks/use-mobile";
+import { getUserSettings, patchUserSettings } from "@/shared/api/user-settings";
+import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 import { ModelIcon } from "@/shared/components/model-icon";
 import {
   cacheWritePricingLabel,
@@ -47,7 +51,7 @@ const DESKTOP_GROUP_MENU_VERTICAL_CHROME = 40;
 /** Model submenu non-list chrome: p-1.5 × 2. */
 const DESKTOP_SUBMENU_VERTICAL_CHROME = 12;
 
-function resolveModelGroups(modelOptions: ChatModelOption[]) {
+function resolveModelGroups(modelOptions: ChatModelOption[], orderBy?: string[] | null) {
   const groupMap = new Map<string, { label: string; icon: string; items: ChatModelOption[] }>();
   for (const item of modelOptions) {
     const presentation = resolveModelPresentationGroup(item);
@@ -63,46 +67,50 @@ function resolveModelGroups(modelOptions: ChatModelOption[]) {
     });
   }
 
+  // 组内按用户自定义顺序排列（未收录的模型保持原相对顺序）。
+  if (orderBy && orderBy.length > 0) {
+    const rank = new Map(orderBy.map((name, index) => [name, index]));
+    for (const group of groupMap.values()) {
+      group.items.sort((a, b) => {
+        const rankA = rank.get(a.platformModelName);
+        const rankB = rank.get(b.platformModelName);
+        if (rankA !== undefined && rankB !== undefined) {
+          return rankA - rankB;
+        }
+        if (rankA !== undefined) {
+          return -1;
+        }
+        if (rankB !== undefined) {
+          return 1;
+        }
+        return 0;
+      });
+    }
+  }
+
   return Array.from(groupMap.entries()).map(([key, group]) => ({ key, ...group }));
 }
 
-function ChatModelIdentity({
-  model,
-  density = "default",
-}: {
-  model: ChatModelOption;
-  density?: "default" | "compact";
-}) {
-  const platformModelName = model.platformModelName.trim();
-  const identity = React.useMemo(
-    () =>
-      resolveModelIdentity({
-        code: model.platformModelName,
-        vendor: model.vendor,
-        icon: model.icon,
-      }),
-    [model.icon, model.platformModelName, model.vendor],
-  );
-  const iconURL = React.useMemo(() => resolveModelIconURL(identity.modelIcon), [identity.modelIcon]);
-  const compact = density === "compact";
-
-  return (
-    <div className={cn("flex min-w-0 items-center", compact ? "gap-2" : "gap-2.5")}>
-      <ModelIcon iconUrl={iconURL} label={platformModelName} />
-      <div className="min-w-0 flex-1 overflow-hidden">
-        <div className={cn("flex items-center", compact ? "gap-1" : "gap-1.5")}>
-          <p
-            className={cn(
-              "truncate font-medium text-foreground",
-              compact ? "text-[12.5px] leading-4" : "text-[13px] leading-4.5",
-            )}
-          >
-            {platformModelName}
-          </p>
-        </div>
-      </div>
-    </div>
-  );
+// 按用户自定义顺序排列 flat 模型列表（未收录的模型追加尾部，保持原相对顺序）。
+function sortModelOptionsByOrder(modelOptions: ChatModelOption[], orderBy: string[] | null): ChatModelOption[] {
+  if (!orderBy || orderBy.length === 0) {
+    return modelOptions;
+  }
+  const rank = new Map(orderBy.map((name, index) => [name, index]));
+  return [...modelOptions].sort((a, b) => {
+    const rankA = rank.get(a.platformModelName);
+    const rankB = rank.get(b.platformModelName);
+    if (rankA !== undefined && rankB !== undefined) {
+      return rankA - rankB;
+    }
+    if (rankA !== undefined) {
+      return -1;
+    }
+    if (rankB !== undefined) {
+      return 1;
+    }
+    return 0;
+  });
 }
 
 function ChatModelTriggerSkeleton() {
@@ -462,6 +470,9 @@ export function ChatModelPicker({
   const t = useTranslations("chat.modelPicker");
   const isMobile = useIsMobile();
   const [open, setOpen] = React.useState(false);
+  // 模型列表视图：grouped=按厂商分组 / custom=自定义排序（flat 拖拽）。
+  const [viewMode, setViewMode] = React.useState<"grouped" | "custom">("grouped");
+  const [modelOrder, setModelOrder] = React.useState<string[] | null>(null);
   const [activeGroupKey, setActiveGroupKey] = React.useState("");
   const [mobileGroupKey, setMobileGroupKey] = React.useState<string | null>(null);
   const [desktopSubmenuSide, setDesktopSubmenuSide] = React.useState<"right" | "left">("right");
@@ -490,7 +501,14 @@ export function ChatModelPicker({
     }
     return resolveModelPresentationGroup(selectedModel).label;
   }, [selectedModel]);
-  const modelGroups = React.useMemo(() => resolveModelGroups(modelOptions), [modelOptions]);
+  const modelGroups = React.useMemo(
+    () => resolveModelGroups(modelOptions, modelOrder),
+    [modelOptions, modelOrder],
+  );
+  const sortedModelOptions = React.useMemo(
+    () => sortModelOptionsByOrder(modelOptions, modelOrder),
+    [modelOptions, modelOrder],
+  );
   const activeDesktopGroupKey = activeGroupKey || selectedGroupKey || modelGroups[0]?.key || "";
   const activeDesktopGroup = React.useMemo(
     () => modelGroups.find((group) => group.key === activeDesktopGroupKey) ?? modelGroups[0] ?? null,
@@ -544,6 +562,64 @@ export function ChatModelPicker({
       setMobileGroupKey(null);
     }
   }, [isMobile, open]);
+
+  // 打开选择器时读取视图偏好与自定义顺序（user settings）。
+  React.useEffect(() => {
+    if (!open) {
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const token = await resolveAccessToken();
+        if (!token) {
+          return;
+        }
+        const settings = await getUserSettings(token);
+        if (cancelled) {
+          return;
+        }
+        setViewMode(settings["chat.model_view"] === "custom" ? "custom" : "grouped");
+        try {
+          const parsed = JSON.parse(settings["chat.model_order"] ?? "null") as unknown;
+          setModelOrder(
+            Array.isArray(parsed)
+              ? parsed.filter((name): name is string => typeof name === "string")
+              : null,
+          );
+        } catch {
+          setModelOrder(null);
+        }
+      } catch {
+        // 读取失败保持默认视图，不阻塞选择器。
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
+  const persistModelView = React.useCallback((mode: "grouped" | "custom") => {
+    setViewMode(mode);
+    void (async () => {
+      const token = await resolveAccessToken();
+      if (!token) {
+        return;
+      }
+      await patchUserSettings(token, { "chat.model_view": mode }).catch(() => undefined);
+    })();
+  }, []);
+
+  const persistModelOrder = React.useCallback((order: string[]) => {
+    setModelOrder(order);
+    void (async () => {
+      const token = await resolveAccessToken();
+      if (!token) {
+        return;
+      }
+      await patchUserSettings(token, { "chat.model_order": JSON.stringify(order) }).catch(() => undefined);
+    })();
+  }, []);
 
   const updateDesktopSubmenuMetrics = React.useCallback(() => {
     if (!open || isMobile) {
@@ -732,10 +808,62 @@ export function ChatModelPicker({
               "relative overflow-visible rounded-xl",
               isMobile
                 ? "w-[min(20rem,calc(100vw-3rem))] p-1.5"
-                : "w-[min(14rem,calc(100vw-3rem))] border-0 bg-transparent p-0 shadow-none",
+                : cn(
+                    "border-0 bg-transparent p-0 shadow-none",
+                    viewMode === "custom"
+                      ? "w-[min(19rem,calc(100vw-3rem))]"
+                      : "w-[min(14rem,calc(100vw-3rem))]",
+                  ),
             )}
           >
-            {isMobile ? (
+            {/* 视图切换：按厂商分组 / 自定义排序 */}
+            <div className="flex h-7 shrink-0 items-center justify-between gap-2 px-1 pb-1">
+              <div className="flex items-center gap-0.5 rounded-md bg-muted/70 p-0.5">
+                <button
+                  type="button"
+                  className={cn(
+                    "h-5 rounded px-1.5 text-[10px] font-medium transition-colors",
+                    viewMode === "grouped"
+                      ? "bg-background text-foreground shadow-xs"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                  onClick={() => persistModelView("grouped")}
+                >
+                  {t("viewGrouped")}
+                </button>
+                <button
+                  type="button"
+                  className={cn(
+                    "h-5 rounded px-1.5 text-[10px] font-medium transition-colors",
+                    viewMode === "custom"
+                      ? "bg-background text-foreground shadow-xs"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                  onClick={() => persistModelView("custom")}
+                >
+                  {t("viewCustom")}
+                </button>
+              </div>
+              <span className="min-w-0 truncate text-right text-[10px] font-medium text-muted-foreground">
+                {viewMode === "custom" ? t("sortTitle") : selectedGroupLabel}
+              </span>
+            </div>
+
+            {viewMode === "custom" ? (
+              <div className="flex max-h-[calc(100dvh-3rem)] min-w-0 flex-col overflow-hidden rounded-xl border-[0.5px] border-border bg-popover p-1.5 shadow-xs">
+                <ModelMenuScrollContainer maxHeight={resolveDesktopMenuListMaxHeight(420, 40)}>
+                  <ChatModelSortPanel
+                    modelOptions={sortedModelOptions}
+                    selectedPlatformModelName={selectedPlatformModelName}
+                    onSelect={(platformModelName) => {
+                      onModelChange(platformModelName);
+                      closeMenu();
+                    }}
+                    onOrderChange={persistModelOrder}
+                  />
+                </ModelMenuScrollContainer>
+              </div>
+            ) : isMobile ? (
               <>
                 <div className="flex h-7 items-center justify-between gap-2 px-2">
                   {mobileGroup ? (

@@ -206,8 +206,48 @@ export type PublicSharedMessageDTO = Omit<PublicSharedMessageResponse, "processT
   processTrace?: MessageProcessTraceDTO;
 };
 
+// 分享快照中的群组中间过程时间线（后端由 chat_agent_group_runs/steps/attempts 脱敏重建）。
+export type PublicSharedGroupRunTimelineDTO = {
+  groupRunID: string;
+  status: string;
+  steps: Array<{
+    stepID: string;
+    sequence: number;
+    stepType: string;
+    actor: {
+      memberID: string;
+      name: string;
+      type: string;
+      icon: string;
+      color: string;
+      model: string;
+    };
+    status: string;
+    attempts: Array<{
+      attemptID: string;
+      attemptNumber: number;
+      status: string;
+      output: string;
+      errorCode?: string;
+      startedAt: string;
+      endedAt?: string | null;
+      updatedAt: string;
+    }>;
+    startedAt: string;
+    endedAt?: string | null;
+    updatedAt: string;
+  }>;
+  currentStepID: string | null;
+  currentAttemptID: string | null;
+  errorCode?: string;
+  startedAt: string;
+  endedAt?: string | null;
+  updatedAt: string;
+};
+
 export type PublicSharedConversationDTO = Omit<PublicSharedConversationResponse, "messages"> & {
   messages: PublicSharedMessageDTO[];
+  groupRuns?: Record<string, PublicSharedGroupRunTimelineDTO>;
 };
 
 export type SetMessageFeedbackRequest = ContractSetMessageFeedbackRequest;

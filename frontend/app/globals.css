@@ -1591,3 +1591,59 @@ html[data-branding-pending] body {
     color: #fff;
   }
 }
+
+/* ─── 进行中动效 ─────────────────────────────────────────────── */
+
+/* 侧边栏"进行中"呼吸点：提示该对话正在进行流式生成 */
+.streaming-dot {
+  position: relative;
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background: var(--primary);
+  animation: streaming-dot-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes streaming-dot-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in oklch, var(--primary) 45%, transparent);
+  }
+  70% {
+    box-shadow: 0 0 0 6px transparent;
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
+/* 行级扫光：进行中的工具调用 / 群组成员活动行，高光从左到右循环扫过 */
+.trace-sweep {
+  position: relative;
+}
+
+.trace-sweep::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  background: linear-gradient(
+    100deg,
+    transparent 30%,
+    color-mix(in oklch, currentColor 7%, transparent) 50%,
+    transparent 70%
+  );
+  background-size: 220% 100%;
+  background-repeat: no-repeat;
+  animation: trace-sweep-move var(--trace-sweep-duration, 1.8s) ease-in-out infinite;
+}
+
+@keyframes trace-sweep-move {
+  from {
+    background-position: 130% 0;
+  }
+  to {
+    background-position: -30% 0;
+  }
+}
