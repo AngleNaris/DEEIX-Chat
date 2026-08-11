@@ -42,7 +42,7 @@ services:
       context: .
       dockerfile: mm-gateway.Dockerfile
       args:
-        MM_PACKAGE: "qwen-mm-plugins[core]"
+        MM_PACKAGE: "qwen-mm-plugins[core] @ git+https://github.com/QwenLM/Qwen-MM-Plugins.git@main"
         MM_ENTRY: "qwen-mm-plugins-core"
     image: deeix-mm-gateway-core:latest
     container_name: deeix-mm-core
@@ -51,7 +51,6 @@ services:
       - "127.0.0.1:8082:8082"
     environment:
       SUPER_GATEWAY_PORT: "8082"
-      SUPER_GATEWAY_MODE: "stateful"
       DASHSCOPE_API_KEY: "${DASHSCOPE_API_KEY:?set in .env}"
       DASHSCOPE_BASE_URL: "${DASHSCOPE_BASE_URL:-}"
       QWEN_MM_MAX_RESPONSE_BYTES: "${QWEN_MM_MAX_RESPONSE_BYTES:-6291456}"
@@ -63,7 +62,7 @@ services:
       context: .
       dockerfile: mm-gateway.Dockerfile
       args:
-        MM_PACKAGE: "qwen-mm-plugins[omni-av]"
+        MM_PACKAGE: "qwen-mm-plugins[omni-av] @ git+https://github.com/QwenLM/Qwen-MM-Plugins.git@main"
         MM_ENTRY: "qwen-mm-plugins-omni-av"
     image: deeix-mm-gateway-omni-av:latest
     container_name: deeix-mm-omni-av
@@ -72,7 +71,6 @@ services:
       - "127.0.0.1:8083:8083"
     environment:
       SUPER_GATEWAY_PORT: "8083"
-      SUPER_GATEWAY_MODE: "stateful"
       DASHSCOPE_API_KEY: "${DASHSCOPE_API_KEY:?set in .env}"
       DASHSCOPE_BASE_URL: "${DASHSCOPE_BASE_URL:-}"
       QWEN_MM_MAX_RESPONSE_BYTES: "${QWEN_MM_MAX_RESPONSE_BYTES:-6291456}"
