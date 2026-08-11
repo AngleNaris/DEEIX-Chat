@@ -1,6 +1,6 @@
 # deeix-sandbox-mcp 服务镜像（compose build context = tools/sandbox-mcp）
 # 需要挂载宿主 /var/run/docker.sock（唯一持该权限的服务）。
-FROM golang:1.24-alpine AS builder
+FROM golang:1.26-alpine AS builder
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download

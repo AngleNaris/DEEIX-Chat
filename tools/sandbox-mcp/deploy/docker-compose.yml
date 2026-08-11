@@ -5,11 +5,13 @@
 #   mm-omni-av   :8083  Qwen-MM-Plugins omni-av 能力
 # 用法：cp .env.example .env && 编辑凭据 -> docker compose up -d
 services:
+  # 镜像由本地构建后 docker save/scp/load 到 VPS（tools/sandbox-mcp/deploy/sandbox-mcp.Dockerfile）；
+  # 如需在 VPS 直接构建，取消下方 build 段注释并把 image 行移到 build 下方。
   sandbox-mcp:
-    build:
-      context: ..
-      dockerfile: deploy/sandbox-mcp.Dockerfile
     image: deeix-sandbox-mcp:latest
+    # build:
+    #   context: ..
+    #   dockerfile: deploy/sandbox-mcp.Dockerfile
     container_name: deeix-sandbox-mcp
     restart: unless-stopped
     ports:
