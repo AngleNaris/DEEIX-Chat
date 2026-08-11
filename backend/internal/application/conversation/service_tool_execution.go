@@ -117,6 +117,8 @@ func (s *Service) executeAssistantToolCalls(ctx context.Context, input executeAs
 					if row.OutputJSON == "" {
 						row.OutputJSON = "{}"
 					}
+					// 平台内置工具产物（图片等）同样附件化落库。
+					s.attachToolArtifacts(ctx, input, row.OutputJSON)
 				}
 				persisted := s.persistToolCallResult(ctx, &row)
 				result := buildToolResultForModel(row, modelToolName)
@@ -193,6 +195,8 @@ func (s *Service) executeAssistantToolCalls(ctx context.Context, input executeAs
 			if row.OutputJSON == "" {
 				row.OutputJSON = "{}"
 			}
+			// MCP 工具多模态产物（image/audio 等 content 块）附件化落库为消息附件。
+			s.attachToolArtifacts(ctx, input, row.OutputJSON)
 		}
 		persisted := s.persistToolCallResult(ctx, &row)
 		result := buildToolResultForModel(row, modelToolName)

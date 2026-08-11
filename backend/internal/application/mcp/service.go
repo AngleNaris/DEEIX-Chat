@@ -464,7 +464,10 @@ func normalizeToolInput(input ToolInput) (repository.UpdateMCPToolInput, error) 
 	if input.AttachmentInputMode != nil {
 		mode := strings.ToLower(strings.TrimSpace(*input.AttachmentInputMode))
 		switch mode {
-		case domainmcp.AttachmentInputModeNone, domainmcp.AttachmentInputModeImage:
+		case domainmcp.AttachmentInputModeNone,
+			domainmcp.AttachmentInputModeImage,
+			domainmcp.AttachmentInputModeAudio,
+			domainmcp.AttachmentInputModeFile:
 			update.AttachmentInputMode = &mode
 		default:
 			return update, ErrInvalidToolAttachmentConfig
@@ -537,6 +540,16 @@ func mergedToolAttachmentConfig(tool domainmcp.Tool, update repository.UpdateMCP
 	return config
 }
 
+func isValidAttachmentMode(mode string) bool {
+	switch mode {
+	case domainmcp.AttachmentInputModeImage,
+		domainmcp.AttachmentInputModeAudio,
+		domainmcp.AttachmentInputModeFile:
+		return true
+	}
+	return false
+}
+
 func validateToolAttachmentConfig(config toolAttachmentConfig, schemaJSON string) error {
 	if config.Mode == domainmcp.AttachmentInputModeNone {
 		if config.Argument != "" || config.Encoding != "" || config.PromptArgument != "" {
@@ -544,7 +557,7 @@ func validateToolAttachmentConfig(config toolAttachmentConfig, schemaJSON string
 		}
 		return nil
 	}
-	if config.Mode != domainmcp.AttachmentInputModeImage || config.Argument == "" {
+	if !isValidAttachmentMode(config.Mode) || config.Argument == "" {
 		return ErrInvalidToolAttachmentConfig
 	}
 	switch config.Encoding {

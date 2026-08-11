@@ -1,14 +1,28 @@
 package mcp
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 const (
 	AttachmentInputModeNone  = "none"
 	AttachmentInputModeImage = "image"
+	AttachmentInputModeAudio = "audio"
+	AttachmentInputModeFile  = "file"
 
 	AttachmentEncodingBase64  = "base64"
 	AttachmentEncodingDataURL = "data_url"
 )
+
+// IsValidAttachmentMode 判断是否为可用的附件注入模式（none 之外）。
+func IsValidAttachmentMode(mode string) bool {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case AttachmentInputModeImage, AttachmentInputModeAudio, AttachmentInputModeFile:
+		return true
+	}
+	return false
+}
 
 // Server 表示管理员维护的 MCP 服务。
 type Server struct {

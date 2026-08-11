@@ -687,7 +687,7 @@ export function AdminToolsPage() {
       if (!token) {
         throw new Error(t("toast.sessionExpired"));
       }
-      const attachmentConfig = toolForm.attachmentInputMode === "image" ? {
+      const attachmentConfig = toolForm.attachmentInputMode !== "none" ? {
         attachmentInputMode: toolForm.attachmentInputMode,
         attachmentArgument: toolForm.attachmentArgument,
         attachmentEncoding: toolForm.attachmentEncoding,

@@ -77,6 +77,17 @@ function isVideoAttachment(attachment: MessageAttachment): boolean {
   );
 }
 
+function isAudioAttachment(attachment: MessageAttachment): boolean {
+  const mimeType = attachment.mimeType.toLowerCase();
+  const detectedMime = attachment.detectedMime?.toLowerCase() || "";
+  return (
+    attachment.kind === "audio" ||
+    attachment.fileCategory === "audio" ||
+    mimeType.startsWith("audio/") ||
+    detectedMime.startsWith("audio/")
+  );
+}
+
 function resolveFileIDFromImageSrc(src: string): string | null {
   if (typeof window === "undefined") {
     return null;
@@ -269,12 +280,23 @@ export function ChatMessageBot({
         : null,
     [item.attachments, item.contentType, item.isStreaming],
   );
+  const inlineAudioAttachment = React.useMemo(
+    () =>
+      !item.isStreaming
+        ? (item.attachments ?? []).find(isAudioAttachment) ?? null
+        : null,
+    [item.attachments, item.isStreaming],
+  );
   const visibleAttachments = React.useMemo(
     () =>
-      inlineVideoAttachment
-        ? (item.attachments ?? []).filter((attachment) => attachment.fileID !== inlineVideoAttachment.fileID)
-        : item.attachments ?? [],
-    [inlineVideoAttachment, item.attachments],
+      (inlineVideoAttachment || inlineAudioAttachment
+        ? (item.attachments ?? []).filter(
+            (attachment) =>
+              attachment.fileID !== inlineVideoAttachment?.fileID &&
+              attachment.fileID !== inlineAudioAttachment?.fileID,
+          )
+        : item.attachments ?? []),
+    [inlineAudioAttachment, inlineVideoAttachment, item.attachments],
   );
   const hideGeneratedVideoMarkdown = inlineVideoAttachment
     ? isGeneratedVideoMarkdownContent(item.content, item.attachments ?? [])
@@ -428,6 +450,10 @@ export function ChatMessageBot({
 
       {inlineVideoAttachment ? (
         <MessageInlineVideoPreview attachment={inlineVideoAttachment} loadContent={attachmentContentLoader} />
+      ) : null}
+
+      {inlineAudioAttachment ? (
+        <MessageInlineAudioPreview attachment={inlineAudioAttachment} loadContent={attachmentContentLoader} />
       ) : null}
 
       {item.inlineAlert ? (
@@ -840,6 +866,129 @@ function MessageInlineVideoPreview({
         contentType={state.contentType}
         inline
       />
+    </div>
+  );
+}
+
+// MessageInlineAudioPreview 内联渲染消息中的音频附件（工具产物/上传的音频），
+// 复用视频预览的加载状态机（objectURL + accessToken），渲染原生 <audio> 播放器。
+function MessageInlineAudioPreview({
+  attachment,
+  loadContent,
+}: {
+  attachment: MessageAttachment;
+  loadContent?: (file: PreviewDialogFile) => Promise<FileContentResult>;
+}) {
+  const tPreview = useTranslations("files.previewDialog");
+  const resolveErrorMessage = useLocalizedErrorMessage();
+  const objectURLRef = React.useRef<string | null>(null);
+  const [state, setState] = React.useState<InlineVideoPreviewState>({ status: "loading" });
+  const fileID = attachment.fileID;
+  const fileName = attachment.fileName;
+  const mimeType = attachment.mimeType;
+  const detectedMime = attachment.detectedMime;
+  const previewURL = attachment.previewURL;
+  const sizeBytes = attachment.sizeBytes;
+  const revokeObjectURL = React.useCallback(() => {
+    if (!objectURLRef.current) {
+      return;
+    }
+    URL.revokeObjectURL(objectURLRef.current);
+    objectURLRef.current = null;
+  }, []);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    revokeObjectURL();
+
+    if (previewURL) {
+      setState({
+        status: "ready",
+        source: previewURL,
+        contentType: detectedMime || mimeType,
+      });
+      return undefined;
+    }
+
+    setState({ status: "loading" });
+    void (async () => {
+      try {
+        const file = {
+          fileID,
+          fileName,
+          mimeType,
+          sizeBytes,
+        };
+        const result = loadContent
+          ? await loadContent(file)
+          : await (async () => {
+              const token = await resolveAccessToken();
+              if (!token) {
+                throw new Error(tPreview("sessionExpired"));
+              }
+              return fetchFileContent(token, fileID);
+            })();
+        const objectURL = URL.createObjectURL(result.blob);
+        objectURLRef.current = objectURL;
+
+        if (cancelled) {
+          URL.revokeObjectURL(objectURL);
+          if (objectURLRef.current === objectURL) {
+            objectURLRef.current = null;
+          }
+          return;
+        }
+
+        setState({
+          status: "ready",
+          source: objectURL,
+          contentType: result.contentType || detectedMime || mimeType,
+        });
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+        setState({ status: "error", message: resolveErrorMessage(error, tPreview("loadFailed")) });
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      revokeObjectURL();
+    };
+  }, [
+    detectedMime,
+    fileID,
+    fileName,
+    loadContent,
+    mimeType,
+    previewURL,
+    resolveErrorMessage,
+    revokeObjectURL,
+    sizeBytes,
+    tPreview,
+  ]);
+
+  if (state.status === "loading") {
+    return <div className="my-4 h-10 w-full max-w-[36rem] animate-pulse rounded-md bg-muted/40" />;
+  }
+
+  if (state.status === "error") {
+    return (
+      <Alert className="my-4 max-w-[36rem]" variant="destructive">
+        <CircleAlert className="size-4" />
+        <AlertDescription>{state.message}</AlertDescription>
+      </Alert>
+    );
+  }
+
+  return (
+    <div className="my-4 w-full max-w-[36rem]">
+      <audio controls preload="metadata" className="w-full" src={state.source}>
+        <a href={state.source} download={fileName}>
+          {fileName}
+        </a>
+      </audio>
     </div>
   );
 }

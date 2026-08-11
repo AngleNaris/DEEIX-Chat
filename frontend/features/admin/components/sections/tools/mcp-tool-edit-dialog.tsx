@@ -26,7 +26,7 @@ export type MCPToolEditFormState = {
   id: number;
   displayName: string;
   description: string;
-  attachmentInputMode: "none" | "image";
+  attachmentInputMode: "none" | "image" | "audio" | "file";
   attachmentArgument: string;
   attachmentEncoding: "base64" | "data_url";
   attachmentPromptArgument: string;
@@ -151,25 +151,33 @@ export function MCPToolEditDialog({
             </div>
 
             <div className="border-t border-border/60 pt-4">
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex min-w-0 flex-1 items-center gap-1">
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-1">
                   <p className="text-xs font-medium text-foreground">{t("imageRoutingTitle")}</p>
                   <HelpTooltip label={t("imageRoutingTitle")}>
                     {t("imageRoutingTooltip")}
                   </HelpTooltip>
                 </div>
-                <Switch
-                  size="sm"
-                  checked={stableForm?.attachmentInputMode === "image"}
-                  aria-label={t("imageRoutingTitle")}
-                  onCheckedChange={(checked) => onFormChange((prev) => (
-                    prev ? { ...prev, attachmentInputMode: checked ? "image" : "none" } : prev
+                <Select
+                  value={stableForm?.attachmentInputMode ?? "none"}
+                  onValueChange={(value: "none" | "image" | "audio" | "file") => onFormChange((prev) => (
+                    prev ? { ...prev, attachmentInputMode: value } : prev
                   ))}
-                />
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">{t("attachmentModeNone")}</SelectItem>
+                    <SelectItem value="image">{t("attachmentModeImage")}</SelectItem>
+                    <SelectItem value="audio">{t("attachmentModeAudio")}</SelectItem>
+                    <SelectItem value="file">{t("attachmentModeFile")}</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
 
               {stableForm ? (
-                <DialogCollapsible open={stableForm.attachmentInputMode === "image"}>
+                <DialogCollapsible open={stableForm.attachmentInputMode !== "none"}>
                   <div className="space-y-4 pt-4">
                     {stableForm.schemaStringArguments.length === 0 ? (
                       <p className="text-[11px] leading-5 text-destructive">

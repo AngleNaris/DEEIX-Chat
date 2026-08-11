@@ -1,0 +1,77 @@
+# /opt/deeix-mcp —— DEEIX 配套 MCP 服务编排
+# 服务（全部仅绑定 127.0.0.1，供 DEEIX 后端回环访问）：
+#   sandbox-mcp  :8081  多用户沙箱（自建 Go 组件，tools/sandbox-mcp）
+#   mm-core      :8082  Qwen-MM-Plugins core 能力（stdio 经 supergateway 桥接为 Streamable HTTP）
+#   mm-omni-av   :8083  Qwen-MM-Plugins omni-av 能力
+# 用法：cp .env.example .env && 编辑凭据 -> docker compose up -d
+services:
+  sandbox-mcp:
+    build:
+      context: ..
+      dockerfile: deploy/sandbox-mcp.Dockerfile
+    image: deeix-sandbox-mcp:latest
+    container_name: deeix-sandbox-mcp
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8081:8081"
+    environment:
+      SANDBOX_MCP_ADDR: "0.0.0.0:8081"
+      SANDBOX_MCP_API_KEY: "${SANDBOX_MCP_API_KEY:?set in .env}"
+      SANDBOX_BASE_IMAGE: "${SANDBOX_BASE_IMAGE:-deeix-sandbox-base:latest}"
+      SANDBOX_LEASE_TTL_SEC: "${SANDBOX_LEASE_TTL_SEC:-900}"
+      SANDBOX_EXEC_TIMEOUT_SEC: "${SANDBOX_EXEC_TIMEOUT_SEC:-120}"
+      SANDBOX_MAX_EXEC_TIMEOUT_SEC: "${SANDBOX_MAX_EXEC_TIMEOUT_SEC:-600}"
+      SANDBOX_MEMORY_LIMIT: "${SANDBOX_MEMORY_LIMIT:-1g}"
+      SANDBOX_PIDS_LIMIT: "${SANDBOX_PIDS_LIMIT:-256}"
+      SANDBOX_CPUS_LIMIT: "${SANDBOX_CPUS_LIMIT:-0.5}"
+      SANDBOX_CACHE_VOLUME: "${SANDBOX_CACHE_VOLUME:-deeix-sandbox-cache}"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    # 沙箱 MCP 需要按 (user, conversation) 创建/销毁容器，故授予 docker.sock；
+    # 镜像体积小、无宿主目录挂载，容器 root 能力由 AppArmor/SELinux 默认策略与资源限额兜底。
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  # ---- Qwen-MM-Plugins 桥接（supergateway: stdio -> Streamable HTTP）----
+  mm-core:
+    build:
+      context: .
+      dockerfile: mm-gateway.Dockerfile
+      args:
+        MM_PACKAGE: "qwen-mm-plugins[core]"
+        MM_ENTRY: "qwen-mm-plugins-core"
+    image: deeix-mm-gateway-core:latest
+    container_name: deeix-mm-core
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8082:8082"
+    environment:
+      SUPER_GATEWAY_PORT: "8082"
+      SUPER_GATEWAY_MODE: "stateful"
+      DASHSCOPE_API_KEY: "${DASHSCOPE_API_KEY:?set in .env}"
+      DASHSCOPE_BASE_URL: "${DASHSCOPE_BASE_URL:-}"
+      QWEN_MM_MAX_RESPONSE_BYTES: "${QWEN_MM_MAX_RESPONSE_BYTES:-6291456}"
+      QWEN_MM_CHAT_TIMEOUT: "${QWEN_MM_CHAT_TIMEOUT:-600}"
+      SERPER_API_KEY: "${SERPER_API_KEY:-}"
+
+  mm-omni-av:
+    build:
+      context: .
+      dockerfile: mm-gateway.Dockerfile
+      args:
+        MM_PACKAGE: "qwen-mm-plugins[omni-av]"
+        MM_ENTRY: "qwen-mm-plugins-omni-av"
+    image: deeix-mm-gateway-omni-av:latest
+    container_name: deeix-mm-omni-av
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8083:8083"
+    environment:
+      SUPER_GATEWAY_PORT: "8083"
+      SUPER_GATEWAY_MODE: "stateful"
+      DASHSCOPE_API_KEY: "${DASHSCOPE_API_KEY:?set in .env}"
+      DASHSCOPE_BASE_URL: "${DASHSCOPE_BASE_URL:-}"
+      QWEN_MM_MAX_RESPONSE_BYTES: "${QWEN_MM_MAX_RESPONSE_BYTES:-6291456}"
+      QWEN_MM_CHAT_TIMEOUT: "${QWEN_MM_CHAT_TIMEOUT:-600}"

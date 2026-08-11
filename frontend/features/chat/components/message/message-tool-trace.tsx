@@ -148,6 +148,14 @@ function normalizeImageSource(value: string): string {
   return "";
 }
 
+// normalizeMediaDataURL 将 MCP content 块的 data(base64) + mimeType 组装为 data URL。
+function normalizeMediaDataURL(data: unknown, mimeType: string, fallbackMime: string): string {
+  const encoded = readString(data)?.replace(/\s/g, "");
+  if (!encoded || encoded.length < 80) return "";
+  const mime = mimeType.trim() || fallbackMime;
+  return `data:${mime};base64,${encoded}`;
+}
+
 function collectToolImageSources(value: unknown, result: string[] = []): string[] {
   if (typeof value === "string") {
     const source = normalizeImageSource(value);
@@ -161,12 +169,41 @@ function collectToolImageSources(value: unknown, result: string[] = []): string[
     return Array.from(new Set(result));
   }
   if (!isRecord(value)) return Array.from(new Set(result));
+  // MCP content 块：{type:"image", data, mimeType}；audio 块交给音频渲染，跳过避免误判为图片。
+  if (String(value.type) === "image") {
+    const source = normalizeMediaDataURL(value.data, readString(value.mimeType) || readString(value.mime_type), "image/png");
+    if (source) result.push(source);
+    return Array.from(new Set(result));
+  }
+  if (String(value.type) === "audio" || String(value.type) === "video") {
+    return Array.from(new Set(result));
+  }
   for (const key of ["url", "uri", "image_url", "b64_json", "base64", "partial_image_b64", "result"]) {
     const source = normalizeImageSource(readString(value[key]));
     if (source) result.push(source);
   }
   Object.values(value).forEach((item) => {
     collectToolImageSources(item, result);
+  });
+  return Array.from(new Set(result));
+}
+
+// collectToolAudioSources 提取 MCP content 块中的音频（{type:"audio", data, mimeType}）。
+function collectToolAudioSources(value: unknown, result: string[] = []): string[] {
+  if (Array.isArray(value)) {
+    value.forEach((item) => {
+      collectToolAudioSources(item, result);
+    });
+    return Array.from(new Set(result));
+  }
+  if (!isRecord(value)) return Array.from(new Set(result));
+  if (String(value.type) === "audio") {
+    const source = normalizeMediaDataURL(value.data, readString(value.mimeType) || readString(value.mime_type), "audio/mpeg");
+    if (source) result.push(source);
+    return Array.from(new Set(result));
+  }
+  Object.values(value).forEach((item) => {
+    collectToolAudioSources(item, result);
   });
   return Array.from(new Set(result));
 }
@@ -363,6 +400,30 @@ function ToolImageGrid({ urls, labels }: { urls: string[]; labels: ProcessTraceL
         >
           <ToolPreviewImage src={url} alt={labels.tool.detail.generatedImageAlt(index + 1)} />
         </a>
+      ))}
+    </div>
+  );
+}
+
+// ToolAudioList 渲染 MCP 工具返回的音频块（语音合成/音频产物）。
+function ToolAudioList({ sources, labels }: { sources: string[]; labels: ProcessTraceLabels }) {
+  const unique = Array.from(new Set(sources.map((item) => item.trim()).filter(Boolean))).slice(0, 4);
+  if (unique.length === 0) return null;
+  return (
+    <div className="space-y-2">
+      <ToolMiniLabel>{labels.tool.detail.response}</ToolMiniLabel>
+      {unique.map((source, index) => (
+        <audio
+          key={`${source}-${index}`}
+          controls
+          preload="metadata"
+          className="h-9 w-full max-w-sm rounded-md"
+          src={source}
+        >
+          <a href={source} target="_blank" rel="noreferrer">
+            {labels.tool.detail.generatedImageAlt(index + 1)}
+          </a>
+        </audio>
       ))}
     </div>
   );
@@ -629,12 +690,22 @@ function ToolTraceStructuredContent({
     );
   }
 
+  // 通用工具（MCP / 沙箱 / mm-plugins）：内联展示多模态产物（图片/音频）+ 原始结果。
+  const images = collectToolImageSources(output);
+  const audios = collectToolAudioSources(output);
   return (
-    <ToolDetailText failed={failed} open={open} canExpand={canExpand} labels={labels} onToggle={onToggle}>
-      {call.latency_ms && call.latency_ms > 0 ? <span>{call.latency_ms}ms</span> : null}
-      {call.latency_ms && call.latency_ms > 0 && rawDetail ? <span>{labels.tool.detail.latencySeparator}</span> : null}
-      {rawDetail ? <span>{rawDetail}</span> : null}
-    </ToolDetailText>
+    <div className={cn("space-y-2 text-muted-foreground/84", failed && "text-destructive/80")}>
+      <div>{statusText}</div>
+      {images.length > 0 ? <ToolImageGrid urls={images} labels={labels} /> : null}
+      {audios.length > 0 ? <ToolAudioList sources={audios} labels={labels} /> : null}
+      {rawDetail ? (
+        <ToolDetailText failed={failed} open={open} canExpand={canExpand} labels={labels} onToggle={onToggle}>
+          {call.latency_ms && call.latency_ms > 0 ? <span>{call.latency_ms}ms</span> : null}
+          {call.latency_ms && call.latency_ms > 0 && rawDetail ? <span>{labels.tool.detail.latencySeparator}</span> : null}
+          {rawDetail ? <span>{rawDetail}</span> : null}
+        </ToolDetailText>
+      ) : null}
+    </div>
   );
 }
 

@@ -8,7 +8,7 @@ export type MessageAttachment = {
   fileCategory?: string;
   sizeBytes: number;
   durationSeconds?: number;
-  kind: "file" | "image";
+  kind: "file" | "image" | "audio" | "video";
   previewURL?: string;
   processingStatus?: string;
   processingReady?: boolean;

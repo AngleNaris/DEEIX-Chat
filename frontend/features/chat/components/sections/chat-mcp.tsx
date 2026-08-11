@@ -477,7 +477,9 @@ export function ChatMCP({
                                 onBlur={() => setFocusedRowKey((current) => (current === toolRowKey ? null : current))}
                               >
                                 <span className="min-w-0 truncate text-xs text-current">{label}</span>
-                                {tool.attachmentInputMode === "image" ? (
+                                {tool.attachmentInputMode === "image" ||
+                                tool.attachmentInputMode === "audio" ||
+                                tool.attachmentInputMode === "file" ? (
                                   <Tooltip disableHoverableContent>
                                     <TooltipTrigger asChild>
                                       <span

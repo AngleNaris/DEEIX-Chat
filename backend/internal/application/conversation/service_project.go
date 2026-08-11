@@ -428,7 +428,7 @@ func (s *Service) validateConversationProjectDefaults(
 		imageProcessorCount := 0
 		for _, tool := range tools {
 			selectedToolsByID[tool.ID] = tool
-			if tool.AttachmentInputMode == domainmcp.AttachmentInputModeImage {
+			if domainmcp.IsValidAttachmentMode(tool.AttachmentInputMode) {
 				imageProcessorCount++
 			}
 		}

@@ -3163,7 +3163,7 @@ export interface ToolListResponseDoc {
 export interface ToolResponse {
   attachmentArgument: string;
   attachmentEncoding: "" | "base64" | "data_url";
-  attachmentInputMode: "none" | "image";
+  attachmentInputMode: "none" | "image" | "audio" | "file";
   attachmentPromptArgument: string;
   createdAt: string;
   description: string;
@@ -3401,7 +3401,7 @@ export interface UpdateServerToolsStatusRequest {
 export interface UpdateToolRequest {
   attachmentArgument?: string;
   attachmentEncoding?: "base64" | "data_url";
-  attachmentInputMode?: "none" | "image";
+  attachmentInputMode?: "none" | "image" | "audio" | "file";
   attachmentPromptArgument?: string;
   description?: string;
   displayName?: string;

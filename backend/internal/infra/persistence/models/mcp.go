@@ -29,7 +29,7 @@ type MCPTool struct {
 	Description              string `gorm:"type:text;not null;default:'';comment:工具说明"`
 	MetadataCustomized       *bool  `gorm:"comment:名称或说明是否由管理员修改(NULL表示升级前状态待确认)"`
 	InputSchemaJSON          string `gorm:"type:text;not null;default:'{}';comment:输入JSON Schema"`
-	AttachmentInputMode      string `gorm:"size:32;not null;default:'none';comment:附件输入模式(none/image)"`
+	AttachmentInputMode      string `gorm:"size:32;not null;default:'none';comment:附件输入模式(none/image/audio/file)"`
 	AttachmentArgument       string `gorm:"size:128;not null;default:'';comment:附件内容对应的顶层参数名"`
 	AttachmentEncoding       string `gorm:"size:32;not null;default:'';comment:附件编码(base64/data_url)"`
 	AttachmentPromptArgument string `gorm:"size:128;not null;default:'';comment:用户提示词对应的顶层参数名"`

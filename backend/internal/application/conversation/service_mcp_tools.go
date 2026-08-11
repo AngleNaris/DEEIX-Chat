@@ -29,6 +29,7 @@ type selectedAttachmentProcessor struct {
 	modelName      string
 	toolName       string
 	displayName    string
+	mode           string // image / audio / file（决定注入哪些附件）
 	argument       string
 	encoding       string
 	promptArgument string
@@ -180,7 +181,7 @@ func (s *Service) resolveMCPToolRuntime(ctx context.Context, toolIDs []uint, res
 		if tool.Status != "active" {
 			continue
 		}
-		isAttachmentProcessor := strings.EqualFold(strings.TrimSpace(tool.AttachmentInputMode), domainmcp.AttachmentInputModeImage)
+		isAttachmentProcessor := domainmcp.IsValidAttachmentMode(strings.TrimSpace(tool.AttachmentInputMode))
 		server, ok := serverCache[tool.ServerID]
 		if !ok {
 			server, err = s.mcpRepo.GetServer(ctx, tool.ServerID)
@@ -230,19 +231,20 @@ func (s *Service) resolveMCPToolRuntime(ctx context.Context, toolIDs []uint, res
 			TimeoutMS: cfg.MCPToolTimeoutSeconds * 1000,
 			Headers:   headers,
 		}
-		if isAttachmentProcessor {
-			if bindErr := result.bindAttachmentProcessor(selectedAttachmentProcessor{
-				toolID:         tool.ID,
-				modelName:      modelName,
-				toolName:       tool.Name,
-				displayName:    firstNonEmptyString(tool.DisplayName, tool.Name),
-				argument:       strings.TrimSpace(tool.AttachmentArgument),
-				encoding:       strings.TrimSpace(tool.AttachmentEncoding),
-				promptArgument: strings.TrimSpace(tool.AttachmentPromptArgument),
-			}); bindErr != nil {
-				return bindErr
+			if isAttachmentProcessor {
+				if bindErr := result.bindAttachmentProcessor(selectedAttachmentProcessor{
+					toolID:         tool.ID,
+					modelName:      modelName,
+					toolName:       tool.Name,
+					displayName:    firstNonEmptyString(tool.DisplayName, tool.Name),
+					mode:           strings.ToLower(strings.TrimSpace(tool.AttachmentInputMode)),
+					argument:       strings.TrimSpace(tool.AttachmentArgument),
+					encoding:       strings.TrimSpace(tool.AttachmentEncoding),
+					promptArgument: strings.TrimSpace(tool.AttachmentPromptArgument),
+				}); bindErr != nil {
+					return bindErr
+				}
 			}
-		}
 	}
 	return nil
 }

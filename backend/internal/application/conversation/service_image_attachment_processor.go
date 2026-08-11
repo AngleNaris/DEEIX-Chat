@@ -19,6 +19,9 @@ import (
 const (
 	maxImageAttachmentAnalysisChars      = 6000
 	maxImageAttachmentAnalysisTotalChars = 16000
+	// maxProcessorBinaryBytes 附件处理器（audio/file 模式）允许注入的原始文件大小上限。
+	// 二进制附件按 base64 注入 MCP 参数，过大会撑爆请求体；图片走缩放流程不受此限。
+	maxProcessorBinaryBytes = 8 << 20
 )
 
 type imageAttachmentAnalysis struct {
@@ -47,23 +50,34 @@ type imageAttachmentProcessingResult struct {
 	PersistedToolCallKeys map[string]struct{}
 }
 
+// processImageAttachments 将当前消息附件按附件处理器（image/audio/file 模式）注入
+// 到指定的 MCP 工具参数中执行，并把分析结果接回主模型上下文。
+// 名称保留 image 前缀以兼容既有调用点；实际支持三种附件模式。
 func (s *Service) processImageAttachments(
 	ctx context.Context,
 	input imageAttachmentProcessingInput,
 ) (imageAttachmentProcessingResult, error) {
 	processor := input.Runtime.attachmentProcessor
-	images := currentImageAttachments(input.Attachments)
-	if processor == nil || len(images) == 0 {
+	if processor == nil {
+		return imageAttachmentProcessingResult{}, nil
+	}
+	// mode 为空时回退 image 行为（兼容存量工具与旧测试构造）。
+	mode := strings.ToLower(strings.TrimSpace(processor.mode))
+	if mode == "" {
+		mode = domainmcp.AttachmentInputModeImage
+	}
+	attachments := currentProcessorAttachments(input.Attachments, mode)
+	if len(attachments) == 0 {
 		return imageAttachmentProcessingResult{}, nil
 	}
 	result := imageAttachmentProcessingResult{
 		Routed:                true,
-		Analyses:              make([]imageAttachmentAnalysis, 0, len(images)),
-		Rows:                  make([]domainconversation.ToolCall, 0, len(images)),
-		PersistedToolCallKeys: make(map[string]struct{}, len(images)),
+		Analyses:              make([]imageAttachmentAnalysis, 0, len(attachments)),
+		Rows:                  make([]domainconversation.ToolCall, 0, len(attachments)),
+		PersistedToolCallKeys: make(map[string]struct{}, len(attachments)),
 	}
-	if len(images) > s.resolveMaxToolCallsPerRun() {
-		return result, fmt.Errorf("%w: image count exceeds the tool call limit", ErrImageAttachmentProcessingFailed)
+	if len(attachments) > s.resolveMaxToolCallsPerRun() {
+		return result, fmt.Errorf("%w: attachment count exceeds the tool call limit", ErrImageAttachmentProcessingFailed)
 	}
 	if processor.argument == "" ||
 		(processor.encoding != domainmcp.AttachmentEncodingBase64 && processor.encoding != domainmcp.AttachmentEncodingDataURL) {
@@ -81,15 +95,18 @@ func (s *Service) processImageAttachments(
 	}
 
 	totalImageBytes := 0
-	analysisCharLimit := min(maxImageAttachmentAnalysisChars, maxImageAttachmentAnalysisTotalChars/len(images))
-	for index, attachment := range images {
-		prepared, prepareErr := prepareImageAttachmentForProcessor(ctx, store, attachment, cfg.ImageMaxDimension)
+	analysisCharLimit := min(maxImageAttachmentAnalysisChars, maxImageAttachmentAnalysisTotalChars/len(attachments))
+	for index, attachment := range attachments {
+		prepared, prepareErr := prepareAttachmentForProcessor(ctx, store, attachment, cfg.ImageMaxDimension, processor.mode)
 		if prepareErr != nil {
 			return result, prepareErr
 		}
 		totalImageBytes += len(prepared.data)
-		if totalImageBytes > maxConversationImageContextBytes {
+		if processor.mode == domainmcp.AttachmentInputModeImage && totalImageBytes > maxConversationImageContextBytes {
 			return result, fmt.Errorf("%w: image attachment context exceeds %d bytes", ErrFileTooLarge, maxConversationImageContextBytes)
+		}
+		if processor.mode != domainmcp.AttachmentInputModeImage && len(prepared.data) > maxProcessorBinaryBytes {
+			return result, fmt.Errorf("%w: attachment exceeds %d bytes and cannot be injected into the tool", ErrFileTooLarge, maxProcessorBinaryBytes)
 		}
 
 		encodedImage := base64.StdEncoding.EncodeToString(prepared.data)
@@ -173,9 +190,13 @@ func (s *Service) processImageAttachments(
 		for _, analysis := range result.Analyses {
 			fileNames = append(fileNames, analysis.FileName)
 		}
+		attachmentLabel := "附件"
+		if processor.mode == domainmcp.AttachmentInputModeImage {
+			attachmentLabel = "图片"
+		}
 		input.TraceRecorder.appendProcessSection(
-			fmt.Sprintf("已通过 %s 处理 %d 张图片", processor.displayName, len(result.Analyses)),
-			formatTraceStep("图片附件", fmt.Sprintf("图片已交由 %s 分析，主模型仅接收分析结果。", processor.displayName)),
+			fmt.Sprintf("已通过 %s 处理 %d 个%s", processor.displayName, len(result.Analyses), attachmentLabel),
+			formatTraceStep(attachmentLabel, fmt.Sprintf("%s已交由 %s 处理，主模型仅接收处理结果。", attachmentLabel, processor.displayName)),
 			map[string]interface{}{
 				"tool_id":    processor.toolID,
 				"tool_name":  processor.toolName,
@@ -197,48 +218,72 @@ type preparedImageAttachment struct {
 	mimeType string
 }
 
-func prepareImageAttachmentForProcessor(
+// prepareAttachmentForProcessor 按模式准备附件字节：
+//   - image：读取 + 缩放（复用现有图片管线）；
+//   - audio/file：原样读取（受 maxProcessorBinaryBytes 限制）。
+func prepareAttachmentForProcessor(
 	ctx context.Context,
 	store objectstore.Store,
 	attachment AttachmentInput,
 	maxDimension int,
+	mode string,
 ) (preparedImageAttachment, error) {
 	storagePath := strings.TrimSpace(attachment.StoragePath)
 	if storagePath == "" {
-		return preparedImageAttachment{}, fmt.Errorf("%w: image storage path is empty", ErrInvalidFileReference)
+		return preparedImageAttachment{}, fmt.Errorf("%w: attachment storage path is empty", ErrInvalidFileReference)
 	}
 	reader, _, err := store.Open(ctx, storagePath)
 	if err != nil {
-		return preparedImageAttachment{}, fmt.Errorf("%w: open image %s: %v", ErrFileNotFound, attachment.FileID, err)
+		return preparedImageAttachment{}, fmt.Errorf("%w: open attachment %s: %v", ErrFileNotFound, attachment.FileID, err)
 	}
 	data, readErr := io.ReadAll(io.LimitReader(reader, maxConversationImageSourceBytes+1))
 	closeErr := reader.Close()
 	if readErr != nil {
-		return preparedImageAttachment{}, fmt.Errorf("%w: read image %s: %v", ErrFileNotFound, attachment.FileID, readErr)
+		return preparedImageAttachment{}, fmt.Errorf("%w: read attachment %s: %v", ErrFileNotFound, attachment.FileID, readErr)
 	}
 	if closeErr != nil {
-		return preparedImageAttachment{}, fmt.Errorf("%w: close image %s: %v", ErrFileNotFound, attachment.FileID, closeErr)
+		return preparedImageAttachment{}, fmt.Errorf("%w: close attachment %s: %v", ErrFileNotFound, attachment.FileID, closeErr)
 	}
 	if len(data) == 0 {
-		return preparedImageAttachment{}, fmt.Errorf("%w: image %s is empty", ErrInvalidFileReference, attachment.FileID)
+		return preparedImageAttachment{}, fmt.Errorf("%w: attachment %s is empty", ErrInvalidFileReference, attachment.FileID)
 	}
 	if len(data) > maxConversationImageSourceBytes {
-		return preparedImageAttachment{}, fmt.Errorf("%w: image %s exceeds source limit", ErrFileTooLarge, attachment.FileID)
+		return preparedImageAttachment{}, fmt.Errorf("%w: attachment %s exceeds source limit", ErrFileTooLarge, attachment.FileID)
 	}
-	if maxDimension <= 0 {
-		maxDimension = 1024
+	mimeType := firstNonEmptyString(attachment.DetectedMIME, attachment.MimeType)
+	if mode == domainmcp.AttachmentInputModeImage {
+		if maxDimension <= 0 {
+			maxDimension = 1024
+		}
+		mimeType = resolveImageMimeType(mimeType)
+		resized, actualMIME := resizeImageIfNeeded(data, mimeType, maxDimension)
+		return preparedImageAttachment{data: resized, mimeType: actualMIME}, nil
 	}
-	mimeType := resolveImageMimeType(firstNonEmptyString(attachment.DetectedMIME, attachment.MimeType))
-	resized, actualMIME := resizeImageIfNeeded(data, mimeType, maxDimension)
-	return preparedImageAttachment{data: resized, mimeType: actualMIME}, nil
+	return preparedImageAttachment{data: data, mimeType: mimeType}, nil
 }
 
-func currentImageAttachments(attachments []AttachmentInput) []AttachmentInput {
+// currentProcessorAttachments 按处理器模式筛选当前消息附件。
+func currentProcessorAttachments(attachments []AttachmentInput, mode string) []AttachmentInput {
 	result := make([]AttachmentInput, 0)
 	for _, attachment := range attachments {
-		mimeType := firstNonEmptyString(attachment.DetectedMIME, attachment.MimeType)
-		if attachment.Current && normalizeAttachmentKind(attachment.Kind, mimeType) == "image" {
-			result = append(result, attachment)
+		if !attachment.Current {
+			continue
+		}
+		mimeType := strings.ToLower(firstNonEmptyString(attachment.DetectedMIME, attachment.MimeType))
+		kind := normalizeAttachmentKind(attachment.Kind, mimeType)
+		switch mode {
+		case domainmcp.AttachmentInputModeImage:
+			if kind == "image" {
+				result = append(result, attachment)
+			}
+		case domainmcp.AttachmentInputModeAudio:
+			if strings.HasPrefix(mimeType, "audio/") {
+				result = append(result, attachment)
+			}
+		case domainmcp.AttachmentInputModeFile:
+			if kind != "image" {
+				result = append(result, attachment)
+			}
 		}
 	}
 	return result
