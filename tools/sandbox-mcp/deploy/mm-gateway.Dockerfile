@@ -25,6 +25,9 @@ ENV MM_PACKAGE=${MM_PACKAGE} MM_ENTRY=${MM_ENTRY} \
     PATH="/root/.local/bin:${PATH}" \
     SUPER_GATEWAY_PORT=8082
 COPY --from=uv-install /root/.local /root/.local
+# ffmpeg：media_info/read_video/transcribe_audio/save_view 等工具依赖系统 ffprobe/ffmpeg
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
 RUN npm install -g supergateway --silent
 EXPOSE 8082 8083
 # 启动：supergateway 桥接 mm-plugins stdio MCP 进程。

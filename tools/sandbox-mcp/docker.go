@@ -61,7 +61,8 @@ type containerSpec struct {
 	PidsLimit  int64
 	CPUs       float64
 	Workspace  string
-	CacheMount bool // 挂载用户级共享缓存卷（pip/npm 缓存）
+	CacheMount bool   // 挂载用户级共享缓存卷（pip/npm 缓存）
+	SharedVol  string // 挂载共享卷（沙箱 <-> mm 多模态工具文件桥接），空则不挂
 }
 
 // createContainer 创建并启动一个会话容器。volumeName 为空时不挂工作区卷。
@@ -77,6 +78,13 @@ func (d *dockerClient) createContainer(ctx context.Context, spec containerSpec, 
 			Type:   mount.TypeVolume,
 			Source: "deeix-sandbox-cache-root",
 			Target: "/root/.cache",
+		})
+	}
+	if spec.SharedVol != "" {
+		mounts = append(mounts, mount.Mount{
+			Type:   mount.TypeVolume,
+			Source: spec.SharedVol,
+			Target: "/shared",
 		})
 	}
 	cfg := &container.Config{

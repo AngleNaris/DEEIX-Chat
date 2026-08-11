@@ -38,6 +38,23 @@ ghcr.io/anglenaris/x-deeix:0.3.4      # 版本标签
 | **提示词标签插入** | 角色 / 项目提示词编辑器内置标签工具栏：系统变量 + 动态提示词选单，一键插入光标处 |
 | **侧边栏与页面** | 卡片、制品与文件同级入口（路由页面模式），卡片 / 制品管理页为卡片网格 UI |
 | **Skills & Prompts 管理** | 技能包（skill package）功能：后端服务 + 前端管理 / 提示词面板 |
+| **配套 MCP 服务（沙箱 + 多模态）** | 自建多用户沙箱 MCP（`tools/sandbox-mcp`）：Agent 在按 (user, conversation) 隔离的 Docker 容器里执行 shell/Python、处理文件（ffmpeg/数据分析）、抓取网络、按需拉取环境；Qwen-MM-Plugins 桥接（mm-core / mm-omni-av）提供 22 个多模态工具（读图/读视频/OCR/ASR/语音合成/视觉定位/音视频理解），经共享卷 `/shared/<scope>` 与沙箱文件互通；MCP 工具产出的 image/audio 自动附件化进消息流，前端轨迹卡内联渲染 |
+
+## 配套 MCP 服务（沙箱 / 多模态）
+
+三个 MCP 服务部署在 VPS（`/opt/deeix-mcp`，只绑 127.0.0.1，DEEIX 后端经 1panel-network 服务名访问），在管理后台「工具」页注册为 MCP server 后即可在对话中勾选：
+
+| 服务 | 端点 | 工具 | 说明 |
+| --- | --- | --- | --- |
+| `deeix-sandbox-mcp` | `:8081/mcp` | 12 个 | 多用户隔离沙箱（自建 Go，`tools/sandbox-mcp/`）：`sandbox_exec` / `sandbox_task_start\|poll\|cancel` / `sandbox_write_file` / `sandbox_read_file` / `sandbox_list_files` / `sandbox_download` / `sandbox_spawn` / `sandbox_ps` / `sandbox_kill` / `sandbox_reset`；会话按 `_meta{user_id, conversation_id}` 隔离，租约 TTL 默认 900s 闲置回收，pip 缓存卷跨会话保留（环境拉取秒级命中） |
+| `qwen-mm-core` | `:8082/mcp` | 15 个 | Qwen-MM-Plugins core（stdio 经 supergateway 桥接为 Streamable HTTP）：`read_image` / `read_video` / `media_info` / `visualize` / `save_view` / `crop` / `draw_bbox`（纯本地）；`ocr` / `grounding` / `vision_chat` / `transcribe_audio`（阿里云百炼）；`web_search` / `web_extractor` / `image_search`（需 SERPER_API_KEY） |
+| `qwen-mm-omni-av` | `:8083/mcp` | 7 个 | Qwen-MM-Plugins omni-av（音视频理解，百炼）：`omni_asr` / `omni_asr_timestamped` / `omni_multi_speaker_asr` / `omni_av_caption` / `omni_av_grounding` / `omni_av_counting` / `omni_music_caption` |
+
+**沙箱 ↔ 多模态文件互通（共享卷桥接）**：沙箱与 mm 容器挂同一 named volume（`deeix-mcp-shared`）。Agent 需要多模态工具处理文件时，把沙箱文件复制到 `shared_dir`（每次 `sandbox_exec` 结果返回，形如 `/shared/deeix-<uid>-<cid>`，按会话隔离），再把 mm 工具的 `file_path`/`image_path` 填为该路径。典型闭环：上传音频 → 附件注入沙箱 → ffmpeg/Python 分析 → 复制到 `/shared/<scope>/` → `transcribe_audio`/`ocr` 处理 → 结果回 DEEIX。
+
+**DEEIX 侧配套改动**：上传白名单支持 `audio/*`；MCP 工具附件处理支持 image/audio/file 模式（管理员在工具编辑里配置"附件 → 注入工具参数"）；MCP 工具返回的 image/audio/video content 块自动附件化落库为消息附件；前端工具轨迹卡内联渲染图片/音频，消息流支持音频内联播放。
+
+**部署**：`tools/sandbox-mcp/deploy/`（compose + 镜像 Dockerfile + `.env.example` + 注册脚本 `register-mcp.sh`），沙箱镜像与 mm 桥接镜像本地构建后 `docker save/scp/load`；详细说明见 `tools/sandbox-mcp/README.md`。
 
 ## 部署方式
 

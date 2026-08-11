@@ -16,6 +16,8 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:8081:8081"
+    networks:
+      - onepanel
     environment:
       SANDBOX_MCP_ADDR: "0.0.0.0:8081"
       SANDBOX_MCP_API_KEY: "${SANDBOX_MCP_API_KEY:?set in .env}"
@@ -31,6 +33,8 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     # 沙箱 MCP 需要按 (user, conversation) 创建/销毁容器，故授予 docker.sock；
     # 镜像体积小、无宿主目录挂载，容器 root 能力由 AppArmor/SELinux 默认策略与资源限额兜底。
+    group_add:
+      - "999"
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -49,6 +53,10 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:8082:8082"
+    networks:
+      - onepanel
+    volumes:
+      - deeix-mcp-shared:/shared
     environment:
       SUPER_GATEWAY_PORT: "8082"
       DASHSCOPE_API_KEY: "${DASHSCOPE_API_KEY:?set in .env}"
@@ -69,9 +77,23 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:8083:8083"
+    networks:
+      - onepanel
+    volumes:
+      - deeix-mcp-shared:/shared
     environment:
       SUPER_GATEWAY_PORT: "8083"
       DASHSCOPE_API_KEY: "${DASHSCOPE_API_KEY:?set in .env}"
       DASHSCOPE_BASE_URL: "${DASHSCOPE_BASE_URL:-}"
       QWEN_MM_MAX_RESPONSE_BYTES: "${QWEN_MM_MAX_RESPONSE_BYTES:-6291456}"
       QWEN_MM_CHAT_TIMEOUT: "${QWEN_MM_CHAT_TIMEOUT:-600}"
+
+volumes:
+  # 显式卷名：沙箱经 docker API 也挂同名卷（deeix-mcp-shared），必须一致
+  deeix-mcp-shared:
+    name: deeix-mcp-shared
+
+networks:
+  onepanel:
+    external: true
+    name: 1panel-network

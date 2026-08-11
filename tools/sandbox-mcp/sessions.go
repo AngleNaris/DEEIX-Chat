@@ -162,10 +162,16 @@ func (m *SessionManager) createSessionContainer(ctx context.Context, s *Session)
 		CPUs:       m.cfg.CPUsLimit,
 		Workspace:  m.cfg.WorkspaceDir,
 		CacheMount: s.CacheMount,
+		SharedVol:  m.cfg.SharedVolume,
 	}, "deeix-sandbox-ws-"+s.Scope); err != nil {
 		return err
 	}
 	return nil
+}
+
+// SharedDir 返回当前会话在共享卷中的专属目录（mm 多模态工具可读取）。
+func (m *SessionManager) SharedDir(scope string) string {
+	return "/shared/" + scope
 }
 
 // Spawn 为会话更换/新建镜像容器（sandbox_spawn 语义）：销毁旧容器后按新镜像重建。

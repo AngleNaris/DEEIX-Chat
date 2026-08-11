@@ -38,7 +38,10 @@ func registerTools(mcpServer *server.MCPServer, s *sandboxServer) {
 		mcp.WithDescription(`在用户隔离的沙箱容器内执行 shell 命令（默认 /bin/sh）。
 工作目录为 /workspace，会话按 (user, conversation) 隔离，闲置自动回收、重建后环境保留（pip 缓存命中）。
 可在容器内自由 pip install / apt-get install 拉取所需环境。
-输出截断到 64KB。长任务建议使用 sandbox_task_start 后台执行。`),
+输出截断到 64KB。长任务建议使用 sandbox_task_start 后台执行。
+【共享目录】每次结果会返回 shared_dir（形如 /shared/deeix-<uid>-<cid>，本会话专属）。
+需要多模态工具（如 transcribe_audio / ocr / read_image）处理文件时，先把文件复制到 shared_dir 下，
+再把这些工具的 file_path/image_path 参数填为 /shared/<scope>/<文件名>。`),
 		mcp.WithString("command", mcp.Required(), mcp.Description("要执行的命令（一行或多行 shell）")),
 		mcp.WithString("cwd", mcp.Description("工作目录，默认 /workspace")),
 		mcp.WithNumber("timeout", mcp.Description("超时秒数（默认 120，最大 600）")),
@@ -57,7 +60,8 @@ func registerTools(mcpServer *server.MCPServer, s *sandboxServer) {
 	)
 	writeTool := mcp.NewTool("sandbox_write_file",
 		mcp.WithDescription(`将内容写入沙箱工作区文件（路径必须位于 /workspace 内，禁止 .. 逃逸）。
-音频/图片等二进制内容用 content_base64 传入；文本用 content_text。`),
+音频/图片等二进制内容用 content_base64 传入；文本用 content_text。
+需要多模态工具处理时，先写到 /workspace 再复制到 shared_dir（见 sandbox_exec 的返回）。`),
 		mcp.WithString("path", mcp.Required(), mcp.Description("工作区相对或绝对路径，如 /workspace/input.mp3 或 input.mp3")),
 		mcp.WithString("content_base64", mcp.Description("base64 编码的二进制内容（与 content_text 二选一）")),
 		mcp.WithString("content_text", mcp.Description("纯文本内容（与 content_base64 二选一）")),
@@ -190,10 +194,11 @@ func (s *sandboxServer) handleExec(ctx context.Context, req mcp.CallToolRequest)
 		return resultJSON(map[string]any{"ok": false, "error": err.Error()}), nil
 	}
 	return resultJSON(map[string]any{
-		"ok":        res.ExitCode == 0,
-		"exit_code": res.ExitCode,
-		"stdout":    res.Stdout,
-		"stderr":    res.Stderr,
+		"ok":         res.ExitCode == 0,
+		"exit_code":  res.ExitCode,
+		"stdout":     res.Stdout,
+		"stderr":     res.Stderr,
+		"shared_dir": s.mgr.SharedDir(scope),
 	}), nil
 }
 

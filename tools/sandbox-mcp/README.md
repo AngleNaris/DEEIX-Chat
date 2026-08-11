@@ -7,6 +7,7 @@ DEEIX（X-DEEIX）配套的**多用户隔离沙箱**：Agent 可在远程沙箱�
 - **多用户隔离**：DEEIX 后端在每次 MCP 调用中注入 `_meta{user_id, conversation_id, request_id}`（`backend/internal/infra/mcp/client.go`），本服务按 `(user_id, conversation_id)` 建立独立 Docker 容器会话，互不可见。
 - **会话租约制（参考 LobeHub Onlyboxes）**：懒创建（create_if_missing）、闲置超 `lease TTL`（默认 900s）自动回收；重建时工具结果回传 `session_recreated: true`，模型可感知工作区被重置。
 - **环境拉取**：容器内可自由 `pip install` / `apt-get install`；用户级共享缓存卷（`/root/.cache`）保证容器重建后安装秒级命中；`sandbox_spawn` 可按需拉任意镜像（如 `node:22-slim`）重建会话。
+- **共享卷桥接（沙箱 ↔ 多模态工具）**：会话容器挂载共享卷 `deeix-mcp-shared` 到 `/shared`，与 mm-core/mm-omni-av 容器互通。每次 `sandbox_exec` 结果返回 `shared_dir`（如 `/shared/deeix-42-7`，按会话隔离）；把文件复制到该目录后，mm 工具的 `file_path`/`image_path` 即可指向它（如 `transcribe_audio` / `ocr` / `read_image` / `media_info`）。
 - **网络**：默认允许出网（抓取信息需求）；仅接受 http/https URL。
 - **传输**：Streamable HTTP（`/mcp`），Bearer Token 鉴权；仅建议 DEEIX 后端回环访问（VPS `127.0.0.1:8081`）。
 
@@ -21,6 +22,9 @@ DEEIX（X-DEEIX）配套的**多用户隔离沙箱**：Agent 可在远程沙箱�
 | `sandbox_download` | 抓取 URL 存文件或返回正文 |
 | `sandbox_spawn` | 按需拉镜像重建会话容器（环境拉取） |
 | `sandbox_ps` / `sandbox_kill` / `sandbox_reset` | 会话管理 |
+
+> 注：mm-core / mm-omni-av（Qwen-MM-Plugins 桥接）是独立部署的服务（见 `deploy/docker-compose.yml`），
+> 通过共享卷 `deeix-mcp-shared:/shared` 与沙箱互通文件。
 
 ## 安全权衡（有意为之）
 
