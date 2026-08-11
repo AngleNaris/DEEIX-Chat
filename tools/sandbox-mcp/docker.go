@@ -183,6 +183,10 @@ func (d *dockerClient) execInContainer(ctx context.Context, name string, cmd []s
 
 	select {
 	case <-ctx.Done():
+		// 超时：关闭连接终止流读取，避免 goroutine 泄漏；容器内的 exec 进程由
+		// docker 在连接关闭后清理，不会继续占用沙箱资源。
+		resp.Close()
+		<-writeErr
 		return nil, fmt.Errorf("exec timeout after %s: %w", timeout, ctx.Err())
 	case err := <-writeErr:
 		if err != nil {

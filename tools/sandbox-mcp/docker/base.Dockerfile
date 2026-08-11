@@ -6,7 +6,10 @@ FROM python:3.12-slim
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PIP_NO_CACHE_DIR=0 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    # 国内 pip 镜像：VPS 直连 PyPI 慢（曾导致 pip install 撞上工具超时）
+    PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/ \
+    PIP_TRUSTED_HOST=mirrors.aliyun.com
 
 # 系统工具：ffmpeg（音频/视频处理）、curl（网络抓取）、git、网络工具
 RUN apt-get update && apt-get install -y --no-install-recommends \

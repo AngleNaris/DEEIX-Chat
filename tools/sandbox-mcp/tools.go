@@ -217,13 +217,18 @@ func (s *sandboxServer) handleTaskStart(ctx context.Context, req mcp.CallToolReq
 	}
 	taskID := fmt.Sprintf("t%d", time.Now().UnixNano()/1e6)
 	out := fmt.Sprintf("/tmp/%s.out", taskID)
-	// nohup 后台执行：输出写入文件，进程 PID 写入 pid 文件。
-	cmd := fmt.Sprintf("nohup sh -c %q > %s 2>&1 & echo $! > %s.pid", command, out, out)
+	// nohup 后台执行：输出写入文件，PID 直接回 stdout（echo $! 不能重定向到文件，
+	// 否则返回值拿不到 PID，poll 的 kill -0 会因空 PID 误判任务已完成）。
+	cmd := fmt.Sprintf("nohup sh -c %q > %s 2>&1 & echo $!", command, out)
 	res, err := s.d.execInContainer(ctx, session.Container, []string{"/bin/sh", "-c", cmd}, nil, 30*time.Second)
 	if err != nil || res.ExitCode != 0 {
 		return resultJSON(map[string]any{"ok": false, "error": "failed to start task", "detail": safeErr(err, res)}), nil
 	}
-	task := &BackgroundTask{ID: taskID, PID: strings.TrimSpace(res.Stdout), Output: out, StartedAt: time.Now()}
+	pid := strings.TrimSpace(res.Stdout)
+	if pid == "" {
+		return resultJSON(map[string]any{"ok": false, "error": "failed to capture task pid"}), nil
+	}
+	task := &BackgroundTask{ID: taskID, PID: pid, Output: out, StartedAt: time.Now()}
 	session.mu.Lock()
 	if len(session.tasks) >= s.cfg.MaxTasksPerSession {
 		session.mu.Unlock()
@@ -292,7 +297,7 @@ func (s *sandboxServer) handleTaskCancel(ctx context.Context, req mcp.CallToolRe
 	if !ok {
 		return resultJSON(map[string]any{"ok": false, "error": "unknown task_id"}), nil
 	}
-	_, _ = s.d.execInContainer(ctx, session.Container, []string{"/bin/sh", "-c", fmt.Sprintf("kill -9 %s 2>/dev/null; rm -f %s %s.pid", task.PID, task.Output, task.Output)}, nil, 20*time.Second)
+	_, _ = s.d.execInContainer(ctx, session.Container, []string{"/bin/sh", "-c", fmt.Sprintf("kill -9 %s 2>/dev/null; rm -f %s", task.PID, task.Output)}, nil, 20*time.Second)
 	return resultJSON(map[string]any{"ok": true, "task_id": taskID, "cancelled": true}), nil
 }
 
