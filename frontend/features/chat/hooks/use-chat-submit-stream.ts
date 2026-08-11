@@ -58,6 +58,7 @@ export function useChatSubmitStream({
   activeGenerationRunsRef,
   failedGenerationRunsRef,
   resumeGenerationActive,
+  autoEditDismissed = false,
 }: {
   conversationID: string | null;
   conversationScopeKey: string;
@@ -98,6 +99,7 @@ export function useChatSubmitStream({
   activeGenerationRunsRef?: React.RefObject<Set<string>>;
   failedGenerationRunsRef?: React.RefObject<Set<string>>;
   resumeGenerationActive?: boolean;
+  autoEditDismissed?: boolean;
 }) {
   const streamBuffer = useChatStreamBuffer({
     setPendingExchanges,
@@ -149,6 +151,7 @@ export function useChatSubmitStream({
     activeGenerationRunsRef,
     failedGenerationRunsRef,
     resumeGenerationActive,
+    autoEditDismissed,
   });
 
   return messageSubmit;

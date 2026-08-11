@@ -115,6 +115,7 @@ export function useChatRuntime({
   activeGenerationRunsRef,
   failedGenerationRunsRef,
   resumingRunID = "",
+  autoEditDismissed = false,
 }: {
   conversationID: string | null;
   resetToken: number;
@@ -145,6 +146,7 @@ export function useChatRuntime({
   activeGenerationRunsRef?: React.RefObject<Set<string>>;
   failedGenerationRunsRef?: React.RefObject<Set<string>>;
   resumingRunID?: string;
+  autoEditDismissed?: boolean;
 }) {
   const [showConversationLayout, setShowConversationLayout] = React.useState(false);
   const previousResetTokenRef = React.useRef(resetToken);
@@ -222,6 +224,7 @@ export function useChatRuntime({
     activeGenerationRunsRef,
     failedGenerationRunsRef,
     resumeGenerationActive: visibleResumeGenerationActive,
+    autoEditDismissed,
   });
 
   React.useEffect(() => {

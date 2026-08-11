@@ -2,10 +2,28 @@
 
 import * as React from "react";
 import dynamic from "next/dynamic";
-import { Box, CornerDownRight, Eye, EyeOff, Film, Image, ImageOff, ImagePlus, LoaderCircle, PencilLine, ScrollText, Trash2 } from "lucide-react";
+import { Box, CornerDownRight, Eye, EyeOff, Film, Image, ImageOff, ImagePlus, LoaderCircle, PencilLine, ScrollText, Trash2, WandSparkles } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
+import {
+  closestCenter,
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  horizontalListSortingStrategy,
+  sortableKeyboardCoordinates,
+  useSortable,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+
+import { GripVerticalIcon } from "@/components/ui/grip-vertical";
 
 import { AudioLines } from "@/components/animate-ui/icons/audio-lines";
 import { Blocks } from "@/components/animate-ui/icons/blocks";
@@ -179,6 +197,12 @@ type ChatInputProps = {
   onUploadFiles: (files: File[]) => void | Promise<void>;
   onCaptureScreenshot: () => void | Promise<void>;
   onRemoveAttachment: (fileID: string) => void;
+  onReorderAttachment: (fromIndex: number, toIndex: number) => void;
+  /** 连续改图：纯文字提交自动带入「上一张 AI 生成图」后的附件列表（用于模式指示）。 */
+  resolvedSubmissionAttachments?: PendingAttachment[];
+  /** 连续改图自动带入模式激活（显示可关闭提示条）。 */
+  autoEditActive?: boolean;
+  onAutoEditDismiss?: () => void;
   onSelectAgentGroup?: (group: AgentGroupDTO) => void;
   onSendMessage: () => void | Promise<void>;
   onStopMessage: () => void;
@@ -245,6 +269,37 @@ function resolveComposerModeIndicator(
     };
   }
   return null;
+}
+
+/** 附件卡片拖拽排序包装：横向列表只取 x 位移，拖拽中半透明并抬升层级。 */
+function SortableAttachmentItem({
+  id,
+  disabled = false,
+  children,
+}: {
+  id: string;
+  disabled?: boolean;
+  children: (props: {
+    attributes: ReturnType<typeof useSortable>["attributes"];
+    isDragging: boolean;
+    listeners: ReturnType<typeof useSortable>["listeners"];
+  }) => React.ReactNode;
+}) {
+  const { attributes, isDragging, listeners, setNodeRef, transform, transition } = useSortable({
+    id,
+    disabled,
+  });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.7 : undefined,
+  } satisfies React.CSSProperties;
+
+  return (
+    <div ref={setNodeRef} style={style} className={cn("relative flex", isDragging && "z-10")}>
+      {children({ attributes, isDragging, listeners })}
+    </div>
+  );
 }
 
 function clipboardFilesFromPaste(event: React.ClipboardEvent<HTMLTextAreaElement>): File[] {
@@ -325,6 +380,10 @@ function ChatInputComponent({
   onUploadFiles,
   onCaptureScreenshot,
   onRemoveAttachment,
+  onReorderAttachment,
+  resolvedSubmissionAttachments,
+  autoEditActive = false,
+  onAutoEditDismiss,
   onSelectAgentGroup,
   onSendMessage,
   onStopMessage,
@@ -463,7 +522,11 @@ function ChatInputComponent({
     },
     [onOptionsChange, options, reasoningEffortProtocol],
   );
-  const submitDecision = resolveChatSubmitDecision(selectedModel, attachments, options);
+  const submitDecision = resolveChatSubmitDecision(
+    selectedModel,
+    resolvedSubmissionAttachments ?? attachments,
+    options,
+  );
   const submitTask = submitDecision.task;
   const isMediaMode = isMediaSubmitTask(submitTask);
   const isImageTask = submitTask === "image_generation" || submitTask === "image_edit";
@@ -517,6 +580,32 @@ function ChatInputComponent({
   const showMCPToolsButton = availableTools.length > 0 && !isMediaMode;
   const showHTMLVisualPromptButton = !isMediaMode;
   const hasComposerAttachments = attachments.length > 0 || uploadingAttachments.length > 0;
+  const sortableFileIDs = React.useMemo(
+    () => attachments.map((item) => item.fileID),
+    [attachments],
+  );
+  const sortSensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: 4 },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    }),
+  );
+  const handleAttachmentDragEnd = React.useCallback(
+    (event: DragEndEvent) => {
+      const { active, over } = event;
+      if (!over || active.id === over.id) {
+        return;
+      }
+      const fromIndex = attachments.findIndex((item) => item.fileID === active.id);
+      const toIndex = attachments.findIndex((item) => item.fileID === over.id);
+      if (fromIndex >= 0 && toIndex >= 0 && fromIndex !== toIndex) {
+        onReorderAttachment(fromIndex, toIndex);
+      }
+    },
+    [attachments, onReorderAttachment],
+  );
   const showSelectedSkills = selectedSkills.length > 0 && !isMediaMode;
   const showSelectedPrompts = selectedPrompts.length > 0 && !isMediaMode;
   const {
@@ -820,6 +909,25 @@ function ChatInputComponent({
             </div>
           ) : null}
 
+          {autoEditActive && draft.trim().length > 0 && !loading && !uploading ? (
+            <div className="w-full px-2.5 pt-1">
+              <div className="flex items-center gap-2 rounded-lg border border-primary/25 bg-primary/[0.06] px-3 py-1.5 text-[11px] text-foreground/80">
+                <WandSparkles className="size-3.5 shrink-0 text-primary/70" strokeWidth={1.8} />
+                <span className="min-w-0 flex-1 truncate">{tComposer("autoEditLatestImage")}</span>
+                {onAutoEditDismiss ? (
+                  <button
+                    type="button"
+                    onClick={onAutoEditDismiss}
+                    aria-label={tComposer("dismissAutoEdit")}
+                    className="shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  >
+                    <XIcon size={13} strokeWidth={1.8} />
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+
           {hasComposerAttachments ? (
             <div className="w-full space-y-1 px-2.5 pt-1">
               {showRagWarn ? (
@@ -837,6 +945,8 @@ function ChatInputComponent({
                 </div>
               ) : null}
               <AttachmentGroup className="max-h-[196px] w-full flex-col gap-2 overflow-y-auto scroll-fade-12 px-1.5 pb-1 pt-1 [-ms-overflow-style:none] [scrollbar-width:none] max-sm:scroll-fade-none sm:max-h-none sm:flex-row sm:scroll-fade-x sm:overflow-x-auto sm:overflow-y-visible sm:pr-1.5 [&::-webkit-scrollbar]:hidden">
+              <DndContext sensors={sortSensors} collisionDetection={closestCenter} onDragEnd={handleAttachmentDragEnd}>
+                <SortableContext items={sortableFileIDs} strategy={horizontalListSortingStrategy}>
                 {attachments.map((item) => {
                   const badge = resolveFileProcessingBadge(item, (key, values) => tFileStatus(key, values));
                   const FileIcon = resolveFileIcon(item);
@@ -844,11 +954,15 @@ function ChatInputComponent({
                   const processing = !failed && badge.tone !== "success";
                   const meta = formatAttachmentMeta(item.fileName, item.sizeBytes);
                   return (
+                    <SortableAttachmentItem key={item.fileID} id={item.fileID}>
+                      {({ attributes, listeners, isDragging }) => (
                     <Attachment
-                      key={item.fileID}
                       state={failed ? "error" : processing ? "processing" : "done"}
                       size="sm"
-                      className="h-12 w-full border-0 bg-muted/35 px-2 text-left hover:bg-muted/50 dark:bg-white/[0.06] dark:hover:bg-white/[0.09] sm:w-[228px] sm:px-2.5"
+                      className={cn(
+                        "h-12 w-full border-0 bg-muted/35 px-2 text-left hover:bg-muted/50 dark:bg-white/[0.06] dark:hover:bg-white/[0.09] sm:w-[228px] sm:px-2.5",
+                        isDragging && "shadow-lg ring-1 ring-border",
+                      )}
                     >
                       <AttachmentMedia className="size-6 bg-transparent text-muted-foreground">
                         {processing ? (
@@ -880,6 +994,16 @@ function ChatInputComponent({
                         aria-label={tComposer("previewAttachment", { name: item.fileName })}
                       />
                       <AttachmentActions>
+                        <button
+                          {...attributes}
+                          {...listeners}
+                          type="button"
+                          aria-label={tComposer("dragToReorder", { name: item.fileName })}
+                          title={tComposer("dragToReorder", { name: item.fileName })}
+                          className="flex size-7 shrink-0 cursor-grab items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground active:cursor-grabbing sm:size-6"
+                        >
+                          <GripVerticalIcon size={12} className="size-3.5" />
+                        </button>
                         <AttachmentAction
                           type="button"
                           className="size-8 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground sm:size-7"
@@ -890,6 +1014,8 @@ function ChatInputComponent({
                         </AttachmentAction>
                       </AttachmentActions>
                     </Attachment>
+                      )}
+                    </SortableAttachmentItem>
                   );
                 })}
                 {uploadingAttachments.map((item) => (
@@ -913,6 +1039,8 @@ function ChatInputComponent({
                     </AttachmentContent>
                   </Attachment>
                 ))}
+                </SortableContext>
+              </DndContext>
               </AttachmentGroup>
               {stablePreviewAttachment ? (
                 <FilePreviewDialog

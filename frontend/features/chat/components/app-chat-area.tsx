@@ -46,6 +46,8 @@ import {
   sanitizeConversationOptions,
 } from "@/features/chat/model/conversation-options";
 import { toPendingAttachment } from "@/features/chat/model/message-submit";
+import { requestedResponseType } from "@/features/chat/model/chat-task";
+import { resolveImageEditSubmissionAttachments } from "@/features/chat/model/image-edit-submit";
 import type { ChatAreaMessage, MessageAttachment } from "@/features/chat/types/messages";
 import { useSettingsChatPreferences } from "@/features/settings/hooks/use-settings-chat-preferences";
 import { cn } from "@/lib/utils";
@@ -536,6 +538,8 @@ export function AppChatArea() {
     () => modelOptions.find((item) => item.platformModelName === selectedPlatformModelName) ?? null,
     [modelOptions, selectedPlatformModelName],
   );
+  // 连续改图：用户关闭「自动编辑上一张生成图」提示后，本会话不再自动带入（刷新重置）。
+  const [autoEditDismissed, setAutoEditDismissed] = React.useState(false);
   const modelOptionPolicyDisabled = modelOptionPolicy?.mode?.trim() === "disabled";
   const refreshModelCatalogForComposer = React.useCallback(async () => {
     await refreshModelCatalog();
@@ -856,6 +860,7 @@ export function AppChatArea() {
     activeGenerationRunsRef,
     failedGenerationRunsRef,
     resumingRunID,
+    autoEditDismissed,
   });
   const generating = sending;
   // §16.7/§16.10 刷新恢复：群组会话加载后重建最后一条 assistant 消息的运行时间线；
@@ -1307,6 +1312,37 @@ export function AppChatArea() {
   }, [artifactWorkspace]);
 
   const effectiveOptions = modelOptionPolicyDisabled ? EMPTY_CONVERSATION_OPTIONS : options;
+  // 连续改图（ChatGPT 式）：合成「上一张 AI 生成图 + 本次附件」用于输入框模式指示；
+  // 提交 hook 内部会用同一纯函数基于提交快照再算一次，两者一致。
+  const imageEditSubmission = React.useMemo(
+    () =>
+      resolveImageEditSubmissionAttachments({
+        messages: visibleMessages,
+        userAttachments: attachments,
+        supportsImageEdit: selectedModel?.kinds.includes("image_edit") ?? false,
+        requestedResponseType: requestedResponseType(effectiveOptions),
+        dismissed: autoEditDismissed,
+      }),
+    [attachments, autoEditDismissed, effectiveOptions, selectedModel, visibleMessages],
+  );
+  const dismissAutoEdit = React.useCallback(() => setAutoEditDismissed(true), []);
+  const onReorderAttachment = React.useCallback(
+    (fromIndex: number, toIndex: number) => {
+      if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) {
+        return;
+      }
+      setAttachments((previous) => {
+        if (fromIndex >= previous.length || toIndex >= previous.length) {
+          return previous;
+        }
+        const next = [...previous];
+        const [item] = next.splice(fromIndex, 1);
+        next.splice(toIndex, 0, item);
+        return next;
+      });
+    },
+    [setAttachments],
+  );
   const selectedModelDefaultOptions = modelOptionPolicyDisabled
     ? EMPTY_CONVERSATION_OPTIONS
     : (selectedModel?.defaultOptions ?? EMPTY_CONVERSATION_OPTIONS);
@@ -1413,6 +1449,10 @@ export function AppChatArea() {
     onUploadFiles,
     onCaptureScreenshot,
     onRemoveAttachment,
+    onReorderAttachment,
+    resolvedSubmissionAttachments: imageEditSubmission.attachments,
+    autoEditActive: imageEditSubmission.autoEditActive,
+    onAutoEditDismiss: dismissAutoEdit,
     onSelectAgentGroup,
     onSendMessage: handleSendMessage,
     onStopMessage: onStopActiveMessage,

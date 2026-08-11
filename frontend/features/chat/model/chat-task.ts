@@ -60,7 +60,7 @@ function responseFormatType(value: unknown): "image" | "video" | "text" | "" {
   return "";
 }
 
-function requestedResponseType(options?: ConversationOptions): "image" | "video" | "text" | "" {
+export function requestedResponseType(options?: ConversationOptions): "image" | "video" | "text" | "" {
   if (!options) {
     return "";
   }

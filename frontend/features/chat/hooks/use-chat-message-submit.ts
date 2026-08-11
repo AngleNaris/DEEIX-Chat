@@ -12,7 +12,8 @@ import {
 } from "@/features/agent-groups/model/group-run-store";
 import { useHiddenQueuedParentRuns } from "@/features/chat/hooks/use-hidden-queued-parent-runs";
 import type { ChatSubmitBlockReason } from "@/features/chat/model/chat-task";
-import { resolveChatSubmitDecision } from "@/features/chat/model/chat-task";
+import { requestedResponseType, resolveChatSubmitDecision } from "@/features/chat/model/chat-task";
+import { resolveImageEditSubmissionAttachments } from "@/features/chat/model/image-edit-submit";
 import {
   buildChildrenIndex,
   parseAttachments,
@@ -503,6 +504,7 @@ export function useChatMessageSubmit({
   activeGenerationRunsRef,
   failedGenerationRunsRef,
   resumeGenerationActive = false,
+  autoEditDismissed = false,
 }: {
   conversationID: string | null;
   conversationScopeKey: string;
@@ -549,6 +551,7 @@ export function useChatMessageSubmit({
   activeGenerationRunsRef?: React.RefObject<Set<string>>;
   failedGenerationRunsRef?: React.RefObject<Set<string>>;
   resumeGenerationActive?: boolean;
+  autoEditDismissed?: boolean;
 }) {
   const t = useTranslations("chat.submit");
   const [activeRunRevision, setActiveRunRevision] = React.useState(0);
@@ -851,9 +854,23 @@ export function useChatMessageSubmit({
         ? Boolean(modelGuardConversation.agentGroupID?.trim())
         : isAgentGroupConversation;
       const sanitizedOptions = sanitizeConversationOptions(requestOptions);
+      // 连续改图（ChatGPT 式）：仅对支持 image_edit 的模型，把「上一张 AI 生成图」合成进提交附件。
+      // 只影响本次提交载荷，不写入 composer 附件 state（不持久化、不参与清空/恢复逻辑）。
+      // retry/edit 分支由后端复用原 user 附件，不走自动带入，避免把「重新生成」错变成「编辑生成图」。
+      const branchIsRetryOrEdit = resolvedBranchReason === "retry" || resolvedBranchReason === "edit";
+      const imageEditSubmission = branchIsRetryOrEdit
+        ? { attachments: effectiveAttachments, autoEditActive: false }
+        : resolveImageEditSubmissionAttachments({
+            messages: visibleMessagesRef.current,
+            userAttachments: effectiveAttachments,
+            supportsImageEdit: (selectedModel?.kinds.includes("image_edit") ?? false) && !isAgentGroupTarget,
+            requestedResponseType: isAgentGroupTarget ? "" : requestedResponseType(sanitizedOptions),
+            dismissed: autoEditDismissed,
+          });
+      const resolvedEffectiveAttachments = imageEditSubmission.attachments;
       const submitDecision = resolveChatSubmitDecision(
         isAgentGroupTarget ? null : selectedModel,
-        effectiveAttachments,
+        resolvedEffectiveAttachments,
         isAgentGroupTarget ? undefined : sanitizedOptions,
       );
       if (submitDecision.blockedReason) {
@@ -940,7 +957,7 @@ export function useChatMessageSubmit({
           branchReason: resolvedBranchReason,
           reuseUserMessage: assistantOnlyBranch,
           userContent: payloadContent,
-          userAttachments: effectiveAttachments.length > 0 ? effectiveAttachments : undefined,
+          userAttachments: resolvedEffectiveAttachments.length > 0 ? resolvedEffectiveAttachments : undefined,
           userCreatedAt: createdAt,
           assistantText: "",
           assistantPending: true,
@@ -1103,7 +1120,7 @@ export function useChatMessageSubmit({
               ? sanitizedOptions
               : undefined,
           clientRunID: clientRunID,
-          fileIDs: effectiveAttachments.length > 0 ? effectiveAttachments.map((item) => item.fileID) : undefined,
+          fileIDs: resolvedEffectiveAttachments.length > 0 ? resolvedEffectiveAttachments.map((item) => item.fileID) : undefined,
           parentMessagePublicID: resolvedParentPublicID || undefined,
           sourceMessagePublicID: resolvedSourcePublicID || undefined,
           branchReason: resolvedBranchReason,
@@ -1205,7 +1222,7 @@ export function useChatMessageSubmit({
         if (submitTask === "chat") {
           const chatPayload: SendMessageRequest = {
             ...commonStreamPayload,
-            contentType: effectiveAttachments.length > 0 ? "mixed" : "text",
+            contentType: resolvedEffectiveAttachments.length > 0 ? "mixed" : "text",
             content: payloadContent,
             selectedToolIDs: requestSelectedToolIDs.length > 0 ? requestSelectedToolIDs : undefined,
             skillIDs: requestSelectedSkills.length > 0 ? requestSelectedSkills.map((skill) => skill.id) : undefined,
@@ -1412,7 +1429,7 @@ export function useChatMessageSubmit({
         if (assistantMessageSucceeded || completed.metadataRefreshHint?.trim() === "pending") {
           startMetadataRefresh(completed);
         }
-        releaseAttachments(effectiveAttachments);
+        releaseAttachments(resolvedEffectiveAttachments);
         if (assistantMessageSucceeded) {
           notifyResponseCompletion({
             content: completed.assistantMessage.content,
@@ -1433,7 +1450,7 @@ export function useChatMessageSubmit({
           // assistantStatus 也停留在 pending，重试按钮随之消失。
           synthesizeGroupRunPausedState(clientRunID);
           shouldKeepConversationLayout = true;
-          releaseAttachments(effectiveAttachments);
+          releaseAttachments(resolvedEffectiveAttachments);
           updatePendingExchange(exchangeKey, (current) => ({
             ...current,
             assistantPending: false,
