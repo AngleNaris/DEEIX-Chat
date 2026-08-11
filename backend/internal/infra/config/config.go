@@ -526,6 +526,9 @@ type Config struct {
 	MCPMaxLLMCallsPerRun          int
 	MCPMaxToolCallsPerRun         int
 	MCPToolPrompt                 string
+	// SandboxSharedDir 沙箱与多模态 MCP 的共享卷挂载点（DEEIX 容器内路径）。
+	// 工具结果携带 __export__ 标记时，从该目录读取文件并落库为用户文件。
+	SandboxSharedDir string
 }
 
 // defaultYAMLPaths 固定读取仓库根目录的 config.yaml。
@@ -748,6 +751,7 @@ func Load() Config {
 		MCPMaxLLMCallsPerRun:              5,
 		MCPMaxToolCallsPerRun:             8,
 		MCPToolPrompt:                     "",
+		SandboxSharedDir:                  "/shared",
 	}
 }
 

@@ -197,6 +197,11 @@ func (s *Service) executeAssistantToolCalls(ctx context.Context, input executeAs
 			}
 			// MCP 工具多模态产物（image/audio 等 content 块）附件化落库为消息附件。
 			s.attachToolArtifacts(ctx, input, row.OutputJSON)
+			// __export__ 标记：从共享卷读取文件落库为用户文件，并把下载链接
+			// 追加到工具结果（模型可见，可在最终回答中给出下载链接）。
+			if exportLinks := s.exportToolArtifacts(ctx, input, row.OutputJSON); exportLinks != "" {
+				row.OutputJSON = row.OutputJSON + "\n\n文件已发送给用户，请在回答中给出下载链接：" + exportLinks
+			}
 		}
 		persisted := s.persistToolCallResult(ctx, &row)
 		result := buildToolResultForModel(row, modelToolName)

@@ -9,6 +9,7 @@ services:
       - "127.0.0.1:8080:8080"
     volumes:
       - app_storage:/app/storage
+      - deeix-mcp-shared:/shared:ro   # 沙箱/多模态 MCP 共享卷（只读，供 __export__ 导出文件）
       - app_data:/app/data
       # The image runs from /app and reads /app/config.yaml automatically.
       - ./config.yaml:/app/config.yaml:ro
@@ -18,6 +19,8 @@ services:
       - deeix-chat
 volumes:
   app_storage:
+  deeix-mcp-shared:
+    name: deeix-mcp-shared
     name: deeix-chat-app-storage
   app_data:
     name: deeix-chat-app-data

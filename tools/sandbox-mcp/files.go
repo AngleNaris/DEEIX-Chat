@@ -11,7 +11,6 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 )
-
 // sanitizeWorkspacePath 校验并规范化工作区路径：只允许 /workspace 内（或相对路径），
 // 拒绝 .. 逃逸、绝对路径越界、空路径。返回容器内绝对路径。
 func sanitizeWorkspacePath(workspace, raw string) (string, error) {
@@ -158,6 +157,60 @@ print(json.dumps(items))" %s`, shellQuote(path))
 		return resultJSON(map[string]any{"ok": false, "error": "list failed", "raw": truncateUTF8(res.Stdout, 2000)}), nil
 	}
 	return resultJSON(map[string]any{"ok": true, "path": path, "items": items}), nil
+}
+
+// handleExportFile 将共享目录中的文件标记为导出：DEEIX 后端识别 __export__ 字段后
+// 从共享卷读取文件并落库为用户文件（出现在用户文件列表 + 消息附件 + 下载链接）。
+func (s *sandboxServer) handleExportFile(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	scope, err := s.scopeFromRequest(ctx)
+	if err != nil {
+		return resultJSON(map[string]any{"ok": false, "error": err.Error()}), nil
+	}
+	raw := strings.TrimSpace(req.GetString("path", ""))
+	if raw == "" {
+		return resultJSON(map[string]any{"ok": false, "error": "path is required"}), nil
+	}
+	// 只允许导出当前会话共享目录内的文件（防跨会话/跨用户读取）。
+	sharedDir := s.mgr.SharedDir(scope)
+	if !strings.HasPrefix(filepath.Clean(strings.ReplaceAll(raw, "\\", "/"))+"/", sharedDir+"/") &&
+		filepath.Clean(strings.ReplaceAll(raw, "\\", "/")) != sharedDir {
+		return resultJSON(map[string]any{"ok": false, "error": fmt.Sprintf("path must be inside %s (your session shared dir)", sharedDir)}), nil
+	}
+	name := strings.TrimSpace(req.GetString("name", ""))
+	if name == "" {
+		name = filepath.Base(raw)
+	}
+	if name == "" || name == "." || name == "/" {
+		return resultJSON(map[string]any{"ok": false, "error": "invalid file name"}), nil
+	}
+	// 读取文件元数据（大小校验上限 20MB，与 DEEIX 上传上限一致）。
+	script := fmt.Sprintf(`python3 -c "import os,sys; p=sys.argv[1]; print(os.path.getsize(p))" %s`, shellQuote(raw))
+	res, err := s.exec(ctx, execRequest{scope: scope, cmd: []string{"/bin/sh", "-c", script}, timeout: 30 * time.Second})
+	if err != nil {
+		return resultJSON(map[string]any{"ok": false, "error": err.Error()}), nil
+	}
+	if res.ExitCode != 0 {
+		return resultJSON(map[string]any{"ok": false, "error": fmt.Sprintf("file not found or not readable: %s", raw)}), nil
+	}
+	var size int64
+	_, _ = fmt.Sscanf(strings.TrimSpace(res.Stdout), "%d", &size)
+	if size <= 0 {
+		return resultJSON(map[string]any{"ok": false, "error": "file is empty"}), nil
+	}
+	if size > 20<<20 {
+		return resultJSON(map[string]any{"ok": false, "error": fmt.Sprintf("file exceeds 20MB limit (%d bytes)", size)}), nil
+	}
+	return resultJSON(map[string]any{
+		"ok":        true,
+		"file_path": raw,
+		"name":      name,
+		"size":      size,
+		"note":      "文件已导出，用户可在对话中下载；在最终回答中给出下载链接。",
+		"__export__": []map[string]string{{
+			"path": raw,
+			"name": name,
+		}},
+	}), nil
 }
 
 // shellQuote 单引号包裹 shell 参数（容器内 python 路径参数）。

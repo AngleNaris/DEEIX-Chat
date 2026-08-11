@@ -82,6 +82,14 @@ func registerTools(mcpServer *server.MCPServer, s *sandboxServer) {
 		mcp.WithString("save_path", mcp.Description("保存为工作区文件（如 input.mp3）；为空则直接返回正文")),
 		mcp.WithNumber("max_bytes", mcp.Description("返回正文上限（默认 65536；保存到文件时忽略）")),
 	)
+	exportTool := mcp.NewTool("sandbox_export_file",
+		mcp.WithDescription(`把沙箱文件发送给用户：文件将被移动到用户的 DEEIX 文件列表，用户可在对话中直接下载。
+文件必须位于共享目录（shared_dir，形如 /shared/deeix-<uid>-<cid>/，见 sandbox_exec 返回）。
+先确认文件已复制到 shared_dir（如 cp /workspace/report.pdf /shared/deeix-1-2/），再调用本工具。
+可选 name 指定用户看到的文件名（保留扩展名）。上限 20MB。`),
+		mcp.WithString("path", mcp.Required(), mcp.Description("共享目录内文件路径，如 /shared/deeix-1-2/report.pdf")),
+		mcp.WithString("name", mcp.Description("用户可见文件名（默认取原文件名）")),
+	)
 	spawnTool := mcp.NewTool("sandbox_spawn",
 		mcp.WithDescription(`为当前会话按需拉取镜像重建沙箱容器（环境拉取）。
 默认镜像已含 python3 + ffmpeg + 常用数据分析包；如需要 Node/其它运行时，用此工具指定镜像（如 node:22-slim）。
@@ -106,6 +114,7 @@ func registerTools(mcpServer *server.MCPServer, s *sandboxServer) {
 	mcpServer.AddTool(readTool, s.handleReadFile)
 	mcpServer.AddTool(listTool, s.handleListFiles)
 	mcpServer.AddTool(downloadTool, s.handleDownload)
+	mcpServer.AddTool(exportTool, s.handleExportFile)
 	mcpServer.AddTool(spawnTool, s.handleSpawn)
 	mcpServer.AddTool(psTool, s.handlePS)
 	mcpServer.AddTool(killTool, s.handleKill)
