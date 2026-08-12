@@ -64,6 +64,73 @@ type platformToolEntry struct {
 // platformToolRegistry 返回平台工具注册表（读 + 写）。
 func platformToolRegistry() map[string]platformToolEntry {
 	return map[string]platformToolEntry{
+		// ── 凭据管理（系统级，默认启用；写操作不走 ask 审批，避免密钥在确认卡片回显）──
+		"credential_list": {
+			definition: llm.ToolDefinition{
+				Name: "credential_list",
+				Description: "List the user's saved credentials (SSH connections, API keys, etc.) as descriptions only — " +
+					"secret values are never returned. Use this to discover which credentials exist and when to use them. " +
+					"To use a credential in a command or parameter, reference it with the placeholder {{credential: name}} " +
+					"(name is the credential name from this list); the placeholder is expanded to the real value at execution time " +
+					"and never appears in the conversation record. Never output secret values in replies.",
+				InputSchema: json.RawMessage(`{"type":"object","properties":{},"required":[]}`),
+			},
+			kind:    platformToolRead,
+			handler: (*Service).platformListCredentials,
+		},
+		"credential_create": {
+			definition: llm.ToolDefinition{
+				Name: "credential_create",
+				Description: "Save a new named credential for the user (SSH connection info, API key, or generic secret). " +
+					"Provide a clear description of when/how to use it. The value is stored encrypted and never echoed back; " +
+					"reference it later with {{credential: name}} in tool parameters.",
+				InputSchema: json.RawMessage(`{
+					"type":"object","properties":{
+						"name":{"type":"string","description":"Unique credential name (used as {{credential: name}} placeholder), e.g. vpsssh"},
+						"type":{"type":"string","enum":["ssh","api_key","generic"],"description":"Credential kind (default generic)"},
+						"description":{"type":"string","description":"When/how to use this credential (visible to AI), e.g. SSH to production server root@10.0.0.5"},
+						"value":{"type":"string","description":"The secret value (SSH private key, API key, password, etc.)"},
+						"meta":{"type":"object","description":"Optional non-secret metadata, e.g. SSH host/port/username"}
+					},"required":["name","value"]
+				}`),
+			},
+			kind:        platformToolWrite,
+			handler:     (*Service).platformCreateCredential,
+			auditAction: "platform_tools.credential_create",
+		},
+		"credential_update": {
+			definition: llm.ToolDefinition{
+				Name: "credential_update",
+				Description: "Update an existing credential by name: change its description/type/meta, or rotate its value " +
+					"(omit value to keep the current secret unchanged).",
+				InputSchema: json.RawMessage(`{
+					"type":"object","properties":{
+						"name":{"type":"string","description":"Existing credential name to update"},
+						"type":{"type":"string","enum":["ssh","api_key","generic"],"description":"New credential kind"},
+						"description":{"type":"string","description":"New description"},
+						"value":{"type":"string","description":"New secret value; omit to keep the current value"},
+						"meta":{"type":"object","description":"New non-secret metadata"}
+					},"required":["name"]
+				}`),
+			},
+			kind:        platformToolWrite,
+			handler:     (*Service).platformUpdateCredential,
+			auditAction: "platform_tools.credential_update",
+		},
+		"credential_delete": {
+			definition: llm.ToolDefinition{
+				Name: "credential_delete",
+				Description: "Delete a saved credential by name. Confirm with the user before deleting.",
+				InputSchema: json.RawMessage(`{
+					"type":"object","properties":{
+						"name":{"type":"string","description":"Credential name to delete"}
+					},"required":["name"]
+				}`),
+			},
+			kind:        platformToolWrite,
+			handler:     (*Service).platformDeleteCredential,
+			auditAction: "platform_tools.credential_delete",
+		},
 		"list_files": {
 			definition: llm.ToolDefinition{
 				Name: "list_files",
@@ -876,6 +943,7 @@ func platformToolRegistry() map[string]platformToolEntry {
 
 // appendPlatformToolRuntime 按开关把平台工具并入工具运行时：
 // 读工具在 platform_tools.enabled=true 时注入；写工具另需 platform_tools.write_enabled=true。
+// 凭据管理工具（credential_*）是系统级能力（与提示词插入一致），始终注入，不依赖开关。
 // 与 MCP 工具共用 uniqueModelToolName 防止重名；本地执行无需 SSRF/DB 校验。
 func (s *Service) appendPlatformToolRuntime(ctx context.Context, result *selectedToolRuntime) error {
 	if s.platformToolsSettings == nil || s == nil {
@@ -891,9 +959,7 @@ func (s *Service) appendPlatformToolRuntime(ctx context.Context, result *selecte
 		}
 		return nil
 	}
-	if strings.TrimSpace(values[platformToolsKeyEnabled]) != "true" {
-		return nil
-	}
+	toolsEnabled := strings.TrimSpace(values[platformToolsKeyEnabled]) == "true"
 	writeEnabled := strings.TrimSpace(values[platformToolsKeyWriteEnabled]) == "true"
 
 	usedNames := make(map[string]int, len(result.definitions))
@@ -909,7 +975,11 @@ func (s *Service) appendPlatformToolRuntime(ctx context.Context, result *selecte
 		result.schemas = map[string]json.RawMessage{}
 	}
 	for name, entry := range platformToolRegistry() {
-		if entry.kind == platformToolWrite && !writeEnabled {
+		isCredentialTool := strings.HasPrefix(name, "credential_")
+		if !toolsEnabled && !isCredentialTool {
+			continue
+		}
+		if entry.kind == platformToolWrite && !writeEnabled && !isCredentialTool {
 			continue
 		}
 		modelName := uniqueModelToolName(name, usedNames)
@@ -934,7 +1004,7 @@ func (s *Service) executePlatformToolCall(ctx context.Context, entry platformToo
 	if entry.handler == nil {
 		return "", fmt.Errorf("platform tool %q has no handler", entry.definition.Name)
 	}
-	if entry.kind == platformToolWrite {
+	if entry.kind == platformToolWrite && !isCredentialPlatformTool(entry.definition.Name) {
 		approval, err := s.resolveWriteApprovalMode(ctx, input.UserID)
 		if err != nil {
 			return "", err
@@ -984,6 +1054,11 @@ func (s *Service) resolveWriteApprovalMode(ctx context.Context, userID uint) (st
 	return mode, nil
 }
 
+// isCredentialPlatformTool 判断是否为凭据管理工具（系统级，始终直执行）。
+func isCredentialPlatformTool(toolName string) bool {
+	return strings.HasPrefix(strings.TrimSpace(toolName), "credential_")
+}
+
 // platformToolGuidancePrompt 平台工具使用纪律（追加在 MCP 工具引导之后）。
 func platformToolGuidancePrompt() string {
 	return strings.TrimSpace(`# platform_tools
@@ -994,6 +1069,7 @@ func platformToolGuidancePrompt() string {
 - Memories: use save_memory for durable facts about the user (long-term preferences, background, standing instructions) — not for transient task details or conversation-specific context. Before saving, call list_memories and update the existing entry with the same meaning instead of creating duplicates.
 - Memory scopes: "preference" is injected into every message (use sparingly, high-value always-on preferences only); "profile" and "custom" are recalled by relevance. When the user asks to forget or change something remembered, use delete_memory / save_memory accordingly.
 - JS execution: use execute_js to compute values on demand (random numbers, math, data transforms). The sandbox has no filesystem/network/process access; print results with console.log and rely on the returned stdout/result. For a script bundled in a skill, use execute_skill_script with the path from list_skills.
+- Credentials: the user may save named credentials (SSH connections, API keys). Call credential_list to see them (descriptions only). When a command/parameter needs a secret, reference it with the placeholder {{credential: name}} (e.g. sshpass -p '{{credential: vpsssh}}') — it is expanded to the real value at execution time and never appears in the conversation record, trace, or share snapshots. Never output secret values in your replies; if the user needs the raw value, point them to Settings → Credentials.
 - Artifacts: when you produce a polished user-facing HTML/JS piece, offer save_artifact so the user can keep and share it; use list_artifacts to find saved items and share_artifact to create a public link when the user asks to share.`)
 }
 

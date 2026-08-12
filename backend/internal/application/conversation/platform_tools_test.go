@@ -36,8 +36,14 @@ func TestAppendPlatformToolRuntimeDisabled(t *testing.T) {
 	if err := svc.appendPlatformToolRuntime(context.Background(), &result); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(result.definitions) != 0 || len(result.platformEntries) != 0 {
-		t.Fatalf("expected no platform tools when disabled, got %d definitions", len(result.definitions))
+	// 平台工具整体关闭时，仅凭据管理工具（系统级能力）仍注入。
+	if len(result.platformEntries) == 0 {
+		t.Fatalf("expected credential tools when platform tools disabled")
+	}
+	for name := range result.platformEntries {
+		if !isCredentialPlatformTool(name) {
+			t.Fatalf("unexpected non-credential tool injected when disabled: %s", name)
+		}
 	}
 }
 
@@ -52,18 +58,23 @@ func TestAppendPlatformToolRuntimeReadOnlyOnly(t *testing.T) {
 	}
 	readCount := 0
 	writeCount := 0
+	credentialWriteCount := 0
 	for name, entry := range result.platformEntries {
 		if name == "" {
 			t.Fatalf("empty model name in platform entries")
 		}
 		if entry.kind == platformToolWrite {
 			writeCount++
+			if isCredentialPlatformTool(name) {
+				credentialWriteCount++
+			}
 		} else {
 			readCount++
 		}
 	}
-	if writeCount != 0 {
-		t.Fatalf("write tools must not be injected when write_enabled=false, got %d", writeCount)
+	// 凭据写工具（系统级）不受 write_enabled 控制；其余写工具必须被过滤。
+	if writeCount != credentialWriteCount {
+		t.Fatalf("non-credential write tools must not be injected when write_enabled=false, got %d", writeCount)
 	}
 	if readCount == 0 {
 		t.Fatalf("read tools must be injected when enabled=true")

@@ -74,9 +74,15 @@ func (s *Service) executeAssistantToolCalls(ctx context.Context, input executeAs
 
 	slots := make([]toolExecutionSlot, len(toolCalls))
 	var fatalErr error
+	// 平台工具执行名集合：凭据工具落库打码时据此区分平台/MCP 工具。
+	platformExecutionNames := make(map[string]struct{}, len(input.PlatformTools))
+	for modelName := range input.PlatformTools {
+		platformExecutionNames[resolveExecutionToolName(modelName, input.ToolNameMap)] = struct{}{}
+	}
 	for i, item := range toolCalls {
 		modelToolName := strings.TrimSpace(item.ToolName)
 		executionToolName := resolveExecutionToolName(modelToolName, input.ToolNameMap)
+		_, isPlatformTool := platformExecutionNames[executionToolName]
 		row := model.ToolCall{
 			MessageID:      input.MessageID,
 			ConversationID: input.ConversationID,
@@ -95,15 +101,16 @@ func (s *Service) executeAssistantToolCalls(ctx context.Context, input executeAs
 		mcpConfig := resolveMCPConfig(modelToolName, input.MCPConfigs)
 		if mcpConfig == nil {
 			if entry, ok := input.PlatformTools[modelToolName]; ok {
-				// 平台内置工具（本地执行）：走同一结果/持久化/预算/去重通道。
-				toolStartedAt := time.Now()
-				outputJSON, executeErr := s.executePlatformToolCall(ctx, entry, ExecuteToolInput{
-					UserID:         input.UserID,
-					ConversationID: input.ConversationID,
-					RequestID:      strings.TrimSpace(input.RequestID),
-					ToolName:       row.ToolName,
-					ArgumentsJSON:  row.InputJSON,
-				})
+			// 平台内置工具（本地执行）：走同一结果/持久化/预算/去重通道。
+			// 执行参数在发送前展开 {{credential: name}} 占位符（落库保持占位符原文）。
+			toolStartedAt := time.Now()
+			outputJSON, executeErr := s.executePlatformToolCall(ctx, entry, ExecuteToolInput{
+				UserID:         input.UserID,
+				ConversationID: input.ConversationID,
+				RequestID:      strings.TrimSpace(input.RequestID),
+				ToolName:       row.ToolName,
+				ArgumentsJSON:  s.expandCredentialRefsInJSON(ctx, input.UserID, row.InputJSON),
+			})
 				row.LatencyMS = time.Since(toolStartedAt).Milliseconds()
 				if row.LatencyMS < 0 {
 					row.LatencyMS = 0
@@ -120,7 +127,10 @@ func (s *Service) executeAssistantToolCalls(ctx context.Context, input executeAs
 					// 平台内置工具产物（图片等）同样附件化落库。
 					s.attachToolArtifacts(ctx, input, row.OutputJSON)
 				}
-				persisted := s.persistToolCallResult(ctx, &row)
+				// 落库前对凭据管理工具输入打码（value → [REDACTED]），防止密钥明文进 tool_calls 表。
+				persistedRow := row
+				persistedRow.InputJSON = maskCredentialToolInput(row.ToolName, isPlatformTool, row.InputJSON)
+				persisted := s.persistToolCallResult(ctx, &persistedRow)
 				result := buildToolResultForModel(row, modelToolName)
 				slots[i] = toolExecutionSlot{
 					row:       row,
@@ -165,6 +175,7 @@ func (s *Service) executeAssistantToolCalls(ctx context.Context, input executeAs
 		if input.Ledger != nil {
 			if previous, ok := input.Ledger.lookup(row.ToolName, row.InputJSON); ok {
 				slot := buildRepeatedToolSlot(row, modelToolName, previous)
+				slot.row.InputJSON = maskCredentialToolInput(slot.row.ToolName, isPlatformTool, slot.row.InputJSON)
 				persisted := s.persistToolCallResult(ctx, &slot.row)
 				slot.result = buildToolResultForModel(slot.row, modelToolName)
 				slot.persisted = persisted
@@ -174,12 +185,14 @@ func (s *Service) executeAssistantToolCalls(ctx context.Context, input executeAs
 		}
 
 		toolStartedAt := time.Now()
+		// 执行参数展开 {{credential: name}} 占位符（仅执行使用，落库保持占位符原文）。
+		executionArguments := s.expandCredentialRefsInJSON(ctx, input.UserID, row.InputJSON)
 		outputJSON, executeErr := s.executeToolCall(ctx, ExecuteToolInput{
 			UserID:         input.UserID,
 			ConversationID: input.ConversationID,
 			RequestID:      strings.TrimSpace(input.RequestID),
 			ToolName:       row.ToolName,
-			ArgumentsJSON:  row.InputJSON,
+			ArgumentsJSON:  executionArguments,
 			MCPConfig:      mcpConfig,
 		})
 		row.LatencyMS = time.Since(toolStartedAt).Milliseconds()
@@ -204,7 +217,10 @@ func (s *Service) executeAssistantToolCalls(ctx context.Context, input executeAs
 				row.OutputJSON = row.OutputJSON + "\n\n导出文件已作为消息附件直接发送给用户（对话中可见附件卡片），请勿再在回答中提供下载链接。"
 			}
 		}
-		persisted := s.persistToolCallResult(ctx, &row)
+		// 落库前对凭据管理工具输入打码（value → [REDACTED]），防止密钥明文进 tool_calls 表。
+		persistedRow := row
+		persistedRow.InputJSON = maskCredentialToolInput(row.ToolName, isPlatformTool, row.InputJSON)
+		persisted := s.persistToolCallResult(ctx, &persistedRow)
 		result := buildToolResultForModel(row, modelToolName)
 		slots[i] = toolExecutionSlot{
 			row:       row,
@@ -228,7 +244,14 @@ func (s *Service) executeAssistantToolCalls(ctx context.Context, input executeAs
 		}
 	}
 	if input.TraceRecorder != nil {
-		summary, markdown, payload := buildToolTrace(rows)
+		// trace 展示同样打码凭据工具输入（payload 中的 input 预览不泄露密钥）。
+		traceRows := make([]model.ToolCall, len(rows))
+		for i := range rows {
+			traceRows[i] = rows[i]
+			_, traceIsPlatform := platformExecutionNames[traceRows[i].ToolName]
+			traceRows[i].InputJSON = maskCredentialToolInput(traceRows[i].ToolName, traceIsPlatform, traceRows[i].InputJSON)
+		}
+		summary, markdown, payload := buildToolTrace(traceRows)
 		input.TraceRecorder.appendToolSection(summary, markdown, payload, messageTraceStatusCompleted)
 		input.TraceRecorder.completeTools()
 	}

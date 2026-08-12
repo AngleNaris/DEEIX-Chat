@@ -756,5 +756,40 @@
       "redemptionSucceeded": "兑换成功",
       "redemptionFailed": "兑换失败"
     }
+  },
+  "credentials": "凭据",
+  "credentialsPage": {
+    "title": "凭据",
+    "hint": "命名凭据（SSH 连接、API key 等）加密存储，保存后不再回显。对话中在工具参数里用 {{credential: name}} 引用即可——执行时自动展开为真实值，密钥不会进入会话记录。",
+    "create": "新建凭据",
+    "empty": "还没有凭据。保存一个后，AI 就能在命令和参数中使用它。",
+    "createTitle": "新建凭据",
+    "editTitle": "编辑凭据",
+    "formHint": "密钥加密存储，保存后永不回显。",
+    "nameLabel": "名称",
+    "namePlaceholder": "例如 vpsssh",
+    "nameHint": "作为对话中的 {{credential: name}} 占位符使用。",
+    "typeLabel": "类型",
+    "valueLabel": "密钥值",
+    "valuePlaceholder": "SSH 私钥、API key、密码…",
+    "valuePlaceholderEdit": "留空表示保持当前密钥不变",
+    "descriptionLabel": "描述",
+    "descriptionPlaceholder": "该凭据的用途，例如：SSH 到生产服务器 root@10.0.0.5",
+    "types": {
+      "ssh": "SSH",
+      "apiKey": "API Key",
+      "generic": "通用"
+    },
+    "edit": "编辑",
+    "delete": "删除",
+    "saved": "凭据已保存",
+    "saveFailed": "保存凭据失败",
+    "deleted": "凭据已删除",
+    "deleteFailed": "删除凭据失败",
+    "deleteTitle": "删除该凭据？",
+    "deleteDescription": "删除后 AI 将无法再使用该凭据，且不可恢复。",
+    "deleteConfirm": "删除",
+    "cancel": "取消",
+    "save": "保存"
   }
 }

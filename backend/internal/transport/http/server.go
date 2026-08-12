@@ -24,6 +24,7 @@ import (
 	conversationhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/conversation"
 	doccardhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/doccard"
 	dynamicprompthttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/dynamicprompt"
+	credentialshttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/credentials"
 	mcphttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/mcp"
 	memoryhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/memory"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/middleware"
@@ -74,6 +75,7 @@ type Modules struct {
 	Artifact      *artifacthttp.Module
 	DocCard       *doccardhttp.Module
 	DynamicPrompt *dynamicprompthttp.Module
+	Credentials   *credentialshttp.Module
 	StartupLog    func(*zap.Logger)
 }
 
@@ -193,6 +195,9 @@ func NewEngine(cfg *config.Runtime, log *zap.Logger, modules Modules, hc HealthC
 	}
 	if modules.DynamicPrompt != nil {
 		modules.DynamicPrompt.RegisterRoutes(authRequired)
+	}
+	if modules.Credentials != nil {
+		modules.Credentials.RegisterRoutes(authRequired)
 	}
 	if modules.Settings != nil {
 		modules.Settings.RegisterRoutes(authRequired)

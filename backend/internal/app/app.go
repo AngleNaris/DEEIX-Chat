@@ -31,6 +31,7 @@ import (
 	agentgroup "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/agentgroup"
 	appdoccard "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/doccard"
 	appdynamicprompt "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/dynamicprompt"
+	appcredentials "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/credentials"
 	domainagentgroup "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/agentgroup"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/settings"
 	appskill "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/skill"
@@ -63,6 +64,7 @@ import (
 	artifactrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/artifact"
 	doccardrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/doccard"
 	dynamicpromptrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/dynamicprompt"
+	credentialsrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/credentials"
 	settingsrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/settings"
 	skillrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/skill"
 	systemeventrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/systemevent"
@@ -83,6 +85,7 @@ import (
 	artifacthttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/artifact"
 	doccardhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/doccard"
 	dynamicprompthttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/dynamicprompt"
+	credentialsh "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/credentials"
 	settingshttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/settings"
 	skillhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/skill"
 	userhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/user"
@@ -450,6 +453,11 @@ func NewApp() (*App, error) {
 	dynamicPromptHandler := dynamicprompthttp.NewHandler(dynamicPromptService)
 	dynamicPromptModule := dynamicprompthttp.NewModule(dynamicPromptHandler)
 	conversationService.SetDynamicPromptReader(dynamicPromptService)
+	credentialRepo := credentialsrepo.NewRepo(db)
+	credentialService := appcredentials.NewService(credentialRepo, cfg.DataEncryptionKey)
+	credentialHandler := credentialsh.NewHandler(credentialService)
+	credentialModule := credentialsh.NewModule(credentialHandler)
+	conversationService.SetCredentialReader(credentialService)
 	conversationService.SetPromptPresetResolver(promptPresetService)
 
 	hc := newHealthChecker(db, cfg.CacheDriver, redisClient)
@@ -473,6 +481,7 @@ func NewApp() (*App, error) {
 		Artifact:      artifactModule,
 		DocCard:       docCardModule,
 		DynamicPrompt: dynamicPromptModule,
+		Credentials:   credentialModule,
 		User:          userModule,
 		StartupLog: func(log *zap.Logger) {
 			if log == nil || bootstrapSuperAdmin == nil {

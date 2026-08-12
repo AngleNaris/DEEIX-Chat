@@ -15,6 +15,7 @@ import (
 	appcompact "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/compact"
 	appdoccard "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/doccard"
 	appdynamicprompt "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/dynamicprompt"
+	appcredentials "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/credentials"
 	appembedding "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/embedding"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/extraction"
 	appartifact "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/artifact"
@@ -122,6 +123,22 @@ type dynamicPromptReader interface {
 	RunDynamicPrompt(ctx context.Context, userID uint, publicID string) (string, error)
 }
 
+// credentialResolver 用户凭据能力（由 credentials 服务注入）：
+// 模型上下文只见凭据描述，执行层经 ResolveValue 解密展开 {{credential: name}} 占位符。
+// 平台工具按 name 操作（模型只认识 name）；HTTP API 按 publicID。
+type credentialResolver interface {
+	// ListCredentials 列出凭据视图（无密钥，平台工具 credential_list 用）。
+	ListCredentials(ctx context.Context, userID uint) ([]appcredentials.View, error)
+	// CreateCredential 创建凭据（平台工具 credential_create 用）。
+	CreateCredential(ctx context.Context, userID uint, input appcredentials.UpsertInput) (*appcredentials.View, error)
+	// UpdateCredentialByName 按名称更新凭据（平台工具 credential_update 用）。
+	UpdateCredentialByName(ctx context.Context, userID uint, name string, input appcredentials.UpsertInput) (*appcredentials.View, error)
+	// DeleteCredentialByName 按名称删除凭据（平台工具 credential_delete 用）。
+	DeleteCredentialByName(ctx context.Context, userID uint, name string) error
+	// ResolveValue 解密凭据值（{{credential: name}} 执行层展开用；未找到返回空串）。
+	ResolveValue(ctx context.Context, userID uint, name string) (string, error)
+}
+
 // promptPresetResolver 预制提示词能力（由 promptpreset 服务注入），
 // 供平台工具 list/create/update/delete_prompt_preset 使用。
 type promptPresetResolver interface {
@@ -220,6 +237,7 @@ type Service struct {
 	docCards              docCardReader              // 文档卡片读取（关键字触发注入）
 	docCardCache          sync.Map                   // userID (uint) → *cachedDocCards
 	dynamicPrompts        dynamicPromptReader        // 动态提示词读取（{{script: name}} 展开 + 平台工具脚本管理）
+	credentials           credentialResolver         // 用户凭据（{{credential: name}} 展开 + 平台工具管理）
 	dynamicPromptCache    sync.Map                   // userID (uint) → *cachedDynamicPrompts
 	promptPresets         promptPresetResolver       // 预制提示词（平台工具 list/create/update/delete_prompt_preset）
 	llmClient         *llm.Client
@@ -549,6 +567,11 @@ func (s *Service) InvalidateDocCardCache(userID uint) {
 // SetDynamicPromptReader 注入动态提示词读取（{{script: name}} 展开 + 平台工具脚本管理）。
 func (s *Service) SetDynamicPromptReader(reader dynamicPromptReader) {
 	s.dynamicPrompts = reader
+}
+
+// SetCredentialReader 注入用户凭据（{{credential: name}} 展开 + 平台工具管理）。
+func (s *Service) SetCredentialReader(reader credentialResolver) {
+	s.credentials = reader
 }
 
 // SetPromptPresetResolver 注入预制提示词能力（平台工具 list/create/update/delete_prompt_preset）。

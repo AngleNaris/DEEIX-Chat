@@ -71,6 +71,7 @@ func Models() []interface{} {
 		&model.AgentGroupRun{},
 		&model.AgentGroupStep{},
 		&model.AgentGroupStepAttempt{},
+		&model.Credential{},
 		&model.SystemSetting{},
 		&model.UserSetting{},
 		&model.FileChunk{},

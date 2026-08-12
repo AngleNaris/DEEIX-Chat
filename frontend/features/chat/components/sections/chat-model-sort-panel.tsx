@@ -17,7 +17,6 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { useTranslations } from "next-intl";
 
 import { GripVerticalIcon } from "@/components/ui/grip-vertical";
 import type { ChatModelOption } from "@/features/chat/types/chat-runtime";
@@ -39,7 +38,6 @@ export function ChatModelSortPanel({
   onSelect: (platformModelName: string) => void;
   onOrderChange: (order: string[]) => void;
 }) {
-  const t = useTranslations("chat.modelPicker");
   const [items, setItems] = React.useState<ChatModelOption[]>(modelOptions);
 
   React.useEffect(() => {
@@ -81,8 +79,6 @@ export function ChatModelSortPanel({
 
   return (
     <div className="flex flex-col gap-1">
-      <div className="px-2 text-[11px] font-medium text-muted-foreground">{t("sortTitle")}</div>
-      <p className="px-2 text-[10px] leading-4 text-muted-foreground/70">{t("sortHint")}</p>
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
         <SortableContext items={items.map((item) => item.platformModelName)} strategy={verticalListSortingStrategy}>
           <div className="flex flex-col gap-0.5">

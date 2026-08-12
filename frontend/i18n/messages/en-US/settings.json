@@ -756,5 +756,40 @@
       "redemptionSucceeded": "Redemption applied",
       "redemptionFailed": "Redemption failed"
     }
+  },
+  "credentials": "Credentials",
+  "credentialsPage": {
+    "title": "Credentials",
+    "hint": "Named credentials (SSH connections, API keys) are stored encrypted and never shown again. In chat, reference one with {{credential: name}} in tool parameters — the value is expanded at execution time and never enters the conversation record.",
+    "create": "New credential",
+    "empty": "No credentials yet. Save one to let the AI use it in commands and parameters.",
+    "createTitle": "New credential",
+    "editTitle": "Edit credential",
+    "formHint": "The secret value is stored encrypted and never echoed back.",
+    "nameLabel": "Name",
+    "namePlaceholder": "e.g. vpsssh",
+    "nameHint": "Used as {{credential: name}} placeholder in chat.",
+    "typeLabel": "Type",
+    "valueLabel": "Secret value",
+    "valuePlaceholder": "SSH private key, API key, password...",
+    "valuePlaceholderEdit": "Leave empty to keep the current value",
+    "descriptionLabel": "Description",
+    "descriptionPlaceholder": "When and how to use this credential, e.g. SSH to production server root@10.0.0.5",
+    "types": {
+      "ssh": "SSH",
+      "apiKey": "API Key",
+      "generic": "Generic"
+    },
+    "edit": "Edit",
+    "delete": "Delete",
+    "saved": "Credential saved",
+    "saveFailed": "Failed to save credential",
+    "deleted": "Credential deleted",
+    "deleteFailed": "Failed to delete credential",
+    "deleteTitle": "Delete credential?",
+    "deleteDescription": "The credential will be removed and can no longer be used by the AI. This cannot be undone.",
+    "deleteConfirm": "Delete",
+    "cancel": "Cancel",
+    "save": "Save"
   }
 }

@@ -457,7 +457,7 @@ function ChatModelMenuItem({
   );
 }
 
-// 模型列表视图切换 tab：按厂商分组 / 自定义排序（菜单卡片内部）。
+// 模型列表视图切换 tab：按厂商分组 / 自定义排序（菜单卡片内部，占满弹窗宽度）。
 function ModelViewSwitch({
   viewMode,
   onViewChange,
@@ -467,11 +467,11 @@ function ModelViewSwitch({
 }) {
   const t = useTranslations("chat.modelPicker");
   return (
-    <div className="flex items-center gap-0.5 rounded-md bg-muted/70 p-0.5">
+    <div className="grid h-8 w-full grid-cols-2 gap-1 rounded-lg bg-muted/40 p-1">
       <button
         type="button"
         className={cn(
-          "h-5 rounded px-1.5 text-[10px] font-medium transition-colors",
+          "min-w-0 rounded-md px-1.5 text-[11px] font-medium transition-colors",
           viewMode === "grouped"
             ? "bg-background text-foreground shadow-xs"
             : "text-muted-foreground hover:text-foreground",
@@ -483,7 +483,7 @@ function ModelViewSwitch({
       <button
         type="button"
         className={cn(
-          "h-5 rounded px-1.5 text-[10px] font-medium transition-colors",
+          "min-w-0 rounded-md px-1.5 text-[11px] font-medium transition-colors",
           viewMode === "custom"
             ? "bg-background text-foreground shadow-xs"
             : "text-muted-foreground hover:text-foreground",
@@ -847,12 +847,7 @@ export function ChatModelPicker({
               "relative overflow-visible rounded-xl",
               isMobile
                 ? "w-[min(20rem,calc(100vw-3rem))] p-1.5"
-                : cn(
-                    "border-0 bg-transparent p-0 shadow-none",
-                    viewMode === "custom"
-                      ? "w-[min(19rem,calc(100vw-3rem))]"
-                      : "w-[min(14rem,calc(100vw-3rem))]",
-                  ),
+                : "w-[min(16rem,calc(100vw-3rem))] border-0 bg-transparent p-0 shadow-none",
             )}
           >
             {viewMode === "custom" ? (
