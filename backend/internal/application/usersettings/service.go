@@ -41,6 +41,10 @@ var allowedKeys = map[string]string{
 	"chat.input_height":                         "standard",
 	"chat.content_width":                        "compact",
 	"chat.default_mcp_tool_ids":                 "[]",
+	// 模型列表视图：grouped 按厂商分组 / custom 自定义排序（flat 拖拽）。
+	"chat.model_view":                           "grouped",
+	// 模型自定义排序：JSON 数组（platformModelName 顺序），空串表示未设置。
+	"chat.model_order":                          "",
 	// 平台工具写操作批准模式：auto 自动执行 / ask 询问用户（模型先收到 pending，用户确认后执行）。
 	"platform_tools.write_approval":             "auto",
 	// 用户时区（IANA 名称，如 Asia/Shanghai）：动态提示词 {{date}} 等按此渲染。
@@ -71,6 +75,7 @@ var enumKeys = map[string]map[string]bool{
 	"chat.send_on_enter": {"enter": true, "ctrl_enter": true, "meta_enter": true},
 	"chat.input_height":  {"compact": true, "standard": true, "loose": true},
 	"chat.content_width": {"compact": true, "standard": true, "wide": true},
+	"chat.model_view":    {"grouped": true, "custom": true},
 	"chat.default_reasoning_effort": {
 		"": true, "low": true, "medium": true, "high": true, "xhigh": true,
 	},
@@ -81,6 +86,9 @@ var enumKeys = map[string]map[string]bool{
 func validateValue(key, value string) error {
 	if key == "chat.default_mcp_tool_ids" {
 		return validateDefaultMCPToolIDs(value, key)
+	}
+	if key == "chat.model_order" {
+		return validateModelOrder(value, key)
 	}
 	if key == "timezone" {
 		if _, err := time.LoadLocation(strings.TrimSpace(value)); err != nil {
@@ -116,6 +124,27 @@ func validateDefaultMCPToolIDs(value string, key string) error {
 	for _, id := range toolIDs {
 		if id == 0 {
 			return &ErrValidation{Msg: fmt.Sprintf("invalid value for %s: tool IDs must be positive integers", key)}
+		}
+	}
+	return nil
+}
+
+func validateModelOrder(value string, key string) error {
+	trimmed := strings.TrimSpace(value)
+	// 空串表示未设置自定义顺序（恢复默认），允许。
+	if trimmed == "" {
+		return nil
+	}
+	var names []string
+	if err := json.Unmarshal([]byte(trimmed), &names); err != nil {
+		return &ErrValidation{Msg: fmt.Sprintf("invalid value for %s: must be a JSON array of model names", key)}
+	}
+	if len(names) > 256 {
+		return &ErrValidation{Msg: fmt.Sprintf("invalid value for %s: must contain at most 256 model names", key)}
+	}
+	for _, name := range names {
+		if strings.TrimSpace(name) == "" {
+			return &ErrValidation{Msg: fmt.Sprintf("invalid value for %s: model names must not be empty", key)}
 		}
 	}
 	return nil

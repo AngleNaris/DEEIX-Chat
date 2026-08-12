@@ -457,6 +457,45 @@ function ChatModelMenuItem({
   );
 }
 
+// 模型列表视图切换 tab：按厂商分组 / 自定义排序（菜单卡片内部）。
+function ModelViewSwitch({
+  viewMode,
+  onViewChange,
+}: {
+  viewMode: "grouped" | "custom";
+  onViewChange: (mode: "grouped" | "custom") => void;
+}) {
+  const t = useTranslations("chat.modelPicker");
+  return (
+    <div className="flex items-center gap-0.5 rounded-md bg-muted/70 p-0.5">
+      <button
+        type="button"
+        className={cn(
+          "h-5 rounded px-1.5 text-[10px] font-medium transition-colors",
+          viewMode === "grouped"
+            ? "bg-background text-foreground shadow-xs"
+            : "text-muted-foreground hover:text-foreground",
+        )}
+        onClick={() => onViewChange("grouped")}
+      >
+        {t("viewGrouped")}
+      </button>
+      <button
+        type="button"
+        className={cn(
+          "h-5 rounded px-1.5 text-[10px] font-medium transition-colors",
+          viewMode === "custom"
+            ? "bg-background text-foreground shadow-xs"
+            : "text-muted-foreground hover:text-foreground",
+        )}
+        onClick={() => onViewChange("custom")}
+      >
+        {t("viewCustom")}
+      </button>
+    </div>
+  );
+}
+
 export function ChatModelPicker({
   modelOptions,
   billingDisplayCurrency,
@@ -816,41 +855,11 @@ export function ChatModelPicker({
                   ),
             )}
           >
-            {/* 视图切换：按厂商分组 / 自定义排序 */}
-            <div className="flex h-7 shrink-0 items-center justify-between gap-2 px-1 pb-1">
-              <div className="flex items-center gap-0.5 rounded-md bg-muted/70 p-0.5">
-                <button
-                  type="button"
-                  className={cn(
-                    "h-5 rounded px-1.5 text-[10px] font-medium transition-colors",
-                    viewMode === "grouped"
-                      ? "bg-background text-foreground shadow-xs"
-                      : "text-muted-foreground hover:text-foreground",
-                  )}
-                  onClick={() => persistModelView("grouped")}
-                >
-                  {t("viewGrouped")}
-                </button>
-                <button
-                  type="button"
-                  className={cn(
-                    "h-5 rounded px-1.5 text-[10px] font-medium transition-colors",
-                    viewMode === "custom"
-                      ? "bg-background text-foreground shadow-xs"
-                      : "text-muted-foreground hover:text-foreground",
-                  )}
-                  onClick={() => persistModelView("custom")}
-                >
-                  {t("viewCustom")}
-                </button>
-              </div>
-              <span className="min-w-0 truncate text-right text-[10px] font-medium text-muted-foreground">
-                {viewMode === "custom" ? t("sortTitle") : selectedGroupLabel}
-              </span>
-            </div>
-
             {viewMode === "custom" ? (
               <div className="flex max-h-[calc(100dvh-3rem)] min-w-0 flex-col overflow-hidden rounded-xl border-[0.5px] border-border bg-popover p-1.5 shadow-xs">
+                <div className="flex shrink-0 items-center px-1 pb-1">
+                  <ModelViewSwitch viewMode={viewMode} onViewChange={persistModelView} />
+                </div>
                 <ModelMenuScrollContainer maxHeight={resolveDesktopMenuListMaxHeight(420, 40)}>
                   <ChatModelSortPanel
                     modelOptions={sortedModelOptions}
@@ -865,6 +874,9 @@ export function ChatModelPicker({
               </div>
             ) : isMobile ? (
               <>
+                <div className="flex items-center px-1 pb-1">
+                  <ModelViewSwitch viewMode={viewMode} onViewChange={persistModelView} />
+                </div>
                 <div className="flex h-7 items-center justify-between gap-2 px-2">
                   {mobileGroup ? (
                     <button
@@ -977,11 +989,8 @@ export function ChatModelPicker({
                   ref={desktopGroupMenuRef}
                   className="flex min-w-0 max-h-[calc(100dvh-3rem)] flex-col overflow-hidden rounded-xl border-[0.5px] border-border bg-popover p-1.5 shadow-xs"
                 >
-                  <div className="flex h-7 shrink-0 items-center justify-between gap-3 px-2">
-                    <span className="text-[11px] font-medium text-foreground">{t("group")}</span>
-                    <span className="truncate text-[10px] font-medium text-muted-foreground">
-                      {selectedGroupLabel}
-                    </span>
+                  <div className="flex h-7 shrink-0 items-center px-1 pb-1">
+                    <ModelViewSwitch viewMode={viewMode} onViewChange={persistModelView} />
                   </div>
                   {modelGroups.length === 0 ? (
                     <div className="px-2 py-3 text-[11px] leading-4 text-muted-foreground">
