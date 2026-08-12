@@ -52,12 +52,14 @@ services:
   # ---- Qwen-MM-Plugins 桥接（supergateway: stdio -> Streamable HTTP）----
   # 依赖固定到 Qwen-MM-Plugins 不可变 commit（2026-08-12 main HEAD），保证可重建（P0-08）。
   # omni-av 入口已随上游废弃，迁移为官方 core + api 两个入口。
+  # VPS 直连 github.com 不通（构建卡死），git URL 走 gh-proxy.com 镜像前缀；
+  # 网络可达 GitHub 的部署环境可去掉前缀：git+https://github.com/QwenLM/Qwen-MM-Plugins.git@114aaaefc3f23d132c6ecc9df50fae72703f14fa
   mm-core:
     build:
       context: .
       dockerfile: mm-gateway.Dockerfile
       args:
-        MM_PACKAGE: "qwen-mm-plugins[core] @ git+https://github.com/QwenLM/Qwen-MM-Plugins.git@114aaaefc3f23d132c6ecc9df50fae72703f14fa"
+        MM_PACKAGE: "qwen-mm-plugins[core] @ git+https://gh-proxy.com/https://github.com/QwenLM/Qwen-MM-Plugins.git@114aaaefc3f23d132c6ecc9df50fae72703f14fa"
         MM_ENTRY: "qwen-mm-plugins-core"
     image: deeix-mm-gateway-core:latest
     container_name: deeix-mm-core
@@ -81,7 +83,7 @@ services:
       context: .
       dockerfile: mm-gateway.Dockerfile
       args:
-        MM_PACKAGE: "qwen-mm-plugins[api] @ git+https://github.com/QwenLM/Qwen-MM-Plugins.git@114aaaefc3f23d132c6ecc9df50fae72703f14fa"
+        MM_PACKAGE: "qwen-mm-plugins[api] @ git+https://gh-proxy.com/https://github.com/QwenLM/Qwen-MM-Plugins.git@114aaaefc3f23d132c6ecc9df50fae72703f14fa"
         MM_ENTRY: "qwen-mm-plugins-api"
     image: deeix-mm-gateway-omni-av:latest
     container_name: deeix-mm-omni-av
