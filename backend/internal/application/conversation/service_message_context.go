@@ -709,6 +709,9 @@ type userContextInput struct {
 	Memory              []domainmemory.UserMemory
 	DocCards            []appdoccard.CardView
 	RecallChunks        []domainconversation.MessageChunk
+	// SupportsVision 主模型是否原生支持图片输入：
+	// false 时图片降级为路径标记（Hermes text 模式），不注入像素避免上游 400。
+	SupportsVision bool
 }
 
 type snapshotContext struct {
@@ -832,16 +835,57 @@ func conversationImageRefs(messages []domainconversation.Message, attachments []
 	return refs
 }
 
+// injectHistoricalImageHints 将历史图片引用降级为文本路径标记，按消息归组追加到对应
+// user 消息正文（非 vision 模型专用，避免上游对像素内容返回 400）。
+func injectHistoricalImageHints(messages []llm.Message, refs []conversationImageRef, attachments []AttachmentInput) []llm.Message {
+	attachmentByFileID := make(map[string]AttachmentInput, len(attachments))
+	for _, att := range attachments {
+		attachmentByFileID[strings.TrimSpace(att.FileID)] = att
+	}
+	hintsByMessage := make(map[int][]string)
+	for _, ref := range refs {
+		att, ok := attachmentByFileID[ref.fileID]
+		if !ok {
+			continue
+		}
+		hintsByMessage[ref.messageIndex] = append(hintsByMessage[ref.messageIndex], buildImageAttachmentHint(att.FileName, att.FileID))
+	}
+	if len(hintsByMessage) == 0 {
+		return messages
+	}
+	result := cloneLLMMessages(messages)
+	for index, hints := range hintsByMessage {
+		if index < 0 || index >= len(result) {
+			continue
+		}
+		message := result[index]
+		content := strings.TrimSpace(userMessageText(message))
+		if content != "" {
+			content += "\n\n"
+		}
+		content += strings.Join(hints, "\n")
+		result[index] = llm.Message{Role: message.Role, Content: content}
+	}
+	return result
+}
+
 func (s *Service) injectConversationImageContext(
 	ctx context.Context,
 	messages []llm.Message,
 	domainMessages []domainconversation.Message,
 	attachments []AttachmentInput,
 	cfg config.Config,
+	supportsVision bool,
 ) ([]llm.Message, error) {
 	refs := conversationImageRefs(domainMessages, attachments, maxConversationImageContextCount)
 	if len(refs) == 0 {
 		return messages, nil
+	}
+
+	// 非 vision 模型：历史图片同样不注入像素，降级为路径标记（Hermes text 模式），
+	// 附加到对应历史用户消息正文，模型知道历史里存在哪些图（含 fileID 供工具引用）。
+	if !supportsVision {
+		return injectHistoricalImageHints(messages, refs, attachments), nil
 	}
 
 	attachmentByFileID := make(map[string]AttachmentInput, len(attachments))
@@ -992,10 +1036,17 @@ func injectUserContext(
 		}
 	}
 	contextXML := buildUserContextXML(input)
+	// 非 vision 模型：图片不注入像素，降级为路径标记（Hermes text 模式），
+	// 模型知道有图（含 fileID 供工具引用）但不会触发上游 400。
+	imageHints := make([]string, 0)
 
 	for _, att := range input.Attachments {
 		kind := normalizeAttachmentKind(att.Kind, att.MimeType)
 		if kind == "image" {
+			if !input.SupportsVision {
+				imageHints = append(imageHints, buildImageAttachmentHint(att.FileName, att.FileID))
+				continue
+			}
 			// 图片：读取文件字节并缩放
 			storagePath := strings.TrimSpace(att.StoragePath)
 			if storagePath == "" {
@@ -1027,13 +1078,21 @@ func injectUserContext(
 		}
 	}
 
-	if len(imageParts) == 0 && contextXML.empty() {
+	if len(imageParts) == 0 && len(imageHints) == 0 && contextXML.empty() {
 		return messages
 	}
 
 	content := strings.TrimSpace(userMessageText(lastUserMsg))
 	if !contextXML.empty() {
 		content = buildUserContextPrompt(content, contextXML)
+	}
+
+	if len(imageHints) > 0 {
+		// 非 vision：hint 文本并入用户消息正文（无像素注入）。
+		if content != "" {
+			content += "\n\n"
+		}
+		content += strings.Join(imageHints, "\n")
 	}
 
 	result := make([]llm.Message, len(messages))

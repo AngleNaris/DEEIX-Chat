@@ -8,6 +8,19 @@
     "title": "运行参数",
     "description": "写操作与文件重建相关的参数。"
   },
+  "imageGen": {
+    "title": "图片生成（image_gen）",
+    "description": "向模型暴露 image_gen 工具，让使用非生图模型的会话也能基于当前讨论生成图片。选择一个或多个图片生成渠道；调用时由模型自行选择渠道（渠道备注会注入工具描述，向模型渐进披露）。",
+    "enabledLabel": "启用 image_gen 工具",
+    "enabledDescription": "开启且至少配置一个渠道后，模型获得 image_gen 工具，可在对话中按渠道生成图片。",
+    "channelsLabel": "生成渠道",
+    "channelsDescription": "图片生成渠道（kind 含 image_gen 的模型）。备注会展示给模型，例如「可生成4K图」。",
+    "modelPlaceholder": "选择渠道模型",
+    "notePlaceholder": "渠道备注（展示给模型）",
+    "addChannel": "添加渠道",
+    "noImageGenModels": "未找到 kind 含 image_gen 的模型，请先在「模型」中把模型 kind 标记为 image_gen。",
+    "loadModelsFailed": "模型列表加载失败"
+  },
   "fields": {
     "enabled": {
       "label": "启用平台 Agent 工具",

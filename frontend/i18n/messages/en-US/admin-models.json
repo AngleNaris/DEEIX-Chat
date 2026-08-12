@@ -361,6 +361,7 @@
     "capabilitiesVisualButton": "Visual config (Recommended)",
     "capabilitiesAdvancedJSON": "Advanced JSON",
     "imageStreamEnabled": "Image streaming calls",
+    "visionEnabled": "Image input support (vision)",
     "capabilitiesQuick": {
       "button": "Quick config",
       "title": "Model capabilities config",

@@ -477,7 +477,10 @@ func (s *Service) sendMessageInternal(
 	}
 
 	contextAssembler := NewContextAssembler(int64(cfg.ContextMaxInputTokens))
-	userCtx := userContextInput{ImageAnalyses: imageProcessing.Analyses}
+	userCtx := userContextInput{
+		ImageAnalyses: imageProcessing.Analyses,
+		SupportsVision: modelSupportsVision(route.PlatformModelName, route.ModelCapabilitiesJSON),
+	}
 	var prefixMemories []domainmemory.UserMemory
 	preferencePrompt := ""
 	if promptScope.Snapshot != nil {

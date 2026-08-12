@@ -17,15 +17,18 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { Check } from "lucide-react";
 
 import { GripVerticalIcon } from "@/components/ui/grip-vertical";
 import type { ChatModelOption } from "@/features/chat/types/chat-runtime";
-import { ChatModelIdentity } from "./chat-model-identity";
+import { ModelIcon } from "@/shared/components/model-icon";
+import { resolveModelIconURL, resolveModelIdentity } from "@/shared/lib/model-identity";
 import { cn } from "@/lib/utils";
 
 /**
  * ChatModelSortPanel 模型"自定义排序"视图：flat 列表拖拽排序，
  * 顺序变化时通过 onOrderChange 通知父组件持久化（user settings chat.model_order）。
+ * 行样式与分组视图的 ChatModelMenuItem 保持一致（h-7 / text-[11px]）。
  */
 export function ChatModelSortPanel({
   modelOptions,
@@ -78,22 +81,20 @@ export function ChatModelSortPanel({
   );
 
   return (
-    <div className="flex flex-col gap-1">
-      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-        <SortableContext items={items.map((item) => item.platformModelName)} strategy={verticalListSortingStrategy}>
-          <div className="flex flex-col gap-0.5">
-            {items.map((item) => (
-              <ModelSortableRow
-                key={item.platformModelName}
-                model={item}
-                selected={item.platformModelName === selectedPlatformModelName}
-                onSelect={onSelect}
-              />
-            ))}
-          </div>
-        </SortableContext>
-      </DndContext>
-    </div>
+    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+      <SortableContext items={items.map((item) => item.platformModelName)} strategy={verticalListSortingStrategy}>
+        <div className="flex flex-col gap-0.5">
+          {items.map((item) => (
+            <ModelSortableRow
+              key={item.platformModelName}
+              model={item}
+              selected={item.platformModelName === selectedPlatformModelName}
+              onSelect={onSelect}
+            />
+          ))}
+        </div>
+      </SortableContext>
+    </DndContext>
   );
 }
 
@@ -113,32 +114,47 @@ function ModelSortableRow({
     transform: CSS.Transform.toString(transform),
     transition,
   } satisfies React.CSSProperties;
+  const platformModelName = model.platformModelName.trim();
+  const identity = React.useMemo(
+    () =>
+      resolveModelIdentity({
+        code: model.platformModelName,
+        vendor: model.vendor,
+        icon: model.icon,
+      }),
+    [model.icon, model.platformModelName, model.vendor],
+  );
+  const iconURL = React.useMemo(() => resolveModelIconURL(identity.modelIcon), [identity.modelIcon]);
 
   return (
     <div
       ref={setNodeRef}
       style={style}
       className={cn(
-        "flex h-8 w-full min-w-0 items-center gap-1 rounded-md pl-2 pr-1 text-left transition-colors",
-        isDragging ? "bg-accent shadow-sm" : "hover:bg-accent/70",
+        "group flex h-7 items-center rounded-md text-[11px] font-medium text-muted-foreground transition-colors",
+        isDragging
+          ? "bg-accent text-accent-foreground shadow-sm"
+          : "hover:bg-accent hover:text-accent-foreground",
       )}
     >
       <button
         {...attributes}
         {...listeners}
         type="button"
-        aria-label={model.platformModelName}
-        title={model.platformModelName}
-        className="flex size-5 shrink-0 cursor-grab items-center justify-center rounded-md text-muted-foreground/50 transition-colors hover:bg-accent hover:text-muted-foreground active:cursor-grabbing"
+        aria-label={platformModelName}
+        title={platformModelName}
+        className="ml-1 flex size-4 shrink-0 cursor-grab items-center justify-center rounded text-muted-foreground/50 transition-colors hover:text-muted-foreground active:cursor-grabbing"
       >
-        <GripVerticalIcon size={12} className="size-3.5" />
+        <GripVerticalIcon size={11} className="size-3" />
       </button>
       <button
         type="button"
-        className="flex h-full min-w-0 flex-1 items-center rounded-md outline-none"
+        className="flex h-7 min-w-0 flex-1 items-center gap-2 rounded-md bg-transparent py-0 pl-1 pr-2 text-left text-[11px] font-medium leading-none text-inherit outline-none"
         onClick={() => onSelect(model.platformModelName)}
       >
-        <ChatModelIdentity model={model} density="compact" />
+        <ModelIcon iconUrl={iconURL} label={platformModelName} />
+        <span className="min-w-0 flex-1 truncate leading-4">{platformModelName}</span>
+        {selected ? <Check className="size-3 shrink-0 text-current" strokeWidth={1.7} /> : null}
       </button>
     </div>
   );

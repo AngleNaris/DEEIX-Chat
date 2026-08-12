@@ -8,6 +8,19 @@
     "title": "Runtime parameters",
     "description": "Parameters for write operations and file re-processing."
   },
+  "imageGen": {
+    "title": "Image generation (image_gen)",
+    "description": "Exposes an image_gen tool to models so conversations that use non-image models can still generate images from the current discussion. Pick one or more image generation channels; the model chooses a channel itself when calling the tool (channel notes are injected into the tool description as progressive disclosure).",
+    "enabledLabel": "Enable image_gen tool",
+    "enabledDescription": "When enabled with at least one channel, the model gains the image_gen tool and can generate images by picking a channel.",
+    "channelsLabel": "Channels",
+    "channelsDescription": "Image generation channels (models with the image_gen kind). The note is shown to the model, e.g. \"can generate 4K images\".",
+    "modelPlaceholder": "Select a channel model",
+    "notePlaceholder": "Channel note (shown to the model)",
+    "addChannel": "Add channel",
+    "noImageGenModels": "No models with the image_gen kind found. Mark a model's kind as image_gen in Models first.",
+    "loadModelsFailed": "Failed to load the model list"
+  },
   "fields": {
     "enabled": {
       "label": "Enable platform agent tools",

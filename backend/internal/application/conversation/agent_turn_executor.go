@@ -232,8 +232,9 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 	stableFullContextAttachments := append([]AttachmentInput{}, fileContextPlan.FullAttachments...)
 	stableFullContextAttachments = append(stableFullContextAttachments, ragFallbackEvidenceAttachments(retrievalRAGFallbacks)...)
 	userCtx := userContextInput{
-		Attachments: imageAttachmentsForCurrentUser(stableFullContextAttachments),
-		RAGChunks:   ragContextChunks,
+		Attachments:    imageAttachmentsForCurrentUser(stableFullContextAttachments),
+		RAGChunks:      ragContextChunks,
+		SupportsVision: modelSupportsVision(route.PlatformModelName, route.ModelCapabilitiesJSON),
 	}
 
 	// 4. Skill：与普通消息同口径（按用户级最大可选数收敛）。

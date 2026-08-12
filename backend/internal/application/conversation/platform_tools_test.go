@@ -3,6 +3,7 @@ package conversation
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/skill"
@@ -137,6 +138,62 @@ func TestAppendPlatformToolRuntimeNameCollisionWithMCP(t *testing.T) {
 			t.Fatalf("duplicate definition name %q", def.Name)
 		}
 		seen[def.Name] = true
+	}
+}
+
+func TestAppendPlatformToolRuntimeImageGen(t *testing.T) {
+	// 未开启 image_gen：不注入。
+	svc := newTestServiceWithPlatformSettings(map[string]string{
+		platformToolsKeyEnabled:      "true",
+		platformToolsKeyWriteEnabled: "true",
+		"image_gen_enabled":          "false",
+		"image_gen_channels":         `[{"model":"dashscope-image","note":"4K"}]`,
+	})
+	var result selectedToolRuntime
+	if err := svc.appendPlatformToolRuntime(context.Background(), &result); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := result.platformEntries["image_gen"]; ok {
+		t.Fatalf("image_gen must not be injected when image_gen_enabled=false")
+	}
+
+	// 开启但渠道为空：不注入。
+	svc = newTestServiceWithPlatformSettings(map[string]string{
+		platformToolsKeyEnabled:      "true",
+		platformToolsKeyWriteEnabled: "true",
+		"image_gen_enabled":          "true",
+		"image_gen_channels":         "[]",
+	})
+	result = selectedToolRuntime{}
+	if err := svc.appendPlatformToolRuntime(context.Background(), &result); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := result.platformEntries["image_gen"]; ok {
+		t.Fatalf("image_gen must not be injected with empty channels")
+	}
+
+	// 开启且有渠道：注入，且描述渐进披露渠道名与备注。
+	svc = newTestServiceWithPlatformSettings(map[string]string{
+		platformToolsKeyEnabled:      "true",
+		platformToolsKeyWriteEnabled: "true",
+		"image_gen_enabled":          "true",
+		"image_gen_channels":         `[{"model":"dashscope-image","note":"4K"},{"model":"qwen-omni"}]`,
+	})
+	result = selectedToolRuntime{}
+	if err := svc.appendPlatformToolRuntime(context.Background(), &result); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	entry, ok := result.platformEntries["image_gen"]
+	if !ok {
+		t.Fatalf("image_gen must be injected when enabled with channels")
+	}
+	if entry.kind != platformToolWrite {
+		t.Fatalf("image_gen must be a write tool")
+	}
+	if !strings.Contains(entry.definition.Description, "dashscope-image") ||
+		!strings.Contains(entry.definition.Description, "4K") ||
+		!strings.Contains(entry.definition.Description, "qwen-omni") {
+		t.Fatalf("image_gen description must disclose channels with notes, got: %s", entry.definition.Description)
 	}
 }
 

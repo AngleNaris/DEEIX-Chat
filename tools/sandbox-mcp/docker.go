@@ -63,6 +63,7 @@ type containerSpec struct {
 	Workspace  string
 	CacheMount bool   // 挂载用户级共享缓存卷（pip/npm 缓存）
 	SharedVol  string // 挂载共享卷（沙箱 <-> mm 多模态工具文件桥接），空则不挂
+	Network    string // 网络模式（空 = Docker 默认 bridge）
 }
 
 // createContainer 创建并启动一个会话容器。volumeName 为空时不挂工作区卷。
@@ -100,6 +101,9 @@ func (d *dockerClient) createContainer(ctx context.Context, spec containerSpec, 
 			NanoCPUs:  int64(spec.CPUs * 1e9),
 			PidsLimit: &spec.PidsLimit,
 		},
+	}
+	if strings.TrimSpace(spec.Network) != "" {
+		host.NetworkMode = container.NetworkMode(strings.TrimSpace(spec.Network))
 	}
 	_, err := d.cli.ContainerCreate(ctx, cfg, host, nil, nil, spec.Name)
 	if err != nil {

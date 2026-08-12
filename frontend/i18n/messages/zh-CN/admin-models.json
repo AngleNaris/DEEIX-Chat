@@ -361,6 +361,7 @@
     "capabilitiesVisualButton": "可视化配置（推荐）",
     "capabilitiesAdvancedJSON": "高级 JSON",
     "imageStreamEnabled": "图像流式调用",
+    "visionEnabled": "支持图片输入（vision）",
     "capabilitiesQuick": {
       "button": "快速配置",
       "title": "模型能力配置",

@@ -65,3 +65,27 @@ func TestCollectExportMessageRunIDsSkipsEmpty(t *testing.T) {
 		t.Fatalf("expected 0 run IDs for empty inputs, got %d", len(runIDs))
 	}
 }
+
+func TestParseToolExportItemsConcatenatedFormat(t *testing.T) {
+	// image_gen 形态：{"__export__":[...]} 后接 markdown 图片引用（拼接非纯 JSON）。
+	output := "{\"__export__\":[{\"path\":\"file://file_abc\",\"name\":\"gen.png\"}]}\n\n![Generated image](/api/v1/files/file_abc/content)"
+	items := parseToolExportItems(output)
+	if len(items) != 1 {
+		t.Fatalf("expected 1 export item, got %d", len(items))
+	}
+	if items[0].Path != "file://file_abc" || items[0].Name != "gen.png" {
+		t.Fatalf("unexpected export item: %+v", items[0])
+	}
+
+	// content 块包装形态（MCP 工具兼容）。
+	wrapped := `{"content":[{"type":"text","text":"{\"__export__\":[{\"path\":\"/shared/deeix-1-2/a.png\",\"name\":\"a.png\"}]}"}]}`
+	items = parseToolExportItems(wrapped)
+	if len(items) != 1 || items[0].Path != "/shared/deeix-1-2/a.png" {
+		t.Fatalf("unexpected wrapped items: %+v", items)
+	}
+
+	// 无标记：返回 nil。
+	if items := parseToolExportItems("just some text output"); items != nil {
+		t.Fatalf("expected nil for text output, got %+v", items)
+	}
+}

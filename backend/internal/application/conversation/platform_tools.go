@@ -131,6 +131,23 @@ func platformToolRegistry() map[string]platformToolEntry {
 			handler:     (*Service).platformDeleteCredential,
 			auditAction: "platform_tools.credential_delete",
 		},
+		"image_gen": {
+			definition: llm.ToolDefinition{
+				Name: "image_gen",
+				// Description 在 appendPlatformToolRuntime 中按渠道配置动态生成（渐进披露）。
+				Description: "Generate images for the user using a configured image generation channel.",
+				InputSchema: json.RawMessage(`{
+					"type":"object","properties":{
+						"prompt":{"type":"string","description":"Detailed image description (subject, style, composition, etc.)"},
+						"channel":{"type":"string","description":"Channel model name from the available channels list in the tool description"},
+						"count":{"type":"integer","description":"Number of images to generate (default 1, max 4)"}
+					},"required":["prompt","channel"]
+				}`),
+			},
+			kind:        platformToolWrite,
+			handler:     (*Service).platformGenerateImage,
+			auditAction: "platform_tools.image_gen",
+		},
 		"list_files": {
 			definition: llm.ToolDefinition{
 				Name: "list_files",
@@ -981,6 +998,14 @@ func (s *Service) appendPlatformToolRuntime(ctx context.Context, result *selecte
 		}
 		if entry.kind == platformToolWrite && !writeEnabled && !isCredentialTool {
 			continue
+		}
+		if name == "image_gen" {
+			imageGenEnabled := strings.TrimSpace(values["image_gen_enabled"]) == "true"
+			channels := parseImageGenChannels(values["image_gen_channels"])
+			if !imageGenEnabled || len(channels) == 0 {
+				continue
+			}
+			entry.definition.Description = buildImageGenToolDescription(channels)
 		}
 		modelName := uniqueModelToolName(name, usedNames)
 		if modelName == "" {

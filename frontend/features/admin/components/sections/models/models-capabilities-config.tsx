@@ -247,6 +247,28 @@ export function setImageStreamEnabledInCapabilities(raw: string, enabled: boolea
   return Object.keys(payload).length > 0 ? JSON.stringify(payload, null, 2) : "";
 }
 
+export function visionEnabledFromCapabilities(raw: string): boolean {
+  const payload = parseCapabilitiesObject(raw);
+  if (!payload) {
+    return false;
+  }
+  const vision = payload.vision;
+  return vision === true;
+}
+
+export function setVisionEnabledInCapabilities(raw: string, enabled: boolean): string | null {
+  const payload = parseCapabilitiesObject(raw);
+  if (!payload) {
+    return null;
+  }
+  if (enabled) {
+    payload.vision = true;
+  } else {
+    delete payload.vision;
+  }
+  return Object.keys(payload).length > 0 ? JSON.stringify(payload, null, 2) : "";
+}
+
 function optionPathSegments(path: string): string[] {
   return path
     .split(".")

@@ -126,6 +126,10 @@ func (s *Service) executeAssistantToolCalls(ctx context.Context, input executeAs
 					}
 					// 平台内置工具产物（图片等）同样附件化落库。
 					s.attachToolArtifacts(ctx, input, row.OutputJSON)
+					// __export__ 标记（image_gen 生成图等）：挂为消息附件卡片，模型无需重复给链接。
+					if links := s.exportToolArtifacts(ctx, input, row.OutputJSON); links != "" {
+						row.OutputJSON = row.OutputJSON + "\n\n生成的文件已作为消息附件直接发送给用户（对话中可见附件卡片），请勿再在回答中提供下载链接。"
+					}
 				}
 				// 落库前对凭据管理工具输入打码（value → [REDACTED]），防止密钥明文进 tool_calls 表。
 				persistedRow := row

@@ -109,6 +109,8 @@ import {
   ModelCapabilitiesQuickConfig,
   normalizeModelCapabilitiesJSON,
   setImageStreamEnabledInCapabilities,
+  setVisionEnabledInCapabilities,
+  visionEnabledFromCapabilities,
 } from "@/features/admin/components/sections/models/models-capabilities-config";
 import type { NativeToolDefinition } from "@/shared/lib/model-option-policy";
 import {
@@ -465,12 +467,22 @@ export function ModelSheet({ open, mode, target, models, vendors, displayGroups,
     }) as AdminLLMAdapter[];
   }
   const imageStreamEnabled = imageStreamEnabledFromCapabilities(form.capabilitiesJSON);
+  const visionEnabled = visionEnabledFromCapabilities(form.capabilitiesJSON);
   const showImageStreamControl = routeProtocols.some((protocol) => IMAGE_MEDIA_PROTOCOLS.has(protocol.trim()));
   const showPermissionGroupUnassigned =
     !permissionGroupsLoading && permissionGroupsUnassigned && effectivePermissionGroupIDs.length === 0;
 
   function updateImageStreamEnabled(enabled: boolean) {
     const nextValue = setImageStreamEnabledInCapabilities(form.capabilitiesJSON, enabled);
+    if (nextValue === null) {
+      toast.error(t("sheet.capabilitiesQuick.invalidJSON"));
+      return;
+    }
+    setField("capabilitiesJSON", nextValue);
+  }
+
+  function updateVisionEnabled(enabled: boolean) {
+    const nextValue = setVisionEnabledInCapabilities(form.capabilitiesJSON, enabled);
     if (nextValue === null) {
       toast.error(t("sheet.capabilitiesQuick.invalidJSON"));
       return;
@@ -991,6 +1003,23 @@ export function ModelSheet({ open, mode, target, models, vendors, displayGroups,
                       </label>
                     </div>
                   ) : null}
+                  <div className="pb-1">
+                    <label
+                      htmlFor="model-vision-enabled"
+                      className="flex min-w-0 items-center gap-2 text-xs font-normal text-muted-foreground"
+                    >
+                      <Checkbox
+                        id="model-vision-enabled"
+                        checked={visionEnabled}
+                        disabled={pending}
+                        className="size-3.5"
+                        onCheckedChange={(checked) => updateVisionEnabled(checked === true)}
+                      />
+                      <span className="min-w-0 truncate">
+                        {t("sheet.visionEnabled")}
+                      </span>
+                    </label>
+                  </div>
                   <div className="grid min-w-0 grid-cols-2 gap-2">
                     <ModelCapabilitiesQuickConfig
                       value={form.capabilitiesJSON}

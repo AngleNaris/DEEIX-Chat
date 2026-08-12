@@ -61,7 +61,8 @@ func (s *Service) buildMessageRoutePrompt(ctx context.Context, route *channel.Re
 	})
 	if !input.SkipImageAttachments {
 		var err error
-		historyMessages, err = s.injectConversationImageContext(ctx, historyMessages, routeMessages, input.StableAttachments, input.Config)
+		supportsVision := modelSupportsVision(route.PlatformModelName, route.ModelCapabilitiesJSON)
+		historyMessages, err = s.injectConversationImageContext(ctx, historyMessages, routeMessages, input.StableAttachments, input.Config, supportsVision)
 		if err != nil {
 			return PromptPlan{}, err
 		}

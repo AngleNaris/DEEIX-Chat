@@ -112,7 +112,7 @@ func TestInjectConversationImageContextKeepsOwnershipAndUsesCache(t *testing.T) 
 	service := &Service{storeProvider: provider, imageContextCache: defaultPreparedConversationImageCache()}
 	history := historyMessagesFromDomain(domainMessages, historyMessageOptions{})
 
-	got, err := service.injectConversationImageContext(t.Context(), history, domainMessages, attachments, config.Config{ImageMaxDimension: 1024})
+	got, err := service.injectConversationImageContext(t.Context(), history, domainMessages, attachments, config.Config{ImageMaxDimension: 1024}, true)
 	if err != nil {
 		t.Fatalf("inject historical images: %v", err)
 	}
@@ -122,7 +122,7 @@ func TestInjectConversationImageContextKeepsOwnershipAndUsesCache(t *testing.T) 
 	if len(got[2].Parts) != 2 || string(got[2].Parts[1].Data) != "image-two" {
 		t.Fatalf("expected second image on second user message, got %#v", got[2])
 	}
-	if _, err = service.injectConversationImageContext(t.Context(), history, domainMessages, attachments, config.Config{ImageMaxDimension: 1024}); err != nil {
+	if _, err = service.injectConversationImageContext(t.Context(), history, domainMessages, attachments, config.Config{ImageMaxDimension: 1024}, true); err != nil {
 		t.Fatalf("inject cached historical images: %v", err)
 	}
 	if provider.opens != 1 {
@@ -133,7 +133,7 @@ func TestInjectConversationImageContextKeepsOwnershipAndUsesCache(t *testing.T) 
 func TestInjectConversationImageContextRejectsMissingAndOversizedContext(t *testing.T) {
 	domainMessages := []model.Message{{Role: "user", Attachments: `[{"file_id":"missing","kind":"image","mime_type":"image/png"}]`}}
 	service := &Service{imageContextCache: defaultPreparedConversationImageCache()}
-	_, err := service.injectConversationImageContext(t.Context(), historyMessagesFromDomain(domainMessages, historyMessageOptions{}), domainMessages, nil, config.Config{})
+	_, err := service.injectConversationImageContext(t.Context(), historyMessagesFromDomain(domainMessages, historyMessageOptions{}), domainMessages, nil, config.Config{}, true)
 	if !errors.Is(err, ErrInvalidFileReference) {
 		t.Fatalf("expected missing historical image to fail explicitly, got %v", err)
 	}
@@ -153,7 +153,7 @@ func TestInjectConversationImageContextRejectsMissingAndOversizedContext(t *test
 		{Role: "assistant"},
 		{Role: "user", Attachments: `[{"file_id":"two","kind":"image","mime_type":"image/png"}]`},
 	}
-	_, err = service.injectConversationImageContext(t.Context(), historyMessagesFromDomain(domainMessages, historyMessageOptions{}), domainMessages, attachments, config.Config{ImageMaxDimension: 1024})
+	_, err = service.injectConversationImageContext(t.Context(), historyMessagesFromDomain(domainMessages, historyMessageOptions{}), domainMessages, attachments, config.Config{ImageMaxDimension: 1024}, true)
 	if !errors.Is(err, ErrFileTooLarge) {
 		t.Fatalf("expected aggregate image context budget failure, got %v", err)
 	}

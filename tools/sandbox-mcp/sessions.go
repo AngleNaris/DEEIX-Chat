@@ -163,6 +163,7 @@ func (m *SessionManager) createSessionContainer(ctx context.Context, s *Session)
 		Workspace:  m.cfg.WorkspaceDir,
 		CacheMount: s.CacheMount,
 		SharedVol:  m.cfg.SharedVolume,
+		Network:    m.cfg.NetworkMode,
 	}, "deeix-sandbox-ws-"+s.Scope); err != nil {
 		return err
 	}

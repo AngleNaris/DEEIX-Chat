@@ -37,6 +37,11 @@ type Config struct {
 	// SharedVolume 沙箱与多模态 MCP（mm-core/mm-omni-av）共享的文件卷名。
 	// 会话容器挂载到 /shared，按 /shared/<scope> 子目录隔离；mm 工具可读取该目录文件。
 	SharedVolume string
+	// NetworkMode 会话容器网络模式：空串 = Docker 默认 bridge（容器可出公网，
+	// 但不能按服务名访问 DEEIX 内部容器）；设为 "1panel-network" 等外部网络名时，
+	// 会话容器与 DEEIX 后端同网，可直接 http://deeix-chat-app:8080 访问本平台服务
+	//（供"AI 维护 DEEIX 所在服务器"类任务使用）。
+	NetworkMode string
 	// MaxTasksPerSession 单会话并行后台任务上限。
 	MaxTasksPerSession int
 }
@@ -101,6 +106,7 @@ func Load() *Config {
 		CPUsLimit:          envFloat("SANDBOX_CPUS_LIMIT", 0.5),
 		CacheVolume:        envStr("SANDBOX_CACHE_VOLUME", "deeix-sandbox-cache"),
 		SharedVolume:       envStr("SANDBOX_SHARED_VOLUME", "deeix-mcp-shared"),
+		NetworkMode:        envStr("SANDBOX_NETWORK_MODE", ""),
 		MaxTasksPerSession: envInt("SANDBOX_MAX_TASKS_PER_SESSION", 4),
 	}
 }

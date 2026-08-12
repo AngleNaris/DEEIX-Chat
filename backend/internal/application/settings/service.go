@@ -552,6 +552,50 @@ func validatePatchItem(item PatchItem) error {
 		return validateIntMinMax(value, 0, 5, key)
 	case "mcp:mcp_tool_prompt":
 		return validateStringMax(value, 20000, key)
+	case "platform_tools:image_gen_enabled":
+		if _, err := strconv.ParseBool(value); err != nil {
+			return fmt.Errorf("%s must be bool", key)
+		}
+	case "platform_tools:image_gen_channels":
+		return validateImageGenChannelsJSON(value, key)
+	}
+	return nil
+}
+
+// imageGenChannelSetting 平台 image_gen 渠道配置项（系统设置里存 JSON）。
+type imageGenChannelSetting struct {
+	Model string `json:"model"`
+	Note  string `json:"note,omitempty"`
+}
+
+func validateImageGenChannelsJSON(value string, key string) error {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fmt.Errorf("%s is required", key)
+	}
+	var items []imageGenChannelSetting
+	if err := json.Unmarshal([]byte(value), &items); err != nil {
+		return fmt.Errorf("%s must be a JSON array", key)
+	}
+	if len(items) > 32 {
+		return fmt.Errorf("%s must contain at most 32 channels", key)
+	}
+	seen := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		model := strings.TrimSpace(item.Model)
+		if model == "" {
+			return fmt.Errorf("%s items require model", key)
+		}
+		if len(model) > 255 {
+			return fmt.Errorf("%s item model is too long", key)
+		}
+		if len(item.Note) > 512 {
+			return fmt.Errorf("%s item note is too long", key)
+		}
+		if _, ok := seen[model]; ok {
+			return fmt.Errorf("%s contains duplicate model %q", key, model)
+		}
+		seen[model] = struct{}{}
 	}
 	return nil
 }

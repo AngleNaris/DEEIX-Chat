@@ -17,6 +17,8 @@ import (
 // toolExportItem 工具结果中的导出标记（__export__ 数组元素）。
 // 任何 MCP 工具（如沙箱 sandbox_export_file、mm save_view）结果携带该字段时，
 // DEEIX 后端会从共享卷读取文件并落库为当前用户的文件。
+// Path 以 "file://" 前缀开头时表示平台已上传的文件 fileID（如 image_gen 生成的图片），
+// 直接按已有文件挂为消息附件，不再读共享卷。
 type toolExportItem struct {
 	Path string `json:"path"`
 	Name string `json:"name"`
@@ -26,6 +28,8 @@ type toolExportItem struct {
 const maxToolExportBytes = 20 << 20
 
 // parseToolExportItems 从工具结果 JSON 中解析 __export__ 标记。
+// 支持三种形态：纯 JSON、content 块包装、以及"JSON 标记 + 文本"拼接
+//（如 image_gen 返回 {"__export__":[...]} 后接 markdown 图片引用）。
 func parseToolExportItems(outputJSON string) []toolExportItem {
 	raw := strings.TrimSpace(outputJSON)
 	if raw == "" {
@@ -38,24 +42,79 @@ func parseToolExportItems(outputJSON string) []toolExportItem {
 		} `json:"content"`
 		Export []toolExportItem `json:"__export__"`
 	}
-	if err := json.Unmarshal([]byte(raw), &probe); err != nil {
-		return nil
+	if err := json.Unmarshal([]byte(raw), &probe); err == nil {
+		if len(probe.Export) > 0 {
+			return probe.Export
+		}
+		for _, block := range probe.Content {
+			var inner struct {
+				Export []toolExportItem `json:"__export__"`
+			}
+			if err := json.Unmarshal([]byte(block.Text), &inner); err != nil {
+				continue
+			}
+			if len(inner.Export) > 0 {
+				return inner.Export
+			}
+		}
 	}
-	if len(probe.Export) > 0 {
-		return probe.Export
-	}
-	for _, block := range probe.Content {
-		var inner struct {
+	// 拼接形态：逐段尝试解析"以 { 开头"的 JSON 对象（按括号配平截断）。
+	for start := 0; start < len(raw); {
+		braceIndex := strings.IndexByte(raw[start:], '{')
+		if braceIndex < 0 {
+			break
+		}
+		braceIndex += start
+		end := matchJSONObjectEnd(raw, braceIndex)
+		if end < 0 {
+			break
+		}
+		var candidate struct {
 			Export []toolExportItem `json:"__export__"`
 		}
-		if err := json.Unmarshal([]byte(block.Text), &inner); err != nil {
-			continue
+		if err := json.Unmarshal([]byte(raw[braceIndex:end+1]), &candidate); err == nil && len(candidate.Export) > 0 {
+			return candidate.Export
 		}
-		if len(inner.Export) > 0 {
-			return inner.Export
-		}
+		start = end + 1
 	}
 	return nil
+}
+
+// matchJSONObjectEnd 返回从 openIndex（必须指向 '{'）开始配平的 JSON 对象结束下标；
+// 处理字符串与转义，配平失败返回 -1。
+func matchJSONObjectEnd(raw string, openIndex int) int {
+	depth := 0
+	inString := false
+	escaped := false
+	for i := openIndex; i < len(raw); i++ {
+		ch := raw[i]
+		if inString {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if ch == '\\' {
+				escaped = true
+				continue
+			}
+			if ch == '"' {
+				inString = false
+			}
+			continue
+		}
+		switch ch {
+		case '"':
+			inString = true
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
 }
 
 // exportFilePath 校验共享目录路径并返回容器内绝对路径。
@@ -97,6 +156,32 @@ func (s *Service) exportToolArtifacts(ctx context.Context, input executeAssistan
 	attachments := make([]domainconversation.Attachment, 0, len(items))
 	links := make([]string, 0, len(items))
 	for _, item := range items {
+		// 平台已上传文件的导出（image_gen 等）：path 即 fileID，直接挂为附件。
+		if strings.HasPrefix(strings.TrimSpace(item.Path), "file://") {
+			fileID := strings.TrimPrefix(strings.TrimSpace(item.Path), "file://")
+			resolved, resolveErr := s.resolveAttachments(ctx, input.UserID, []string{fileID})
+			if resolveErr != nil || len(resolved) == 0 {
+				slog.Warn("tool export file_id resolve failed", "tool", input.RunID, "file_id", fileID, "err", resolveErr)
+				continue
+			}
+			fileItem := resolved[0]
+			attachments = append(attachments, domainconversation.Attachment{
+				ConversationID: input.ConversationID,
+				MessageID:      input.MessageID,
+				UserID:         input.UserID,
+				FileID:         fileItem.FileID,
+				Kind:           "image",
+				FileName:       fileItem.FileName,
+				MimeType:       fileItem.MimeType,
+				FileSize:       fileItem.FileSize,
+				SHA256:         fileItem.SHA256,
+				StoragePath:    fileItem.StoragePath,
+				Status:         "active",
+				UploadedAt:     now,
+			})
+			links = append(links, fmt.Sprintf("![%s](/api/v1/files/%s/content)", fileItem.FileName, fileItem.FileID))
+			continue
+		}
 		absPath, err := s.exportFilePath(input, item.Path)
 		if err != nil {
 			slog.Warn("tool export rejected", "tool", input.RunID, "err", err)

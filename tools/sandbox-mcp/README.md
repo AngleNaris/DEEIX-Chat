@@ -8,7 +8,7 @@ DEEIX（X-DEEIX）配套的**多用户隔离沙箱**：Agent 可在远程沙箱�
 - **会话租约制（参考 LobeHub Onlyboxes）**：懒创建（create_if_missing）、闲置超 `lease TTL`（默认 900s）自动回收；重建时工具结果回传 `session_recreated: true`，模型可感知工作区被重置。
 - **环境拉取**：容器内可自由 `pip install` / `apt-get install`；用户级共享缓存卷（`/root/.cache`）保证容器重建后安装秒级命中；`sandbox_spawn` 可按需拉任意镜像（如 `node:22-slim`）重建会话。
 - **共享卷桥接（沙箱 ↔ 多模态工具）**：会话容器挂载共享卷 `deeix-mcp-shared` 到 `/shared`，与 mm-core/mm-omni-av 容器互通。每次 `sandbox_exec` 结果返回 `shared_dir`（如 `/shared/deeix-42-7`，按会话隔离）；把文件复制到该目录后，mm 工具的 `file_path`/`image_path` 即可指向它（如 `transcribe_audio` / `ocr` / `read_image` / `media_info`）。
-- **网络**：默认允许出网（抓取信息需求）；仅接受 http/https URL。
+- **网络**：默认允许出网（抓取信息需求）；仅接受 http/https URL。会话容器默认在 Docker bridge 网络（可访问任意公网；VPS 上回环/hairpin 访问自身公网 IP 由宿主 NAT 支持，实测 `https://<站点>` 可达）。如需让沙箱直接访问 DEEIX 本平台服务（如"AI 维护 DEEIX 所在服务器"任务），把 `SANDBOX_NETWORK_MODE` 设为 DEEIX 所在外部网络名（如 `1panel-network`），会话容器即可按服务名访问，例如 `http://deeix-chat-app:8080`（平台 API）——注意：加入外部网络后沙箱与平台内网互通，仅在单租户受信 VPS 上启用。
 - **传输**：Streamable HTTP（`/mcp`），Bearer Token 鉴权；仅建议 DEEIX 后端回环访问（VPS `127.0.0.1:8081`）。
 
 ## 工具

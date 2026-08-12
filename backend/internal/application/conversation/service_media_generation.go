@@ -548,6 +548,115 @@ func (s *Service) StreamMediaImage(ctx context.Context, input MediaImageInput) (
 	}, nil
 }
 
+// generatedImageToolResult 平台 image_gen 工具的一次生成结果：markdown 引用 + 已上传文件。
+type generatedImageToolResult struct {
+	Markdown string
+	Files    []model.FileObject
+}
+
+// generateImagesForTool 按指定渠道模型执行一次图片生成并落库为文件对象，
+// 返回 markdown 引用与已上传文件（平台 image_gen 工具与媒体任务共用同一条生成/上传链路）。
+// 渠道由调用方解析（platform_tools.image_gen_channels 的 model 字段）。
+func (s *Service) generateImagesForTool(ctx context.Context, input MediaImageInput) (generatedImageToolResult, error) {
+	if s.routeResolver == nil || s.llmClient == nil {
+		return generatedImageToolResult{}, ErrModelRouteNotConfigured
+	}
+	platformModelName := strings.TrimSpace(input.PlatformModelName)
+	if platformModelName == "" {
+		return generatedImageToolResult{}, ErrModelRouteNotConfigured
+	}
+	route, err := s.routeResolver.ResolveRoute(ctx, channel.ResolveRouteInput{
+		PlatformModelName: platformModelName,
+		TaskType:          channel.TaskTypeImageGeneration,
+		Scope:             channel.RouteScopeUser,
+		UserID:            input.UserID,
+		ConversationID:    input.ConversationID,
+		RequestID:         strings.TrimSpace(input.RequestID),
+	})
+	if err != nil {
+		return generatedImageToolResult{}, ErrModelRouteNotConfigured
+	}
+	if !llm.IsImageGenerationAdapter(route.Protocol) {
+		return generatedImageToolResult{}, ErrMediaRouteProtocolMismatch
+	}
+
+	cfg := s.cfg.Snapshot()
+	attributionReferer, attributionTitle := s.llmAttribution()
+	routeConfig := llm.RouteConfig{
+		Protocol:            route.Protocol,
+		BaseURL:             route.BaseURL,
+		APIKey:              route.APIKey,
+		HeadersJSON:         route.HeadersJSON,
+		ConnectTimeoutMS:    route.ConnectTimeoutMS,
+		ReadTimeoutMS:       route.ReadTimeoutMS,
+		StreamIdleTimeoutMS: route.StreamIdleTimeoutMS,
+		Endpoint:            llm.EndpointImageGenerations,
+		UpstreamModel:       route.UpstreamModel,
+		AttributionReferer:  attributionReferer,
+		AttributionTitle:    attributionTitle,
+	}
+	filteredOptions := filterModelOptions(input.Options, route.Protocol, modelOptionPolicyConfig{
+		Mode:                  cfg.ModelOptionPolicyMode,
+		AllowedPathsJSON:      cfg.ModelOptionAllowedPaths,
+		DeniedPathsJSON:       cfg.ModelOptionDeniedPaths,
+		ModelCapabilitiesJSON: route.ModelCapabilitiesJSON,
+	})
+	generateInput := llm.GenerateInput{
+		RequestID:      strings.TrimSpace(input.RequestID),
+		ConversationID: input.ConversationID,
+		Messages: []llm.Message{{
+			Role:    "user",
+			Content: strings.TrimSpace(input.Prompt),
+		}},
+		Options: filteredOptions,
+	}
+	var output *llm.GenerateOutput
+	if mediaImageStreamEnabled(routeConfig.Protocol, routeConfig.UpstreamModel, route.ModelCapabilitiesJSON) {
+		output, err = s.llmClient.GenerateStream(ctx, routeConfig, generateInput, func(event llm.GenerateStreamEvent) error {
+			return nil
+		})
+	} else {
+		output, err = s.llmClient.Generate(ctx, routeConfig, generateInput)
+	}
+	if err != nil {
+		s.routeResolver.MarkRouteFailure(ctx, route, err)
+		return generatedImageToolResult{}, wrapUpstreamRequestError(err)
+	}
+	s.routeResolver.MarkRouteSuccess(ctx, route)
+	if output == nil || (len(output.GeneratedImages) == 0 && strings.TrimSpace(output.Text) == "") {
+		return generatedImageToolResult{}, ErrUpstreamEmptyResponse
+	}
+	if len(output.GeneratedImages) == 0 {
+		return generatedImageToolResult{Markdown: strings.TrimSpace(output.Text)}, nil
+	}
+
+	uploaded := make([]model.FileObject, 0, len(output.GeneratedImages))
+	now := time.Now()
+	for i, image := range output.GeneratedImages {
+		data, mimeType, readErr := s.readGeneratedImage(ctx, image, route.BaseURL)
+		if readErr != nil {
+			return generatedImageToolResult{}, readErr
+		}
+		fileName := generatedImageFileName(route.PlatformModelName, now, i, len(output.GeneratedImages), mimeType)
+		uploadResult, uploadErr := s.UploadFile(ctx, appupload.UploadFileInput{
+			UserID:       input.UserID,
+			Purpose:      "generated_image",
+			FileName:     fileName,
+			MimeType:     mimeType,
+			DeclaredSize: int64(len(data)),
+			Reader:       bytes.NewReader(data),
+		})
+		if uploadErr != nil {
+			return generatedImageToolResult{}, uploadErr
+		}
+		uploaded = append(uploaded, uploadResult.File)
+	}
+	return generatedImageToolResult{
+		Markdown: generatedImageMarkdown(uploaded),
+		Files:    uploaded,
+	}, nil
+}
+
 // mediaOutputUsage 安全提取允许为空的媒体响应 usage。
 func mediaOutputUsage(output *llm.GenerateOutput) llm.Usage {
 	if output == nil {

@@ -304,6 +304,11 @@ function resolveMCPMaxSelectedTools(value: unknown): number {
   return Math.min(Math.floor(numeric), 128);
 }
 
+function resolveSupportsVision(capabilitiesJSON: string): boolean {
+  const parsed = parseJSONObject(capabilitiesJSON);
+  return parsed?.vision === true;
+}
+
 function toChatModelOption(item: PublicModelDTO): ChatModelOption {
   return {
     platformModelName: item.platformModelName,
@@ -316,6 +321,7 @@ function toChatModelOption(item: PublicModelDTO): ChatModelOption {
     displayGroupIcon: item.displayGroupIcon,
     kinds: parseKindsJSON(item.kindsJSON),
     protocols: parseProtocolsJSON(item.protocolsJSON),
+    supportsVision: resolveSupportsVision(item.capabilitiesJSON),
     defaultOptions: resolveDefaultOptions(item.capabilitiesJSON),
     optionControls: resolveOptionControls(item.capabilitiesJSON),
     lockedOptionPaths: resolveLockedOptionPaths(item.capabilitiesJSON),

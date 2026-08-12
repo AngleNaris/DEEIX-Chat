@@ -29,6 +29,8 @@ services:
       SANDBOX_PIDS_LIMIT: "${SANDBOX_PIDS_LIMIT:-256}"
       SANDBOX_CPUS_LIMIT: "${SANDBOX_CPUS_LIMIT:-0.5}"
       SANDBOX_CACHE_VOLUME: "${SANDBOX_CACHE_VOLUME:-deeix-sandbox-cache}"
+      SANDBOX_SHARED_VOLUME: "${SANDBOX_SHARED_VOLUME:-deeix-mcp-shared}"
+      SANDBOX_NETWORK_MODE: "${SANDBOX_NETWORK_MODE:-}"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     # 沙箱 MCP 需要按 (user, conversation) 创建/销毁容器，故授予 docker.sock；
