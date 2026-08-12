@@ -10,7 +10,7 @@
 - 分支差异：Custom 领先 93 个提交，落后 5 个提交
 - 工作树状态：审查开始及结束时均干净
 - 文档目的：记录当前定制修改的健壮性、安全性、性能、上游兼容性和多模态 MCP 演进结论
-- 当前阶段：审查完成，生产代码修复尚未开始
+- 当前阶段：阶段 1（P0 全部 + sandbox 顺手 P1）修复完成，见第 14 节；阶段 2（Agent Group 一致性）与阶段 3（上游同步）未开始
 
 本结论是上述提交快照的审查基线。后续修复、同步上游或重新生成代码后，应更新本文档中的状态和验证结果。
 
@@ -929,12 +929,12 @@ Gateway 实施前必须先修复当前 `/shared` 隔离问题。
 
 ### 阶段 1：修复 P0
 
-1. 修复根 Compose。
-2. 修复下载命令注入和 SSRF。
-3. 修复 `cwd` 路径约束。
-4. 重做共享文件隔离和符号链接防护。
-5. 强制 Sandbox 服务鉴权和可信身份。
-6. 固定 Qwen 依赖并迁移失效入口。
+1. ✅ 修复根 Compose。
+2. ✅ 修复下载命令注入和 SSRF。
+3. ✅ 修复 `cwd` 路径约束。
+4. ✅ 重做共享文件隔离和符号链接防护。
+5. ✅ 强制 Sandbox 服务鉴权和可信身份。
+6. ✅ 固定 Qwen 依赖并迁移失效入口。
 
 ### 阶段 2：修复 Agent Group 一致性
 
@@ -984,19 +984,82 @@ Gateway 实施前必须先修复当前 `/shared` 隔离问题。
 
 ## 13. 当前未执行事项
 
-- 未修改上述生产代码。
-- 未合并 `upstream/dev`。
-- 未创建提交。
-- 未 push。
-- 未执行生产部署。
+- 未合并 `upstream/dev`（阶段 3）。
+- 未执行生产部署（阶段 1 修复待上线验证）。
 - 未使用真实 Qwen、豆包或 Gemini 凭据调用。
+- 阶段 2 的 Agent Group 一致性（P1-07~11）、sandbox 生命周期（P1-01/02/04）、性能项（P1-PERF-*）与 P2 项未开始。
 
-后续进入修复阶段时，应在本文件中为每个问题补充：
+## 14. 阶段 1 修复记录（2026-08-13）
 
-- 修复提交
-- 修改文件
-- 新增测试
-- 验证命令
-- 验证结果
-- 剩余风险
-- 是否允许进入下一发布门槛
+修复提交：`e6386ddc`（fix(sandbox,security,deploy): 审查阶段1 P0 全修复 + sandbox 顺手 P1）
+
+### 14.1 P0-01 根 Compose —— 已修复
+
+- 修改：`docker-compose.yml`（volumes 段去重 name、`app_storage` 补 name），`docker-compose.full.yml` / `docker-compose.sqlite.yml` 补 app 的 `/shared` 只读挂载与 sandbox env 透传。
+- 验证：三份 `docker compose config --quiet` 全部通过。
+
+### 14.2 P0-02 下载 Shell 注入 —— 已修复
+
+- 修改：`tools/sandbox-mcp/download.go` 整体重写，删除全部 `curl` / `/bin/sh -c %q` 拼接；下载在 Go 侧执行，存文件复用 `writeWorkspaceBytes`（python stdin 解码）管道。
+- 测试：`main_test.go` 新增 `$()`、反引号、换行、引号、重定向等注入载荷用例（非法 URL 拒绝；合法主机 + 路径内载荷安全通过——不再经过任何 Shell）。
+
+### 14.3 P0-03 下载 SSRF —— 已修复
+
+- 修改：`tools/sandbox-mcp/outbound.go`（拷贝自 `backend/internal/shared/security/outbound.go`，含 DNS rebinding 防护 dialer，注释标明 canonical 源）；`validateFetchURL` 接入策略校验；`fetchDownload` 用 `NewOutboundHTTPClient` + 每跳重定向复验 + 响应/重定向/超时上限。
+- 配置：新增 `SANDBOX_ALLOWED_HOSTS` / `SANDBOX_ALLOWED_CIDRS`（默认空 = 拒绝全部私网/回环/link-local/metadata）。
+- 测试：私网/回环/link-local/metadata/IPv6 本机/白名单放行用例。
+- 剩余风险：出站策略与后端 canonical 源存在拷贝分叉风险（源更新时需同步，outbound.go 头部已注明）。
+
+### 14.4 P0-04 cwd Shell 转义 —— 已修复
+
+- 修改：`handleExec` 的 cwd 先过 `sanitizeWorkspacePath`（强制位于 /workspace），经 `container.ExecOptions.WorkingDir` 原生传递，删除 `cd %q && ...` 拼接。
+- 测试：注入/越界拒绝、合法 cwd 生效（单元层覆盖路径校验逻辑）。
+
+### 14.5 P0-05 共享卷租户隔离 —— 已修复（宿主目录 per-scope bind mount）
+
+- 修改：`SessionManager.createSessionContainer` 在宿主目录 `SANDBOX_SHARED_HOST_DIR/<scope>`（0o755，scope 白名单正则校验）预先建目录；会话容器只 bind 挂载自己 scope 子目录到 `/shared/<scope>`，其他租户目录物理不可见。mm 网关与后端挂整目录只读（`deploy/docker-compose.yml`、三份根 compose）。
+- 部署变更：`deeix-mcp-shared` 命名卷废弃；旧数据迁移 `docker run --rm -v deeix-mcp-shared:/data -v <hostDir>:/out alpine cp -a /data/. /out/`。
+- 剩余风险：未做容器内真实挂载隔离的集成验证（需 VPS 冒烟）；跨用户读取拒绝测试待补（下一轮随生命周期重做补上）。
+
+### 14.6 P0-06 符号链接逃逸 —— 已修复（双端）
+
+- 修改：sandbox 侧 write/read/list/export 的容器内 python 统一 `os.path.realpath` 根内断言（list 改用 lstat 不跟随 symlink）；后端 `exportFilePath` 增加 `filepath.EvalSymlinks` 后前缀复验。
+- 剩余风险：容器内写路径的 TOCTOU 窗口极小（单用户容器内，实际风险来自共享卷 symlink，已由 bind 隔离 + 双端复验覆盖）。
+
+### 14.7 P0-07 鉴权与身份 —— 已修复
+
+- 修改：`Config.Validate()` 空 API Key 拒绝启动（main.go 强制校验，authMiddleware 纵深防御）；`_meta` 增加 HMAC-SHA256 短期签名（`ts` 5 分钟窗口，`SANDBOX_META_HMAC_KEY`，空则回退 APIKey 派生）；后端 `infra/mcp/client.go` 在 `tools/call` 的 `_meta` 注入 `ts`/`sig`（canonical 串与沙箱一致）；`sandbox_ps` 只返回当前用户会话。
+- 测试：签名缺失/篡改/过期拒绝、空 key 启动拒绝、ps 跨用户不泄露、后端签名 canonical 一致性测试。
+- 剩余风险：mm-core/mm-omni-av 网关（supergateway）无鉴权中间件，仅靠 127.0.0.1 回环绑定——与审查结论一致，留待多模型 Gateway 阶段统一。
+
+### 14.8 P0-08 Qwen 部署可重建 —— 已修复
+
+- 修改：`deploy/docker-compose.yml` 两个 mm 服务 git 依赖 pin 到 commit `114aaaefc3f23d132c6ecc9df50fae72703f14fa`（2026-08-12 main HEAD）；mm-omni-av 从已废弃的 `[omni-av]` 迁移到官方 `[api]` 入口（`qwen-mm-plugins-api`，经官方 pyproject.toml 确认）。
+- 剩余风险：api 入口工具清单与旧 omni-av 的差异需 VPS 重建后 `tools/list` 冒烟比对（文档 10 节验证表待更新）。
+
+### 14.9 顺手修复
+
+- P1-03：`handleTaskPoll` 检查 `err`/`output == nil`，容器丢失返回任务中断而非 panic。
+- P1-05：`ensureImage` 保存并消费 `ImagePull` reader。
+- P1-06：`containerSpec.CacheVolume` 用配置值替换硬编码 `deeix-sandbox-cache-root`。
+- `createContainer` 启动失败补偿删除容器。
+- 3 处空白（`files.go:144-145`、`artifact-thumbnail-protocol.ts:3`）修复，`git diff --check` 干净。
+- 移除误入库的编译产物 `tools/sandbox-mcp/sandbox-mcp`（加入 .gitignore）。
+
+### 14.10 验证结果（本轮）
+
+| 验证项 | 结果 |
+| --- | --- |
+| Sandbox `go vet` + `go test -race ./...` | 通过 |
+| Backend `go build ./...` + `go vet ./...` | 通过 |
+| Backend 受影响包（mcp/config/security/conversation）测试 | 通过 |
+| 三份 `docker compose config` | 通过 |
+| Deploy compose（`tools/sandbox-mcp/deploy`） | 通过（需注入必需 env） |
+| `git diff --check` | 干净 |
+| VPS 上线冒烟（mm tools/list、跨租户隔离、导出链路） | 待部署后执行 |
+| Backend 全量 `go test ./...` | 仍失败（P2-08 分层测试，本轮未拆层） |
+
+### 14.11 下一发布门槛评估
+
+- 阶段 1（P0）已落地并有单测；发布阻断项在代码层解除。
+- 在 VPS 完成 sandbox 栈重建 + mm 工具冒烟 + 沙箱/导出链路实测前，不建议视为生产发布；Agent Group 一致性（阶段 2）与上游同步（阶段 3）仍是发布门槛。
