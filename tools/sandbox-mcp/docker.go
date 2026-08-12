@@ -45,25 +45,30 @@ func (d *dockerClient) ensureImage(ctx context.Context, ref string) error {
 	if err == nil && len(summary) > 0 {
 		return nil
 	}
-	_, err = d.cli.ImagePull(ctx, ref, image.PullOptions{})
+	rc, err := d.cli.ImagePull(ctx, ref, image.PullOptions{})
 	if err != nil {
 		return fmt.Errorf("pull image %s: %w", ref, err)
 	}
+	defer rc.Close()
+	// 完整消费拉取响应：关闭并读空 reader，释放连接、暴露拉取错误（P1-05）。
+	_, _ = io.Copy(io.Discard, rc)
 	return nil
 }
 
 // containerSpec 一次容器创建所需的全部参数。
 type containerSpec struct {
-	Name       string
-	Image      string
-	Env        []string
-	Memory     string
-	PidsLimit  int64
-	CPUs       float64
-	Workspace  string
-	CacheMount bool   // 挂载用户级共享缓存卷（pip/npm 缓存）
-	SharedVol  string // 挂载共享卷（沙箱 <-> mm 多模态工具文件桥接），空则不挂
-	Network    string // 网络模式（空 = Docker 默认 bridge）
+	Name         string
+	Image        string
+	Env          []string
+	Memory       string
+	PidsLimit    int64
+	CPUs         float64
+	Workspace    string
+	CacheMount   bool   // 挂载用户级共享缓存卷（pip/npm 缓存）
+	CacheVol     string // 缓存卷名（使用配置值，禁止硬编码）
+	SharedBind   string // 宿主共享子目录（仅本 scope）bind 到 SharedTarget；空则不挂
+	SharedTarget string // 容器内共享目录路径（/shared/<scope>）
+	Network      string // 网络模式（空 = Docker 默认 bridge）
 }
 
 // createContainer 创建并启动一个会话容器。volumeName 为空时不挂工作区卷。
@@ -77,15 +82,17 @@ func (d *dockerClient) createContainer(ctx context.Context, spec containerSpec, 
 	if spec.CacheMount {
 		mounts = append(mounts, mount.Mount{
 			Type:   mount.TypeVolume,
-			Source: "deeix-sandbox-cache-root",
+			Source: spec.CacheVol,
 			Target: "/root/.cache",
 		})
 	}
-	if spec.SharedVol != "" {
+	if spec.SharedBind != "" {
+		// P0-05：只 bind 挂载当前会话的 scope 子目录，不做整卷挂载，
+		// 容器内无法枚举/读取其他租户目录。
 		mounts = append(mounts, mount.Mount{
-			Type:   mount.TypeVolume,
-			Source: spec.SharedVol,
-			Target: "/shared",
+			Type:   mount.TypeBind,
+			Source: spec.SharedBind,
+			Target: spec.SharedTarget,
 		})
 	}
 	cfg := &container.Config{
@@ -110,6 +117,8 @@ func (d *dockerClient) createContainer(ctx context.Context, spec containerSpec, 
 		return fmt.Errorf("create container %s: %w", spec.Name, err)
 	}
 	if err := d.cli.ContainerStart(ctx, spec.Name, container.StartOptions{}); err != nil {
+		// 补偿清理：启动失败的容器不留残余（P1-04 顺手项）。
+		_ = d.removeContainer(ctx, spec.Name)
 		return fmt.Errorf("start container %s: %w", spec.Name, err)
 	}
 	return nil
@@ -150,8 +159,9 @@ type execResult struct {
 }
 
 // execInContainer 在容器内同步执行命令。
+// workingDir 经 Docker Exec 原生 WorkingDir 传递（不经 shell cd 拼接，P0-04）。
 // stdinData 非空时通过标准输入注入（用于 base64 写文件等大载荷场景）。
-func (d *dockerClient) execInContainer(ctx context.Context, name string, cmd []string, stdinData []byte, timeout time.Duration) (*execResult, error) {
+func (d *dockerClient) execInContainer(ctx context.Context, name string, cmd []string, workingDir string, stdinData []byte, timeout time.Duration) (*execResult, error) {
 	if timeout <= 0 {
 		timeout = 120 * time.Second
 	}
@@ -163,6 +173,7 @@ func (d *dockerClient) execInContainer(ctx context.Context, name string, cmd []s
 		AttachStdout: true,
 		AttachStderr: true,
 		AttachStdin:  stdinData != nil,
+		WorkingDir:   workingDir,
 	}
 	execID, err := d.cli.ContainerExecCreate(ctx, name, execCfg)
 	if err != nil {

@@ -20,6 +20,11 @@ import (
 func main() {
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
 	cfg := Load()
+	// P0-07：API Key 缺失或出站策略非法时拒绝启动（不再静默关闭鉴权）。
+	if err := cfg.Validate(); err != nil {
+		slog.Error("invalid config, refusing to start", "err", err)
+		os.Exit(1)
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

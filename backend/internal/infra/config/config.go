@@ -526,9 +526,12 @@ type Config struct {
 	MCPMaxLLMCallsPerRun          int
 	MCPMaxToolCallsPerRun         int
 	MCPToolPrompt                 string
-	// SandboxSharedDir 沙箱与多模态 MCP 的共享卷挂载点（DEEIX 容器内路径）。
+	// SandboxSharedDir 沙箱与多模态 MCP 的共享目录挂载点（DEEIX 容器内路径）。
 	// 工具结果携带 __export__ 标记时，从该目录读取文件并落库为用户文件。
 	SandboxSharedDir string
+	// SandboxMetaHMACKey 沙箱 MCP _meta 签名的 HMAC 密钥（与 sandbox-mcp 的 SANDBOX_META_HMAC_KEY 一致）。
+	// 非空时后端在每次 MCP tools/call 的 _meta 中附带签名与时间戳，供沙箱校验身份。
+	SandboxMetaHMACKey string
 }
 
 // defaultYAMLPaths 固定读取仓库根目录的 config.yaml。
@@ -751,7 +754,8 @@ func Load() Config {
 		MCPMaxLLMCallsPerRun:              5,
 		MCPMaxToolCallsPerRun:             8,
 		MCPToolPrompt:                     "",
-		SandboxSharedDir:                  "/shared",
+		SandboxSharedDir:                  envOr("SANDBOX_SHARED_DIR", "", "/shared"),
+		SandboxMetaHMACKey:                os.Getenv("SANDBOX_META_HMAC_KEY"),
 	}
 }
 

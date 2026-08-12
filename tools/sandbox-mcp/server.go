@@ -23,16 +23,19 @@ func MetaFromContext(ctx context.Context) (*Meta, bool) {
 
 // authMiddleware 校验 Bearer Token 并提取 _meta。
 // _meta 从 POST body 的 params._meta 提取（不依赖 mcp-go 的 Meta 解析细节），
-// 提取后恢复请求体供 mcp-go 正常解析。
+// 提取时校验 HMAC 签名（P0-07：身份必须来自已验证声明），随后恢复请求体供 mcp-go 正常解析。
 func authMiddleware(cfg *Config, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if cfg.APIKey != "" {
-			auth := r.Header.Get("Authorization")
-			expected := "Bearer " + cfg.APIKey
-			if subtle.ConstantTimeCompare([]byte(auth), []byte(expected)) != 1 {
-				http.Error(w, `{"jsonrpc":"2.0","error":{"code":-32001,"message":"unauthorized"}}`, http.StatusUnauthorized)
-				return
-			}
+		if cfg.APIKey == "" {
+			// 启动时 Validate 已拒绝空 key，此处是纵深防御。
+			http.Error(w, `{"jsonrpc":"2.0","error":{"code":-32001,"message":"server misconfigured: missing api key"}}`, http.StatusInternalServerError)
+			return
+		}
+		auth := r.Header.Get("Authorization")
+		expected := "Bearer " + cfg.APIKey
+		if subtle.ConstantTimeCompare([]byte(auth), []byte(expected)) != 1 {
+			http.Error(w, `{"jsonrpc":"2.0","error":{"code":-32001,"message":"unauthorized"}}`, http.StatusUnauthorized)
+			return
 		}
 		if r.Method == http.MethodPost {
 			body, err := io.ReadAll(io.LimitReader(r.Body, 32<<20))
@@ -42,7 +45,7 @@ func authMiddleware(cfg *Config, next http.Handler) http.Handler {
 			}
 			_ = r.Body.Close()
 			r.Body = io.NopCloser(bytes.NewReader(body))
-			if meta, err := ParseMeta(body); err == nil {
+			if meta, err := ParseMeta(body, cfg.HmacKey()); err == nil {
 				r = r.WithContext(context.WithValue(r.Context(), metaKey{}, meta))
 			}
 		}
@@ -52,7 +55,10 @@ func authMiddleware(cfg *Config, next http.Handler) http.Handler {
 
 // runServer 组装并启动 HTTP 服务。
 func runServer(ctx context.Context, cfg *Config, mgr *SessionManager) error {
-	s := newSandboxServer(cfg, mgr)
+	s, err := newSandboxServer(cfg, mgr)
+	if err != nil {
+		return err
+	}
 	mcpServer := server.NewMCPServer("deeix-sandbox-mcp", "1.0.0")
 	registerTools(mcpServer, s)
 

@@ -1,12 +1,22 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 )
 
+const testHmacKey = "test-hmac-key"
+
+// signedMetaBody 构造带有效 HMAC 签名的 _meta 请求体（后端签名格式）。
+func signedMetaBody(uid, cid uint, reqID string, ts int64) string {
+	return fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"sandbox_exec","arguments":{"command":"ls"},"_meta":{"user_id":%d,"conversation_id":%d,"request_id":%q,"ts":%d,"sig":%q}}}`,
+		uid, cid, reqID, ts, metaSignature(testHmacKey, uid, cid, reqID, ts))
+}
+
 func TestParseMeta(t *testing.T) {
+	now := time.Now().Unix()
 	cases := []struct {
 		name    string
 		body    string
@@ -15,18 +25,18 @@ func TestParseMeta(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name:    "deeix style params._meta",
-			body:    `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"sandbox_exec","arguments":{"command":"ls"},"_meta":{"user_id":42,"conversation_id":7,"request_id":"req-1"}}}`,
+			name:    "deeix style params._meta with valid sig",
+			body:    signedMetaBody(42, 7, "req-1", now),
 			wantUID: 42, wantCID: 7,
 		},
 		{
 			name:    "no conversation id",
-			body:    `{"params":{"_meta":{"user_id":9}}}`,
+			body:    fmt.Sprintf(`{"params":{"_meta":{"user_id":9,"ts":%d,"sig":%q}}}`, now, metaSignature(testHmacKey, 9, 0, "", now)),
 			wantUID: 9, wantCID: 0,
 		},
 		{
 			name:    "string user id",
-			body:    `{"params":{"_meta":{"user_id":"3","conversation_id":"5"}}}`,
+			body:    fmt.Sprintf(`{"params":{"_meta":{"user_id":"3","conversation_id":"5","request_id":"r","ts":%d,"sig":%q}}}`, now, metaSignature(testHmacKey, 3, 5, "r", now)),
 			wantUID: 3, wantCID: 5,
 		},
 		{
@@ -36,7 +46,32 @@ func TestParseMeta(t *testing.T) {
 		},
 		{
 			name:    "zero user id rejected",
-			body:    `{"params":{"_meta":{"user_id":0}}}`,
+			body:    fmt.Sprintf(`{"params":{"_meta":{"user_id":0,"ts":%d,"sig":"x"}}}`, now),
+			wantErr: true,
+		},
+		{
+			name:    "missing signature rejected",
+			body:    fmt.Sprintf(`{"params":{"_meta":{"user_id":9,"ts":%d}}}`, now),
+			wantErr: true,
+		},
+		{
+			name:    "wrong signature rejected",
+			body:    fmt.Sprintf(`{"params":{"_meta":{"user_id":9,"ts":%d,"sig":"deadbeef"}}}`, now),
+			wantErr: true,
+		},
+		{
+			name:    "tampered user id rejected",
+			body:    fmt.Sprintf(`{"params":{"_meta":{"user_id":999,"conversation_id":7,"request_id":"req-1","ts":%d,"sig":%q}}}`, now, metaSignature(testHmacKey, 42, 7, "req-1", now)),
+			wantErr: true,
+		},
+		{
+			name:    "expired timestamp rejected",
+			body:    signedMetaBody(42, 7, "req-1", time.Now().Add(-10*time.Minute).Unix()),
+			wantErr: true,
+		},
+		{
+			name:    "missing timestamp rejected",
+			body:    `{"params":{"_meta":{"user_id":9,"sig":"x"}}}`,
 			wantErr: true,
 		},
 		{
@@ -47,7 +82,7 @@ func TestParseMeta(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			meta, err := ParseMeta([]byte(tc.body))
+			meta, err := ParseMeta([]byte(tc.body), testHmacKey)
 			if tc.wantErr {
 				if err == nil {
 					t.Fatalf("expected error, got meta %+v", meta)
@@ -138,16 +173,104 @@ func TestParseMemoryBytes(t *testing.T) {
 }
 
 func TestValidateFetchURL(t *testing.T) {
-	if _, err := validateFetchURL("https://example.com/a"); err != nil {
-		t.Fatalf("https should pass: %v", err)
+	strict := NewStrictOutboundPolicy(true)
+	valid := []string{
+		"https://example.com/a", "http://example.com", "https://example.com/path?q=1#frag",
 	}
-	if _, err := validateFetchURL("http://example.com"); err != nil {
-		t.Fatalf("http should pass: %v", err)
-	}
-	for _, bad := range []string{"file:///etc/passwd", "ftp://x", "gopher://x", "javascript:alert(1)", ""} {
-		if _, err := validateFetchURL(bad); err == nil {
-			t.Fatalf("url %q should be rejected", bad)
+	for _, u := range valid {
+		if _, err := validateFetchURL(u, strict); err != nil {
+			t.Fatalf("url %q should pass: %v", u, err)
 		}
+	}
+	// 协议/格式非法 + 注入载荷（P0-02：这些不再进入 Shell，但必须被拒绝）。
+	badProtocol := []string{"file:///etc/passwd", "ftp://x", "gopher://x", "javascript:alert(1)", ""}
+	// SSRF 目标（P0-03）：私网/回环/link-local/metadata/IPv6 本机。
+	ssrf := []string{
+		"http://127.0.0.1:8080/", "http://localhost/", "http://10.0.0.1/", "http://172.16.0.1/",
+		"http://192.168.1.1/", "http://169.254.169.254/latest/meta-data/", "http://100.100.100.200/",
+		"http://[::1]/", "http://[fd00:ec2::254]/", "http://metadata.google.internal/",
+		"http://example.com@127.0.0.1/", "http://0.0.0.0/",
+	}
+	// Shell 注入形态（P0-02）：换行（控制字符）必须被拒绝；
+	// 合法主机 + 路径内注入载荷（$()、反引号、引号、空格、重定向符）现在安全通过或仅失败在 HTTP 层——
+	// 下载在 Go 侧执行，不经任何 Shell，这些字符不再能构造命令。
+	injection := []string{
+		"http://example.com/a\nrm -rf /", "http://example.com/a\r\nrm -rf /",
+	}
+	for _, u := range append(badProtocol, append(ssrf, injection...)...) {
+		if _, err := validateFetchURL(u, strict); err == nil {
+			t.Fatalf("url %q should be rejected", u)
+		}
+	}
+	for _, u := range []string{
+		"http://example.com/$(whoami)", "http://example.com/`id`", "http://example.com/a'b;cat /etc/passwd",
+		"http://example.com/\"; rm -rf /; #", "http://example.com/a> /etc/passwd",
+	} {
+		if _, err := validateFetchURL(u, strict); err != nil {
+			t.Fatalf("payload url %q should pass safely (no shell involved): %v", u, err)
+		}
+	}
+	// 白名单显式放行私网目标。
+	policy, err := NewOutboundPolicy(true, []string{"internal.example.com"}, []string{"10.0.0.0/8"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := validateFetchURL("http://10.1.2.3/x", policy); err != nil {
+		t.Fatalf("allowlisted CIDR should pass: %v", err)
+	}
+	if _, err := validateFetchURL("http://internal.example.com/x", policy); err != nil {
+		t.Fatalf("allowlisted host should pass: %v", err)
+	}
+}
+
+func TestSessionBelongsToUser(t *testing.T) {
+	cases := []struct {
+		scope string
+		uid   uint
+		want  bool
+	}{
+		{"deeix-42", 42, true},
+		{"deeix-42-7", 42, true},
+		{"deeix-42-7", 7, false},
+		{"deeix-420", 42, false}, // 前缀但不是用户边界（420 不是 42）
+		{"deeix-42", 420, false},
+	}
+	for _, tc := range cases {
+		if got := sessionBelongsToUser(tc.scope, tc.uid); got != tc.want {
+			t.Fatalf("sessionBelongsToUser(%q, %d)=%v want %v", tc.scope, tc.uid, got, tc.want)
+		}
+	}
+}
+
+func TestValidScopePattern(t *testing.T) {
+	valid := []string{"deeix-1", "deeix-1-2", "deeix-123456-987654"}
+	for _, s := range valid {
+		if !validScopePattern.MatchString(s) {
+			t.Fatalf("scope %q should be valid", s)
+		}
+	}
+	invalid := []string{"", "deeix-", "deeix-1-", "deeix-1-2-3", "deeix-abc", "../etc", "deeix-1/../../host", "deeix-1-2/evil"}
+	for _, s := range invalid {
+		if validScopePattern.MatchString(s) {
+			t.Fatalf("scope %q should be invalid", s)
+		}
+	}
+}
+
+func TestConfigValidateRequiresAPIKey(t *testing.T) {
+	// P0-07：API Key 缺失必须拒绝启动（原 TestAuthDisabledWhenKeyEmpty 反转）。
+	cfg := &Config{}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected validation error for empty APIKey")
+	}
+	cfg.APIKey = "k"
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("expected valid config, got %v", err)
+	}
+	// 非法白名单 CIDR 也必须被拒绝。
+	cfg.AllowedCIDRs = []string{"not-a-cidr"}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected validation error for invalid CIDR allowlist")
 	}
 }
 

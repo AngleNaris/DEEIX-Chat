@@ -4,6 +4,9 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -29,6 +32,8 @@ const (
 type Client struct {
 	httpClients *outboundhttp.Pool
 	nextID      atomic.Int64
+	// metaHMACKey 沙箱 MCP 的 _meta 签名密钥；非空时每次 tools/call 的 _meta 附带签名与时间戳。
+	metaHMACKey string
 }
 
 // CallConfig 定义 MCP 调用配置。
@@ -57,11 +62,13 @@ type Tool struct {
 }
 
 // NewClient 创建带出站安全策略的 MCP 客户端。
-func NewClient(outboundPolicy security.OutboundPolicy) *Client {
+// metaHMACKey 非空时对每次 tools/call 的 _meta 做 HMAC 签名（供沙箱 MCP 校验身份）。
+func NewClient(outboundPolicy security.OutboundPolicy, metaHMACKey string) *Client {
 	return &Client{
 		httpClients: outboundhttp.NewPool(outboundPolicy, outboundhttp.DefaultCacheLimit, func(policy security.OutboundPolicy, trustedOrigin string, variant string) (outboundhttp.ManagedClient, error) {
 			return newMCPHTTPClient(policy, outboundPolicy, trustedOrigin, variant)
 		}),
+		metaHMACKey: metaHMACKey,
 	}
 }
 
@@ -107,20 +114,37 @@ func (c *Client) CallTool(ctx context.Context, cfg CallConfig, input CallInput) 
 	if err != nil {
 		return "", err
 	}
+	meta := map[string]interface{}{
+		"user_id":         input.UserID,
+		"conversation_id": input.ConversationID,
+		"request_id":      strings.TrimSpace(input.RequestID),
+	}
+	if c.metaHMACKey != "" {
+		// 沙箱 MCP 要求 _meta 附带短期 HMAC 签名（服务到服务身份，canonical 串与 sandbox-mcp 一致）。
+		ts := time.Now().Unix()
+		meta["ts"] = ts
+		meta["sig"] = c.metaSignature(input, ts)
+	}
 	params := map[string]interface{}{
 		"name":      toolName,
 		"arguments": args,
-		"_meta": map[string]interface{}{
-			"user_id":         input.UserID,
-			"conversation_id": input.ConversationID,
-			"request_id":      strings.TrimSpace(input.RequestID),
-		},
+		"_meta":     meta,
 	}
 	result, err := c.rpc(ctx, cfg, session, "tools/call", params, false)
 	if err != nil {
 		return "", err
 	}
 	return normalizeToolCallResult(result)
+}
+
+// metaSignature 计算 _meta 的 HMAC-SHA256 签名。
+// canonical 串格式必须与 tools/sandbox-mcp 的 metaSignature 保持一致。
+func (c *Client) metaSignature(input CallInput, ts int64) string {
+	canonical := fmt.Sprintf("user_id=%d\nconversation_id=%d\nrequest_id=%s\nts=%d",
+		input.UserID, input.ConversationID, strings.TrimSpace(input.RequestID), ts)
+	mac := hmac.New(sha256.New, []byte(c.metaHMACKey))
+	mac.Write([]byte(canonical))
+	return hex.EncodeToString(mac.Sum(nil))
 }
 
 func (c *Client) initialize(ctx context.Context, cfg CallConfig) (string, error) {

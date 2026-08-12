@@ -30,14 +30,17 @@ func (s *sandboxServer) handleSpawn(ctx context.Context, req mcp.CallToolRequest
 }
 
 func (s *sandboxServer) handlePS(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	// 聚合视图：列出全部存活会话（管理用途，含所有用户 scope）。
-	// 同样要求 DEEIX _meta（避免未授权调用探测会话信息）。
-	if _, err := s.scopeFromRequest(ctx); err != nil {
-		return resultJSON(map[string]any{"ok": false, "error": err.Error()}), nil
+	// P0-07：只返回当前用户的会话，不再暴露全部租户的聚合视图（全局视图仅限管理员端点，本轮不做）。
+	meta, ok := MetaFromContext(ctx)
+	if !ok || meta == nil {
+		return resultJSON(map[string]any{"ok": false, "error": "missing DEEIX _meta.user_id: this MCP server only serves DEEIX-injected tool calls"}), nil
 	}
 	sessions := s.mgr.List()
 	items := make([]map[string]any, 0, len(sessions))
 	for _, sess := range sessions {
+		if !sessionBelongsToUser(sess.Scope, meta.UserID) {
+			continue
+		}
 		items = append(items, map[string]any{
 			"scope":        sess.Scope,
 			"image":        sess.Image,

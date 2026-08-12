@@ -323,7 +323,7 @@ func NewApp() (*App, error) {
 	trustedOutboundPolicy := cfg.TrustedOutboundPolicy()
 	strictOutboundPolicy := cfg.StrictOutboundPolicy()
 	llmClient := llm.NewClient(trustedOutboundPolicy)
-	mcpClient := mcp.NewClient(trustedOutboundPolicy)
+	mcpClient := mcp.NewClient(trustedOutboundPolicy, cfg.SandboxMetaHMACKey)
 	mediaArtifactClient := mediaartifact.New(strictOutboundPolicy)
 	channelService := channel.NewServiceWithRuntime(runtimeCfg, channelRepo, channelRepo, channelCache, llmClient)
 	channelService.SetLogger(log)

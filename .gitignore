@@ -176,3 +176,6 @@ docker-compose.local.yml
 
 # Runtime data (per-service)
 backend/data/
+
+# Compiled Go binaries (sandbox-mcp build artifacts)
+tools/sandbox-mcp/sandbox-mcp

@@ -76,7 +76,7 @@ func TestProcessImageAttachmentsRoutesOnlyTextToMainModelContext(t *testing.T) {
 	}
 	service := &Service{
 		cfg:           config.NewRuntime(config.Config{MCPMaxToolCallsPerRun: 8, MCPMaxConcurrentCalls: 8}),
-		mcpClient:     mcp.NewClient(security.OutboundPolicy{}),
+		mcpClient:     mcp.NewClient(security.OutboundPolicy{}, ""),
 		storeProvider: &conversationTestStoreProvider{store: store},
 	}
 	runtime := selectedToolRuntime{

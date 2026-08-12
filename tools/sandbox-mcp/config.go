@@ -1,8 +1,10 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -34,9 +36,19 @@ type Config struct {
 	CPUsLimit float64
 	// CacheVolume 用户级共享包缓存卷名（pip/npm 缓存，跨会话保留，加速环境重建）。
 	CacheVolume string
-	// SharedVolume 沙箱与多模态 MCP（mm-core/mm-omni-av）共享的文件卷名。
-	// 会话容器挂载到 /shared，按 /shared/<scope> 子目录隔离；mm 工具可读取该目录文件。
-	SharedVolume string
+	// SharedHostDir 共享目录的宿主路径（sandbox-mcp 进程与 Docker daemon 所在主机）。
+	// 会话容器只 bind mount 自己的 scope 子目录（SharedHostDir/<scope> → /shared/<scope>），
+	// 其他租户目录物理不可见；DEEIX 后端与 mm 网关挂载整目录只读。
+	SharedHostDir string
+	// SharedMountDir 会话容器内共享目录挂载点（默认 /shared）。
+	SharedMountDir string
+	// MetaHMACKey _meta 签名的 HMAC 密钥（与后端 SANDBOX_META_HMAC_KEY 一致）。
+	// 为空时回退使用 APIKey 派生（APIKey 必填，见 Validate）。
+	MetaHMACKey string
+	// AllowedHosts 下载工具出站白名单主机（精确主机名，逗号分隔；默认空 = 拒绝全部私网/回环）。
+	AllowedHosts []string
+	// AllowedCIDRs 下载工具出站白名单网段（逗号分隔；默认空）。
+	AllowedCIDRs []string
 	// NetworkMode 会话容器网络模式：空串 = Docker 默认 bridge（容器可出公网，
 	// 但不能按服务名访问 DEEIX 内部容器）；设为 "1panel-network" 等外部网络名时，
 	// 会话容器与 DEEIX 后端同网，可直接 http://deeix-chat-app:8080 访问本平台服务
@@ -89,6 +101,17 @@ func envFloat(key string, def float64) float64 {
 	return def
 }
 
+// splitEnvList 解析逗号分隔的环境变量列表（去空白、去空项）。
+func splitEnvList(key string) []string {
+	var out []string
+	for _, item := range strings.Split(os.Getenv(key), ",") {
+		if v := strings.TrimSpace(item); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
 // Load 读取环境变量构建配置。
 func Load() *Config {
 	return &Config{
@@ -105,8 +128,36 @@ func Load() *Config {
 		PidsLimit:          int64(envInt("SANDBOX_PIDS_LIMIT", 256)),
 		CPUsLimit:          envFloat("SANDBOX_CPUS_LIMIT", 0.5),
 		CacheVolume:        envStr("SANDBOX_CACHE_VOLUME", "deeix-sandbox-cache"),
-		SharedVolume:       envStr("SANDBOX_SHARED_VOLUME", "deeix-mcp-shared"),
+		SharedHostDir:      envStr("SANDBOX_SHARED_HOST_DIR", "/opt/deeix-mcp/shared"),
+		SharedMountDir:     envStr("SANDBOX_SHARED_DIR", "/shared"),
+		MetaHMACKey:        os.Getenv("SANDBOX_META_HMAC_KEY"),
+		AllowedHosts:       splitEnvList("SANDBOX_ALLOWED_HOSTS"),
+		AllowedCIDRs:       splitEnvList("SANDBOX_ALLOWED_CIDRS"),
 		NetworkMode:        envStr("SANDBOX_NETWORK_MODE", ""),
 		MaxTasksPerSession: envInt("SANDBOX_MAX_TASKS_PER_SESSION", 4),
 	}
+}
+
+// HmacKey 返回 _meta 签名密钥：优先专用密钥，回退 APIKey（必填）。
+func (c *Config) HmacKey() string {
+	if c.MetaHMACKey != "" {
+		return c.MetaHMACKey
+	}
+	return c.APIKey
+}
+
+// DownloadPolicy 构建 sandbox_download 的出站策略（SSRF 防护）。
+func (c *Config) DownloadPolicy() (OutboundPolicy, error) {
+	return NewOutboundPolicy(true, c.AllowedHosts, c.AllowedCIDRs)
+}
+
+// Validate 启动前校验配置：API Key 缺失或出站策略非法时拒绝启动（发布阻断项 P0-07）。
+func (c *Config) Validate() error {
+	if c.APIKey == "" {
+		return fmt.Errorf("SANDBOX_MCP_API_KEY is required: refusing to run without auth (P0-07)")
+	}
+	if _, err := c.DownloadPolicy(); err != nil {
+		return fmt.Errorf("invalid download outbound policy: %w", err)
+	}
+	return nil
 }

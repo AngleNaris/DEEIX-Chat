@@ -3,23 +3,68 @@ package main
 import (
 	"context"
 	"fmt"
-	"net/url"
+	"io"
+	"net/http"
 	"strings"
 	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
-// validateFetchURL 仅允许 http/https 目标（防 file://、gopher 等协议滥用）。
-func validateFetchURL(raw string) (string, error) {
-	u, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || u.Host == "" {
-		return "", fmt.Errorf("invalid url")
+const (
+	// maxDownloadRedirects 下载允许的最大重定向次数。
+	maxDownloadRedirects = 5
+	// maxDownloadFileBytes 存文件硬上限（100MB），防下载撑爆工作区磁盘。
+	maxDownloadFileBytes = 100 << 20
+	// maxDownloadReadTimeout 单次下载的总超时。
+	maxDownloadReadTimeout = 120 * time.Second
+)
+
+// validateFetchURL 校验下载目标：仅 http/https、无 userinfo，并经出站策略复验（SSRF 防护，P0-03）。
+func validateFetchURL(raw string, policy OutboundPolicy) (string, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return "", fmt.Errorf("url is required")
 	}
-	if u.Scheme != "http" && u.Scheme != "https" {
-		return "", fmt.Errorf("only http/https urls are allowed")
+	if err := ValidateOutboundHTTPURL(value, policy); err != nil {
+		return "", fmt.Errorf("url blocked: %w", err)
 	}
-	return u.String(), nil
+	return value, nil
+}
+
+// fetchDownload 用策略保护的 HTTP client 在 Go 侧（宿主）下载目标 URL——不经 Shell/curl（P0-02）。
+// 每次重定向重新校验目标地址；响应读取受 limit 上限约束。
+func (s *sandboxServer) fetchDownload(ctx context.Context, target string, limit int64) ([]byte, error) {
+	client := NewOutboundHTTPClient(s.policy, maxDownloadReadTimeout)
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if len(via) >= maxDownloadRedirects {
+			return fmt.Errorf("too many redirects (max %d)", maxDownloadRedirects)
+		}
+		return ValidateOutboundHTTPURL(req.URL.String(), s.policy)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	if err != nil {
+		return nil, fmt.Errorf("download request: %w", err)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("download request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		detail := make([]byte, 512)
+		n, _ := resp.Body.Read(detail)
+		return nil, fmt.Errorf("download failed: http status %d: %s", resp.StatusCode, truncateUTF8(string(detail[:n]), 512))
+	}
+	// 多读 1 字节区分"恰好等于上限"与"被截断"。
+	data, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
+	if err != nil {
+		return nil, fmt.Errorf("download read failed: %w", err)
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("download exceeds size limit (%d bytes)", limit)
+	}
+	return data, nil
 }
 
 func (s *sandboxServer) handleDownload(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -27,7 +72,7 @@ func (s *sandboxServer) handleDownload(ctx context.Context, req mcp.CallToolRequ
 	if err != nil {
 		return resultJSON(map[string]any{"ok": false, "error": err.Error()}), nil
 	}
-	target, err := validateFetchURL(req.GetString("url", ""))
+	target, err := validateFetchURL(req.GetString("url", ""), s.policy)
 	if err != nil {
 		return resultJSON(map[string]any{"ok": false, "error": err.Error()}), nil
 	}
@@ -37,30 +82,27 @@ func (s *sandboxServer) handleDownload(ctx context.Context, req mcp.CallToolRequ
 		maxBytes = s.cfg.OutputLimitBytes
 	}
 
+	limit := int64(maxBytes)
+	if savePath != "" {
+		limit = maxDownloadFileBytes
+	}
+	body, err := s.fetchDownload(ctx, target, limit)
+	if err != nil {
+		return resultJSON(map[string]any{"ok": false, "error": err.Error()}), nil
+	}
+
 	if savePath != "" {
 		path, err := sanitizeWorkspacePath(s.cfg.WorkspaceDir, savePath)
 		if err != nil {
 			return resultJSON(map[string]any{"ok": false, "error": err.Error()}), nil
 		}
-		// 容器内 curl 下载到工作区文件。
-		script := fmt.Sprintf("mkdir -p %q && curl -sSL --max-time 120 -o %q %q && echo __OK__ && stat -c '%%s' %q",
-			s.cfg.WorkspaceDir, path, target, path)
-		res, err := s.exec(ctx, execRequest{scope: scope, cmd: []string{"/bin/sh", "-c", script}, timeout: 150 * time.Second})
-		if err != nil {
-			return resultJSON(map[string]any{"ok": false, "error": err.Error()}), nil
+		// 经容器 stdin 解码写入工作区（复用 writeBytes 管道，URL 不经过 Shell）。
+		if err := s.writeWorkspaceBytes(ctx, scope, path, body, 10*time.Minute); err != nil {
+			return resultJSON(map[string]any{"ok": false, "error": "save download failed", "detail": err.Error()}), nil
 		}
-		if res.ExitCode != 0 || !strings.Contains(res.Stdout, "__OK__") {
-			return resultJSON(map[string]any{"ok": false, "error": "download failed", "detail": truncateUTF8(res.Stderr, 2000)}), nil
-		}
-		size := strings.TrimSpace(strings.ReplaceAll(res.Stdout, "__OK__", ""))
-		return resultJSON(map[string]any{"ok": true, "path": path, "size_bytes": strings.TrimSpace(size)}), nil
+		return resultJSON(map[string]any{"ok": true, "path": path, "size_bytes": len(body)}), nil
 	}
 
-	// 直接返回正文（截断）。
-	script := fmt.Sprintf("curl -sSL --max-time 60 -L %q | head -c %d", target, maxBytes)
-	res, err := s.exec(ctx, execRequest{scope: scope, cmd: []string{"/bin/sh", "-c", script}, timeout: 90 * time.Second})
-	if err != nil {
-		return resultJSON(map[string]any{"ok": false, "error": err.Error()}), nil
-	}
-	return resultJSON(map[string]any{"ok": true, "content": res.Stdout}), nil
+	// 直接返回正文（已在 fetch 内按 maxBytes 截断）。
+	return resultJSON(map[string]any{"ok": true, "content": string(body)}), nil
 }

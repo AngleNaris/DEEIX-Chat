@@ -118,8 +118,10 @@ func matchJSONObjectEnd(raw string, openIndex int) int {
 }
 
 // exportFilePath 校验共享目录路径并返回容器内绝对路径。
-// 只允许读取共享卷（SandboxSharedDir）内的文件，且路径前缀必须属于当前用户会话
+// 只允许读取共享目录（SandboxSharedDir）内的文件，且路径前缀必须属于当前用户会话
 // （/shared/deeix-<uid>-<cid>/），防跨用户导出。
+// P0-06：解析真实路径（EvalSymlinks）后再次校验前缀，防止共享目录内符号链接
+// 指向会话 scope 外的文件（如后端容器内 /etc/passwd）。
 func (s *Service) exportFilePath(input executeAssistantToolCallsInput, path string) (string, error) {
 	sharedDir := strings.TrimSpace(s.cfg.Snapshot().SandboxSharedDir)
 	if sharedDir == "" {
@@ -136,7 +138,15 @@ func (s *Service) exportFilePath(input executeAssistantToolCallsInput, path stri
 	if !strings.HasPrefix(p, expected+"/") {
 		return "", fmt.Errorf("export path not in current session scope: %s", path)
 	}
-	return p, nil
+	resolved, err := filepath.EvalSymlinks(p)
+	if err != nil {
+		return "", fmt.Errorf("export path cannot be resolved: %s", path)
+	}
+	resolved = filepath.ToSlash(resolved)
+	if !strings.HasPrefix(resolved, expected+"/") {
+		return "", fmt.Errorf("export path resolves outside session scope: %s", path)
+	}
+	return resolved, nil
 }
 
 // exportToolArtifacts 处理工具结果中的 __export__ 标记：

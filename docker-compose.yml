@@ -7,9 +7,14 @@ services:
     ports:
       # Optional. Localhost-only by default. Put a reverse proxy in front for public access.
       - "127.0.0.1:8080:8080"
+    environment:
+      # Optional. Sandbox MCP 集成（配套 /opt/deeix-mcp 栈，见 tools/sandbox-mcp/deploy）。
+      # SANDBOX_META_HMAC_KEY 必须与沙箱栈 SANDBOX_META_HMAC_KEY 一致（_meta 身份签名）。
+      SANDBOX_META_HMAC_KEY: ${SANDBOX_META_HMAC_KEY:-}
+      SANDBOX_SHARED_DIR: ${SANDBOX_SHARED_DIR:-/shared}
     volumes:
       - app_storage:/app/storage
-      - deeix-mcp-shared:/shared:ro   # 沙箱/多模态 MCP 共享卷（只读，供 __export__ 导出文件）
+      - ${SANDBOX_SHARED_HOST_DIR:-/opt/deeix-mcp/shared}:/shared:ro   # 沙箱/多模态 MCP 共享目录（只读，供 __export__ 导出文件）
       - app_data:/app/data
       # The image runs from /app and reads /app/config.yaml automatically.
       - ./config.yaml:/app/config.yaml:ro
@@ -19,8 +24,6 @@ services:
       - deeix-chat
 volumes:
   app_storage:
-  deeix-mcp-shared:
-    name: deeix-mcp-shared
     name: deeix-chat-app-storage
   app_data:
     name: deeix-chat-app-data

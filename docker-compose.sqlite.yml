@@ -4,11 +4,16 @@ services:
   app:
     image: ${DEEIX_CHAT_IMAGE:-ghcr.io/deeix-ai/deeix-chat:latest}
     container_name: deeix-chat-app
+    environment:
+      # Optional. Sandbox MCP 集成（与沙箱栈 SANDBOX_META_HMAC_KEY 保持一致）。
+      SANDBOX_META_HMAC_KEY: ${SANDBOX_META_HMAC_KEY:-}
+      SANDBOX_SHARED_DIR: ${SANDBOX_SHARED_DIR:-/shared}
     ports:
       # Optional. Localhost-only by default. Put a reverse proxy in front for public access.
       - "127.0.0.1:8080:8080"
     volumes:
       - app_storage:/app/storage
+      - ${SANDBOX_SHARED_HOST_DIR:-/opt/deeix-mcp/shared}:/shared:ro   # 沙箱/多模态 MCP 共享目录（只读，供 __export__ 导出文件）
       - app_data:/app/data
       # The image runs from /app and reads /app/config.yaml automatically.
       - ./config.yaml:/app/config.yaml:ro

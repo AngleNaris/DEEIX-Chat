@@ -41,6 +41,12 @@ func sanitizeWorkspacePath(workspace, raw string) (string, error) {
 	return abs, nil
 }
 
+// pyRealpathGuard 容器内 python 断言片段：校验路径（含符号链接解析后）仍位于 r 根内。
+// 调用脚本约定变量 p=目标路径、r=允许根（两者都经 shellQuote 作为 argv 传入）。
+func pyRealpathGuard() string {
+	return `rp=os.path.realpath(p); assert rp==r or rp.startswith(r+'/'), 'path escapes allowed root';`
+}
+
 func (s *sandboxServer) handleWriteFile(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	scope, err := s.scopeFromRequest(ctx)
 	if err != nil {
@@ -67,24 +73,30 @@ func (s *sandboxServer) handleWriteFile(ctx context.Context, req mcp.CallToolReq
 }
 
 func (s *sandboxServer) writeBytes(ctx context.Context, scope, path string, data []byte, isBinary bool) (*mcp.CallToolResult, error) {
-	dir := filepath.Dir(path)
-	if dir == "" {
-		dir = "/workspace"
-	}
-	// 先建目录再写文件：二进制用 base64 经 stdin 解码，文本用 cat heredoc 不可靠，统一 python3。
-	script := fmt.Sprintf(`python3 -c "import base64,sys,os; d=os.path.dirname(sys.argv[1]); os.makedirs(d,exist_ok=True); open(sys.argv[1],'wb').write(base64.b64decode(sys.stdin.read()))" %s`, shellQuote(path))
-	res, err := s.exec(ctx, execRequest{scope: scope, cmd: []string{"/bin/sh", "-c", script}, stdin: []byte(base64.StdEncoding.EncodeToString(data)), timeout: 60 * time.Second})
-	if err != nil {
+	if err := s.writeWorkspaceBytes(ctx, scope, path, data, 60*time.Second); err != nil {
 		return resultJSON(map[string]any{"ok": false, "error": err.Error()}), nil
-	}
-	if res.ExitCode != 0 {
-		return resultJSON(map[string]any{"ok": false, "error": strings.TrimSpace(res.Stderr), "exit_code": res.ExitCode}), nil
 	}
 	kind := "text"
 	if isBinary {
 		kind = "binary"
 	}
 	return resultJSON(map[string]any{"ok": true, "path": path, "bytes": len(data), "kind": kind}), nil
+}
+
+// writeWorkspaceBytes 将字节写入工作区文件（容器内 python 解码，含 realpath/symlink 校验，P0-06）。
+// 供 sandbox_write_file 与 sandbox_download 复用。
+func (s *sandboxServer) writeWorkspaceBytes(ctx context.Context, scope, path string, data []byte, timeout time.Duration) error {
+	ws := s.cfg.WorkspaceDir
+	// 先校验目标（存在则拒绝 symlink），再建目录并校验目录 realpath，最后写入。
+	script := fmt.Sprintf(`python3 -c "import base64,sys,os; p=sys.argv[1]; r=sys.argv[2]; %s assert not os.path.islink(p), 'refusing symlink target'; d=os.path.dirname(p); os.makedirs(d,exist_ok=True); rd=os.path.realpath(d); assert rd==r or rd.startswith(r+'/'), 'path escapes workspace'; open(p,'wb').write(base64.b64decode(sys.stdin.read()))" %s %s`, pyRealpathGuard(), shellQuote(path), shellQuote(ws))
+	res, err := s.exec(ctx, execRequest{scope: scope, cmd: []string{"/bin/sh", "-c", script}, stdin: []byte(base64.StdEncoding.EncodeToString(data)), timeout: timeout})
+	if err != nil {
+		return err
+	}
+	if res.ExitCode != 0 {
+		return fmt.Errorf("%s", strings.TrimSpace(res.Stderr))
+	}
+	return nil
 }
 
 func (s *sandboxServer) handleReadFile(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -100,8 +112,8 @@ func (s *sandboxServer) handleReadFile(ctx context.Context, req mcp.CallToolRequ
 	if maxBytes <= 0 || maxBytes > 8<<20 {
 		maxBytes = s.cfg.OutputLimitBytes
 	}
-	// 文件大小 + 内容 base64（限制上限，超出时截断）。
-	script := fmt.Sprintf(`python3 -c "import base64,sys,os; p=sys.argv[1]; n=os.path.getsize(p); d=open(p,'rb').read(int(sys.argv[2])); print('__SIZE__', n); print(base64.b64encode(d).decode())" %s %d`, shellQuote(path), maxBytes)
+	// 文件大小 + 内容 base64（限制上限，超出时截断）；realpath 校验防 symlink 逃逸（P0-06）。
+	script := fmt.Sprintf(`python3 -c "import base64,sys,os; p=sys.argv[1]; r=sys.argv[2]; %s n=os.path.getsize(p); d=open(p,'rb').read(int(sys.argv[3])); print('__SIZE__', n); print(base64.b64encode(d).decode())" %s %s %d`, pyRealpathGuard(), shellQuote(path), shellQuote(s.cfg.WorkspaceDir), maxBytes)
 	res, err := s.exec(ctx, execRequest{scope: scope, cmd: []string{"/bin/sh", "-c", script}, timeout: 60 * time.Second})
 	if err != nil {
 		return resultJSON(map[string]any{"ok": false, "error": err.Error()}), nil
@@ -141,10 +153,11 @@ func (s *sandboxServer) handleListFiles(ctx context.Context, req mcp.CallToolReq
 	if err != nil {
 		return resultJSON(map[string]any{"ok": false, "error": err.Error()}), nil
 	}
-	script := fmt.Sprintf(`python3 -c "import os,sys,json; p=sys.argv[1]; items=[]; 
-for e in sorted(os.listdir(p)): 
-    fp=os.path.join(p,e); st=os.stat(fp); items.append({'name':e,'dir':os.path.isdir(fp),'size':st.st_size,'mtime':int(st.st_mtime)})
-print(json.dumps(items))" %s`, shellQuote(path))
+	// lstat 不跟随 symlink（防止列目录时泄露外部文件大小/mtime）；realpath 校验防逃逸（P0-06）。
+	script := fmt.Sprintf(`python3 -c "import os,sys,json; p=sys.argv[1]; r=sys.argv[2]; %s items=[];
+for e in sorted(os.listdir(p)):
+    fp=os.path.join(p,e); st=os.lstat(fp); items.append({'name':e,'dir':os.path.isdir(fp) and not os.path.islink(fp),'size':st.st_size,'mtime':int(st.st_mtime)})
+print(json.dumps(items))" %s %s`, pyRealpathGuard(), shellQuote(path), shellQuote(s.cfg.WorkspaceDir))
 	res, err := s.exec(ctx, execRequest{scope: scope, cmd: []string{"/bin/sh", "-c", script}, timeout: 60 * 1e9})
 	if err != nil {
 		return resultJSON(map[string]any{"ok": false, "error": err.Error()}), nil
@@ -183,8 +196,8 @@ func (s *sandboxServer) handleExportFile(ctx context.Context, req mcp.CallToolRe
 	if name == "" || name == "." || name == "/" {
 		return resultJSON(map[string]any{"ok": false, "error": "invalid file name"}), nil
 	}
-	// 读取文件元数据（大小校验上限 20MB，与 DEEIX 上传上限一致）。
-	script := fmt.Sprintf(`python3 -c "import os,sys; p=sys.argv[1]; print(os.path.getsize(p))" %s`, shellQuote(raw))
+	// 读取文件元数据（大小校验上限 20MB，与 DEEIX 上传上限一致；realpath 校验防 symlink 逃逸，P0-06）。
+	script := fmt.Sprintf(`python3 -c "import os,sys; p=sys.argv[1]; r=sys.argv[2]; %s print(os.path.getsize(p))" %s %s`, pyRealpathGuard(), shellQuote(raw), shellQuote(sharedDir))
 	res, err := s.exec(ctx, execRequest{scope: scope, cmd: []string{"/bin/sh", "-c", script}, timeout: 30 * time.Second})
 	if err != nil {
 		return resultJSON(map[string]any{"ok": false, "error": err.Error()}), nil

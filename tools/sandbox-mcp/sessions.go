@@ -2,9 +2,16 @@ package main
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -12,15 +19,28 @@ import (
 )
 
 // Meta 是 DEEIX 后端注入的请求元数据（client.go 将 _meta 写入 MCP 请求顶层 params）。
+// user_id/conversation_id 必须经 HMAC 签名（见 ParseMeta），不能作为独立身份凭据。
 type Meta struct {
 	UserID         uint
 	ConversationID uint
 	RequestID      string
 }
 
-// ParseMeta 从原始请求体提取 DEEIX 注入的 _meta。
+// metaTimestampWindow _meta 签名的允许时钟偏移（短期签名，防重放）。
+const metaTimestampWindow = 5 * time.Minute
+
+// metaSignature 计算 _meta 的 HMAC-SHA256 签名（后端与沙箱共享密钥，canonical 串保持一致）。
+func metaSignature(secret string, userID, conversationID uint, requestID string, ts int64) string {
+	canonical := fmt.Sprintf("user_id=%d\nconversation_id=%d\nrequest_id=%s\nts=%d", userID, conversationID, requestID, ts)
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(canonical))
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// ParseMeta 从原始请求体提取 DEEIX 注入的 _meta 并校验 HMAC 签名。
+// 签名缺失、不匹配或时间戳过期均拒绝（身份必须来自已验证声明，P0-07）。
 // 缺失 user_id 视为非法调用（本服务仅面向 DEEIX 后端）。
-func ParseMeta(raw []byte) (*Meta, error) {
+func ParseMeta(raw []byte, hmacKey string) (*Meta, error) {
 	// 兼容两种注入位置：DEEIX 放顶层 params._meta；未来其它客户端可能放 arguments._meta。
 	var envelope struct {
 		Params struct {
@@ -35,11 +55,41 @@ func ParseMeta(raw []byte) (*Meta, error) {
 	if !ok || userID == 0 {
 		return nil, fmt.Errorf("missing or invalid _meta.user_id")
 	}
-	meta := &Meta{UserID: userID, RequestID: fmt.Sprintf("%v", m["request_id"])}
+	meta := &Meta{UserID: userID}
+	if rid, ok := m["request_id"].(string); ok {
+		meta.RequestID = rid
+	}
 	if cid, ok := toUint(m["conversation_id"]); ok {
 		meta.ConversationID = cid
 	}
+	if hmacKey == "" {
+		return nil, fmt.Errorf("meta hmac key not configured: refusing unsigned identity")
+	}
+	ts, ok := toInt64(m["ts"])
+	if !ok {
+		return nil, fmt.Errorf("missing or invalid _meta.ts (signed meta required)")
+	}
+	if drift := time.Since(time.Unix(ts, 0)); drift < -metaTimestampWindow || drift > metaTimestampWindow {
+		return nil, fmt.Errorf("_meta timestamp expired")
+	}
+	sig, _ := m["sig"].(string)
+	expected := metaSignature(hmacKey, meta.UserID, meta.ConversationID, meta.RequestID, ts)
+	if sig == "" || subtle.ConstantTimeCompare([]byte(sig), []byte(expected)) != 1 {
+		return nil, fmt.Errorf("_meta signature mismatch: identity must be signed by DEEIX backend")
+	}
 	return meta, nil
+}
+
+func toInt64(v any) (int64, bool) {
+	switch t := v.(type) {
+	case float64:
+		return int64(t), t == float64(int64(t))
+	case string:
+		if n, err := strconv.ParseInt(strings.TrimSpace(t), 10, 64); err == nil {
+			return n, true
+		}
+	}
+	return 0, false
 }
 
 func toUint(v any) (uint, bool) {
@@ -87,6 +137,11 @@ func NewSessionManager(cfg *Config, d *dockerClient) *SessionManager {
 	return &SessionManager{cfg: cfg, d: d, live: make(map[string]*Session)}
 }
 
+// validScopePattern scope 只允许 deeix-<数字>[-<数字>] 形式。
+// 身份已由 HMAC 签名校验（ParseMeta），此处为纵深防御：防止任何异常 scope
+// 被拼入宿主 bind 挂载路径（P0-05/P0-07）。
+var validScopePattern = regexp.MustCompile(`^deeix-[0-9]+(-[0-9]+)?$`)
+
 // SessionScope 生成 (user, conversation) 会话标识。
 func SessionScope(meta *Meta) string {
 	scope := fmt.Sprintf("deeix-%d", meta.UserID)
@@ -94,6 +149,12 @@ func SessionScope(meta *Meta) string {
 		scope += fmt.Sprintf("-%d", meta.ConversationID)
 	}
 	return scope
+}
+
+// sessionBelongsToUser 判断 scope 是否属于指定用户（sandbox_ps 过滤用）。
+func sessionBelongsToUser(scope string, userID uint) bool {
+	prefix := fmt.Sprintf("deeix-%d", userID)
+	return scope == prefix || strings.HasPrefix(scope, prefix+"-")
 }
 
 // GetOrCreate 获取会话；不存在则懒创建（create_if_missing 语义）。
@@ -153,6 +214,15 @@ func (m *SessionManager) Get(scope string) (*Session, bool) {
 }
 
 func (m *SessionManager) createSessionContainer(ctx context.Context, s *Session) error {
+	if !validScopePattern.MatchString(s.Scope) {
+		return fmt.Errorf("invalid session scope %q", s.Scope)
+	}
+	// 宿主侧预先创建本会话的共享子目录：容器只 bind 挂载这一份，
+	// 其他租户目录在容器内物理不可见（P0-05）。0755 允许后端只读挂载读取导出文件。
+	sharedHostSub := filepath.Join(m.cfg.SharedHostDir, s.Scope)
+	if err := os.MkdirAll(sharedHostSub, 0o755); err != nil {
+		return fmt.Errorf("create shared scope dir %s: %w", sharedHostSub, err)
+	}
 	if err := m.d.createContainer(ctx, containerSpec{
 		Name:       s.Container,
 		Image:      s.Image,
@@ -162,7 +232,9 @@ func (m *SessionManager) createSessionContainer(ctx context.Context, s *Session)
 		CPUs:       m.cfg.CPUsLimit,
 		Workspace:  m.cfg.WorkspaceDir,
 		CacheMount: s.CacheMount,
-		SharedVol:  m.cfg.SharedVolume,
+		CacheVol:   m.cfg.CacheVolume,
+		SharedBind: sharedHostSub,
+		SharedTarget: filepath.Join(m.cfg.SharedMountDir, s.Scope),
 		Network:    m.cfg.NetworkMode,
 	}, "deeix-sandbox-ws-"+s.Scope); err != nil {
 		return err
@@ -170,9 +242,9 @@ func (m *SessionManager) createSessionContainer(ctx context.Context, s *Session)
 	return nil
 }
 
-// SharedDir 返回当前会话在共享卷中的专属目录（mm 多模态工具可读取）。
+// SharedDir 返回当前会话在共享目录中的专属子目录（mm 多模态工具可读取）。
 func (m *SessionManager) SharedDir(scope string) string {
-	return "/shared/" + scope
+	return m.cfg.SharedMountDir + "/" + scope
 }
 
 // Spawn 为会话更换/新建镜像容器（sandbox_spawn 语义）：销毁旧容器后按新镜像重建。

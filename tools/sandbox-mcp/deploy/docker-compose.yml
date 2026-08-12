@@ -2,7 +2,7 @@
 # 服务（全部仅绑定 127.0.0.1，供 DEEIX 后端回环访问）：
 #   sandbox-mcp  :8081  多用户沙箱（自建 Go 组件，tools/sandbox-mcp）
 #   mm-core      :8082  Qwen-MM-Plugins core 能力（stdio 经 supergateway 桥接为 Streamable HTTP）
-#   mm-omni-av   :8083  Qwen-MM-Plugins omni-av 能力
+#   mm-omni-av   :8083  Qwen-MM-Plugins api 能力（上游 omni-av 入口已废弃，迁移至官方 api 入口）
 # 用法：cp .env.example .env && 编辑凭据 -> docker compose up -d
 services:
   # 镜像由本地构建后 docker save/scp/load 到 VPS（tools/sandbox-mcp/deploy/sandbox-mcp.Dockerfile）；
@@ -29,10 +29,17 @@ services:
       SANDBOX_PIDS_LIMIT: "${SANDBOX_PIDS_LIMIT:-256}"
       SANDBOX_CPUS_LIMIT: "${SANDBOX_CPUS_LIMIT:-0.5}"
       SANDBOX_CACHE_VOLUME: "${SANDBOX_CACHE_VOLUME:-deeix-sandbox-cache}"
-      SANDBOX_SHARED_VOLUME: "${SANDBOX_SHARED_VOLUME:-deeix-mcp-shared}"
+      SANDBOX_SHARED_HOST_DIR: "${SANDBOX_SHARED_HOST_DIR:-/opt/deeix-mcp/shared}"
+      SANDBOX_SHARED_DIR: "${SANDBOX_SHARED_DIR:-/shared}"
+      SANDBOX_META_HMAC_KEY: "${SANDBOX_META_HMAC_KEY:-}"
+      SANDBOX_ALLOWED_HOSTS: "${SANDBOX_ALLOWED_HOSTS:-}"
+      SANDBOX_ALLOWED_CIDRS: "${SANDBOX_ALLOWED_CIDRS:-}"
       SANDBOX_NETWORK_MODE: "${SANDBOX_NETWORK_MODE:-}"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      # 与容器内同路径挂载共享宿主目录：sandbox-mcp 进程在其中创建各 scope 子目录
+      # （会话容器仅 bind 挂载自己 scope 的子目录，租户间物理不可见）。
+      - "${SANDBOX_SHARED_HOST_DIR:-/opt/deeix-mcp/shared}:${SANDBOX_SHARED_HOST_DIR:-/opt/deeix-mcp/shared}"
     # 沙箱 MCP 需要按 (user, conversation) 创建/销毁容器，故授予 docker.sock；
     # 镜像体积小、无宿主目录挂载，容器 root 能力由 AppArmor/SELinux 默认策略与资源限额兜底。
     group_add:
@@ -43,12 +50,14 @@ services:
       - ALL
 
   # ---- Qwen-MM-Plugins 桥接（supergateway: stdio -> Streamable HTTP）----
+  # 依赖固定到 Qwen-MM-Plugins 不可变 commit（2026-08-12 main HEAD），保证可重建（P0-08）。
+  # omni-av 入口已随上游废弃，迁移为官方 core + api 两个入口。
   mm-core:
     build:
       context: .
       dockerfile: mm-gateway.Dockerfile
       args:
-        MM_PACKAGE: "qwen-mm-plugins[core] @ git+https://github.com/QwenLM/Qwen-MM-Plugins.git@main"
+        MM_PACKAGE: "qwen-mm-plugins[core] @ git+https://github.com/QwenLM/Qwen-MM-Plugins.git@114aaaefc3f23d132c6ecc9df50fae72703f14fa"
         MM_ENTRY: "qwen-mm-plugins-core"
     image: deeix-mm-gateway-core:latest
     container_name: deeix-mm-core
@@ -58,7 +67,7 @@ services:
     networks:
       - onepanel
     volumes:
-      - deeix-mcp-shared:/shared
+      - "${SANDBOX_SHARED_HOST_DIR:-/opt/deeix-mcp/shared}:/shared:ro"
     environment:
       SUPER_GATEWAY_PORT: "8082"
       DASHSCOPE_API_KEY: "${DASHSCOPE_API_KEY:?set in .env}"
@@ -72,8 +81,8 @@ services:
       context: .
       dockerfile: mm-gateway.Dockerfile
       args:
-        MM_PACKAGE: "qwen-mm-plugins[omni-av] @ git+https://github.com/QwenLM/Qwen-MM-Plugins.git@main"
-        MM_ENTRY: "qwen-mm-plugins-omni-av"
+        MM_PACKAGE: "qwen-mm-plugins[api] @ git+https://github.com/QwenLM/Qwen-MM-Plugins.git@114aaaefc3f23d132c6ecc9df50fae72703f14fa"
+        MM_ENTRY: "qwen-mm-plugins-api"
     image: deeix-mm-gateway-omni-av:latest
     container_name: deeix-mm-omni-av
     restart: unless-stopped
@@ -82,7 +91,7 @@ services:
     networks:
       - onepanel
     volumes:
-      - deeix-mcp-shared:/shared
+      - "${SANDBOX_SHARED_HOST_DIR:-/opt/deeix-mcp/shared}:/shared:ro"
     environment:
       SUPER_GATEWAY_PORT: "8083"
       DASHSCOPE_API_KEY: "${DASHSCOPE_API_KEY:?set in .env}"
@@ -90,10 +99,9 @@ services:
       QWEN_MM_MAX_RESPONSE_BYTES: "${QWEN_MM_MAX_RESPONSE_BYTES:-6291456}"
       QWEN_MM_CHAT_TIMEOUT: "${QWEN_MM_CHAT_TIMEOUT:-600}"
 
-volumes:
-  # 显式卷名：沙箱经 docker API 也挂同名卷（deeix-mcp-shared），必须一致
-  deeix-mcp-shared:
-    name: deeix-mcp-shared
+# 共享目录已从命名卷改为宿主 bind 目录（SANDBOX_SHARED_HOST_DIR）：
+# 沙箱会话容器经 Docker API 只挂自己 scope 子目录；mm 网关与 DEEIX 后端挂整目录只读。
+# 迁移旧数据：docker run --rm -v deeix-mcp-shared:/data -v <hostDir>:/out alpine cp -a /data/. /out/
 
 networks:
   onepanel:

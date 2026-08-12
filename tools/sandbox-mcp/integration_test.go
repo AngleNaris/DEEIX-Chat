@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mark3labs/mcp-go/server"
 )
@@ -113,6 +114,15 @@ func (c *minimalDeEIXClient) callTool(t *testing.T, name string, arguments map[s
 	return out, http.StatusOK
 }
 
+// signedTestMeta 生成带有效 HMAC 签名的 _meta（key 与 newTestServer 的 APIKey 一致，签名回退 APIKey）。
+func signedTestMeta(apiKey string, uid, cid uint, reqID string) map[string]any {
+	ts := time.Now().Unix()
+	return map[string]any{
+		"user_id": uid, "conversation_id": cid, "request_id": reqID,
+		"ts": ts, "sig": metaSignature(apiKey, uid, cid, reqID, ts),
+	}
+}
+
 func newTestServer(t *testing.T, apiKey string) (*httptest.Server, *SessionManager) {
 	t.Helper()
 	cfg := &Config{
@@ -120,6 +130,8 @@ func newTestServer(t *testing.T, apiKey string) (*httptest.Server, *SessionManag
 		APIKey:           apiKey,
 		BaseImage:        "deeix-sandbox-base:latest",
 		WorkspaceDir:     "/workspace",
+		SharedHostDir:    t.TempDir(),
+		SharedMountDir:   "/shared",
 		LeaseTTL:         5 * 1000 * 1000 * 1000,
 		ExecTimeout:      10 * 1000 * 1000 * 1000,
 		MaxExecTimeout:   30 * 1000 * 1000 * 1000,
@@ -132,7 +144,10 @@ func newTestServer(t *testing.T, apiKey string) (*httptest.Server, *SessionManag
 	}
 	d := &dockerClient{} // 无真实 Docker（本测试不触 Docker 路径）
 	mgr := NewSessionManager(cfg, d)
-	s := newSandboxServer(cfg, mgr)
+	s, err := newSandboxServer(cfg, mgr)
+	if err != nil {
+		t.Fatal(err)
+	}
 	mcpServer := server.NewMCPServer("deeix-sandbox-mcp", "1.0.0")
 	registerTools(mcpServer, s)
 	httpSrv := server.NewStreamableHTTPServer(mcpServer)
@@ -215,10 +230,8 @@ func TestCallToolWithMetaRoutesScope(t *testing.T) {
 	ts, mgr := newTestServer(t, "test-key")
 	client := &minimalDeEIXClient{baseURL: ts.URL, token: "test-key"}
 	client.initialize(t)
-	// sandbox_ps 不触 Docker：带合法 _meta 应返回 sessions 列表
-	out, _ := client.callTool(t, "sandbox_ps", map[string]any{}, map[string]any{
-		"user_id": 42, "conversation_id": 7, "request_id": "req-1",
-	})
+	// sandbox_ps 不触 Docker：带合法签名 _meta 应返回 sessions 列表
+	out, _ := client.callTool(t, "sandbox_ps", map[string]any{}, signedTestMeta("test-key", 42, 7, "req-1"))
 	result, _ := out["result"].(map[string]any)
 	content, _ := result["content"].([]any)
 	text := ""
@@ -234,10 +247,71 @@ func TestCallToolWithMetaRoutesScope(t *testing.T) {
 	}
 }
 
+func TestCallToolWithForgedMetaRejected(t *testing.T) {
+	ts, _ := newTestServer(t, "test-key")
+	client := &minimalDeEIXClient{baseURL: ts.URL, token: "test-key"}
+	client.initialize(t)
+	// 有效 token + 伪造 _meta（无签名）→ 应被拒绝（身份必须来自已验证声明，P0-07）。
+	out, _ := client.callTool(t, "sandbox_ps", map[string]any{}, map[string]any{
+		"user_id": 42, "conversation_id": 7, "request_id": "req-1", "ts": time.Now().Unix(),
+	})
+	result, _ := out["result"].(map[string]any)
+	content, _ := result["content"].([]any)
+	text := ""
+	if len(content) > 0 {
+		item, _ := content[0].(map[string]any)
+		text, _ = item["text"].(string)
+	}
+	if !strings.Contains(text, "missing DEEIX _meta") {
+		t.Fatalf("expected forged meta rejection, got: %s", text)
+	}
+}
+
+func TestPSFiltersToCurrentUser(t *testing.T) {
+	ts, mgr := newTestServer(t, "test-key")
+	client := &minimalDeEIXClient{baseURL: ts.URL, token: "test-key"}
+	client.initialize(t)
+	// 手工放入两个用户 + 同用户两个会话的存活记录（绕过 Docker）。
+	mgr.mu.Lock()
+	mgr.live["deeix-42-7"] = &Session{Scope: "deeix-42-7", Container: "deeix-42-7", Image: "img-a", LastUsedAt: time.Now()}
+	mgr.live["deeix-42"] = &Session{Scope: "deeix-42", Container: "deeix-42", Image: "img-b", LastUsedAt: time.Now()}
+	mgr.live["deeix-99-1"] = &Session{Scope: "deeix-99-1", Container: "deeix-99-1", Image: "img-c", LastUsedAt: time.Now()}
+	mgr.mu.Unlock()
+	out, _ := client.callTool(t, "sandbox_ps", map[string]any{}, signedTestMeta("test-key", 42, 7, "req-2"))
+	result, _ := out["result"].(map[string]any)
+	content, _ := result["content"].([]any)
+	text := ""
+	if len(content) > 0 {
+		item, _ := content[0].(map[string]any)
+		text, _ = item["text"].(string)
+	}
+	// 只出现用户 42 的 scope，绝不能出现 deeix-99-1（P0-07 租户视图收敛）。
+	if !strings.Contains(text, "deeix-42-7") || !strings.Contains(text, "deeix-42") {
+		t.Fatalf("expected user 42 sessions, got: %s", text)
+	}
+	if strings.Contains(text, "deeix-99-1") {
+		t.Fatalf("cross-user session leaked: %s", text)
+	}
+}
+
 func TestAuthDisabledWhenKeyEmpty(t *testing.T) {
-	ts, _ := newTestServer(t, "")
-	client := &minimalDeEIXClient{baseURL: ts.URL, token: ""}
-	client.initialize(t) // 无 token 也应通过
+	// P0-07 反转：空 key 现在必须在启动前拒绝（见 TestConfigValidateRequiresAPIKey）。
+	// authMiddleware 遇到空 key 也返回 5xx 而非放行。
+	cfg := &Config{ListenAddr: "127.0.0.1:0", APIKey: ""}
+	mcpServer := server.NewMCPServer("deeix-sandbox-mcp", "1.0.0")
+	ts := httptest.NewServer(authMiddleware(cfg, server.NewStreamableHTTPServer(mcpServer)))
+	defer ts.Close()
+	body := []byte(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`)
+	req, _ := http.NewRequest(http.MethodPost, ts.URL, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("expected 500 for missing api key, got %d", resp.StatusCode)
+	}
 }
 
 var _ = context.Background

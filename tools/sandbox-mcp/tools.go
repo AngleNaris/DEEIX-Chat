@@ -14,13 +14,18 @@ import (
 
 // sandboxServer 持有全部工具 handler 所需的依赖。
 type sandboxServer struct {
-	cfg *Config
-	mgr *SessionManager
-	d   *dockerClient
+	cfg    *Config
+	mgr    *SessionManager
+	d      *dockerClient
+	policy OutboundPolicy // sandbox_download 出站策略（SSRF 防护）
 }
 
-func newSandboxServer(cfg *Config, mgr *SessionManager) *sandboxServer {
-	return &sandboxServer{cfg: cfg, mgr: mgr, d: mgr.d}
+func newSandboxServer(cfg *Config, mgr *SessionManager) (*sandboxServer, error) {
+	policy, err := cfg.DownloadPolicy()
+	if err != nil {
+		return nil, err
+	}
+	return &sandboxServer{cfg: cfg, mgr: mgr, d: mgr.d, policy: policy}, nil
 }
 
 // scopeFromRequest 从请求上下文解析会话 scope；无 _meta 时拒绝（仅服务 DEEIX 注入的调用）。
@@ -97,7 +102,7 @@ func registerTools(mcpServer *server.MCPServer, s *sandboxServer) {
 		mcp.WithString("image", mcp.Description("Docker 镜像名，如 node:22-slim；为空使用默认镜像")),
 	)
 	psTool := mcp.NewTool("sandbox_ps",
-		mcp.WithDescription("列出当前存活的所有沙箱会话容器（所有用户可见的聚合视图，含 scope/镜像/最近使用时间）。"),
+		mcp.WithDescription("列出当前用户的存活沙箱会话容器（含 scope/镜像/最近使用时间）。"),
 	)
 	killTool := mcp.NewTool("sandbox_kill",
 		mcp.WithDescription("销毁当前会话容器（工作区与已装环境保留，下次调用自动重建）。"),
@@ -142,6 +147,7 @@ func withRecreatedFlag(v map[string]any, created bool) map[string]any {
 type execRequest struct {
 	scope    string
 	cmd      []string
+	cwd      string // 容器内工作目录（经 Exec WorkingDir 传递，必须已通过路径校验）
 	stdin    []byte
 	timeout  time.Duration
 	outputLimit int
@@ -162,7 +168,7 @@ func (s *sandboxServer) exec(ctx context.Context, req execRequest) (*execResult,
 	if limit <= 0 {
 		limit = s.cfg.OutputLimitBytes
 	}
-	res, err := s.d.execInContainer(ctx, session.Container, req.cmd, req.stdin, req.timeout)
+	res, err := s.d.execInContainer(ctx, session.Container, req.cmd, req.cwd, req.stdin, req.timeout)
 	if err != nil {
 		return nil, err
 	}
@@ -195,10 +201,13 @@ func (s *sandboxServer) handleExec(ctx context.Context, req mcp.CallToolRequest)
 	if command == "" {
 		return resultJSON(map[string]any{"ok": false, "error": "command is required"}), nil
 	}
-	cwd := req.GetString("cwd", s.cfg.WorkspaceDir)
+	// P0-04：cwd 必须位于工作区内，且经 Exec WorkingDir 传递（不经 shell cd 拼接）。
+	cwd, err := sanitizeWorkspacePath(s.cfg.WorkspaceDir, req.GetString("cwd", s.cfg.WorkspaceDir))
+	if err != nil {
+		return resultJSON(map[string]any{"ok": false, "error": fmt.Sprintf("invalid cwd: %v", err)}), nil
+	}
 	timeoutSec := int(req.GetFloat("timeout", float64(s.cfg.ExecTimeout.Seconds())))
-	full := fmt.Sprintf("cd %q && %s", cwd, command)
-	res, err := s.exec(ctx, execRequest{scope: scope, cmd: []string{"/bin/sh", "-c", full}, timeout: time.Duration(timeoutSec) * time.Second})
+	res, err := s.exec(ctx, execRequest{scope: scope, cmd: []string{"/bin/sh", "-c", command}, cwd: cwd, timeout: time.Duration(timeoutSec) * time.Second})
 	if err != nil {
 		return resultJSON(map[string]any{"ok": false, "error": err.Error()}), nil
 	}
@@ -229,7 +238,7 @@ func (s *sandboxServer) handleTaskStart(ctx context.Context, req mcp.CallToolReq
 	// nohup 后台执行：输出写入文件，PID 直接回 stdout（echo $! 不能重定向到文件，
 	// 否则返回值拿不到 PID，poll 的 kill -0 会因空 PID 误判任务已完成）。
 	cmd := fmt.Sprintf("nohup sh -c %q > %s 2>&1 & echo $!", command, out)
-	res, err := s.d.execInContainer(ctx, session.Container, []string{"/bin/sh", "-c", cmd}, nil, 30*time.Second)
+	res, err := s.d.execInContainer(ctx, session.Container, []string{"/bin/sh", "-c", cmd}, "", nil, 30*time.Second)
 	if err != nil || res.ExitCode != 0 {
 		return resultJSON(map[string]any{"ok": false, "error": "failed to start task", "detail": safeErr(err, res)}), nil
 	}
@@ -269,9 +278,20 @@ func (s *sandboxServer) handleTaskPoll(ctx context.Context, req mcp.CallToolRequ
 	}
 	s.mgr.touch(scope)
 	// 判断任务是否结束：检查容器内进程是否仍存活。
-	alive, err := s.d.execInContainer(ctx, session.Container, []string{"/bin/sh", "-c", fmt.Sprintf("kill -0 %s 2>/dev/null", task.PID)}, nil, 20*time.Second)
+	alive, err := s.d.execInContainer(ctx, session.Container, []string{"/bin/sh", "-c", fmt.Sprintf("kill -0 %s 2>/dev/null", task.PID)}, "", nil, 20*time.Second)
 	done := err != nil || alive.ExitCode != 0
-	output, _ := s.d.execInContainer(ctx, session.Container, []string{"/bin/sh", "-c", fmt.Sprintf("cat %s 2>/dev/null", task.Output)}, nil, 20*time.Second)
+	output, outErr := s.d.execInContainer(ctx, session.Container, []string{"/bin/sh", "-c", fmt.Sprintf("cat %s 2>/dev/null", task.Output)}, "", nil, 20*time.Second)
+	// P1-03：第二次 exec 的错误不得忽略（容器消失/Docker 断开时 output 为 nil，直接访问会 panic）。
+	if outErr != nil || output == nil {
+		result := map[string]any{"ok": false, "error": "task output unavailable (session container lost?)"}
+		if outErr != nil {
+			result["detail"] = outErr.Error()
+		}
+		session.mu.Lock()
+		delete(session.tasks, taskID)
+		session.mu.Unlock()
+		return resultJSON(result), nil
+	}
 	text := truncateUTF8(output.Stdout, s.cfg.OutputLimitBytes*2)
 	// 尝试解析退出码：容器内通过 wait 拿不到（跨 exec），仅返回输出与是否存活。
 	result := map[string]any{"ok": true, "task_id": taskID, "running": !done, "output": text}
@@ -306,7 +326,7 @@ func (s *sandboxServer) handleTaskCancel(ctx context.Context, req mcp.CallToolRe
 	if !ok {
 		return resultJSON(map[string]any{"ok": false, "error": "unknown task_id"}), nil
 	}
-	_, _ = s.d.execInContainer(ctx, session.Container, []string{"/bin/sh", "-c", fmt.Sprintf("kill -9 %s 2>/dev/null; rm -f %s", task.PID, task.Output)}, nil, 20*time.Second)
+	_, _ = s.d.execInContainer(ctx, session.Container, []string{"/bin/sh", "-c", fmt.Sprintf("kill -9 %s 2>/dev/null; rm -f %s", task.PID, task.Output)}, "", nil, 20*time.Second)
 	return resultJSON(map[string]any{"ok": true, "task_id": taskID, "cancelled": true}), nil
 }
 
