@@ -8,13 +8,17 @@ ARG MM_ENTRY
 # PyPI 镜像源（VPS 直连 PyPI 很慢，viz 依赖全家桶全量重装会卡几十分钟）；
 # 国外部署可用 --build-arg 覆盖为官方源。
 ARG PYPI_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+# apt 镜像源：VPS 直连 deb.debian.org 极慢（ffmpeg 依赖数百个包）。留空 = 官方源。
+ARG APT_MIRROR=mirrors.aliyun.com
 
 FROM node:22-slim AS uv-install
 ARG MM_PACKAGE
 ARG MM_ENTRY
 ARG PYPI_INDEX_URL
+ARG APT_MIRROR
 # 安装 uv（官方脚本）
-RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates git \
+RUN if [ -n "${APT_MIRROR}" ]; then sed -i "s|deb.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list.d/debian.sources; fi \
+    && apt-get update && apt-get install -y --no-install-recommends curl ca-certificates git \
     && curl -LsSf https://astral.sh/uv/install.sh | sh \
     && rm -rf /var/lib/apt/lists/*
 ENV PATH="/root/.local/bin:${PATH}"
@@ -25,12 +29,14 @@ RUN uv tool install --index-url "${PYPI_INDEX_URL}" "${MM_PACKAGE}"
 FROM node:22-slim
 ARG MM_PACKAGE
 ARG MM_ENTRY
+ARG APT_MIRROR
 ENV MM_PACKAGE=${MM_PACKAGE} MM_ENTRY=${MM_ENTRY} \
     PATH="/root/.local/bin:${PATH}" \
     SUPER_GATEWAY_PORT=8082
 COPY --from=uv-install /root/.local /root/.local
 # ffmpeg：media_info/read_video/transcribe_audio/save_view 等工具依赖系统 ffprobe/ffmpeg
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+RUN if [ -n "${APT_MIRROR}" ]; then sed -i "s|deb.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list.d/debian.sources; fi \
+    && apt-get update && apt-get install -y --no-install-recommends ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 RUN npm install -g supergateway --silent
 EXPOSE 8082 8083
