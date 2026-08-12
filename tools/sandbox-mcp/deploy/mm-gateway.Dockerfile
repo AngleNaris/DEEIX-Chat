@@ -5,10 +5,14 @@
 # 预装（uv tool install）避免每次启动下载依赖；supergateway 以 stateful 模式桥接。
 ARG MM_PACKAGE
 ARG MM_ENTRY
+# PyPI 镜像源（VPS 直连 PyPI 很慢，viz 依赖全家桶全量重装会卡几十分钟）；
+# 国外部署可用 --build-arg 覆盖为官方源。
+ARG PYPI_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
 
 FROM node:22-slim AS uv-install
 ARG MM_PACKAGE
 ARG MM_ENTRY
+ARG PYPI_INDEX_URL
 # 安装 uv（官方脚本）
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates git \
     && curl -LsSf https://astral.sh/uv/install.sh | sh \
@@ -16,7 +20,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certifi
 ENV PATH="/root/.local/bin:${PATH}"
 # 预装 mm-plugins 包到 uv 工具缓存（构建期即可用，首次启动零下载）。
 # 位置参数直接带完整 git 引用；运行时 uvx --from <同包> <entry> 会复用该缓存。
-RUN uv tool install "${MM_PACKAGE}"
+RUN uv tool install --index-url "${PYPI_INDEX_URL}" "${MM_PACKAGE}"
 
 FROM node:22-slim
 ARG MM_PACKAGE
