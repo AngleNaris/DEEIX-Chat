@@ -5,6 +5,31 @@
 #   mm-omni-av   :8083  Qwen-MM-Plugins api 能力（上游 omni-av 入口已废弃，迁移至官方 api 入口）
 # 用法：cp .env.example .env && 编辑凭据 -> docker compose up -d
 services:
+  storage-init:
+    image: alpine:3.21
+    container_name: deeix-mcp-storage-init
+    user: "0:0"
+    restart: "no"
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        install -d -m 0755 /shared /imports /mm-staging /mm-staging/core /mm-staging/api
+        find /shared /imports /mm-staging -xdev -exec chown -h 65532:65532 {} +
+        find /shared /imports /mm-staging -xdev -type d -exec chmod u+rwx,go+rx {} +
+    volumes:
+      - "${SANDBOX_SHARED_HOST_DIR:-/opt/deeix-mcp/shared}:/shared"
+      - "${SANDBOX_IMPORTS_HOST_DIR:-/opt/deeix-mcp/imports}:/imports"
+      - "${MM_STAGING_HOST_DIR:-/opt/deeix-mcp/mm-staging}:/mm-staging"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+
   # 镜像由本地构建后 docker save/scp/load 到 VPS（tools/sandbox-mcp/deploy/sandbox-mcp.Dockerfile）；
   # 如需在 VPS 直接构建，取消下方 build 段注释并把 image 行移到 build 下方。
   sandbox-mcp:
@@ -14,6 +39,10 @@ services:
     #   dockerfile: deploy/sandbox-mcp.Dockerfile
     container_name: deeix-sandbox-mcp
     restart: unless-stopped
+    user: "65532:65532"
+    depends_on:
+      storage-init:
+        condition: service_completed_successfully
     ports:
       - "127.0.0.1:8081:8081"
     networks:
@@ -46,7 +75,7 @@ services:
     # 沙箱 MCP 需要按 (user, conversation) 创建/销毁容器，故授予 docker.sock；
     # 镜像体积小、无宿主目录挂载，容器 root 能力由 AppArmor/SELinux 默认策略与资源限额兜底。
     group_add:
-      - "999"
+      - "${DOCKER_SOCKET_GID:?set to the host docker.sock group ID}"
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -128,7 +157,10 @@ services:
     image: deeix-mm-isolation:latest
     container_name: deeix-mm-core-isolation
     restart: unless-stopped
+    user: "65532:65532"
     depends_on:
+      storage-init:
+        condition: service_completed_successfully
       mm-core:
         condition: service_healthy
     ports:
@@ -167,7 +199,10 @@ services:
     image: deeix-mm-isolation:latest
     container_name: deeix-mm-omni-av-isolation
     restart: unless-stopped
+    user: "65532:65532"
     depends_on:
+      storage-init:
+        condition: service_completed_successfully
       mm-omni-av:
         condition: service_healthy
     ports:

@@ -2,6 +2,7 @@ package conversation
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -41,6 +42,53 @@ func TestExecuteAssistantToolCallsStopsWhenToolNotEnabledForRun(t *testing.T) {
 	}
 	if len(result.ToolResults) != 1 || result.ToolResults[0].Status != "error" {
 		t.Fatalf("expected failed model tool result, got %#v", result.ToolResults)
+	}
+}
+
+func TestExecuteAgentTurnToolCallsStopsBeforeCredentialHandlerWhenDetectionFails(t *testing.T) {
+	const secret = "pre-detection-secret"
+	callCount := 0
+	detectionErr := context.Canceled
+	entry := platformToolEntry{
+		definition: llm.ToolDefinition{
+			Name:        "credential_create",
+			InputSchema: []byte(`{"type":"object","properties":{"name":{"type":"string"},"value":{"type":"string"}},"required":["name","value"]}`),
+		},
+		kind: platformToolWrite,
+		handler: func(_ *Service, _ context.Context, _ platformToolCallContext) (string, error) {
+			callCount++
+			return `{"status":"created"}`, nil
+		},
+	}
+	result := (&Service{}).executeAgentTurnToolCalls(t.Context(), AgentTurnInput{
+		OnCredentialAttemptsDetected: func(_ context.Context, attempts []credentialWrite) error {
+			if len(attempts) != 1 || attempts[0].Name != "deploy-key" || attempts[0].Value != secret {
+				t.Fatalf("unexpected detected attempts: %#v", attempts)
+			}
+			return detectionErr
+		},
+	}, executeAgentTurnToolCallsInput{
+		RunID: "group-run:step:attempt",
+		ToolCalls: []llm.ToolCall{{
+			ToolCallID:    "credential-call",
+			ToolType:      "function",
+			ToolName:      "credential_create_model",
+			ArgumentsJSON: `{"name":"deploy-key","value":"` + secret + `"}`,
+		}},
+		ToolNameMap: map[string]string{"credential_create_model": "credential_create"},
+		PlatformTools: map[string]platformToolEntry{
+			"credential_create_model": entry,
+		},
+	})
+
+	if !errors.Is(result.FatalErr, detectionErr) {
+		t.Fatalf("fatal error = %v, want detection error", result.FatalErr)
+	}
+	if callCount != 0 {
+		t.Fatalf("credential handler ran before detection checkpoint: calls=%d", callCount)
+	}
+	if len(result.Rows) != 0 || len(result.ToolResults) != 0 {
+		t.Fatalf("pre-detection failure produced tool side effects: %#v", result)
 	}
 }
 

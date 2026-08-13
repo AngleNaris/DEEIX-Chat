@@ -7,4 +7,5 @@ RUN go build -trimpath -ldflags='-s -w' -o /mm-isolation .
 
 FROM alpine:3.20
 COPY --from=build /mm-isolation /usr/local/bin/mm-isolation
+USER 65532:65532
 ENTRYPOINT ["/usr/local/bin/mm-isolation"]

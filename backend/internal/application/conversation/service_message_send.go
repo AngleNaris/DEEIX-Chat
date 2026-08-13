@@ -146,7 +146,7 @@ func buildRAGFallbackProcessTracePayload(
 		stage["reason"] = normalizedReason
 	}
 	payload := map[string]interface{}{
-		"query":                  compactSnippet(query, 240),
+		"query_chars":            len([]rune(strings.TrimSpace(query))),
 		"file_names":             ragFileObjectNames(fileObjs),
 		"status":                 strings.TrimSpace(reason),
 		"reason":                 strings.TrimSpace(result.Reason),
@@ -314,7 +314,6 @@ func (s *Service) sendMessageInternal(
 	}
 	userMessage = pair.user
 	assistantMessage = pair.assistant
-	s.persistInitialConversationFallbackTitle(ctx, *conversation, *userMessage)
 	traceRecorder = newMessageTraceRecorder(s, ctx, assistantMessage, input.OnEvent)
 
 	if s.routeResolver == nil || s.llmClient == nil {
@@ -850,6 +849,9 @@ func (s *Service) sendMessageInternal(
 	// lastReadFileRequests 记录最近一次 LLM 调用的 read_file 请求（标记已从可见流中剥离）。
 	var lastReadFileRequests []skillFileRequest
 	var lastGenerationAttemptObservation *generationAttemptObservation
+	credentialAttemptedForRun := false
+	var credentialAttemptsForRun []credentialWrite
+	var credentialWritesForRun []credentialWrite
 	runGenerate := func(currentInput llm.GenerateInput) (*llm.GenerateOutput, error) {
 		attemptObservation := &generationAttemptObservation{}
 		lastGenerationAttemptObservation = attemptObservation
@@ -945,6 +947,10 @@ func (s *Service) sendMessageInternal(
 			llmRequestCount++
 			output, err := s.llmClient.Generate(generationCtx, routeConfig, currentInput)
 			generateErr = err
+			if err == nil && (credentialAttemptedForRun || credentialWriteToolsAvailable(currentInput, &toolRuntime)) {
+				attempts := mergeCredentialWrites(credentialAttemptsForRun, credentialAttemptsFromGenerateOutput(output, &toolRuntime))
+				sanitizeGenerateOutputCredentialAttempts(output, attempts)
+			}
 			if err == nil && streamRequested {
 				generateErr = emitNonStreamingOutput(output)
 				if generateErr != nil {
@@ -958,9 +964,11 @@ func (s *Service) sendMessageInternal(
 		}
 		thinkingRouter := &thinkingDeltaRouter{}
 		callStreamUsage := llm.Usage{}
+		bufferCredentialOutput := credentialAttemptedForRun || credentialWriteToolsAvailable(currentInput, &toolRuntime)
+		credentialBuffer := credentialStreamBuffer{}
 		upstreamCallStarted = true
 		llmRequestCount++
-		output, streamErr := s.llmClient.GenerateStream(generationCtx, routeConfig, currentInput, func(event llm.GenerateStreamEvent) error {
+		handleStreamEvent := func(event llm.GenerateStreamEvent) error {
 			if currentInput.ResponsesBackground {
 				if responseID := strings.TrimSpace(event.ResponseID); responseID != "" {
 					responsesBackgroundRecovery.ResponseID = responseID
@@ -1044,7 +1052,29 @@ func (s *Service) sendMessageInternal(
 				return nil
 			}
 			return emitCallVisibleDelta(visibleDelta)
+		}
+		output, streamErr := s.llmClient.GenerateStream(generationCtx, routeConfig, currentInput, func(event llm.GenerateStreamEvent) error {
+			if !bufferCredentialOutput {
+				return handleStreamEvent(event)
+			}
+			immediate, hadSideEffect, bufferErr := credentialBuffer.add(event)
+			if hadSideEffect {
+				attemptHadSideEffect = true
+			}
+			if immediate.Usage != (llm.Usage{}) || strings.TrimSpace(immediate.ResponseID) != "" {
+				if err := handleStreamEvent(immediate); err != nil {
+					return err
+				}
+			} else if s.isMessageGenerationCanceled(generationCtx, runID) {
+				return ErrMessageGenerationCanceled
+			}
+			return bufferErr
 		})
+		if streamErr == nil && bufferCredentialOutput {
+			credentialAttempts := mergeCredentialWrites(credentialAttemptsForRun, credentialAttemptsFromGenerateOutput(output, &toolRuntime))
+			sanitizeGenerateOutputCredentialAttempts(output, credentialAttempts)
+			streamErr = flushCredentialBufferedStreamEvents(credentialBuffer.events, credentialAttempts, handleStreamEvent)
+		}
 		generateErr = streamErr
 		if generateErr == nil {
 			visibleTail, thinkTail := thinkingRouter.flush()
@@ -1080,6 +1110,10 @@ func (s *Service) sendMessageInternal(
 			attemptObservation.canRetry(generateErr, shouldFallbackToNonStreaming) {
 			llmRequestCount++
 			output, generateErr = s.llmClient.Generate(generationCtx, routeConfig, currentInput)
+			if generateErr == nil && (credentialAttemptedForRun || credentialWriteToolsAvailable(currentInput, &toolRuntime)) {
+				attempts := mergeCredentialWrites(credentialAttemptsForRun, credentialAttemptsFromGenerateOutput(output, &toolRuntime))
+				sanitizeGenerateOutputCredentialAttempts(output, attempts)
+			}
 			if generateErr == nil {
 				generateErr = emitNonStreamingOutput(output)
 			}
@@ -1297,7 +1331,6 @@ func (s *Service) sendMessageInternal(
 	windowBaseCalls := 0
 	windowCallCount := llmRequestCount
 	toolLedger := newToolExecutionLedger()
-	credentialStateChangedForRun := false
 	toolHistoryTrimmedForRun := false
 
 	toolStageMerges := 0
@@ -1339,21 +1372,23 @@ func (s *Service) sendMessageInternal(
 				),
 			)
 			toolResult := s.executeAssistantToolCalls(toolCtx, executeAssistantToolCallsInput{
-				UserID:            input.UserID,
-				ConversationID:    input.ConversationID,
-				MessageID:         assistantMessage.ID,
-				RequestID:         input.RequestID,
-				RunID:             runID,
-				ToolCalls:         pendingToolCalls,
-				ToolCallLimit:     remainingToolCalls,
-				TraceRecorder:     traceRecorder,
-				ToolRuntime:       &toolRuntime,
-				ToolNameMap:       toolRuntime.nameMap,
-				MCPConfigs:        toolRuntime.mcpConfigs,
-				ToolSchemas:       toolRuntime.schemas,
-				PlatformTools:     toolRuntime.platformEntries,
-				Ledger:            toolLedger,
-				ResultTokenBudget: toolResultTokenBudget,
+				UserID:                  input.UserID,
+				ConversationID:          input.ConversationID,
+				MessageID:               assistantMessage.ID,
+				RequestID:               input.RequestID,
+				RunID:                   runID,
+				ToolCalls:               pendingToolCalls,
+				ToolCallLimit:           remainingToolCalls,
+				TraceRecorder:           traceRecorder,
+				ToolRuntime:             &toolRuntime,
+				ToolNameMap:             toolRuntime.nameMap,
+				MCPConfigs:              toolRuntime.mcpConfigs,
+				ToolSchemas:             toolRuntime.schemas,
+				PlatformTools:           toolRuntime.platformEntries,
+				Ledger:                  toolLedger,
+				PriorCredentialAttempts: credentialAttemptsForRun,
+				PriorCredentialWrites:   credentialWritesForRun,
+				ResultTokenBudget:       toolResultTokenBudget,
 			})
 			toolSpan.SetAttributes(
 				attribute.Int("conversation.tool.executed_count", len(toolResult.Rows)),
@@ -1366,20 +1401,33 @@ func (s *Service) sendMessageInternal(
 			toolCallRows = append(toolCallRows, toolResult.Rows...)
 			mergeToolCallPersistenceKeys(&persistedToolCallKeys, toolResult.PersistedToolCallKeys)
 			remainingToolCalls -= len(toolResult.Rows)
+			credentialAttempted := len(toolResult.CredentialAttempts) > 0
 			credentialStateChanged := len(toolResult.CredentialWrites) > 0
+			if credentialAttempted {
+				credentialAttemptedForRun = true
+				credentialAttemptsForRun = mergeCredentialWrites(credentialAttemptsForRun, toolResult.CredentialAttempts)
+				credentialWritesForRun = mergeCredentialWrites(credentialWritesForRun, toolResult.CredentialWrites)
+				if scrubErr := s.scrubPersistedToolCalls(toolCtx, input.UserID, input.ConversationID, runID, false, credentialAttemptsForRun, credentialWritesForRun); scrubErr != nil {
+					retErr = scrubErr
+					return nil, scrubErr
+				}
+				applyCredentialReplacementsToToolCallRows(toolCallRows, credentialAttemptsForRun, credentialWritesForRun)
+				assistantText, _ = applyCredentialReplacements(assistantText, toolResult.CredentialAttempts, toolResult.CredentialWrites)
+				assistantToolMessage.Content, _ = applyCredentialReplacements(assistantToolMessage.Content, toolResult.CredentialAttempts, toolResult.CredentialWrites)
+				assistantToolMessage.ReasoningContent, _ = applyCredentialReplacements(assistantToolMessage.ReasoningContent, toolResult.CredentialAttempts, toolResult.CredentialWrites)
+				applyCredentialReplacementsToLLMMessages(fullLLMMessages, toolResult.CredentialAttempts, toolResult.CredentialWrites)
+				applyCredentialReplacementsToLLMMessages(llmMessages, toolResult.CredentialAttempts, toolResult.CredentialWrites)
+				if traceRecorder != nil {
+					traceRecorder.scrubCredentialAttempts(toolCtx, toolResult.CredentialAttempts, toolResult.CredentialWrites)
+				}
+				_ = s.repo.UpdateConversationLastResponseID(ctx, input.ConversationID, "")
+			}
 			if credentialStateChanged {
-				credentialStateChangedForRun = true
 				if _, updateErr := s.applyCredentialWritesToUserMessage(toolCtx, userMessage, input.ConversationID, input.UserID, toolResult.CredentialWrites); updateErr != nil {
 					retErr = updateErr
 					return nil, updateErr
 				}
 				input.Content, _ = applyCredentialWrites(input.Content, toolResult.CredentialWrites)
-				assistantText, _ = applyCredentialWrites(assistantText, toolResult.CredentialWrites)
-				assistantToolMessage.Content, _ = applyCredentialWrites(assistantToolMessage.Content, toolResult.CredentialWrites)
-				assistantToolMessage.ReasoningContent, _ = applyCredentialWrites(assistantToolMessage.ReasoningContent, toolResult.CredentialWrites)
-				applyCredentialWritesToLLMMessages(fullLLMMessages, toolResult.CredentialWrites)
-				applyCredentialWritesToLLMMessages(llmMessages, toolResult.CredentialWrites)
-				_ = s.repo.UpdateConversationLastResponseID(ctx, input.ConversationID, "")
 			}
 			if toolResult.MCPActivationChanged {
 				toolRuntime = toolRuntime.visibleRuntime()
@@ -1457,7 +1505,7 @@ func (s *Service) sendMessageInternal(
 				followUpInput.DisableTools = true
 				followUpInput.PreviousResponseID = ""
 				applyOpenAIResponsesInstructions(route, routeConfig.Endpoint, &followUpInput)
-			} else if !credentialStateChanged && !toolResult.MCPActivationChanged && !toolHistoryTrimmed && !toolResultsRebalanced && routeConfig.Endpoint == llm.EndpointResponses && supportsPreviousResponseIDRoute(route) && strings.TrimSpace(upstreamOutput.ResponseID) != "" {
+			} else if !credentialAttempted && !toolResult.MCPActivationChanged && !toolHistoryTrimmed && !toolResultsRebalanced && routeConfig.Endpoint == llm.EndpointResponses && supportsPreviousResponseIDRoute(route) && strings.TrimSpace(upstreamOutput.ResponseID) != "" {
 				followUpInput.PreviousResponseID = strings.TrimSpace(upstreamOutput.ResponseID)
 				followUpInput.Messages = []llm.Message{{Role: "tool", ToolResults: toolResult.ToolResults}}
 			} else {
@@ -1711,6 +1759,13 @@ func (s *Service) sendMessageInternal(
 	if reasoningContentPassback {
 		assistantReasoningContent = outputReasoningContent(upstreamOutput)
 	}
+	if credentialAttemptedForRun {
+		assistantText, _ = applyCredentialReplacements(assistantText, credentialAttemptsForRun, credentialWritesForRun)
+		assistantReasoningContent, _ = applyCredentialReplacements(assistantReasoningContent, credentialAttemptsForRun, credentialWritesForRun)
+		if traceRecorder != nil {
+			traceRecorder.scrubCredentialAttempts(ctx, credentialAttemptsForRun, credentialWritesForRun)
+		}
+	}
 	statefulPromptFingerprint := buildPromptStateFingerprint(promptStateFingerprintInput{
 		Protocol:          route.Protocol,
 		Endpoint:          routeConfig.Endpoint,
@@ -1725,7 +1780,7 @@ func (s *Service) sendMessageInternal(
 	})
 	responseIDForPersistence := upstreamOutput.ResponseID
 	// MCP 工具 schema 和凭据明文所在的 provider state 都不能泄漏到下一条消息。
-	if len(toolRuntime.mcpActivation.activeServerIDs()) > 0 || credentialStateChangedForRun {
+	if len(toolRuntime.mcpActivation.activeServerIDs()) > 0 || credentialAttemptedForRun {
 		responseIDForPersistence = ""
 		statefulPromptFingerprint = ""
 	}
@@ -1797,6 +1852,7 @@ func (s *Service) sendMessageInternal(
 		PersistedToolCallKeys:     persistedToolCallKeys,
 		Route:                     resolvedRoute,
 		ReuseUserMessage:          reuseUserMessage,
+		SkipUserMessageEmbedding:  credentialAttemptedForRun,
 	})
 	platformtracing.RecordError(persistSpan, err)
 	persistSpan.End()
@@ -1810,6 +1866,9 @@ func (s *Service) sendMessageInternal(
 	compactMessages = append(compactMessages, *assistantMessage)
 	compactCfg := s.cfg.Snapshot()
 	compactPolicy = s.resolveContextCompactionPolicy(ctx, compactCfg, input.UserID)
+	if credentialAttemptedForRun {
+		compactPolicy.AdminEnabled = false
+	}
 	compactInput := appcompact.MaybeCompactConversationInput{
 		ConversationID:      input.ConversationID,
 		UserID:              input.UserID,
@@ -1857,10 +1916,16 @@ func (s *Service) sendMessageInternal(
 		}
 	}
 
+	metadataRefreshHint := conversationMetadataRefreshNotNeeded
+	if !credentialAttemptedForRun {
+		s.persistInitialConversationFallbackTitle(ctx, *conversation, *userMessage)
+		metadataRefreshHint = s.resolveConversationMetadataRefreshHint(ctx, *conversation, *userMessage)
+	}
+
 	return &SendMessageResult{
 		UserMessage:           *userMessage,
 		AssistantMessage:      *assistantMessage,
-		MetadataRefreshHint:   s.resolveConversationMetadataRefreshHint(ctx, *conversation, *userMessage),
+		MetadataRefreshHint:   metadataRefreshHint,
 		Billable:              true,
 		UpstreamID:            run.UpstreamID,
 		UpstreamName:          run.UpstreamName,

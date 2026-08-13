@@ -226,7 +226,7 @@ func TestMessageErrorSummaryDoesNotSuggestImageStreamForChatStreamParseFailure(t
 	}
 }
 
-func TestMessageErrorDebugKeepsSnapshotButRemovesUpstreamNames(t *testing.T) {
+func TestMessageErrorDebugOmitsRequestBodyAndRemovesResponseUpstreamNames(t *testing.T) {
 	err := wrapUpstreamRequestError(&llm.UpstreamError{
 		StatusCode: 502,
 		Message:    "bad gateway",
@@ -259,12 +259,14 @@ func TestMessageErrorDebugKeepsSnapshotButRemovesUpstreamNames(t *testing.T) {
 	if debug.Request.Headers != nil || debug.Response.Headers != nil {
 		t.Fatalf("expected public debug headers to be omitted, got request=%#v response=%#v", debug.Request.Headers, debug.Response.Headers)
 	}
-	for _, body := range []string{debug.Request.Body, debug.Response.Body} {
-		if strings.Contains(body, "Oi Hub") || strings.Contains(body, "upstream_name") || strings.Contains(body, "upstreamName") || strings.Contains(body, "displayName") {
-			t.Fatalf("expected upstream name fields removed, got %s", body)
-		}
+	if debug.Request.Body != "" || debug.Request.BodyBytes == 0 || debug.Request.RedactedParts == 0 {
+		t.Fatalf("expected request body to be omitted with metadata retained, got %#v", debug.Request)
 	}
-	if !strings.Contains(debug.Request.Body, `"model":"grok-4"`) || !strings.Contains(debug.Response.Body, `"message":"bad gateway"`) {
-		t.Fatalf("expected non-name debug body fields preserved, request=%s response=%s", debug.Request.Body, debug.Response.Body)
+	if strings.Contains(debug.Response.Body, "Oi Hub") || strings.Contains(debug.Response.Body, "upstream_name") ||
+		strings.Contains(debug.Response.Body, "upstreamName") || strings.Contains(debug.Response.Body, "displayName") {
+		t.Fatalf("expected upstream name fields removed, got %s", debug.Response.Body)
+	}
+	if !strings.Contains(debug.Response.Body, `"message":"bad gateway"`) {
+		t.Fatalf("expected non-name response fields preserved, response=%s", debug.Response.Body)
 	}
 }

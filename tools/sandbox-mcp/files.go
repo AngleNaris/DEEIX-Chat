@@ -48,6 +48,109 @@ func pyRealpathGuard() string {
 	return `rp=os.path.realpath(p); assert rp==r or rp.startswith(r+'/'), 'path escapes allowed root';`
 }
 
+const exportFilePythonScript = `import os, secrets, stat, sys
+
+p, r, d, name = sys.argv[1:5]
+
+
+def open_dir_no_symlinks(path):
+    current = os.open('/', os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for part in os.path.abspath(path).split(os.sep)[1:]:
+            if not part:
+                continue
+            next_fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=current)
+            os.close(current)
+            current = next_fd
+        return current
+    except Exception:
+        os.close(current)
+        raise
+
+
+def open_file_beneath(root, target):
+    root = os.path.abspath(root)
+    target = os.path.abspath(target)
+    rel = os.path.relpath(target, root)
+    assert rel != os.pardir and not rel.startswith(os.pardir + os.sep), 'path escapes allowed root'
+    parts = rel.split(os.sep)
+    assert parts and all(part not in ('', '.', '..') for part in parts), 'invalid source path'
+    parent = open_dir_no_symlinks(root)
+    try:
+        for part in parts[:-1]:
+            next_fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+            os.close(parent)
+            parent = next_fd
+        return os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW, dir_fd=parent)
+    finally:
+        os.close(parent)
+
+
+source_fd = open_file_beneath(r, p)
+try:
+    source_stat = os.fstat(source_fd)
+    assert stat.S_ISREG(source_stat.st_mode), 'not a regular file'
+    size = source_stat.st_size
+    assert size > 0, 'file is empty'
+    assert size <= 20 * 1024 * 1024, 'file exceeds 20MB limit'
+
+    dest_dir_fd = open_dir_no_symlinks(d)
+    temp_name = '.deeix-export-' + secrets.token_hex(16)
+    temp_fd = None
+    published = False
+    try:
+        try:
+            existing = os.stat(name, dir_fd=dest_dir_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            existing = None
+        assert existing is None or not stat.S_ISLNK(existing.st_mode), 'refusing symlink target'
+
+        temp_fd = os.open(
+            temp_name,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+            0o644,
+            dir_fd=dest_dir_fd,
+        )
+        copied = 0
+        while True:
+            chunk = os.read(source_fd, 1024 * 1024)
+            if not chunk:
+                break
+            copied += len(chunk)
+            assert copied <= 20 * 1024 * 1024, 'file exceeds 20MB limit'
+            offset = 0
+            while offset < len(chunk):
+                offset += os.write(temp_fd, chunk[offset:])
+        assert copied == size, 'source changed during export'
+        os.fsync(temp_fd)
+        temp_stat = os.fstat(temp_fd)
+        os.replace(temp_name, name, src_dir_fd=dest_dir_fd, dst_dir_fd=dest_dir_fd)
+        published = True
+
+        verify_fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=dest_dir_fd)
+        try:
+            verify_stat = os.fstat(verify_fd)
+            assert (verify_stat.st_dev, verify_stat.st_ino) == (temp_stat.st_dev, temp_stat.st_ino), 'destination changed during export'
+        finally:
+            os.close(verify_fd)
+    finally:
+        if temp_fd is not None:
+            os.close(temp_fd)
+        if not published:
+            try:
+                os.unlink(temp_name, dir_fd=dest_dir_fd)
+            except FileNotFoundError:
+                pass
+        os.close(dest_dir_fd)
+    print(size)
+finally:
+    os.close(source_fd)
+`
+
+func exportFileCopyScript(workspacePath, workspaceRoot, sharedDir, name string) string {
+	return fmt.Sprintf("python3 -c %s %s %s %s %s", shellQuote(exportFilePythonScript), shellQuote(workspacePath), shellQuote(workspaceRoot), shellQuote(sharedDir), shellQuote(name))
+}
+
 func (s *sandboxServer) handleWriteFile(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	scope, err := s.scopeFromRequest(ctx)
 	if err != nil {
@@ -198,7 +301,7 @@ func (s *sandboxServer) handleExportFile(ctx context.Context, req mcp.CallToolRe
 	}
 	sharedDir := s.mgr.SharedDir(scope)
 	dest := filepath.Join(sharedDir, name)
-	script := fmt.Sprintf(`python3 -c "import os,sys,shutil; p=sys.argv[1]; r=sys.argv[2]; d=sys.argv[3]; %s; assert os.path.isfile(p), 'not a regular file'; n=os.path.getsize(p); assert n>0, 'file is empty'; assert n<=20*1024*1024, 'file exceeds 20MB limit'; os.makedirs(d,exist_ok=True); assert os.path.realpath(d)==d or os.path.realpath(d).startswith(d+'/'); shutil.copyfile(p,os.path.join(d,sys.argv[4])); print(n)" %s %s %s %s`, pyRealpathGuard(), shellQuote(workspacePath), shellQuote(s.cfg.WorkspaceDir), shellQuote(sharedDir), shellQuote(name))
+	script := exportFileCopyScript(workspacePath, s.cfg.WorkspaceDir, sharedDir, name)
 	res, err := s.exec(ctx, execRequest{scope: scope, cmd: []string{"/bin/sh", "-c", script}, timeout: 30 * time.Second})
 	if err != nil || res.ExitCode != 0 {
 		return resultJSON(map[string]any{"ok": false, "error": "file not found, unsafe, or exceeds 20MB", "detail": safeErr(err, res)}), nil

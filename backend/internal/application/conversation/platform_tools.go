@@ -1096,6 +1096,15 @@ func isCredentialPlatformTool(toolName string) bool {
 	return strings.HasPrefix(strings.TrimSpace(toolName), "credential_")
 }
 
+func isCredentialWritePlatformTool(toolName string) bool {
+	switch strings.TrimSpace(toolName) {
+	case "credential_create", "credential_update":
+		return true
+	default:
+		return false
+	}
+}
+
 // platformToolGuidancePrompt 平台工具使用纪律（追加在 MCP 工具引导之后）。
 func platformToolGuidancePrompt() string {
 	return strings.TrimSpace(`# platform_tools

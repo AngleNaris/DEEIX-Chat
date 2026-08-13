@@ -49,9 +49,12 @@ type agentGroupRunState struct {
 	attemptLease          time.Duration
 	// ledger 是跨 Attempt 的工具执行幂等账本；persistToolCalls 为 true 时
 	// 工具行以 BillingRef 为 RunID 落盘（重试时按前缀恢复种子）。
-	ledger           *toolExecutionLedger
-	persistToolCalls bool
-	mcpActivation    *mcpActivationState
+	ledger              *toolExecutionLedger
+	persistToolCalls    bool
+	mcpActivation       *mcpActivationState
+	credentialAttempted bool
+	credentialAttempts  []credentialWrite
+	credentialWrites    []credentialWrite
 }
 
 // executeAgentGroupRun 执行一次 Agent 群组串行运行（主管决策 → 成员执行 → 循环）。
@@ -113,7 +116,6 @@ func (s *Service) executeAgentGroupRun(
 	if err != nil {
 		return nil, err
 	}
-	s.persistInitialConversationFallbackTitle(ctx, *conversation, *pair.user)
 
 	// 上下文消息一次组装，整个运行复用（token 预算由执行器内部应用）。
 	contextMessages := buildBranchMessagePath(branchPreparation.branchState, pair.user)
@@ -380,8 +382,11 @@ func (st *agentGroupRunState) agentTurnInput(
 		SelectedToolIDs:   st.input.SelectedToolIDs,
 		MCPActivation:     st.mcpActivation,
 		OnMCPActivation:   st.persistMCPActivation,
-		OnCredentialWrites: func(ctx context.Context, writes []credentialWrite) error {
-			return st.applyCredentialWritesForAttempt(ctx, step, attempt, writes)
+		OnCredentialAttemptsDetected: func(ctx context.Context, attempts []credentialWrite) error {
+			return st.persistDetectedCredentialAttemptsForAttempt(ctx, step, attempt, attempts)
+		},
+		OnCredentialAttempts: func(ctx context.Context, attempts []credentialWrite, successful []credentialWrite) error {
+			return st.applyCredentialAttemptsForAttempt(ctx, step, attempt, attempts, successful)
 		},
 		ToolMessageID:    st.assistantMessage.ID,
 		Options:          options,
@@ -415,33 +420,118 @@ func (st *agentGroupRunState) persistMCPActivation(ctx context.Context, serverID
 	return nil
 }
 
-func (st *agentGroupRunState) applyCredentialWrites(ctx context.Context, writes []credentialWrite) error {
-	if st == nil || st.service == nil || st.userMessage == nil || len(writes) == 0 {
+func (st *agentGroupRunState) persistCredentialResumeSafety(ctx context.Context, resumeSafe bool) error {
+	if st == nil || st.service == nil || st.service.agentGroupRunStore == nil || st.snapshot == nil || st.run == nil {
+		return ErrAgentGroupRunStateCorrupt
+	}
+	if st.snapshot.CredentialWriteAttempted && st.snapshot.CredentialWriteResumeSafe == resumeSafe {
 		return nil
 	}
-	if _, err := st.service.applyCredentialWritesToUserMessage(ctx, st.userMessage, st.input.ConversationID, st.input.UserID, writes); err != nil {
+	nextSnapshot := *st.snapshot
+	nextSnapshot.CredentialWriteAttempted = true
+	nextSnapshot.CredentialWriteResumeSafe = resumeSafe
+	snapshotJSON := marshalAgentGroupRunSnapshot(&nextSnapshot)
+	ok, err := st.service.agentGroupRunStore.CASUpdateAgentGroupRun(ctx, st.run.ID, st.stateVersion, domainagentgroup.RunStatusRunning,
+		domainagentgroup.RunPatch{ConfigSnapshotJSON: &snapshotJSON})
+	if err != nil {
 		return err
 	}
-	st.input.Content, _ = applyCredentialWrites(st.input.Content, writes)
+	if !ok {
+		return ErrAgentGroupCASConflict
+	}
+	st.stateVersion++
+	st.snapshot.CredentialWriteAttempted = true
+	st.snapshot.CredentialWriteResumeSafe = resumeSafe
+	st.run.StateVersion = st.stateVersion
+	st.run.ConfigSnapshotJSON = snapshotJSON
+	return nil
+}
+
+func credentialWriteValuesAbsent(text string, attempts []credentialWrite) bool {
+	if len(attempts) == 0 {
+		return false
+	}
+	for _, attempt := range attempts {
+		if attempt.Value != "" && strings.Contains(text, attempt.Value) {
+			return false
+		}
+	}
+	return true
+}
+
+func (st *agentGroupRunState) persistCredentialResumeSafeIfPossible(ctx context.Context) error {
+	if st == nil || st.userMessage == nil || !credentialWriteValuesAbsent(st.userMessage.Content, st.credentialAttempts) {
+		return nil
+	}
+	return st.persistCredentialResumeSafety(ctx, true)
+}
+
+func (st *agentGroupRunState) applyCredentialAttemptState(
+	ctx context.Context,
+	attempts []credentialWrite,
+	successful []credentialWrite,
+) error {
+	if st == nil || st.service == nil || len(attempts) == 0 {
+		return nil
+	}
+	if len(successful) > 0 && st.userMessage != nil {
+		if _, err := st.service.applyCredentialWritesToUserMessage(ctx, st.userMessage, st.input.ConversationID, st.input.UserID, successful); err != nil {
+			return err
+		}
+	}
+	st.credentialAttempted = true
+	st.credentialAttempts = mergeCredentialWrites(st.credentialAttempts, attempts)
+	st.credentialWrites = mergeCredentialWrites(st.credentialWrites, successful)
+	st.input.Content, _ = applyCredentialReplacements(st.input.Content, attempts, successful)
+	st.finalAnswer, _ = applyCredentialReplacements(st.finalAnswer, attempts, successful)
 	for index := range st.contextMessages {
-		st.contextMessages[index].Content, _ = applyCredentialWrites(st.contextMessages[index].Content, writes)
-		st.contextMessages[index].ReasoningContent, _ = applyCredentialWrites(st.contextMessages[index].ReasoningContent, writes)
+		st.contextMessages[index].Content, _ = applyCredentialReplacements(st.contextMessages[index].Content, attempts, successful)
+		st.contextMessages[index].ReasoningContent, _ = applyCredentialReplacements(st.contextMessages[index].ReasoningContent, attempts, successful)
 	}
 	for index := range st.summaries {
-		st.summaries[index].instruction, _ = applyCredentialWrites(st.summaries[index].instruction, writes)
-		st.summaries[index].outputSummary, _ = applyCredentialWrites(st.summaries[index].outputSummary, writes)
+		st.summaries[index].instruction, _ = applyCredentialReplacements(st.summaries[index].instruction, attempts, successful)
+		st.summaries[index].outputSummary, _ = applyCredentialReplacements(st.summaries[index].outputSummary, attempts, successful)
 	}
 	return nil
 }
 
-func (st *agentGroupRunState) applyCredentialWritesForAttempt(
+func (st *agentGroupRunState) applyCredentialAttempts(ctx context.Context, attempts []credentialWrite, successful []credentialWrite) error {
+	if st == nil || st.service == nil || len(attempts) == 0 {
+		return nil
+	}
+	if err := st.persistCredentialResumeSafety(ctx, false); err != nil {
+		return err
+	}
+	if err := st.applyCredentialAttemptState(ctx, attempts, successful); err != nil {
+		return err
+	}
+	return st.persistCredentialResumeSafeIfPossible(ctx)
+}
+
+func (st *agentGroupRunState) applyCredentialWrites(ctx context.Context, writes []credentialWrite) error {
+	return st.applyCredentialAttempts(ctx, writes, writes)
+}
+
+func (st *agentGroupRunState) persistDetectedCredentialAttemptsForAttempt(
 	ctx context.Context,
 	step *domainagentgroup.Step,
 	attempt *domainagentgroup.Attempt,
-	writes []credentialWrite,
+	attempts []credentialWrite,
 ) error {
+	if st == nil || st.service == nil || len(attempts) == 0 {
+		return nil
+	}
+	if err := st.persistCredentialResumeSafety(ctx, false); err != nil {
+		return err
+	}
+	st.credentialAttempted = true
+	st.credentialAttempts = mergeCredentialWrites(st.credentialAttempts, attempts)
+	groupRunPrefix := strconv.FormatUint(uint64(st.run.ID), 10) + ":"
+	if err := st.service.scrubPersistedToolCalls(ctx, st.input.UserID, st.input.ConversationID, groupRunPrefix, true, attempts, nil); err != nil {
+		return err
+	}
 	if attempt != nil {
-		if inputSnapshot, changed := applyCredentialWritesToJSON(attempt.InputSnapshotJSON, writes); changed {
+		if inputSnapshot, changed := applyCredentialReplacementsToJSON(attempt.InputSnapshotJSON, attempts, nil); changed {
 			ok, err := st.service.agentGroupRunStore.CASUpdateAgentGroupStepAttempt(ctx, attempt.ID, domainagentgroup.AttemptStatusRunning,
 				domainagentgroup.AttemptPatch{InputSnapshotJSON: &inputSnapshot})
 			if err != nil {
@@ -454,14 +544,63 @@ func (st *agentGroupRunState) applyCredentialWritesForAttempt(
 		}
 	}
 	if step != nil {
-		if instruction, changed := applyCredentialWrites(step.Instruction, writes); changed {
+		if instruction, changed := applyCredentialReplacements(step.Instruction, attempts, nil); changed {
 			if err := st.service.agentGroupRunStore.UpdateAgentGroupStep(ctx, step.ID, map[string]interface{}{"instruction": instruction}); err != nil {
 				return err
 			}
 			step.Instruction = instruction
 		}
 	}
-	return st.applyCredentialWrites(ctx, writes)
+	return nil
+}
+
+func (st *agentGroupRunState) applyCredentialAttemptsForAttempt(
+	ctx context.Context,
+	step *domainagentgroup.Step,
+	attempt *domainagentgroup.Attempt,
+	attempts []credentialWrite,
+	successful []credentialWrite,
+) error {
+	if st == nil || st.service == nil || len(attempts) == 0 {
+		return nil
+	}
+	if err := st.persistCredentialResumeSafety(ctx, false); err != nil {
+		return err
+	}
+	if attempt != nil {
+		if inputSnapshot, changed := applyCredentialReplacementsToJSON(attempt.InputSnapshotJSON, attempts, successful); changed {
+			ok, err := st.service.agentGroupRunStore.CASUpdateAgentGroupStepAttempt(ctx, attempt.ID, domainagentgroup.AttemptStatusRunning,
+				domainagentgroup.AttemptPatch{InputSnapshotJSON: &inputSnapshot})
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return ErrAgentGroupCASConflict
+			}
+			attempt.InputSnapshotJSON = inputSnapshot
+		}
+	}
+	if step != nil {
+		if instruction, changed := applyCredentialReplacements(step.Instruction, attempts, successful); changed {
+			if err := st.service.agentGroupRunStore.UpdateAgentGroupStep(ctx, step.ID, map[string]interface{}{"instruction": instruction}); err != nil {
+				return err
+			}
+			step.Instruction = instruction
+		}
+	}
+	if err := st.applyCredentialAttemptState(ctx, attempts, successful); err != nil {
+		return err
+	}
+	return st.persistCredentialResumeSafeIfPossible(ctx)
+}
+
+func (st *agentGroupRunState) applyCredentialWritesForAttempt(
+	ctx context.Context,
+	step *domainagentgroup.Step,
+	attempt *domainagentgroup.Attempt,
+	writes []credentialWrite,
+) error {
+	return st.applyCredentialAttemptsForAttempt(ctx, step, attempt, writes, writes)
 }
 
 // createAgentGroupStepAndAttempt 按 11.2 持久化顺序创建步骤与首次尝试：
@@ -736,18 +875,19 @@ func (st *agentGroupRunState) completeAgentGroupRun(ctx context.Context) error {
 
 	// 1. 顶层消息持久化（聚合全部 Attempt 用量；不设置用户消息状态，由本函数标记）。
 	if err := s.persistSuccessfulMessageGeneration(ctx, persistMessageGenerationInput{
-		SendInput:        st.input,
-		Conversation:     st.conversation,
-		UserMessage:      st.userMessage,
-		AssistantMessage: st.assistantMessage,
-		AssistantText:    st.finalAnswer,
-		InputTokens:      st.totalInputTokens,
-		CacheReadTokens:  st.totalCacheReadTokens,
-		CacheWriteTokens: st.totalCacheWriteTokens,
-		OutputTokens:     st.totalOutputTokens,
-		ReasoningTokens:  st.totalReasoningTokens,
-		AssistantLatency: latency,
-		ReuseUserMessage: st.branchPreparation.reuseUserMessage,
+		SendInput:                st.input,
+		Conversation:             st.conversation,
+		UserMessage:              st.userMessage,
+		AssistantMessage:         st.assistantMessage,
+		AssistantText:            st.finalAnswer,
+		InputTokens:              st.totalInputTokens,
+		CacheReadTokens:          st.totalCacheReadTokens,
+		CacheWriteTokens:         st.totalCacheWriteTokens,
+		OutputTokens:             st.totalOutputTokens,
+		ReasoningTokens:          st.totalReasoningTokens,
+		AssistantLatency:         latency,
+		ReuseUserMessage:         st.branchPreparation.reuseUserMessage,
+		SkipUserMessageEmbedding: st.credentialAttempted,
 	}); err != nil {
 		return err
 	}
@@ -778,6 +918,10 @@ func (st *agentGroupRunState) completeAgentGroupRun(ctx context.Context) error {
 	}
 	st.stateVersion++
 	st.run.Status = completed
+
+	if !st.credentialAttempted {
+		s.persistInitialConversationFallbackTitle(ctx, *st.conversation, *st.userMessage)
+	}
 
 	// 4. 完成事件。
 	st.emitAgentGroupRunCompleted(ctx)

@@ -234,7 +234,7 @@ func buildPromptContextArtifacts(input promptContextArtifactInput) []domainconve
 			TokenEstimate:  estimateTokens(content),
 			Score:          float64(chunk.Score),
 			MetadataJSON: contextArtifactMetadata(map[string]interface{}{
-				"query":       strings.TrimSpace(input.Query),
+				"query_chars": len([]rune(strings.TrimSpace(input.Query))),
 				"file_id":     strings.TrimSpace(chunk.FileID),
 				"chunk_index": chunk.ChunkIndex,
 				"score":       chunk.Score,
@@ -262,7 +262,7 @@ func buildPromptContextArtifacts(input promptContextArtifactInput) []domainconve
 			ContentHash:    contextArtifactHash(domainconversation.ContextArtifactFileRAGFallback, sourceID, content),
 			TokenEstimate:  estimateTokens(content),
 			MetadataJSON: contextArtifactMetadata(map[string]interface{}{
-				"query":          strings.TrimSpace(input.Query),
+				"query_chars":    len([]rune(strings.TrimSpace(input.Query))),
 				"reason":         strings.TrimSpace(fallback.Reason),
 				"error":          strings.TrimSpace(fallback.Error),
 				"file_id":        strings.TrimSpace(file.FileID),

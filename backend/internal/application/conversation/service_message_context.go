@@ -282,14 +282,21 @@ func sanitizeUpstreamDebugSnapshot(debug *llm.UpstreamDebugSnapshot) *llm.Upstre
 	if debug == nil {
 		return nil
 	}
+	requestBodyBytes := debug.Request.BodyBytes
+	if requestBodyBytes == 0 {
+		requestBodyBytes = len(debug.Request.Body)
+	}
+	requestRedactedParts := debug.Request.RedactedParts
+	if debug.Request.Body != "" {
+		requestRedactedParts++
+	}
 	return &llm.UpstreamDebugSnapshot{
 		Request: llm.UpstreamDebugRequest{
 			Method:        debug.Request.Method,
 			Path:          debug.Request.Path,
-			Body:          sanitizeUpstreamNameJSON(llm.SanitizeUpstreamDebugBody(debug.Request.Body)),
-			BodyBytes:     debug.Request.BodyBytes,
+			BodyBytes:     requestBodyBytes,
 			BodyTruncated: debug.Request.BodyTruncated,
-			RedactedParts: debug.Request.RedactedParts,
+			RedactedParts: requestRedactedParts,
 		},
 		Response: llm.UpstreamDebugResponse{
 			StatusCode:    debug.Response.StatusCode,
@@ -1166,9 +1173,9 @@ func (x userContextXML) empty() bool {
 
 func buildUserContextXML(input userContextInput) userContextXML {
 	return userContextXML{
-		summary: formatSnapshotContext(input.Snapshot),
-		memory:  formatMemoryContext(input.Memory),
-		cards:   formatDocCardsContext(input.DocCards, docCardContentLimit),
+		summary:  formatSnapshotContext(input.Snapshot),
+		memory:   formatMemoryContext(input.Memory),
+		cards:    formatDocCardsContext(input.DocCards, docCardContentLimit),
 		images:   formatImageAnalysisContext(input.ImageAnalyses),
 		evidence: formatHistoricalEvidenceContext(input.HistoricalArtifacts),
 		rag:      formatRAGFileContext(input.RAGChunks),

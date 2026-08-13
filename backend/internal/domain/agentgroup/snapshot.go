@@ -12,9 +12,13 @@ type RunSnapshot struct {
 	Members    []RunSnapshotMember
 	Limits     RunSnapshotLimits
 	// RequestedToolIDs / RequestedSkillIDs 是请求级工具与技能选择（重试恢复时还原执行能力）。
-	RequestedToolIDs      []uint
-	RequestedSkillIDs     []uint
-	ActivatedMCPServerIDs []uint
+	RequestedToolIDs         []uint
+	RequestedSkillIDs        []uint
+	ActivatedMCPServerIDs    []uint
+	CredentialWriteAttempted bool
+	// CredentialWriteResumeSafe 仅在已检测值不再存在于持久化用户消息时为 true；
+	// attempted=true 且 safe=false 的检查点禁止重试恢复。
+	CredentialWriteResumeSafe bool
 }
 
 // RunSnapshotProject 项目快照。

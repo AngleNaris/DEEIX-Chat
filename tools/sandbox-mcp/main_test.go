@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -145,6 +147,98 @@ func TestSanitizeWorkspacePath(t *testing.T) {
 		if _, err := sanitizeWorkspacePath(ws, p); err == nil {
 			t.Fatalf("path %q should be rejected", p)
 		}
+	}
+}
+
+func TestExportFileCopyScript(t *testing.T) {
+	script := exportFileCopyScript(
+		"/workspace/report.txt",
+		"/workspace",
+		"/shared/deeix-42-7",
+		"report.txt",
+	)
+	if strings.Contains(script, ";;") {
+		t.Fatalf("export script contains invalid empty statement: %s", script)
+	}
+	for _, expected := range []string{
+		"'/workspace/report.txt'",
+		"'/workspace'",
+		"'/shared/deeix-42-7'",
+		"'report.txt'",
+	} {
+		if !strings.Contains(script, expected) {
+			t.Fatalf("export script missing %q: %s", expected, script)
+		}
+	}
+}
+
+func runExportFileCopyScript(t *testing.T, workspacePath, workspaceRoot, sharedDir, name string) error {
+	t.Helper()
+	cmd := exec.Command("/bin/sh", "-c", exportFileCopyScript(workspacePath, workspaceRoot, sharedDir, name))
+	return cmd.Run()
+}
+
+func TestExportFileCopyScriptCopiesRegularFile(t *testing.T) {
+	workspace := t.TempDir()
+	shared := t.TempDir()
+	source := filepath.Join(workspace, "report.txt")
+	if err := os.WriteFile(source, []byte("report content"), 0600); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+	if err := runExportFileCopyScript(t, source, workspace, shared, "report.txt"); err != nil {
+		t.Fatalf("export regular file: %v", err)
+	}
+	content, err := os.ReadFile(filepath.Join(shared, "report.txt"))
+	if err != nil {
+		t.Fatalf("read exported file: %v", err)
+	}
+	if string(content) != "report content" {
+		t.Fatalf("exported content = %q", content)
+	}
+}
+
+func TestExportFileCopyScriptRejectsSourceSymlink(t *testing.T) {
+	workspace := t.TempDir()
+	shared := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "outside.txt")
+	if err := os.WriteFile(outside, []byte("outside"), 0600); err != nil {
+		t.Fatalf("write outside file: %v", err)
+	}
+	source := filepath.Join(workspace, "report.txt")
+	if err := os.Symlink(outside, source); err != nil {
+		t.Fatalf("create source symlink: %v", err)
+	}
+	if err := runExportFileCopyScript(t, source, workspace, shared, "report.txt"); err == nil {
+		t.Fatal("source symlink export unexpectedly succeeded")
+	}
+	if _, err := os.Stat(filepath.Join(shared, "report.txt")); !os.IsNotExist(err) {
+		t.Fatalf("source symlink created destination: %v", err)
+	}
+}
+
+func TestExportFileCopyScriptRejectsDestinationSymlink(t *testing.T) {
+	workspace := t.TempDir()
+	shared := t.TempDir()
+	source := filepath.Join(workspace, "report.txt")
+	outside := filepath.Join(t.TempDir(), "outside.txt")
+	if err := os.WriteFile(source, []byte("report content"), 0600); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+	if err := os.WriteFile(outside, []byte("outside content"), 0600); err != nil {
+		t.Fatalf("write outside file: %v", err)
+	}
+	if err := os.Symlink(outside, filepath.Join(shared, "report.txt")); err != nil {
+		t.Fatalf("create destination symlink: %v", err)
+	}
+	if err := runExportFileCopyScript(t, source, workspace, shared, "report.txt"); err == nil {
+		t.Fatal("destination symlink export unexpectedly succeeded")
+	}
+	content, err := os.ReadFile(outside)
+	if err != nil {
+		t.Fatalf("read outside file: %v", err)
+	}
+	if string(content) != "outside content" {
+		t.Fatalf("destination symlink target was modified: %q", content)
 	}
 }
 

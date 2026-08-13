@@ -97,11 +97,11 @@ func maskCredentialToolInput(executionToolName string, isPlatformTool bool, inpu
 }
 
 func credentialWriteFromSuccessfulCall(executionToolName string, isPlatformTool bool, inputJSON string) (credentialWrite, bool) {
-	if !isPlatformTool {
-		return credentialWrite{}, false
-	}
-	name := strings.TrimSpace(executionToolName)
-	if name != "credential_create" && name != "credential_update" {
+	return credentialWriteFromToolCall(executionToolName, isPlatformTool, inputJSON)
+}
+
+func credentialWriteFromToolCall(executionToolName string, isPlatformTool bool, inputJSON string) (credentialWrite, bool) {
+	if !isPlatformTool || !isCredentialWritePlatformTool(executionToolName) {
 		return credentialWrite{}, false
 	}
 	var arguments struct {
@@ -116,6 +116,272 @@ func credentialWriteFromSuccessfulCall(executionToolName string, isPlatformTool 
 		return credentialWrite{}, false
 	}
 	return credentialWrite{Name: arguments.Name, Value: arguments.Value}, true
+}
+
+func credentialAttemptsFromGenerateOutput(output *llm.GenerateOutput, runtime *selectedToolRuntime) []credentialWrite {
+	if output == nil || runtime == nil {
+		return nil
+	}
+	return credentialAttemptsFromToolCalls(output.ToolCalls, runtime.nameMap, runtime.platformEntries)
+}
+
+func credentialAttemptsFromToolCalls(
+	toolCalls []llm.ToolCall,
+	toolNameMap map[string]string,
+	platformTools map[string]platformToolEntry,
+) []credentialWrite {
+	attempts := make([]credentialWrite, 0)
+	for _, call := range toolCalls {
+		modelToolName := strings.TrimSpace(call.ToolName)
+		_, isPlatformTool := platformTools[modelToolName]
+		write, ok := credentialWriteFromToolCall(
+			resolveExecutionToolName(modelToolName, toolNameMap),
+			isPlatformTool,
+			call.ArgumentsJSON,
+		)
+		if ok {
+			attempts = mergeCredentialWrites(attempts, []credentialWrite{write})
+		}
+	}
+	return attempts
+}
+
+func mergeCredentialWrites(target []credentialWrite, source []credentialWrite) []credentialWrite {
+	for _, candidate := range source {
+		if strings.TrimSpace(candidate.Name) == "" || candidate.Value == "" {
+			continue
+		}
+		found := false
+		for _, existing := range target {
+			if existing.Name == candidate.Name && existing.Value == candidate.Value {
+				found = true
+				break
+			}
+		}
+		if !found {
+			target = append(target, candidate)
+		}
+	}
+	return target
+}
+
+func isSuccessfulCredentialWrite(candidate credentialWrite, successful []credentialWrite) bool {
+	for _, write := range successful {
+		if write.Name == candidate.Name && write.Value == candidate.Value {
+			return true
+		}
+	}
+	return false
+}
+
+func applyCredentialReplacements(text string, attempts []credentialWrite, successful []credentialWrite) (string, bool) {
+	result, _ := applyCredentialWrites(text, successful)
+	for _, attempt := range attempts {
+		if attempt.Value == "" || isSuccessfulCredentialWrite(attempt, successful) || !strings.Contains(result, attempt.Value) {
+			continue
+		}
+		result = strings.ReplaceAll(result, attempt.Value, "[REDACTED]")
+	}
+	return result, result != text
+}
+
+func applyCredentialReplacementsToJSON(raw string, attempts []credentialWrite, successful []credentialWrite) (string, bool) {
+	var payload interface{}
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return applyCredentialReplacements(raw, attempts, successful)
+	}
+	if !applyCredentialReplacementsToJSONValue(&payload, attempts, successful) {
+		return raw, false
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return raw, false
+	}
+	return string(encoded), true
+}
+
+func applyCredentialReplacementsToJSONValue(value *interface{}, attempts []credentialWrite, successful []credentialWrite) bool {
+	if value == nil {
+		return false
+	}
+	switch typed := (*value).(type) {
+	case string:
+		next, changed := applyCredentialReplacements(typed, attempts, successful)
+		if changed {
+			*value = next
+		}
+		return changed
+	case map[string]interface{}:
+		changed := false
+		for key, child := range typed {
+			if applyCredentialReplacementsToJSONValue(&child, attempts, successful) {
+				typed[key] = child
+				changed = true
+			}
+		}
+		return changed
+	case []interface{}:
+		changed := false
+		for index := range typed {
+			if applyCredentialReplacementsToJSONValue(&typed[index], attempts, successful) {
+				changed = true
+			}
+		}
+		return changed
+	default:
+		return false
+	}
+}
+
+func applyCredentialReplacementsToLLMMessages(messages []llm.Message, attempts []credentialWrite, successful []credentialWrite) bool {
+	changed := false
+	for index := range messages {
+		if content, contentChanged := applyCredentialReplacements(messages[index].Content, attempts, successful); contentChanged {
+			messages[index].Content = content
+			changed = true
+		}
+		if reasoning, reasoningChanged := applyCredentialReplacements(messages[index].ReasoningContent, attempts, successful); reasoningChanged {
+			messages[index].ReasoningContent = reasoning
+			changed = true
+		}
+		for toolIndex := range messages[index].ToolCalls {
+			if arguments, argumentsChanged := applyCredentialReplacementsToJSON(messages[index].ToolCalls[toolIndex].ArgumentsJSON, attempts, successful); argumentsChanged {
+				messages[index].ToolCalls[toolIndex].ArgumentsJSON = arguments
+				changed = true
+			}
+		}
+	}
+	return changed
+}
+
+func applyCredentialReplacementsToToolCallRows(rows []model.ToolCall, attempts []credentialWrite, successful []credentialWrite) {
+	for index := range rows {
+		rows[index].InputJSON, _ = applyCredentialReplacementsToJSON(rows[index].InputJSON, attempts, successful)
+		rows[index].OutputJSON, _ = applyCredentialReplacements(rows[index].OutputJSON, attempts, successful)
+		rows[index].ErrorJSON, _ = applyCredentialReplacements(rows[index].ErrorJSON, attempts, successful)
+	}
+}
+
+func (s *Service) scrubPersistedToolCalls(
+	ctx context.Context,
+	userID uint,
+	conversationID uint,
+	runID string,
+	runIDPrefix bool,
+	attempts []credentialWrite,
+	successful []credentialWrite,
+) error {
+	if s == nil || s.repo == nil || len(attempts) == 0 || strings.TrimSpace(runID) == "" {
+		return nil
+	}
+	var (
+		rows []model.ToolCall
+		err  error
+	)
+	if runIDPrefix {
+		rows, err = s.repo.ListConversationToolCallsByRunIDPrefix(ctx, userID, conversationID, strings.TrimSpace(runID))
+	} else {
+		rows, err = s.repo.ListConversationToolCallsByRunID(ctx, userID, conversationID, strings.TrimSpace(runID))
+	}
+	if err != nil {
+		return err
+	}
+	for index := range rows {
+		beforeInput := rows[index].InputJSON
+		beforeOutput := rows[index].OutputJSON
+		beforeError := rows[index].ErrorJSON
+		applyCredentialReplacementsToToolCallRows(rows[index:index+1], attempts, successful)
+		if rows[index].InputJSON == beforeInput && rows[index].OutputJSON == beforeOutput && rows[index].ErrorJSON == beforeError {
+			continue
+		}
+		if err := s.repo.UpdateConversationToolCallPayload(ctx, userID, conversationID, rows[index].RunID, rows[index]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func credentialAttemptValueRemains(text string, attempts []credentialWrite) bool {
+	for _, attempt := range attempts {
+		if attempt.Value != "" && strings.Contains(text, attempt.Value) {
+			return true
+		}
+	}
+	return false
+}
+
+func credentialWriteToolsAvailable(input llm.GenerateInput, runtime *selectedToolRuntime) bool {
+	if runtime == nil || input.DisableTools {
+		return false
+	}
+	for _, definition := range input.Tools {
+		modelName := strings.TrimSpace(definition.Name)
+		if _, ok := runtime.platformEntries[modelName]; !ok {
+			continue
+		}
+		if isCredentialWritePlatformTool(resolveExecutionToolName(modelName, runtime.nameMap)) {
+			return true
+		}
+	}
+	return false
+}
+
+func sanitizeGenerateOutputCredentialAttempts(output *llm.GenerateOutput, attempts []credentialWrite) {
+	if output == nil || len(attempts) == 0 {
+		return
+	}
+	output.Text, _ = applyCredentialReplacements(output.Text, attempts, nil)
+	if output.Reasoning != nil {
+		output.Reasoning.Text, _ = applyCredentialReplacements(output.Reasoning.Text, attempts, nil)
+		output.Reasoning.Summary, _ = applyCredentialReplacements(output.Reasoning.Summary, attempts, nil)
+	}
+	for index := range output.ServerToolCalls {
+		output.ServerToolCalls[index].ArgumentsJSON, _ = applyCredentialReplacementsToJSON(output.ServerToolCalls[index].ArgumentsJSON, attempts, nil)
+		output.ServerToolCalls[index].OutputJSON, _ = applyCredentialReplacements(output.ServerToolCalls[index].OutputJSON, attempts, nil)
+		output.ServerToolCalls[index].ErrorJSON, _ = applyCredentialReplacements(output.ServerToolCalls[index].ErrorJSON, attempts, nil)
+	}
+	for index := range output.Citations {
+		output.Citations[index], _ = applyCredentialReplacements(output.Citations[index], attempts, nil)
+	}
+	for index := range output.GeneratedImages {
+		output.GeneratedImages[index].URL, _ = applyCredentialReplacements(output.GeneratedImages[index].URL, attempts, nil)
+		output.GeneratedImages[index].RevisedPrompt, _ = applyCredentialReplacements(output.GeneratedImages[index].RevisedPrompt, attempts, nil)
+	}
+	for index := range output.GeneratedVideos {
+		output.GeneratedVideos[index].URL, _ = applyCredentialReplacements(output.GeneratedVideos[index].URL, attempts, nil)
+		output.GeneratedVideos[index].FileName, _ = applyCredentialReplacements(output.GeneratedVideos[index].FileName, attempts, nil)
+	}
+	output.RawJSON = ""
+	if output.Debug != nil {
+		output.Debug.Request.Body, _ = applyCredentialReplacements(output.Debug.Request.Body, attempts, nil)
+		output.Debug.Response.Body, _ = applyCredentialReplacements(output.Debug.Response.Body, attempts, nil)
+	}
+}
+
+func sanitizeGenerateStreamEventCredentialAttempts(event llm.GenerateStreamEvent, attempts []credentialWrite) llm.GenerateStreamEvent {
+	if len(attempts) == 0 {
+		return event
+	}
+	event.Delta, _ = applyCredentialReplacements(event.Delta, attempts, nil)
+	if event.Reasoning != nil {
+		reasoning := *event.Reasoning
+		reasoning.Text, _ = applyCredentialReplacements(reasoning.Text, attempts, nil)
+		event.Reasoning = &reasoning
+	}
+	if event.ServerToolCall != nil {
+		call := *event.ServerToolCall
+		call.ArgumentsJSON, _ = applyCredentialReplacementsToJSON(call.ArgumentsJSON, attempts, nil)
+		call.OutputJSON, _ = applyCredentialReplacements(call.OutputJSON, attempts, nil)
+		call.ErrorJSON, _ = applyCredentialReplacements(call.ErrorJSON, attempts, nil)
+		event.ServerToolCall = &call
+	}
+	if event.GeneratedImage != nil {
+		image := *event.GeneratedImage
+		image.URL, _ = applyCredentialReplacements(image.URL, attempts, nil)
+		image.RevisedPrompt, _ = applyCredentialReplacements(image.RevisedPrompt, attempts, nil)
+		event.GeneratedImage = &image
+	}
+	return event
 }
 
 func applyCredentialWrites(text string, writes []credentialWrite) (string, bool) {

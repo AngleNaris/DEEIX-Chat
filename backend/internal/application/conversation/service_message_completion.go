@@ -34,6 +34,7 @@ type persistMessageGenerationInput struct {
 	PersistedToolCallKeys     map[string]struct{}
 	Route                     *channel.ResolvedRoute
 	ReuseUserMessage          bool
+	SkipUserMessageEmbedding  bool
 }
 
 type persistInterruptedMessageGenerationInput struct {
@@ -289,7 +290,7 @@ func (s *Service) finishSuccessfulMessageGeneration(ctx context.Context, input p
 	if normalizeBranchReason(input.SendInput.BranchReason) == "default" {
 		s.updateStatefulResponseAsync(input.SendInput.ConversationID, input.ResponseID, input.StatefulPromptFingerprint)
 	}
-	if input.ReuseUserMessage {
+	if input.ReuseUserMessage || input.SkipUserMessageEmbedding {
 		s.embedMessagePairAsync(input.SendInput, nil, input.AssistantMessage)
 	} else {
 		s.embedMessagePairAsync(input.SendInput, input.UserMessage, input.AssistantMessage)

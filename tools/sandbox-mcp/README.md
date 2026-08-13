@@ -49,6 +49,7 @@ After any Docker/1Panel firewall change, run `systemctl reload deeix-sandbox-egr
 ```bash
 cp deploy/.env.example deploy/.env
 # Set SANDBOX_MCP_API_KEY, SANDBOX_META_HMAC_KEY, and MM provider keys.
+# Set DOCKER_SOCKET_GID to: stat -c '%g' /var/run/docker.sock
 docker build -t deeix-sandbox-base:latest -f docker/base.Dockerfile docker/
 cd deploy
 docker compose config

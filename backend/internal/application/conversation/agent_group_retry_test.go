@@ -321,6 +321,10 @@ func TestAgentGroupCredentialWritesScrubPersistentCheckpoints(t *testing.T) {
 		t.Fatalf("seed running attempt: %v", err)
 	}
 
+	if err := db.Model(&persistencemodels.AgentGroupRun{}).Where("id = ?", seed.run.ID).
+		Updates(map[string]interface{}{"status": domainagentgroup.RunStatusRunning, "state_version": 1}).Error; err != nil {
+		t.Fatalf("seed running group run: %v", err)
+	}
 	step := &domainagentgroup.Step{ID: seed.workerStep.ID, Instruction: "worker uses " + secret, Status: domainagentgroup.StepStatusRunning}
 	attempt := &domainagentgroup.Attempt{ID: seed.workerAttempt.ID, InputSnapshotJSON: string(snapshotBytes), Status: domainagentgroup.AttemptStatusRunning}
 	userMessage := &domainconversation.Message{
@@ -331,6 +335,12 @@ func TestAgentGroupCredentialWritesScrubPersistentCheckpoints(t *testing.T) {
 		service:     service,
 		input:       SendMessageInput{UserID: agentGroupRetryUserID, ConversationID: seed.conversation.ID, Content: userMessage.Content},
 		userMessage: userMessage,
+		snapshot:    seed.snapshot,
+		run: &domainagentgroup.Run{
+			ID: seed.run.ID, Status: domainagentgroup.RunStatusRunning, StateVersion: 1,
+			ConfigSnapshotJSON: seed.run.ConfigSnapshotJSON,
+		},
+		stateVersion: 1,
 		contextMessages: []domainconversation.Message{{
 			Role: "user", Content: "context " + secret, ReasoningContent: "reason " + secret,
 		}},
@@ -362,6 +372,17 @@ func TestAgentGroupCredentialWritesScrubPersistentCheckpoints(t *testing.T) {
 	if err := db.First(&storedAttempt, seed.workerAttempt.ID).Error; err != nil {
 		t.Fatalf("reload attempt: %v", err)
 	}
+	var storedRun persistencemodels.AgentGroupRun
+	if err := db.First(&storedRun, seed.run.ID).Error; err != nil {
+		t.Fatalf("reload group run: %v", err)
+	}
+	var storedSnapshot domainagentgroup.RunSnapshot
+	if err := json.Unmarshal([]byte(storedRun.ConfigSnapshotJSON), &storedSnapshot); err != nil {
+		t.Fatalf("decode group run snapshot: %v", err)
+	}
+	if storedRun.StateVersion != 3 || !storedSnapshot.CredentialWriteAttempted || !storedSnapshot.CredentialWriteResumeSafe {
+		t.Fatalf("credential checkpoint was not marked resume-safe: version=%d snapshot=%#v", storedRun.StateVersion, storedSnapshot)
+	}
 	for label, value := range map[string]string{
 		"message": storedMessage.Content,
 		"step":    storedStep.Instruction,
@@ -373,6 +394,118 @@ func TestAgentGroupCredentialWritesScrubPersistentCheckpoints(t *testing.T) {
 		if !strings.Contains(value, placeholder) {
 			t.Fatalf("%s missing credential placeholder: %s", label, value)
 		}
+	}
+}
+
+func TestAgentGroupFailedCredentialAttemptRemainsUnsafeAndKeepsUserMessage(t *testing.T) {
+	db := openAgentGroupRetryTestDB(t)
+	seed := seedAgentGroupPausedRetryableRun(t, db, "worker", 3)
+	service := newAgentGroupRetryTestService(t, db)
+	const secret = "failed-write-secret"
+
+	if err := db.Model(&persistencemodels.Message{}).Where("id = ?", seed.userMessage.ID).
+		Update("content", "deploy with "+secret).Error; err != nil {
+		t.Fatalf("seed user message: %v", err)
+	}
+	if err := db.Model(&persistencemodels.AgentGroupRun{}).Where("id = ?", seed.run.ID).
+		Updates(map[string]interface{}{"status": domainagentgroup.RunStatusRunning, "state_version": 1}).Error; err != nil {
+		t.Fatalf("seed running group run: %v", err)
+	}
+	userMessage := &domainconversation.Message{
+		ID: seed.userMessage.ID, ConversationID: seed.conversation.ID, UserID: agentGroupRetryUserID,
+		Role: "user", Content: "deploy with " + secret,
+	}
+	state := &agentGroupRunState{
+		service: service,
+		input: SendMessageInput{
+			UserID: agentGroupRetryUserID, ConversationID: seed.conversation.ID, Content: userMessage.Content,
+		},
+		userMessage: userMessage,
+		snapshot:    seed.snapshot,
+		run: &domainagentgroup.Run{
+			ID: seed.run.ID, Status: domainagentgroup.RunStatusRunning, StateVersion: 1,
+			ConfigSnapshotJSON: seed.run.ConfigSnapshotJSON,
+		},
+		stateVersion: 1,
+	}
+	attempts := []credentialWrite{{Name: "deploy-key", Value: secret}}
+	if err := state.applyCredentialAttempts(t.Context(), attempts, nil); err != nil {
+		t.Fatalf("apply failed credential attempt: %v", err)
+	}
+	if userMessage.Content != "deploy with "+secret {
+		t.Fatalf("failed credential attempt changed user message: %q", userMessage.Content)
+	}
+
+	var storedMessage persistencemodels.Message
+	if err := db.First(&storedMessage, seed.userMessage.ID).Error; err != nil {
+		t.Fatalf("reload user message: %v", err)
+	}
+	if storedMessage.Content != "deploy with "+secret {
+		t.Fatalf("failed credential attempt changed stored user message: %q", storedMessage.Content)
+	}
+	var storedRun persistencemodels.AgentGroupRun
+	if err := db.First(&storedRun, seed.run.ID).Error; err != nil {
+		t.Fatalf("reload group run: %v", err)
+	}
+	var storedSnapshot domainagentgroup.RunSnapshot
+	if err := json.Unmarshal([]byte(storedRun.ConfigSnapshotJSON), &storedSnapshot); err != nil {
+		t.Fatalf("decode group run snapshot: %v", err)
+	}
+	if storedRun.StateVersion != 2 || !storedSnapshot.CredentialWriteAttempted || storedSnapshot.CredentialWriteResumeSafe {
+		t.Fatalf("failed credential attempt was not persisted unsafe: version=%d snapshot=%#v", storedRun.StateVersion, storedSnapshot)
+	}
+}
+
+func TestAgentGroupRetryRejectsUnsafeCredentialCheckpoint(t *testing.T) {
+	db := openAgentGroupRetryTestDB(t)
+	seed := seedAgentGroupPausedRetryableRun(t, db, "worker", 3)
+	service := newAgentGroupRetryTestService(t, db)
+	seed.snapshot.CredentialWriteAttempted = true
+	seed.snapshot.CredentialWriteResumeSafe = false
+	snapshotJSON := marshalAgentGroupRunSnapshot(seed.snapshot)
+	if err := db.Model(&persistencemodels.AgentGroupRun{}).Where("id = ?", seed.run.ID).
+		Update("config_snapshot_json", snapshotJSON).Error; err != nil {
+		t.Fatalf("seed unsafe credential checkpoint: %v", err)
+	}
+
+	_, err := service.RetryAgentGroupRunStep(t.Context(), RetryAgentGroupRunInput{
+		UserID: agentGroupRetryUserID, RunPublicID: seed.run.PublicID, RequestID: "retry-unsafe-credential",
+	}, nil)
+	if !errors.Is(err, ErrAgentGroupRunStateCorrupt) {
+		t.Fatalf("retry error = %v, want ErrAgentGroupRunStateCorrupt", err)
+	}
+	if attempts := listAgentGroupAttempts(t, db, seed.workerStep.ID); len(attempts) != 1 {
+		t.Fatalf("unsafe checkpoint created a retry attempt: count=%d", len(attempts))
+	}
+	var storedRun persistencemodels.AgentGroupRun
+	if err := db.First(&storedRun, seed.run.ID).Error; err != nil {
+		t.Fatalf("reload group run: %v", err)
+	}
+	if storedRun.Status != domainagentgroup.RunStatusPausedRetryable || storedRun.StateVersion != 1 {
+		t.Fatalf("unsafe checkpoint mutated run: status=%q version=%d", storedRun.Status, storedRun.StateVersion)
+	}
+}
+
+func TestAgentGroupRetryAllowsResumeSafeCredentialCheckpoint(t *testing.T) {
+	db := openAgentGroupRetryTestDB(t)
+	seed := seedAgentGroupPausedRetryableRun(t, db, "worker", 3)
+	service := newAgentGroupRetryTestService(t, db)
+	seed.snapshot.CredentialWriteAttempted = true
+	seed.snapshot.CredentialWriteResumeSafe = true
+	snapshotJSON := marshalAgentGroupRunSnapshot(seed.snapshot)
+	if err := db.Model(&persistencemodels.AgentGroupRun{}).Where("id = ?", seed.run.ID).
+		Update("config_snapshot_json", snapshotJSON).Error; err != nil {
+		t.Fatalf("seed resume-safe credential checkpoint: %v", err)
+	}
+
+	_, err := service.RetryAgentGroupRunStep(t.Context(), RetryAgentGroupRunInput{
+		UserID: agentGroupRetryUserID, RunPublicID: seed.run.PublicID, RequestID: "retry-safe-credential",
+	}, nil)
+	if !errors.Is(err, ErrAgentGroupRunBlocked) {
+		t.Fatalf("retry error = %v, want ErrAgentGroupRunBlocked after execution", err)
+	}
+	if attempts := listAgentGroupAttempts(t, db, seed.workerStep.ID); len(attempts) != 2 {
+		t.Fatalf("resume-safe checkpoint did not execute retry: count=%d", len(attempts))
 	}
 }
 
@@ -395,6 +528,10 @@ func TestAgentGroupCredentialWriteCASConflictStopsOtherUpdates(t *testing.T) {
 		t.Fatalf("seed conflicting attempt: %v", err)
 	}
 
+	if err := db.Model(&persistencemodels.AgentGroupRun{}).Where("id = ?", seed.run.ID).
+		Updates(map[string]interface{}{"status": domainagentgroup.RunStatusRunning, "state_version": 1}).Error; err != nil {
+		t.Fatalf("seed running group run: %v", err)
+	}
 	step := &domainagentgroup.Step{ID: seed.workerStep.ID, Instruction: secret}
 	attempt := &domainagentgroup.Attempt{ID: seed.workerAttempt.ID, InputSnapshotJSON: attemptSnapshot}
 	userMessage := &domainconversation.Message{
@@ -405,6 +542,12 @@ func TestAgentGroupCredentialWriteCASConflictStopsOtherUpdates(t *testing.T) {
 		service:     service,
 		input:       SendMessageInput{UserID: agentGroupRetryUserID, ConversationID: seed.conversation.ID, Content: secret},
 		userMessage: userMessage,
+		snapshot:    seed.snapshot,
+		run: &domainagentgroup.Run{
+			ID: seed.run.ID, Status: domainagentgroup.RunStatusRunning, StateVersion: 1,
+			ConfigSnapshotJSON: seed.run.ConfigSnapshotJSON,
+		},
+		stateVersion: 1,
 	}
 	err := state.applyCredentialWritesForAttempt(t.Context(), step, attempt, []credentialWrite{{Name: "key", Value: secret}})
 	if !errors.Is(err, ErrAgentGroupCASConflict) {

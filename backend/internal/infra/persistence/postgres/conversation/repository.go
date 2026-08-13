@@ -1995,6 +1995,59 @@ func (r *Repo) CreateConversationToolCalls(ctx context.Context, items []domainco
 	return nil
 }
 
+func (r *Repo) UpdateConversationToolCallPayload(
+	ctx context.Context,
+	userID uint,
+	conversationID uint,
+	runID string,
+	item domainconversation.ToolCall,
+) error {
+	if item.ID == 0 || userID == 0 || conversationID == 0 || strings.TrimSpace(runID) == "" {
+		return nil
+	}
+	result := r.db.WithContext(ctx).Model(&models.ChatRunEvent{}).
+		Where("id = ? AND user_id = ? AND conversation_id = ? AND run_id = ? AND event_scope = ?",
+			item.ID, userID, conversationID, strings.TrimSpace(runID), chatRunEventScopeToolCall).
+		Updates(map[string]interface{}{
+			"input_json":  item.InputJSON,
+			"output_json": item.OutputJSON,
+			"error_json":  item.ErrorJSON,
+		})
+	if result.Error != nil {
+		return translateError(result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return repository.ErrNotFound
+	}
+	return nil
+}
+
+func (r *Repo) ListConversationToolCallsByRunID(
+	ctx context.Context,
+	userID uint,
+	conversationID uint,
+	runID string,
+) ([]domainconversation.ToolCall, error) {
+	value := strings.TrimSpace(runID)
+	if value == "" {
+		return []domainconversation.ToolCall{}, nil
+	}
+	items := make([]models.ChatRunEvent, 0)
+	if err := r.db.WithContext(ctx).
+		Select(conversationEventDetailSelectColumns(r.db)).
+		Where("user_id = ? AND conversation_id = ? AND event_scope = ? AND run_id = ?",
+			userID, conversationID, chatRunEventScopeToolCall, value).
+		Order("id ASC").
+		Find(&items).Error; err != nil {
+		return nil, translateError(err)
+	}
+	rows := make([]domainconversation.ToolCall, 0, len(items))
+	for i := range items {
+		rows = append(rows, toConversationToolCallDomain(items[i]))
+	}
+	return rows, nil
+}
+
 // ListConversationToolCallsByRunIDPrefix 按运行 ID 前缀查询工具调用行。
 // 群组重试时以 BillingRefStepPrefix(groupRunID, stepID)（形如 "runID:stepID:"）为前缀
 // 匹配同一逻辑步骤的全部尝试，仅 success/reused 行用于重建工具幂等账本。

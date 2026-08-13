@@ -63,15 +63,16 @@ type AgentTurnInput struct {
 	SystemPrompt string
 	UserContent  string
 	// DomainMessages 是会话历史（不包含本次用户需求）。
-	DomainMessages     []model.Message
-	FileIDs            []string
-	SkillIDs           []uint
-	SelectedToolIDs    []uint
-	MCPActivation      *mcpActivationState
-	OnMCPActivation    func(context.Context, []uint) error
-	OnCredentialWrites func(context.Context, []credentialWrite) error
-	ToolMessageID      uint
-	Options            map[string]interface{}
+	DomainMessages               []model.Message
+	FileIDs                      []string
+	SkillIDs                     []uint
+	SelectedToolIDs              []uint
+	MCPActivation                *mcpActivationState
+	OnMCPActivation              func(context.Context, []uint) error
+	OnCredentialAttemptsDetected func(context.Context, []credentialWrite) error
+	OnCredentialAttempts         func(context.Context, []credentialWrite, []credentialWrite) error
+	ToolMessageID                uint
+	Options                      map[string]interface{}
 	// Stream 为 true 时通过 OnEvent 推送正文增量；思考与用量事件始终推送。
 	Stream  bool
 	OnEvent func(AgentTurnEvent) error
@@ -388,6 +389,9 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 		toolLedger = newToolExecutionLedger()
 	}
 	toolCallRows := append([]model.ToolCall(nil), imageProcessing.Rows...)
+	credentialAttemptedForTurn := false
+	var credentialAttemptsForTurn []credentialWrite
+	var credentialWritesForTurn []credentialWrite
 	var streamedText strings.Builder
 	preferStream := input.Stream
 	onDelta := func(delta string) error {
@@ -467,6 +471,10 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 			llmRequestCount++
 			output, callErr := s.llmClient.Generate(generationCtx, routeConfig, currentInput)
 			generateErr = callErr
+			if callErr == nil && (credentialAttemptedForTurn || credentialWriteToolsAvailable(currentInput, &toolRuntime)) {
+				attempts := mergeCredentialWrites(credentialAttemptsForTurn, credentialAttemptsFromGenerateOutput(output, &toolRuntime))
+				sanitizeGenerateOutputCredentialAttempts(output, attempts)
+			}
 			if callErr == nil && streamRequested {
 				generateErr = emitNonStreamingOutput(output)
 			}
@@ -479,8 +487,10 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 		}
 		thinkingRouter := &thinkingDeltaRouter{}
 		callStreamUsage := llm.Usage{}
+		bufferCredentialOutput := credentialAttemptedForTurn || credentialWriteToolsAvailable(currentInput, &toolRuntime)
+		credentialBuffer := credentialStreamBuffer{}
 		llmRequestCount++
-		output, streamErr := s.llmClient.GenerateStream(generationCtx, routeConfig, currentInput, func(event llm.GenerateStreamEvent) error {
+		handleStreamEvent := func(event llm.GenerateStreamEvent) error {
 			if event.Usage != (llm.Usage{}) {
 				attemptHadSideEffect = true
 				// 上游流式 usage 通常是“本次 LLM 调用累计值”，先换算成增量再累加，保证实时展示与最终账单一致。
@@ -514,7 +524,29 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 				return nil
 			}
 			return emitCallVisibleDelta(visibleDelta)
+		}
+		output, streamErr := s.llmClient.GenerateStream(generationCtx, routeConfig, currentInput, func(event llm.GenerateStreamEvent) error {
+			if !bufferCredentialOutput {
+				return handleStreamEvent(event)
+			}
+			immediate, hadSideEffect, bufferErr := credentialBuffer.add(event)
+			if hadSideEffect {
+				attemptHadSideEffect = true
+			}
+			if immediate.Usage != (llm.Usage{}) || strings.TrimSpace(immediate.ResponseID) != "" {
+				if err := handleStreamEvent(immediate); err != nil {
+					return err
+				}
+			} else if ctx.Err() != nil {
+				return ErrMessageGenerationCanceled
+			}
+			return bufferErr
 		})
+		if streamErr == nil && bufferCredentialOutput {
+			credentialAttempts := mergeCredentialWrites(credentialAttemptsForTurn, credentialAttemptsFromGenerateOutput(output, &toolRuntime))
+			sanitizeGenerateOutputCredentialAttempts(output, credentialAttempts)
+			streamErr = flushCredentialBufferedStreamEvents(credentialBuffer.events, credentialAttempts, handleStreamEvent)
+		}
 		generateErr = streamErr
 		if generateErr == nil {
 			visibleTail, thinkTail := thinkingRouter.flush()
@@ -534,6 +566,10 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 			attemptObservation.canRetry(generateErr, shouldFallbackToNonStreaming) {
 			llmRequestCount++
 			output, generateErr = s.llmClient.Generate(generationCtx, routeConfig, currentInput)
+			if generateErr == nil && (credentialAttemptedForTurn || credentialWriteToolsAvailable(currentInput, &toolRuntime)) {
+				attempts := mergeCredentialWrites(credentialAttemptsForTurn, credentialAttemptsFromGenerateOutput(output, &toolRuntime))
+				sanitizeGenerateOutputCredentialAttempts(output, attempts)
+			}
 			if generateErr == nil {
 				generateErr = emitNonStreamingOutput(output)
 			}
@@ -692,20 +728,22 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 			),
 		)
 		toolResult := s.executeAgentTurnToolCalls(toolCtx, input, executeAgentTurnToolCallsInput{
-			UserID:            input.UserID,
-			ConversationID:    input.ConversationID,
-			MessageID:         input.ToolMessageID,
-			RequestID:         input.RequestID,
-			RunID:             input.ClientRunID,
-			ToolCalls:         pendingToolCalls,
-			ToolCallLimit:     remainingToolCalls,
-			ToolRuntime:       &toolRuntime,
-			ToolNameMap:       toolRuntime.nameMap,
-			MCPConfigs:        toolRuntime.mcpConfigs,
-			ToolSchemas:       toolRuntime.schemas,
-			PlatformTools:     toolRuntime.platformEntries,
-			Ledger:            toolLedger,
-			ResultTokenBudget: toolResultTokenBudget,
+			UserID:                  input.UserID,
+			ConversationID:          input.ConversationID,
+			MessageID:               input.ToolMessageID,
+			RequestID:               input.RequestID,
+			RunID:                   input.ClientRunID,
+			ToolCalls:               pendingToolCalls,
+			ToolCallLimit:           remainingToolCalls,
+			ToolRuntime:             &toolRuntime,
+			ToolNameMap:             toolRuntime.nameMap,
+			MCPConfigs:              toolRuntime.mcpConfigs,
+			ToolSchemas:             toolRuntime.schemas,
+			PlatformTools:           toolRuntime.platformEntries,
+			Ledger:                  toolLedger,
+			PriorCredentialAttempts: credentialAttemptsForTurn,
+			PriorCredentialWrites:   credentialWritesForTurn,
+			ResultTokenBudget:       toolResultTokenBudget,
 		})
 		toolSpan.SetAttributes(
 			attribute.Int("conversation.tool.executed_count", len(toolResult.Rows)),
@@ -717,11 +755,15 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 		toolSpan.End()
 		toolCallRows = append(toolCallRows, toolResult.Rows...)
 		remainingToolCalls -= len(toolResult.Rows)
-		if len(toolResult.CredentialWrites) > 0 {
-			assistantText, _ = applyCredentialWrites(assistantText, toolResult.CredentialWrites)
-			assistantToolMessage.Content, _ = applyCredentialWrites(assistantToolMessage.Content, toolResult.CredentialWrites)
-			assistantToolMessage.ReasoningContent, _ = applyCredentialWrites(assistantToolMessage.ReasoningContent, toolResult.CredentialWrites)
-			applyCredentialWritesToLLMMessages(llmMessages, toolResult.CredentialWrites)
+		credentialAttempted := len(toolResult.CredentialAttempts) > 0
+		if credentialAttempted {
+			credentialAttemptedForTurn = true
+			credentialAttemptsForTurn = mergeCredentialWrites(credentialAttemptsForTurn, toolResult.CredentialAttempts)
+			credentialWritesForTurn = mergeCredentialWrites(credentialWritesForTurn, toolResult.CredentialWrites)
+			assistantText, _ = applyCredentialReplacements(assistantText, toolResult.CredentialAttempts, toolResult.CredentialWrites)
+			assistantToolMessage.Content, _ = applyCredentialReplacements(assistantToolMessage.Content, toolResult.CredentialAttempts, toolResult.CredentialWrites)
+			assistantToolMessage.ReasoningContent, _ = applyCredentialReplacements(assistantToolMessage.ReasoningContent, toolResult.CredentialAttempts, toolResult.CredentialWrites)
+			applyCredentialReplacementsToLLMMessages(llmMessages, toolResult.CredentialAttempts, toolResult.CredentialWrites)
 		}
 		if toolResult.MCPActivationChanged {
 			toolRuntime = toolRuntime.visibleRuntime()
@@ -795,7 +837,7 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 			followUpInput.DisableTools = true
 			followUpInput.PreviousResponseID = ""
 			applyOpenAIResponsesInstructions(route, routeConfig.Endpoint, &followUpInput)
-		} else if len(toolResult.CredentialWrites) == 0 && !toolResult.MCPActivationChanged && !toolHistoryTrimmed && !toolResultsRebalanced && routeConfig.Endpoint == llm.EndpointResponses && supportsPreviousResponseIDRoute(route) && strings.TrimSpace(upstreamOutput.ResponseID) != "" {
+		} else if !credentialAttempted && !toolResult.MCPActivationChanged && !toolHistoryTrimmed && !toolResultsRebalanced && routeConfig.Endpoint == llm.EndpointResponses && supportsPreviousResponseIDRoute(route) && strings.TrimSpace(upstreamOutput.ResponseID) != "" {
 			followUpInput.PreviousResponseID = strings.TrimSpace(upstreamOutput.ResponseID)
 			followUpInput.Messages = []llm.Message{{Role: "tool", ToolResults: toolResult.ToolResults}}
 		} else {
@@ -857,6 +899,13 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 	}
 
 	// 9. 收尾：用量口径、空响应检查、最终 usage 事件。
+	if credentialAttemptedForTurn {
+		assistantText, _ = applyCredentialReplacements(assistantText, credentialAttemptsForTurn, credentialWritesForTurn)
+		if upstreamOutput != nil {
+			sanitizeGenerateOutputCredentialAttempts(upstreamOutput, credentialAttemptsForTurn)
+		}
+		applyCredentialReplacementsToToolCallRows(toolCallRows, credentialAttemptsForTurn, credentialWritesForTurn)
+	}
 	effectiveInputTokens := usageAccumulator.effectiveInputTokens(estimatedPromptTokens)
 	effectiveOutputTokens := resolveObservedOrEstimatedOutputTokens(totalUsage.OutputTokens, assistantText)
 
@@ -914,8 +963,14 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 		latency = 0
 	}
 	return &AgentTurnOutput{
-		Text:              strings.TrimSpace(assistantText),
-		ReasoningText:     outputReasoningContent(upstreamOutput),
+		Text: strings.TrimSpace(assistantText),
+		ReasoningText: func() string {
+			reasoning := outputReasoningContent(upstreamOutput)
+			if credentialAttemptedForTurn {
+				reasoning, _ = applyCredentialReplacements(reasoning, credentialAttemptsForTurn, credentialWritesForTurn)
+			}
+			return reasoning
+		}(),
 		ToolCallRows:      toolCallRows,
 		Usage:             usageLedger,
 		Route:             route,
@@ -1030,20 +1085,22 @@ func emitAgentTurnUsageEvent(input AgentTurnInput, usage llm.Usage) error {
 }
 
 type executeAgentTurnToolCallsInput struct {
-	UserID            uint
-	ConversationID    uint
-	MessageID         uint
-	RequestID         string
-	RunID             string
-	ToolCalls         []llm.ToolCall
-	ToolCallLimit     int
-	ToolRuntime       *selectedToolRuntime
-	ToolNameMap       map[string]string
-	MCPConfigs        map[string]mcp.CallConfig
-	ToolSchemas       map[string]json.RawMessage
-	PlatformTools     map[string]platformToolEntry // 平台内置工具（模型名 → 注册项）
-	Ledger            *toolExecutionLedger
-	ResultTokenBudget int64
+	UserID                  uint
+	ConversationID          uint
+	MessageID               uint
+	RequestID               string
+	RunID                   string
+	ToolCalls               []llm.ToolCall
+	ToolCallLimit           int
+	ToolRuntime             *selectedToolRuntime
+	ToolNameMap             map[string]string
+	MCPConfigs              map[string]mcp.CallConfig
+	ToolSchemas             map[string]json.RawMessage
+	PlatformTools           map[string]platformToolEntry // 平台内置工具（模型名 → 注册项）
+	Ledger                  *toolExecutionLedger
+	PriorCredentialAttempts []credentialWrite
+	PriorCredentialWrites   []credentialWrite
+	ResultTokenBudget       int64
 }
 
 // executeAgentTurnToolCalls 是 executeAssistantToolCalls 的 Actor 包装：
@@ -1053,32 +1110,46 @@ func (s *Service) executeAgentTurnToolCalls(ctx context.Context, turn AgentTurnI
 	if input.ToolCallLimit > 0 && len(toolCalls) > input.ToolCallLimit {
 		toolCalls = toolCalls[:input.ToolCallLimit]
 	}
+	attempts := mergeCredentialWrites(
+		append([]credentialWrite(nil), input.PriorCredentialAttempts...),
+		credentialAttemptsFromToolCalls(toolCalls, input.ToolNameMap, input.PlatformTools),
+	)
+	currentAttempts := credentialAttemptsFromToolCalls(toolCalls, input.ToolNameMap, input.PlatformTools)
+	if len(currentAttempts) > 0 && turn.OnCredentialAttemptsDetected != nil {
+		if err := turn.OnCredentialAttemptsDetected(ctx, currentAttempts); err != nil {
+			return executeAssistantToolCallsResult{CredentialAttempts: currentAttempts, FatalErr: err}
+		}
+	}
 	for _, item := range toolCalls {
 		modelToolName := strings.TrimSpace(item.ToolName)
 		executionToolName := resolveExecutionToolName(modelToolName, input.ToolNameMap)
 		_, isPlatform := input.PlatformTools[modelToolName]
+		arguments := maskCredentialToolInput(executionToolName, isPlatform, strings.TrimSpace(item.ArgumentsJSON))
+		arguments, _ = applyCredentialReplacementsToJSON(arguments, attempts, input.PriorCredentialWrites)
 		_ = emitAgentTurnEvent(turn, AgentTurnEventToolCall, map[string]interface{}{
 			"tool_name":    modelToolName,
 			"tool_call_id": strings.TrimSpace(item.ToolCallID),
-			"arguments":    maskCredentialToolInput(executionToolName, isPlatform, strings.TrimSpace(item.ArgumentsJSON)),
+			"arguments":    arguments,
 		})
 	}
 	result := s.executeAssistantToolCalls(ctx, executeAssistantToolCallsInput{
-		UserID:            input.UserID,
-		ConversationID:    input.ConversationID,
-		MessageID:         input.MessageID,
-		RequestID:         input.RequestID,
-		RunID:             input.RunID,
-		ToolCalls:         toolCalls,
-		ToolCallLimit:     input.ToolCallLimit,
-		ToolRuntime:       input.ToolRuntime,
-		ToolNameMap:       input.ToolNameMap,
-		MCPConfigs:        input.MCPConfigs,
-		ToolSchemas:       input.ToolSchemas,
-		PlatformTools:     input.PlatformTools,
-		Ledger:            input.Ledger,
-		SkipPersistence:   !turn.PersistToolCalls,
-		ResultTokenBudget: input.ResultTokenBudget,
+		UserID:                  input.UserID,
+		ConversationID:          input.ConversationID,
+		MessageID:               input.MessageID,
+		RequestID:               input.RequestID,
+		RunID:                   input.RunID,
+		ToolCalls:               toolCalls,
+		ToolCallLimit:           input.ToolCallLimit,
+		ToolRuntime:             input.ToolRuntime,
+		ToolNameMap:             input.ToolNameMap,
+		MCPConfigs:              input.MCPConfigs,
+		ToolSchemas:             input.ToolSchemas,
+		PlatformTools:           input.PlatformTools,
+		Ledger:                  input.Ledger,
+		PriorCredentialAttempts: input.PriorCredentialAttempts,
+		PriorCredentialWrites:   input.PriorCredentialWrites,
+		SkipPersistence:         !turn.PersistToolCalls,
+		ResultTokenBudget:       input.ResultTokenBudget,
 	})
 	for _, row := range result.Rows {
 		_ = emitAgentTurnEvent(turn, AgentTurnEventToolResult, map[string]interface{}{
@@ -1088,8 +1159,8 @@ func (s *Service) executeAgentTurnToolCalls(ctx context.Context, turn AgentTurnI
 			"error":        row.ErrorJSON,
 		})
 	}
-	if len(result.CredentialWrites) > 0 && turn.OnCredentialWrites != nil {
-		if err := turn.OnCredentialWrites(ctx, result.CredentialWrites); err != nil && result.FatalErr == nil {
+	if len(result.CredentialAttempts) > 0 && turn.OnCredentialAttempts != nil {
+		if err := turn.OnCredentialAttempts(ctx, result.CredentialAttempts, result.CredentialWrites); err != nil && result.FatalErr == nil {
 			result.FatalErr = err
 		}
 	}

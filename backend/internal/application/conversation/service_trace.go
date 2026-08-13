@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
@@ -97,6 +98,7 @@ type messageTraceRecorder struct {
 	upstreamThinkPendingReason  map[string]interface{}
 	upstreamThinkBufferedByte   int
 	failed                      bool
+	backgroundPersists          sync.WaitGroup
 }
 
 func formatTraceStep(label string, detail string) string {
@@ -525,7 +527,11 @@ func (r *messageTraceRecorder) completeDraft(draft *messageTraceDraft) bool {
 		r.upsertSnapshotEvent(draft, tracePayloadJSON(draft.payload))
 	}
 	if r.service != nil && r.service.repo != nil {
-		go r.persistDraftBackground(cloneTraceDraft(draft))
+		r.backgroundPersists.Add(1)
+		go func(snapshot *messageTraceDraft) {
+			defer r.backgroundPersists.Done()
+			r.persistDraftBackground(snapshot)
+		}(cloneTraceDraft(draft))
 	}
 	return true
 }
@@ -596,6 +602,73 @@ func (r *messageTraceRecorder) failWithContext(ctx context.Context, err error) {
 		r.tools.status = messageTraceStatusError
 		r.tools.endedAt = &now
 		r.persistDraftCtx(ctx, r.tools, true)
+	}
+}
+
+func (r *messageTraceRecorder) scrubCredentialAttempts(ctx context.Context, attempts []credentialWrite, successful []credentialWrite) {
+	if !r.enabled() || len(attempts) == 0 {
+		return
+	}
+	// Completed trace snapshots persist in background. Wait before the forced scrub so
+	// an older plaintext snapshot cannot overwrite the sanitized row afterward.
+	r.backgroundPersists.Wait()
+	for _, draft := range []*messageTraceDraft{r.process, r.tools, r.upstreamThink} {
+		if draft == nil {
+			continue
+		}
+		draft.title, _ = applyCredentialReplacements(draft.title, attempts, successful)
+		draft.summary, _ = applyCredentialReplacements(draft.summary, attempts, successful)
+		draft.contentMarkdown, _ = applyCredentialReplacements(draft.contentMarkdown, attempts, successful)
+		draft.payload = scrubCredentialTracePayload(draft.payload, attempts, successful)
+		r.persistDraftCtx(ctx, draft, true)
+	}
+	for index := range r.events {
+		r.events[index].Title, _ = applyCredentialReplacements(r.events[index].Title, attempts, successful)
+		r.events[index].Summary, _ = applyCredentialReplacements(r.events[index].Summary, attempts, successful)
+		r.events[index].ContentMarkdown, _ = applyCredentialReplacements(r.events[index].ContentMarkdown, attempts, successful)
+		r.events[index].PayloadJSON, _ = applyCredentialReplacementsToJSON(r.events[index].PayloadJSON, attempts, successful)
+	}
+	r.upstreamThinkPendingReplace, _ = applyCredentialReplacements(r.upstreamThinkPendingReplace, attempts, successful)
+	if pending, changed := applyCredentialReplacements(r.upstreamThinkPendingText.String(), attempts, successful); changed {
+		r.upstreamThinkPendingText.Reset()
+		_, _ = r.upstreamThinkPendingText.WriteString(pending)
+	}
+	r.upstreamThinkPendingReason = scrubCredentialTracePayload(r.upstreamThinkPendingReason, attempts, successful)
+	scrubMessagePromptTraceCredentials(r.promptTrace, attempts, successful)
+}
+
+func scrubCredentialTracePayload(payload map[string]interface{}, attempts []credentialWrite, successful []credentialWrite) map[string]interface{} {
+	if len(payload) == 0 {
+		return payload
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return payload
+	}
+	scrubbed, changed := applyCredentialReplacementsToJSON(string(raw), attempts, successful)
+	if !changed {
+		return payload
+	}
+	result := map[string]interface{}{}
+	if err := json.Unmarshal([]byte(scrubbed), &result); err != nil {
+		return payload
+	}
+	return result
+}
+
+func scrubMessagePromptTraceCredentials(trace *model.MessagePromptTrace, attempts []credentialWrite, successful []credentialWrite) {
+	if trace == nil {
+		return
+	}
+	trace.PromptFingerprint, _ = applyCredentialReplacements(trace.PromptFingerprint, attempts, successful)
+	trace.StatefulDisabledReason, _ = applyCredentialReplacements(trace.StatefulDisabledReason, attempts, successful)
+	for index := range trace.Blocks {
+		trace.Blocks[index].Title, _ = applyCredentialReplacements(trace.Blocks[index].Title, attempts, successful)
+		for refIndex := range trace.Blocks[index].SourceRefs {
+			trace.Blocks[index].SourceRefs[refIndex].SourceType, _ = applyCredentialReplacements(trace.Blocks[index].SourceRefs[refIndex].SourceType, attempts, successful)
+			trace.Blocks[index].SourceRefs[refIndex].SourceID, _ = applyCredentialReplacements(trace.Blocks[index].SourceRefs[refIndex].SourceID, attempts, successful)
+			trace.Blocks[index].SourceRefs[refIndex].Title, _ = applyCredentialReplacements(trace.Blocks[index].SourceRefs[refIndex].Title, attempts, successful)
+		}
 	}
 }
 
@@ -1582,7 +1655,7 @@ func buildRAGProcessTrace(
 	}
 	detail := fmt.Sprintf("检索已完成，共检索 %d 个文件，命中 %d 个段落。", len(names), len(chunks))
 	return fmt.Sprintf("检索到 %d 段相关内容", len(chunks)), formatTraceStep("内容检索", detail), map[string]interface{}{
-		"query":           compactSnippet(query, 240),
+		"query_chars":     len([]rune(strings.TrimSpace(query))),
 		"file_names":      names,
 		"hit_chunk_count": len(chunks),
 		"citations":       citations,

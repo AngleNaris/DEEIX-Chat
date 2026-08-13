@@ -289,6 +289,9 @@ func (s *Service) buildAgentGroupRunResumeState(
 	if err != nil {
 		return nil, err
 	}
+	if snapshot.CredentialWriteAttempted && !snapshot.CredentialWriteResumeSafe {
+		return nil, ErrAgentGroupRunStateCorrupt
+	}
 	conversation, err := s.repo.GetConversationByUser(ctx, run.ConversationID, run.UserID)
 	if err != nil {
 		return nil, err
@@ -410,6 +413,7 @@ func (s *Service) buildAgentGroupRunResumeState(
 		ledger:                ledger,
 		persistToolCalls:      true,
 		mcpActivation:         newMCPActivationState(snapshot.ActivatedMCPServerIDs),
+		credentialAttempted:   snapshot.CredentialWriteAttempted,
 	}, nil
 }
 

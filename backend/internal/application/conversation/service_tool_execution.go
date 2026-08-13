@@ -2,6 +2,8 @@ package conversation
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -15,22 +17,24 @@ import (
 )
 
 type executeAssistantToolCallsInput struct {
-	UserID            uint
-	ConversationID    uint
-	MessageID         uint
-	RequestID         string
-	RunID             string
-	ToolCalls         []llm.ToolCall
-	ToolCallLimit     int
-	TraceRecorder     *messageTraceRecorder
-	ToolRuntime       *selectedToolRuntime
-	ToolNameMap       map[string]string
-	MCPConfigs        map[string]mcp.CallConfig
-	ToolSchemas       map[string]json.RawMessage
-	PlatformTools     map[string]platformToolEntry // 平台内置工具（模型名 → 注册项）
-	Ledger            *toolExecutionLedger
-	SkipPersistence   bool
-	ResultTokenBudget int64
+	UserID                  uint
+	ConversationID          uint
+	MessageID               uint
+	RequestID               string
+	RunID                   string
+	ToolCalls               []llm.ToolCall
+	ToolCallLimit           int
+	TraceRecorder           *messageTraceRecorder
+	ToolRuntime             *selectedToolRuntime
+	ToolNameMap             map[string]string
+	MCPConfigs              map[string]mcp.CallConfig
+	ToolSchemas             map[string]json.RawMessage
+	PlatformTools           map[string]platformToolEntry // 平台内置工具（模型名 → 注册项）
+	Ledger                  *toolExecutionLedger
+	PriorCredentialAttempts []credentialWrite
+	PriorCredentialWrites   []credentialWrite
+	SkipPersistence         bool
+	ResultTokenBudget       int64
 }
 
 type executeAssistantToolCallsResult struct {
@@ -39,6 +43,7 @@ type executeAssistantToolCallsResult struct {
 	ExecutedToolCalls     []llm.ToolCall
 	PersistedToolCallKeys map[string]struct{}
 	CredentialWrites      []credentialWrite
+	CredentialAttempts    []credentialWrite
 	MCPActivationChanged  bool
 	FatalErr              error
 }
@@ -76,8 +81,12 @@ func (s *Service) executeAssistantToolCalls(ctx context.Context, input executeAs
 		return executeAssistantToolCallsResult{}
 	}
 	executedToolCalls := append([]llm.ToolCall(nil), toolCalls...)
+	credentialAttempts := credentialAttemptsFromToolCalls(toolCalls, input.ToolNameMap, input.PlatformTools)
+	allCredentialAttempts := mergeCredentialWrites(append([]credentialWrite(nil), input.PriorCredentialAttempts...), credentialAttempts)
+	input.PriorCredentialAttempts = allCredentialAttempts
 	if input.TraceRecorder != nil {
 		requestedRows := buildRequestedToolCallRows(toolCalls, input.ToolNameMap, input.RunID)
+		applyCredentialReplacementsToToolCallRows(requestedRows, allCredentialAttempts, input.PriorCredentialWrites)
 		for index := range requestedRows {
 			_, isPlatform := input.PlatformTools[toolCalls[index].ToolName]
 			requestedRows[index].InputJSON = maskCredentialToolInput(requestedRows[index].ToolName, isPlatform, requestedRows[index].InputJSON)
@@ -88,6 +97,9 @@ func (s *Service) executeAssistantToolCalls(ctx context.Context, input executeAs
 
 	slots := make([]toolExecutionSlot, len(toolCalls))
 	credentialWrites := make([]credentialWrite, 0)
+	credentialWritesForScrub := func() []credentialWrite {
+		return mergeCredentialWrites(append([]credentialWrite(nil), input.PriorCredentialWrites...), credentialWrites)
+	}
 	mcpActivationChanged := false
 	var fatalErr error
 	// 平台工具执行名集合：凭据工具落库打码时据此区分平台/MCP 工具。
@@ -194,6 +206,8 @@ func (s *Service) executeAssistantToolCalls(ctx context.Context, input executeAs
 						row.OutputJSON = row.OutputJSON + "\n\n生成的文件已作为消息附件直接发送给用户（对话中可见附件卡片），请勿再在回答中提供下载链接。"
 					}
 				}
+				row.OutputJSON, _ = applyCredentialReplacements(row.OutputJSON, allCredentialAttempts, credentialWritesForScrub())
+				row.ErrorJSON, _ = applyCredentialReplacements(row.ErrorJSON, allCredentialAttempts, credentialWritesForScrub())
 				// 落库前对凭据管理工具输入打码（value → [REDACTED]），防止密钥明文进 tool_calls 表。
 				persistedRow := row
 				persistedRow.InputJSON = maskCredentialToolInput(row.ToolName, isPlatformTool, row.InputJSON)
@@ -285,6 +299,8 @@ func (s *Service) executeAssistantToolCalls(ctx context.Context, input executeAs
 				row.OutputJSON = row.OutputJSON + "\n\n导出文件已作为消息附件直接发送给用户（对话中可见附件卡片），请勿再在回答中提供下载链接。"
 			}
 		}
+		row.OutputJSON, _ = applyCredentialReplacements(row.OutputJSON, allCredentialAttempts, credentialWritesForScrub())
+		row.ErrorJSON, _ = applyCredentialReplacements(row.ErrorJSON, allCredentialAttempts, credentialWritesForScrub())
 		// 落库前对凭据管理工具输入打码（value → [REDACTED]），防止密钥明文进 tool_calls 表。
 		persistedRow := row
 		persistedRow.InputJSON = maskCredentialToolInput(row.ToolName, isPlatformTool, row.InputJSON)
@@ -304,6 +320,13 @@ func (s *Service) executeAssistantToolCalls(ctx context.Context, input executeAs
 	toolResults := make([]llm.ToolResult, 0, len(slots))
 	persistedToolCallKeys := make(map[string]struct{})
 	enforceToolResultAggregateBudget(slots, input.ResultTokenBudget)
+	for index := range slots {
+		slots[index].row.InputJSON, _ = applyCredentialReplacementsToJSON(slots[index].row.InputJSON, allCredentialAttempts, credentialWritesForScrub())
+		slots[index].row.OutputJSON, _ = applyCredentialReplacements(slots[index].row.OutputJSON, allCredentialAttempts, credentialWritesForScrub())
+		slots[index].row.ErrorJSON, _ = applyCredentialReplacements(slots[index].row.ErrorJSON, allCredentialAttempts, credentialWritesForScrub())
+		slots[index].result.OutputJSON, _ = applyCredentialReplacements(slots[index].result.OutputJSON, allCredentialAttempts, credentialWritesForScrub())
+		slots[index].result.Error, _ = applyCredentialReplacements(slots[index].result.Error, allCredentialAttempts, credentialWritesForScrub())
+	}
 	for _, slot := range slots {
 		rows = append(rows, slot.row)
 		toolResults = append(toolResults, slot.result)
@@ -324,7 +347,7 @@ func (s *Service) executeAssistantToolCalls(ctx context.Context, input executeAs
 		input.TraceRecorder.completeTools()
 	}
 	for index := range executedToolCalls {
-		if arguments, changed := applyCredentialWrites(executedToolCalls[index].ArgumentsJSON, credentialWrites); changed {
+		if arguments, changed := applyCredentialReplacementsToJSON(executedToolCalls[index].ArgumentsJSON, allCredentialAttempts, credentialWritesForScrub()); changed {
 			executedToolCalls[index].ArgumentsJSON = arguments
 		}
 	}
@@ -334,6 +357,7 @@ func (s *Service) executeAssistantToolCalls(ctx context.Context, input executeAs
 		ExecutedToolCalls:     executedToolCalls,
 		PersistedToolCallKeys: persistedToolCallKeys,
 		CredentialWrites:      credentialWrites,
+		CredentialAttempts:    credentialAttempts,
 		MCPActivationChanged:  mcpActivationChanged,
 		FatalErr:              fatalErr,
 	}
@@ -394,10 +418,12 @@ func buildRepeatedToolSlot(row model.ToolCall, modelToolName string, previous to
 }
 
 func (s *Service) persistToolCallForInput(ctx context.Context, input executeAssistantToolCallsInput, row *model.ToolCall) bool {
-	if input.SkipPersistence {
+	if input.SkipPersistence || row == nil {
 		return false
 	}
-	return s.persistToolCallResult(ctx, row)
+	persistedRows := []model.ToolCall{*row}
+	applyCredentialReplacementsToToolCallRows(persistedRows, input.PriorCredentialAttempts, input.PriorCredentialWrites)
+	return s.persistToolCallResult(ctx, &persistedRows[0])
 }
 
 func (s *Service) persistToolCallResult(ctx context.Context, row *model.ToolCall) bool {
@@ -724,18 +750,21 @@ func (l *toolExecutionLedger) store(toolName string, argumentsJSON string, recor
 	if l == nil {
 		return
 	}
-	l.records[toolExecutionKey(toolName, argumentsJSON)] = record
+	key := toolExecutionKey(toolName, argumentsJSON)
+	record.row.InputJSON = ""
+	l.records[key] = record
 }
 
 func toolExecutionKey(toolName string, argumentsJSON string) string {
-	return strings.ToLower(strings.TrimSpace(toolName)) + "\x00" + canonicalToolArguments(argumentsJSON)
+	digest := sha256.Sum256([]byte(canonicalToolArguments(argumentsJSON)))
+	return strings.ToLower(strings.TrimSpace(toolName)) + "\x00" + hex.EncodeToString(digest[:])
 }
 
 func toolCallPersistenceKey(row model.ToolCall) string {
 	if value := strings.TrimSpace(row.ToolCallID); value != "" {
 		return "id:" + value
 	}
-	return "tool:" + strings.ToLower(strings.TrimSpace(row.ToolName)) + "\x00" + canonicalToolArguments(row.InputJSON)
+	return "tool:" + toolExecutionKey(row.ToolName, row.InputJSON)
 }
 
 func mergeToolCallPersistenceKeys(target *map[string]struct{}, source map[string]struct{}) {
