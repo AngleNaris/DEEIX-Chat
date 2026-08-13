@@ -129,6 +129,7 @@ definitions:
         - medium
         - high
         - xhigh
+        - max
         type: string
       rolePublicID:
         maxLength: 32
@@ -349,6 +350,7 @@ definitions:
         - medium
         - high
         - xhigh
+        - max
         type: string
       rolePublicID:
         maxLength: 32
@@ -803,6 +805,14 @@ definitions:
         type: string
     required:
     - updatedAt
+    type: object
+  ApprovalResponse:
+    properties:
+      approval:
+        description: Approval 待批准记录摘要（JSON 字符串，含 approval_id/tool/arguments/status）。
+        type: string
+    required:
+    - approval
     type: object
   AuditLogListResponseDoc:
     properties:
@@ -2223,6 +2233,8 @@ definitions:
         type: string
       icon:
         type: string
+      id:
+        type: integer
       mcpDefaultMode:
         type: string
       name:
@@ -2244,6 +2256,7 @@ definitions:
     - defaultSkillIDs
     - description
     - icon
+    - id
     - mcpDefaultMode
     - name
     - publicID
@@ -2384,12 +2397,16 @@ definitions:
         type: string
       icon:
         type: string
+      id:
+        type: integer
       mcpDefaultMode:
         type: string
       model:
         type: string
       name:
         type: string
+      pinned:
+        type: boolean
       provider:
         type: string
       publicID:
@@ -2412,9 +2429,11 @@ definitions:
     - description
     - groupName
     - icon
+    - id
     - mcpDefaultMode
     - model
     - name
+    - pinned
     - provider
     - publicID
     - reasoningEffort
@@ -2660,7 +2679,6 @@ definitions:
       defaultMCPToolIDs:
         items:
           type: integer
-        maxItems: 128
         type: array
       defaultSkillIDs:
         items:
@@ -2713,7 +2731,6 @@ definitions:
       defaultMCPToolIDs:
         items:
           type: integer
-        maxItems: 128
         type: array
       defaultSkillIDs:
         items:
@@ -2740,6 +2757,8 @@ definitions:
       name:
         maxLength: 80
         type: string
+      pinned:
+        type: boolean
       provider:
         maxLength: 32
         type: string
@@ -2749,6 +2768,7 @@ definitions:
         - medium
         - high
         - xhigh
+        - max
         type: string
       systemPrompt:
         maxLength: 12000
@@ -2763,6 +2783,27 @@ definitions:
           type: string
         maxItems: 1000
         type: array
+    type: object
+  CreateCredentialRequest:
+    properties:
+      description:
+        type: string
+      meta:
+        additionalProperties:
+          type: string
+        type: object
+      name:
+        type: string
+      type:
+        type: string
+      value:
+        type: string
+    required:
+    - description
+    - meta
+    - name
+    - type
+    - value
     type: object
   CreateModelDisplayGroupRequest:
     properties:
@@ -2920,6 +2961,8 @@ definitions:
         type: string
       baseURL:
         type: string
+      description:
+        type: string
       headersJSON:
         type: string
       name:
@@ -3043,6 +3086,49 @@ definitions:
         type: string
     required:
     - data
+    - errorMsg
+    type: object
+  CredentialListResponse:
+    properties:
+      results:
+        items:
+          $ref: '#/definitions/View'
+        type: array
+    required:
+    - results
+    type: object
+  CredentialListResponseDoc:
+    properties:
+      data:
+        $ref: '#/definitions/CredentialListResponse'
+      errorMsg:
+        type: string
+    required:
+    - data
+    - errorMsg
+    type: object
+  CredentialResponse:
+    properties:
+      credential:
+        $ref: '#/definitions/View'
+    required:
+    - credential
+    type: object
+  CredentialResponseDoc:
+    properties:
+      data:
+        $ref: '#/definitions/CredentialResponse'
+      errorMsg:
+        type: string
+    required:
+    - data
+    - errorMsg
+    type: object
+  CredentialsErrorDoc:
+    properties:
+      errorMsg:
+        type: string
+    required:
     - errorMsg
     type: object
   DeleteAccountRequest:
@@ -5673,6 +5759,126 @@ definitions:
     - data
     - errorMsg
     type: object
+  PublicGroupRunActorResponse:
+    properties:
+      color:
+        type: string
+      icon:
+        type: string
+      memberID:
+        type: string
+      model:
+        type: string
+      name:
+        type: string
+      type:
+        type: string
+    required:
+    - color
+    - icon
+    - memberID
+    - model
+    - name
+    - type
+    type: object
+  PublicGroupRunAttemptResponse:
+    properties:
+      attemptID:
+        type: string
+      attemptNumber:
+        type: integer
+      endedAt:
+        type: string
+        x-nullable: true
+        x-omitempty: false
+      errorCode:
+        type: string
+      output:
+        type: string
+      startedAt:
+        type: string
+      status:
+        type: string
+      updatedAt:
+        type: string
+    required:
+    - attemptID
+    - attemptNumber
+    - endedAt
+    - output
+    - startedAt
+    - status
+    - updatedAt
+    type: object
+  PublicGroupRunStepResponse:
+    properties:
+      actor:
+        $ref: '#/definitions/PublicGroupRunActorResponse'
+      attempts:
+        items:
+          $ref: '#/definitions/PublicGroupRunAttemptResponse'
+        type: array
+      endedAt:
+        type: string
+        x-nullable: true
+        x-omitempty: false
+      sequence:
+        type: integer
+      startedAt:
+        type: string
+      status:
+        type: string
+      stepID:
+        type: string
+      stepType:
+        type: string
+      updatedAt:
+        type: string
+    required:
+    - actor
+    - attempts
+    - endedAt
+    - sequence
+    - startedAt
+    - status
+    - stepID
+    - stepType
+    - updatedAt
+    type: object
+  PublicGroupRunTimelineResponse:
+    properties:
+      currentAttemptID:
+        type: string
+      currentStepID:
+        type: string
+      endedAt:
+        type: string
+        x-nullable: true
+        x-omitempty: false
+      errorCode:
+        type: string
+      groupRunID:
+        type: string
+      startedAt:
+        type: string
+      status:
+        type: string
+      steps:
+        items:
+          $ref: '#/definitions/PublicGroupRunStepResponse'
+        type: array
+      updatedAt:
+        type: string
+    required:
+    - currentAttemptID
+    - currentStepID
+    - endedAt
+    - groupRunID
+    - startedAt
+    - status
+    - steps
+    - updatedAt
+    type: object
   PublicModelListResponseDoc:
     properties:
       data:
@@ -5804,6 +6010,11 @@ definitions:
         items:
           type: string
         type: array
+      groupRuns:
+        additionalProperties:
+          $ref: '#/definitions/PublicGroupRunTimelineResponse'
+        description: 'GroupRuns 群组会话中间过程时间线（key: 消息 RunID），非群组会话为空。'
+        type: object
       lastAccessedAt:
         type: string
         x-nullable: true
@@ -6453,7 +6664,6 @@ definitions:
       selectedToolIDs:
         items:
           type: integer
-        maxItems: 128
         type: array
       skillIDs:
         items:
@@ -6533,6 +6743,8 @@ definitions:
         type: string
       createdAt:
         type: string
+      description:
+        type: string
       headersJSON:
         type: string
       id:
@@ -6559,6 +6771,7 @@ definitions:
     - activeToolCount
     - baseURL
     - createdAt
+    - description
     - headersJSON
     - id
     - lastError
@@ -7155,6 +7368,8 @@ definitions:
         enum:
         - none
         - image
+        - audio
+        - file
         type: string
       attachmentPromptArgument:
         type: string
@@ -7223,6 +7438,7 @@ definitions:
         - medium
         - high
         - xhigh
+        - max
         type: string
       sortOrder:
         minimum: 0
@@ -7312,7 +7528,6 @@ definitions:
       defaultMCPToolIDs:
         items:
           type: integer
-        maxItems: 128
         type: array
       defaultSkillIDs:
         items:
@@ -7350,7 +7565,6 @@ definitions:
       defaultMCPToolIDs:
         items:
           type: integer
-        maxItems: 128
         type: array
       defaultSkillIDs:
         items:
@@ -7377,6 +7591,8 @@ definitions:
       name:
         maxLength: 80
         type: string
+      pinned:
+        type: boolean
       provider:
         maxLength: 32
         type: string
@@ -7386,6 +7602,7 @@ definitions:
         - medium
         - high
         - xhigh
+        - max
         type: string
       status:
         enum:
@@ -7395,6 +7612,27 @@ definitions:
       systemPrompt:
         maxLength: 12000
         type: string
+    type: object
+  UpdateCredentialRequest:
+    properties:
+      description:
+        type: string
+      meta:
+        additionalProperties:
+          type: string
+        type: object
+      name:
+        type: string
+      type:
+        type: string
+      value:
+        type: string
+    required:
+    - description
+    - meta
+    - name
+    - type
+    - value
     type: object
   UpdateCurrentSessionLocationRequest:
     properties:
@@ -7595,6 +7833,8 @@ definitions:
         enum:
         - none
         - image
+        - audio
+        - file
         type: string
       attachmentPromptArgument:
         type: string
@@ -8987,6 +9227,32 @@ definitions:
     required:
     - data
     - errorMsg
+    type: object
+  View:
+    properties:
+      created_at:
+        type: string
+      description:
+        type: string
+      meta:
+        additionalProperties:
+          type: string
+        type: object
+      name:
+        type: string
+      public_id:
+        type: string
+      type:
+        type: string
+      updated_at:
+        type: string
+    required:
+    - created_at
+    - description
+    - name
+    - public_id
+    - type
+    - updated_at
     type: object
   WritePromptPresetRequest:
     properties:
@@ -16260,6 +16526,137 @@ paths:
       summary: 批量关闭会话公开分享
       tags:
       - chat
+  /credentials:
+    get:
+      consumes:
+      - application/json
+      description: 查询当前用户保存的凭据（不包含密钥值）
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/CredentialListResponseDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/CredentialsErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 凭据列表
+      tags:
+      - chat
+    post:
+      consumes:
+      - application/json
+      description: 保存一条命名凭据（SSH/API key 等），密钥加密存储且永不回显
+      parameters:
+      - description: 凭据信息
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/CreateCredentialRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/CredentialResponseDoc'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/CredentialsErrorDoc'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/CredentialsErrorDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/CredentialsErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 创建凭据
+      tags:
+      - chat
+  /credentials/{id}:
+    delete:
+      consumes:
+      - application/json
+      description: 删除一条凭据（软删除）
+      parameters:
+      - description: 凭据公开 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/CredentialsErrorDoc'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/CredentialsErrorDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/CredentialsErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 删除凭据
+      tags:
+      - chat
+    put:
+      consumes:
+      - application/json
+      description: 更新凭据名称/类型/描述/元数据；value 为空表示不修改密钥
+      parameters:
+      - description: 凭据公开 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 更新项
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/UpdateCredentialRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/CredentialResponseDoc'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/CredentialsErrorDoc'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/CredentialsErrorDoc'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/CredentialsErrorDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/CredentialsErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 更新凭据
+      tags:
+      - chat
   /files:
     get:
       consumes:
@@ -16856,6 +17253,64 @@ paths:
       summary: 查询可用模型目录
       tags:
       - llm
+  /platform-tools/approvals/{approval_id}/approve:
+    post:
+      description: 批准一条待确认的平台工具写操作（ask 批准模式），批准后异步执行
+      parameters:
+      - description: 待批准记录 ID
+        in: path
+        name: approval_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/ApprovalResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/Envelope'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/Envelope'
+      security:
+      - BearerAuth: []
+      summary: 批准平台工具写操作
+      tags:
+      - platform-tools
+  /platform-tools/approvals/{approval_id}/reject:
+    post:
+      description: 拒绝一条待确认的平台工具写操作（ask 批准模式），不执行
+      parameters:
+      - description: 待批准记录 ID
+        in: path
+        name: approval_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/ApprovalResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/Envelope'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/Envelope'
+      security:
+      - BearerAuth: []
+      summary: 拒绝平台工具写操作
+      tags:
+      - platform-tools
   /prompt-presets:
     get:
       consumes:

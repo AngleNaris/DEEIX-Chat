@@ -12,14 +12,15 @@ import (
 // platformWriteApproval 记录一条待用户批准的写操作（ask 批准模式）。
 // 模型侧先收到 pending_approval 结果，前端展示确认卡片；用户批准后异步执行。
 type platformWriteApproval struct {
-	ID             string
-	UserID         uint
-	ConversationID uint
-	RequestID      string
-	ToolName       string
-	ArgumentsJSON  string
-	CreatedAt      time.Time
-	Status         string // pending / approved / rejected / expired
+	ID                string
+	UserID            uint
+	ConversationID    uint
+	RequestID         string
+	ToolName          string
+	ExecutionToolName string
+	ArgumentsJSON     string
+	CreatedAt         time.Time
+	Status            string // pending / approved / rejected / expired
 }
 
 const (
@@ -58,20 +59,22 @@ func (s *platformWriteApprovalStore) create(
 	conversationID uint,
 	requestID string,
 	entry platformToolEntry,
+	executionToolName string,
 	argumentsJSON string,
 ) *platformWriteApproval {
 	if s == nil {
 		s = newPlatformWriteApprovalStore()
 	}
 	record := &platformWriteApproval{
-		ID:             conv.NormalizePublicID(uuid.NewString()),
-		UserID:         userID,
-		ConversationID: conversationID,
-		RequestID:      requestID,
-		ToolName:       entry.definition.Name,
-		ArgumentsJSON:  argumentsJSON,
-		CreatedAt:      s.nowFn(),
-		Status:         platformApprovalStatusPending,
+		ID:                conv.NormalizePublicID(uuid.NewString()),
+		UserID:            userID,
+		ConversationID:    conversationID,
+		RequestID:         requestID,
+		ToolName:          entry.definition.Name,
+		ExecutionToolName: executionToolName,
+		ArgumentsJSON:     argumentsJSON,
+		CreatedAt:         s.nowFn(),
+		Status:            platformApprovalStatusPending,
 	}
 	s.mu.Lock()
 	s.items[record.ID] = record

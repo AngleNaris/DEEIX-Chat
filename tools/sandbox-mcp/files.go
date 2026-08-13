@@ -11,6 +11,7 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 )
+
 // sanitizeWorkspacePath 校验并规范化工作区路径：只允许 /workspace 内（或相对路径），
 // 拒绝 .. 逃逸、绝对路径越界、空路径。返回容器内绝对路径。
 func sanitizeWorkspacePath(workspace, raw string) (string, error) {
@@ -183,47 +184,28 @@ func (s *sandboxServer) handleExportFile(ctx context.Context, req mcp.CallToolRe
 	if raw == "" {
 		return resultJSON(map[string]any{"ok": false, "error": "path is required"}), nil
 	}
-	// 只允许导出当前会话共享目录内的文件（防跨会话/跨用户读取）。
-	sharedDir := s.mgr.SharedDir(scope)
-	if !strings.HasPrefix(filepath.Clean(strings.ReplaceAll(raw, "\\", "/"))+"/", sharedDir+"/") &&
-		filepath.Clean(strings.ReplaceAll(raw, "\\", "/")) != sharedDir {
-		return resultJSON(map[string]any{"ok": false, "error": fmt.Sprintf("path must be inside %s (your session shared dir)", sharedDir)}), nil
-	}
-	name := strings.TrimSpace(req.GetString("name", ""))
-	if name == "" {
-		name = filepath.Base(raw)
-	}
-	if name == "" || name == "." || name == "/" {
-		return resultJSON(map[string]any{"ok": false, "error": "invalid file name"}), nil
-	}
-	// 读取文件元数据（大小校验上限 20MB，与 DEEIX 上传上限一致；realpath 校验防 symlink 逃逸，P0-06）。
-	script := fmt.Sprintf(`python3 -c "import os,sys; p=sys.argv[1]; r=sys.argv[2]; %s print(os.path.getsize(p))" %s %s`, pyRealpathGuard(), shellQuote(raw), shellQuote(sharedDir))
-	res, err := s.exec(ctx, execRequest{scope: scope, cmd: []string{"/bin/sh", "-c", script}, timeout: 30 * time.Second})
+	// Export accepts a workspace file and copies it into the current scope's shared directory.
+	workspacePath, err := sanitizeWorkspacePath(s.cfg.WorkspaceDir, raw)
 	if err != nil {
 		return resultJSON(map[string]any{"ok": false, "error": err.Error()}), nil
 	}
-	if res.ExitCode != 0 {
-		return resultJSON(map[string]any{"ok": false, "error": fmt.Sprintf("file not found or not readable: %s", raw)}), nil
+	name := strings.TrimSpace(req.GetString("name", ""))
+	if name == "" {
+		name = filepath.Base(workspacePath)
+	}
+	if filepath.Base(name) != name || name == "." || name == "/" || strings.ContainsRune(name, '\x00') {
+		return resultJSON(map[string]any{"ok": false, "error": "invalid file name"}), nil
+	}
+	sharedDir := s.mgr.SharedDir(scope)
+	dest := filepath.Join(sharedDir, name)
+	script := fmt.Sprintf(`python3 -c "import os,sys,shutil; p=sys.argv[1]; r=sys.argv[2]; d=sys.argv[3]; %s; assert os.path.isfile(p), 'not a regular file'; n=os.path.getsize(p); assert n>0, 'file is empty'; assert n<=20*1024*1024, 'file exceeds 20MB limit'; os.makedirs(d,exist_ok=True); assert os.path.realpath(d)==d or os.path.realpath(d).startswith(d+'/'); shutil.copyfile(p,os.path.join(d,sys.argv[4])); print(n)" %s %s %s %s`, pyRealpathGuard(), shellQuote(workspacePath), shellQuote(s.cfg.WorkspaceDir), shellQuote(sharedDir), shellQuote(name))
+	res, err := s.exec(ctx, execRequest{scope: scope, cmd: []string{"/bin/sh", "-c", script}, timeout: 30 * time.Second})
+	if err != nil || res.ExitCode != 0 {
+		return resultJSON(map[string]any{"ok": false, "error": "file not found, unsafe, or exceeds 20MB", "detail": safeErr(err, res)}), nil
 	}
 	var size int64
 	_, _ = fmt.Sscanf(strings.TrimSpace(res.Stdout), "%d", &size)
-	if size <= 0 {
-		return resultJSON(map[string]any{"ok": false, "error": "file is empty"}), nil
-	}
-	if size > 20<<20 {
-		return resultJSON(map[string]any{"ok": false, "error": fmt.Sprintf("file exceeds 20MB limit (%d bytes)", size)}), nil
-	}
-	return resultJSON(map[string]any{
-		"ok":        true,
-		"file_path": raw,
-		"name":      name,
-		"size":      size,
-		"note":      "文件已导出，用户可在对话中下载；在最终回答中给出下载链接。",
-		"__export__": []map[string]string{{
-			"path": raw,
-			"name": name,
-		}},
-	}), nil
+	return resultJSON(map[string]any{"ok": true, "file_path": dest, "name": name, "size": size, "__export__": []map[string]string{{"path": dest, "name": name}}}), nil
 }
 
 // shellQuote 单引号包裹 shell 参数（容器内 python 路径参数）。

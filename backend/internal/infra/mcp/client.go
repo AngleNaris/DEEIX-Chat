@@ -20,6 +20,7 @@ import (
 	platformtracing "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/observability/tracing"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/outboundhttp"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/security"
+	"github.com/google/uuid"
 )
 
 const (
@@ -118,12 +119,13 @@ func (c *Client) CallTool(ctx context.Context, cfg CallConfig, input CallInput) 
 		"user_id":         input.UserID,
 		"conversation_id": input.ConversationID,
 		"request_id":      strings.TrimSpace(input.RequestID),
+		"call_id":         uuid.NewString(),
 	}
 	if c.metaHMACKey != "" {
 		// 沙箱 MCP 要求 _meta 附带短期 HMAC 签名（服务到服务身份，canonical 串与 sandbox-mcp 一致）。
 		ts := time.Now().Unix()
 		meta["ts"] = ts
-		meta["sig"] = c.metaSignature(input, ts)
+		meta["sig"] = c.metaSignature(input, meta["call_id"].(string), ts)
 	}
 	params := map[string]interface{}{
 		"name":      toolName,
@@ -139,9 +141,9 @@ func (c *Client) CallTool(ctx context.Context, cfg CallConfig, input CallInput) 
 
 // metaSignature 计算 _meta 的 HMAC-SHA256 签名。
 // canonical 串格式必须与 tools/sandbox-mcp 的 metaSignature 保持一致。
-func (c *Client) metaSignature(input CallInput, ts int64) string {
-	canonical := fmt.Sprintf("user_id=%d\nconversation_id=%d\nrequest_id=%s\nts=%d",
-		input.UserID, input.ConversationID, strings.TrimSpace(input.RequestID), ts)
+func (c *Client) metaSignature(input CallInput, callID string, ts int64) string {
+	canonical := fmt.Sprintf("user_id=%d\nconversation_id=%d\nrequest_id=%s\ncall_id=%s\nts=%d",
+		input.UserID, input.ConversationID, strings.TrimSpace(input.RequestID), strings.TrimSpace(callID), ts)
 	mac := hmac.New(sha256.New, []byte(c.metaHMACKey))
 	mac.Write([]byte(canonical))
 	return hex.EncodeToString(mac.Sum(nil))

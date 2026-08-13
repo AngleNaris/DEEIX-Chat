@@ -11373,6 +11373,212 @@ const docTemplate = `{
                 }
             }
         },
+        "/credentials": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "查询当前用户保存的凭据（不包含密钥值）",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "chat"
+                ],
+                "summary": "凭据列表",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/CredentialListResponseDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/CredentialsErrorDoc"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "保存一条命名凭据（SSH/API key 等），密钥加密存储且永不回显",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "chat"
+                ],
+                "summary": "创建凭据",
+                "parameters": [
+                    {
+                        "description": "凭据信息",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/CreateCredentialRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/CredentialResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/CredentialsErrorDoc"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/CredentialsErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/CredentialsErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/credentials/{id}": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "更新凭据名称/类型/描述/元数据；value 为空表示不修改密钥",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "chat"
+                ],
+                "summary": "更新凭据",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "凭据公开 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "更新项",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/UpdateCredentialRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/CredentialResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/CredentialsErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/CredentialsErrorDoc"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/CredentialsErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/CredentialsErrorDoc"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "删除一条凭据（软删除）",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "chat"
+                ],
+                "summary": "删除凭据",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "凭据公开 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/CredentialsErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/CredentialsErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/CredentialsErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
         "/files": {
             "get": {
                 "security": [
@@ -12308,6 +12514,98 @@ const docTemplate = `{
                         "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/ChannelErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/platform-tools/approvals/{approval_id}/approve": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "批准一条待确认的平台工具写操作（ask 批准模式），批准后异步执行",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "platform-tools"
+                ],
+                "summary": "批准平台工具写操作",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "待批准记录 ID",
+                        "name": "approval_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ApprovalResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/Envelope"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/Envelope"
+                        }
+                    }
+                }
+            }
+        },
+        "/platform-tools/approvals/{approval_id}/reject": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "拒绝一条待确认的平台工具写操作（ask 批准模式），不执行",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "platform-tools"
+                ],
+                "summary": "拒绝平台工具写操作",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "待批准记录 ID",
+                        "name": "approval_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ApprovalResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/Envelope"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/Envelope"
                         }
                     }
                 }
@@ -13713,7 +14011,8 @@ const docTemplate = `{
                         "low",
                         "medium",
                         "high",
-                        "xhigh"
+                        "xhigh",
+                        "max"
                     ]
                 },
                 "rolePublicID": {
@@ -14017,7 +14316,8 @@ const docTemplate = `{
                         "low",
                         "medium",
                         "high",
-                        "xhigh"
+                        "xhigh",
+                        "max"
                     ]
                 },
                 "rolePublicID": {
@@ -14660,6 +14960,18 @@ const docTemplate = `{
             ],
             "properties": {
                 "updatedAt": {
+                    "type": "string"
+                }
+            }
+        },
+        "ApprovalResponse": {
+            "type": "object",
+            "required": [
+                "approval"
+            ],
+            "properties": {
+                "approval": {
+                    "description": "Approval 待批准记录摘要（JSON 字符串，含 approval_id/tool/arguments/status）。",
                     "type": "string"
                 }
             }
@@ -16658,6 +16970,7 @@ const docTemplate = `{
                 "defaultSkillIDs",
                 "description",
                 "icon",
+                "id",
                 "mcpDefaultMode",
                 "name",
                 "publicID",
@@ -16690,6 +17003,9 @@ const docTemplate = `{
                 },
                 "icon": {
                     "type": "string"
+                },
+                "id": {
+                    "type": "integer"
                 },
                 "mcpDefaultMode": {
                     "type": "string"
@@ -16876,9 +17192,11 @@ const docTemplate = `{
                 "description",
                 "groupName",
                 "icon",
+                "id",
                 "mcpDefaultMode",
                 "model",
                 "name",
+                "pinned",
                 "provider",
                 "publicID",
                 "reasoningEffort",
@@ -16915,6 +17233,9 @@ const docTemplate = `{
                 "icon": {
                     "type": "string"
                 },
+                "id": {
+                    "type": "integer"
+                },
                 "mcpDefaultMode": {
                     "type": "string"
                 },
@@ -16923,6 +17244,9 @@ const docTemplate = `{
                 },
                 "name": {
                     "type": "string"
+                },
+                "pinned": {
+                    "type": "boolean"
                 },
                 "provider": {
                     "type": "string"
@@ -17282,7 +17606,6 @@ const docTemplate = `{
                 },
                 "defaultMCPToolIDs": {
                     "type": "array",
-                    "maxItems": 128,
                     "items": {
                         "type": "integer"
                     }
@@ -17356,7 +17679,6 @@ const docTemplate = `{
                 },
                 "defaultMCPToolIDs": {
                     "type": "array",
-                    "maxItems": 128,
                     "items": {
                         "type": "integer"
                     }
@@ -17395,6 +17717,9 @@ const docTemplate = `{
                     "type": "string",
                     "maxLength": 80
                 },
+                "pinned": {
+                    "type": "boolean"
+                },
                 "provider": {
                     "type": "string",
                     "maxLength": 32
@@ -17405,7 +17730,8 @@ const docTemplate = `{
                         "low",
                         "medium",
                         "high",
-                        "xhigh"
+                        "xhigh",
+                        "max"
                     ]
                 },
                 "systemPrompt": {
@@ -17423,6 +17749,36 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                }
+            }
+        },
+        "CreateCredentialRequest": {
+            "type": "object",
+            "required": [
+                "description",
+                "meta",
+                "name",
+                "type",
+                "value"
+            ],
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "meta": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "name": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                },
+                "value": {
+                    "type": "string"
                 }
             }
         },
@@ -17647,6 +18003,9 @@ const docTemplate = `{
                 "baseURL": {
                     "type": "string"
                 },
+                "description": {
+                    "type": "string"
+                },
                 "headersJSON": {
                     "type": "string"
                 },
@@ -17812,6 +18171,72 @@ const docTemplate = `{
                 "data": {
                     "$ref": "#/definitions/UserDataResponse"
                 },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "CredentialListResponse": {
+            "type": "object",
+            "required": [
+                "results"
+            ],
+            "properties": {
+                "results": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/View"
+                    }
+                }
+            }
+        },
+        "CredentialListResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/CredentialListResponse"
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "CredentialResponse": {
+            "type": "object",
+            "required": [
+                "credential"
+            ],
+            "properties": {
+                "credential": {
+                    "$ref": "#/definitions/View"
+                }
+            }
+        },
+        "CredentialResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/CredentialResponse"
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "CredentialsErrorDoc": {
+            "type": "object",
+            "required": [
+                "errorMsg"
+            ],
+            "properties": {
                 "errorMsg": {
                     "type": "string"
                 }
@@ -21572,6 +21997,172 @@ const docTemplate = `{
                 }
             }
         },
+        "PublicGroupRunActorResponse": {
+            "type": "object",
+            "required": [
+                "color",
+                "icon",
+                "memberID",
+                "model",
+                "name",
+                "type"
+            ],
+            "properties": {
+                "color": {
+                    "type": "string"
+                },
+                "icon": {
+                    "type": "string"
+                },
+                "memberID": {
+                    "type": "string"
+                },
+                "model": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "PublicGroupRunAttemptResponse": {
+            "type": "object",
+            "required": [
+                "attemptID",
+                "attemptNumber",
+                "endedAt",
+                "output",
+                "startedAt",
+                "status",
+                "updatedAt"
+            ],
+            "properties": {
+                "attemptID": {
+                    "type": "string"
+                },
+                "attemptNumber": {
+                    "type": "integer"
+                },
+                "endedAt": {
+                    "type": "string",
+                    "x-nullable": true,
+                    "x-omitempty": false
+                },
+                "errorCode": {
+                    "type": "string"
+                },
+                "output": {
+                    "type": "string"
+                },
+                "startedAt": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "updatedAt": {
+                    "type": "string"
+                }
+            }
+        },
+        "PublicGroupRunStepResponse": {
+            "type": "object",
+            "required": [
+                "actor",
+                "attempts",
+                "endedAt",
+                "sequence",
+                "startedAt",
+                "status",
+                "stepID",
+                "stepType",
+                "updatedAt"
+            ],
+            "properties": {
+                "actor": {
+                    "$ref": "#/definitions/PublicGroupRunActorResponse"
+                },
+                "attempts": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/PublicGroupRunAttemptResponse"
+                    }
+                },
+                "endedAt": {
+                    "type": "string",
+                    "x-nullable": true,
+                    "x-omitempty": false
+                },
+                "sequence": {
+                    "type": "integer"
+                },
+                "startedAt": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "stepID": {
+                    "type": "string"
+                },
+                "stepType": {
+                    "type": "string"
+                },
+                "updatedAt": {
+                    "type": "string"
+                }
+            }
+        },
+        "PublicGroupRunTimelineResponse": {
+            "type": "object",
+            "required": [
+                "currentAttemptID",
+                "currentStepID",
+                "endedAt",
+                "groupRunID",
+                "startedAt",
+                "status",
+                "steps",
+                "updatedAt"
+            ],
+            "properties": {
+                "currentAttemptID": {
+                    "type": "string"
+                },
+                "currentStepID": {
+                    "type": "string"
+                },
+                "endedAt": {
+                    "type": "string",
+                    "x-nullable": true,
+                    "x-omitempty": false
+                },
+                "errorCode": {
+                    "type": "string"
+                },
+                "groupRunID": {
+                    "type": "string"
+                },
+                "startedAt": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "steps": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/PublicGroupRunStepResponse"
+                    }
+                },
+                "updatedAt": {
+                    "type": "string"
+                }
+            }
+        },
         "PublicModelListResponseDoc": {
             "type": "object",
             "required": [
@@ -21763,6 +22354,13 @@ const docTemplate = `{
                     "type": "array",
                     "items": {
                         "type": "string"
+                    }
+                },
+                "groupRuns": {
+                    "description": "GroupRuns 群组会话中间过程时间线（key: 消息 RunID），非群组会话为空。",
+                    "type": "object",
+                    "additionalProperties": {
+                        "$ref": "#/definitions/PublicGroupRunTimelineResponse"
                     }
                 },
                 "lastAccessedAt": {
@@ -22680,7 +23278,6 @@ const docTemplate = `{
                 },
                 "selectedToolIDs": {
                     "type": "array",
-                    "maxItems": 128,
                     "items": {
                         "type": "integer"
                     }
@@ -22792,6 +23389,7 @@ const docTemplate = `{
                 "activeToolCount",
                 "baseURL",
                 "createdAt",
+                "description",
                 "headersJSON",
                 "id",
                 "lastError",
@@ -22811,6 +23409,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "createdAt": {
+                    "type": "string"
+                },
+                "description": {
                     "type": "string"
                 },
                 "headersJSON": {
@@ -23710,7 +24311,9 @@ const docTemplate = `{
                     "type": "string",
                     "enum": [
                         "none",
-                        "image"
+                        "image",
+                        "audio",
+                        "file"
                     ]
                 },
                 "attachmentPromptArgument": {
@@ -23786,7 +24389,8 @@ const docTemplate = `{
                         "low",
                         "medium",
                         "high",
-                        "xhigh"
+                        "xhigh",
+                        "max"
                     ]
                 },
                 "sortOrder": {
@@ -23908,7 +24512,6 @@ const docTemplate = `{
                 },
                 "defaultMCPToolIDs": {
                     "type": "array",
-                    "maxItems": 128,
                     "items": {
                         "type": "integer"
                     }
@@ -23961,7 +24564,6 @@ const docTemplate = `{
                 },
                 "defaultMCPToolIDs": {
                     "type": "array",
-                    "maxItems": 128,
                     "items": {
                         "type": "integer"
                     }
@@ -24000,6 +24602,9 @@ const docTemplate = `{
                     "type": "string",
                     "maxLength": 80
                 },
+                "pinned": {
+                    "type": "boolean"
+                },
                 "provider": {
                     "type": "string",
                     "maxLength": 32
@@ -24010,7 +24615,8 @@ const docTemplate = `{
                         "low",
                         "medium",
                         "high",
-                        "xhigh"
+                        "xhigh",
+                        "max"
                     ]
                 },
                 "status": {
@@ -24023,6 +24629,36 @@ const docTemplate = `{
                 "systemPrompt": {
                     "type": "string",
                     "maxLength": 12000
+                }
+            }
+        },
+        "UpdateCredentialRequest": {
+            "type": "object",
+            "required": [
+                "description",
+                "meta",
+                "name",
+                "type",
+                "value"
+            ],
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "meta": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "name": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                },
+                "value": {
+                    "type": "string"
                 }
             }
         },
@@ -24310,7 +24946,9 @@ const docTemplate = `{
                     "type": "string",
                     "enum": [
                         "none",
-                        "image"
+                        "image",
+                        "audio",
+                        "file"
                     ]
                 },
                 "attachmentPromptArgument": {
@@ -26255,6 +26893,43 @@ const docTemplate = `{
                     "$ref": "#/definitions/UserSettingsResponse"
                 },
                 "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "View": {
+            "type": "object",
+            "required": [
+                "created_at",
+                "description",
+                "name",
+                "public_id",
+                "type",
+                "updated_at"
+            ],
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "meta": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "name": {
+                    "type": "string"
+                },
+                "public_id": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                },
+                "updated_at": {
                     "type": "string"
                 }
             }

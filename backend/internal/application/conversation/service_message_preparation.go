@@ -183,10 +183,6 @@ func (s *Service) persistRejectedMessageSend(
 	errorCode string,
 	errorMessage string,
 ) error {
-	if err := s.ValidateSelectedToolIDs(input.SelectedToolIDs); err != nil {
-		return err
-	}
-
 	conversation, err := s.repo.GetConversationByUser(ctx, input.ConversationID, input.UserID)
 	if err != nil {
 		return ErrConversationNotFound

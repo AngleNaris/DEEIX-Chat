@@ -8,10 +8,6 @@ type ModelOptionPolicyResponse = {
   nativeTools?: NativeToolDefinition[];
 };
 
-export type MCPPolicy = {
-  maxSelectedToolsPerMessage: number;
-};
-
 export type ChatContextPolicy = {
   contextCompactEnabled: boolean;
 };
@@ -27,17 +23,6 @@ export async function getModelOptionPolicy(accessToken: string): Promise<ModelOp
     allowedPathsJSON: data.allowedPathsJSON,
     deniedPathsJSON: data.deniedPathsJSON,
     nativeTools: data.nativeTools ?? [],
-  };
-}
-
-export async function getMCPPolicy(accessToken: string): Promise<MCPPolicy> {
-  const data = await authedRequest<MCPPolicy>(
-    "/api/v1/settings/mcp-policy",
-    { accessToken },
-    true,
-  );
-  return {
-    maxSelectedToolsPerMessage: data.maxSelectedToolsPerMessage,
   };
 }
 

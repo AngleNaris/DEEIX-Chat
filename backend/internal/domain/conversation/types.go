@@ -80,15 +80,15 @@ type ConversationProjectPatch struct {
 // ConversationRole 表示用户角色(助手)配置。
 // 角色 = 项目的全部能力 + 默认模型 + 图标。
 type ConversationRole struct {
-	ID                uint
-	UserID            uint
-	PublicID          string
-	Name              string
-	Description       string
-	SystemPrompt      string
-	Model             string
-	Provider          string
-	// ReasoningEffort 是角色默认思考强度语义档位（""/low/medium/high/xhigh），空串=继承用户全局默认。
+	ID           uint
+	UserID       uint
+	PublicID     string
+	Name         string
+	Description  string
+	SystemPrompt string
+	Model        string
+	Provider     string
+	// ReasoningEffort 是角色默认思考强度语义档位（""/low/medium/high/xhigh/max），空串=继承用户全局默认。
 	ReasoningEffort   string
 	MCPDefaultMode    string
 	DefaultMCPToolIDs []uint
@@ -98,10 +98,10 @@ type ConversationRole struct {
 	GroupName         string
 	SortOrder         int
 	// PinnedAt 非空表示角色已置顶（按置顶先后排序）。
-	PinnedAt          *time.Time
-	Status            string
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
+	PinnedAt  *time.Time
+	Status    string
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // ConversationRolePatch 表示角色的局部更新。
@@ -119,8 +119,8 @@ type ConversationRolePatch struct {
 	Icon              *string
 	GroupName         *string
 	// Pinned true=置顶（记录当前时间）；false=取消置顶；nil=不变。
-	Pinned            *bool
-	Status            *string
+	Pinned *bool
+	Status *string
 }
 
 // ConversationShare 表示会话公开分享快照。

@@ -63,11 +63,17 @@ func runServer(ctx context.Context, cfg *Config, mgr *SessionManager) error {
 	registerTools(mcpServer, s)
 
 	httpSrv := server.NewStreamableHTTPServer(mcpServer)
-	handler := authMiddleware(cfg, httpSrv)
+	mcpHandler := authMiddleware(cfg, httpSrv)
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
+	mux.Handle("/", mcpHandler)
 
 	srv := &http.Server{
 		Addr:              cfg.ListenAddr,
-		Handler:           handler,
+		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	slog.Info("sandbox mcp server listening", "addr", cfg.ListenAddr, "endpoint", "/mcp", "base_image", cfg.BaseImage)

@@ -1,6 +1,7 @@
 package agentgroup
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -8,12 +9,59 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin/binding"
 
 	appagentgroup "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/agentgroup"
 	domainagentgroup "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/agentgroup"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/middleware"
 )
+
+func TestAgentGroupReasoningEffortBindingsAcceptMax(t *testing.T) {
+	validate := binding.Validator
+	max := "max"
+	cases := []struct {
+		name  string
+		value interface{}
+	}{
+		{name: "create member", value: AgentGroupMemberRequest{RolePublicID: "role-1", ReasoningEffort: "max"}},
+		{name: "add member", value: AddAgentGroupMemberRequest{RolePublicID: "role-1", ReasoningEffort: "max"}},
+		{name: "update member", value: UpdateAgentGroupMemberRequest{ReasoningEffort: &max}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := validate.ValidateStruct(tc.value); err != nil {
+				t.Fatalf("max should be accepted: %v", err)
+			}
+		})
+	}
+
+	invalid := "highest"
+	for _, value := range []interface{}{
+		AgentGroupMemberRequest{RolePublicID: "role-1", ReasoningEffort: invalid},
+		AddAgentGroupMemberRequest{RolePublicID: "role-1", ReasoningEffort: invalid},
+		UpdateAgentGroupMemberRequest{ReasoningEffort: &invalid},
+	} {
+		if err := validate.ValidateStruct(value); err == nil {
+			t.Fatalf("invalid reasoning effort should be rejected: %#v", value)
+		}
+	}
+}
+
+func TestResolveErrorMapsInvalidReasoningEffortToBadRequest(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/conversation-agent-groups", bytes.NewReader(nil))
+
+	resolveError(c, appagentgroup.ErrInvalidReasoningEffort, http.StatusInternalServerError, "create agent group failed")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rec.Code, rec.Body.String())
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte(appagentgroup.ErrInvalidReasoningEffort.Error())) {
+		t.Fatalf("unexpected response body: %s", rec.Body.String())
+	}
+}
 
 // 群组已从项目绑定中拆除（§C1）：列表接口不再要求 projectID query 参数，
 // 无参数时返回当前用户全部群组 —— 回归测试锁定此行为。

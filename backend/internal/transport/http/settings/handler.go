@@ -247,15 +247,7 @@ func (h *Handler) GetModelOptionPolicy(c *gin.Context) {
 // @Success 200 {object} response.Envelope
 // @Router /settings/mcp-policy [get]
 func (h *Handler) GetMCPPolicy(c *gin.Context) {
-	cfg := h.runtime.Snapshot()
-	limit := cfg.MCPMaxSelectedToolsPerMessage
-	if limit <= 0 {
-		limit = config.DefaultMCPMaxSelectedToolsPerMessage
-	}
-	if limit > config.MaxMCPSelectedToolsPerMessage {
-		limit = config.MaxMCPSelectedToolsPerMessage
-	}
-	response.Success(c, MCPPolicyResponse{MaxSelectedToolsPerMessage: limit})
+	response.Success(c, MCPPolicyResponse{})
 }
 
 // GetChatContextPolicy godoc

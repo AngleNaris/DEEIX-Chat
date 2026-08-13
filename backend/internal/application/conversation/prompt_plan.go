@@ -58,6 +58,7 @@ type PromptPlan struct {
 type promptPlanInput struct {
 	BaseMessages      []llm.Message
 	StableAttachments []AttachmentInput
+	AttachmentImports []attachmentImportPath
 	DynamicContext    userContextInput
 	SkillPrompts      *skillPrompts
 	ToolRuntime       selectedToolRuntime
@@ -150,6 +151,7 @@ func buildPromptPlan(ctx context.Context, input promptPlanInput) PromptPlan {
 
 	before = len(messages)
 	messages = injectMCPToolGuidance(messages, input.ToolRuntime, input.Config.MCPToolPrompt)
+	messages = injectAttachmentImportGuidance(messages, input.ToolRuntime, input.AttachmentImports)
 	if len(messages) > before {
 		inserted := findToolGuidanceMessage(messages)
 		tokenEstimate := int64(0)

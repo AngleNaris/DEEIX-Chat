@@ -356,8 +356,9 @@ func (s *Service) buildAgentGroupRunResumeState(
 				if !strings.EqualFold(row.Status, "success") && !strings.EqualFold(row.Status, "reused") {
 					continue
 				}
-				if modelToolName := strings.TrimSpace(row.ToolName); modelToolName != "" {
+				if modelToolName := strings.TrimSpace(row.ToolName); modelToolName != "" && !isCredentialPlatformTool(modelToolName) {
 					ledger.store(row.ToolName, row.InputJSON, toolExecutionRecord{
+
 						row:    row,
 						result: buildToolResultForModel(row, modelToolName),
 					})
@@ -408,6 +409,7 @@ func (s *Service) buildAgentGroupRunResumeState(
 		attemptLease:          s.agentGroupAttemptLease(ctx),
 		ledger:                ledger,
 		persistToolCalls:      true,
+		mcpActivation:         newMCPActivationState(snapshot.ActivatedMCPServerIDs),
 	}, nil
 }
 

@@ -171,7 +171,6 @@ export function ChatMessageUser({
     draft: editingValue,
     enabledKinds: modelMenuDisabled ? EDIT_MESSAGE_PROMPT_ONLY_KINDS : EDIT_MESSAGE_MENTION_KINDS,
     maxSelectedSkills: 0,
-    maxSelectedTools: 0,
     modelOptions,
     selectedSkills: [],
     selectedPlatformModelName,

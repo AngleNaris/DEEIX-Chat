@@ -994,6 +994,7 @@ function MessageInlineAudioPreview({
 
   return (
     <div className="my-4 w-full max-w-[36rem]">
+      {/* biome-ignore lint/a11y/useMediaCaption: generated audio has no transcript track available. */}
       <audio controls preload="metadata" className="w-full" src={state.source}>
         <a href={state.source} download={fileName}>
           {fileName}

@@ -44,21 +44,73 @@ func TestExecuteAssistantToolCallsStopsWhenToolNotEnabledForRun(t *testing.T) {
 	}
 }
 
+func TestExecuteAssistantToolCallsMasksAndReusesCredentialWrites(t *testing.T) {
+	const secret = "credential-secret-value"
+	callCount := 0
+	entry := platformToolEntry{
+		definition: llm.ToolDefinition{
+			Name:        "credential_create",
+			InputSchema: []byte(`{"type":"object","properties":{"name":{"type":"string"},"value":{"type":"string"}},"required":["name","value"]}`),
+		},
+		kind: platformToolWrite,
+		handler: func(_ *Service, _ context.Context, _ platformToolCallContext) (string, error) {
+			callCount++
+			return `{"status":"created"}`, nil
+		},
+	}
+	ledger := newToolExecutionLedger()
+	execute := func(toolCallID string) executeAssistantToolCallsResult {
+		return (&Service{}).executeAssistantToolCalls(t.Context(), executeAssistantToolCallsInput{
+			RunID: toolCallID,
+			ToolCalls: []llm.ToolCall{{
+				ToolCallID:    toolCallID,
+				ToolType:      "function",
+				ToolName:      "credential_create_model",
+				ArgumentsJSON: `{"name":"deploy-key","value":"` + secret + `"}`,
+			}},
+			ToolNameMap: map[string]string{"credential_create_model": "credential_create"},
+			PlatformTools: map[string]platformToolEntry{
+				"credential_create_model": entry,
+			},
+			Ledger:          ledger,
+			SkipPersistence: true,
+		})
+	}
+
+	first := execute("call-1")
+	second := execute("call-2")
+	if callCount != 1 {
+		t.Fatalf("expected repeated credential call to reuse the in-memory ledger, handler calls=%d", callCount)
+	}
+	for label, result := range map[string]executeAssistantToolCallsResult{"first": first, "second": second} {
+		if result.FatalErr != nil || len(result.Rows) != 1 || len(result.ToolResults) != 1 || len(result.ExecutedToolCalls) != 1 {
+			t.Fatalf("%s execution returned unexpected result: %#v", label, result)
+		}
+		if len(result.CredentialWrites) != 1 || result.CredentialWrites[0].Name != "deploy-key" || result.CredentialWrites[0].Value != secret {
+			t.Fatalf("%s execution lost credential replacement side channel: %#v", label, result.CredentialWrites)
+		}
+		serialized := result.Rows[0].InputJSON + result.Rows[0].OutputJSON + result.Rows[0].ErrorJSON +
+			result.ToolResults[0].OutputJSON + result.ToolResults[0].Error + result.ExecutedToolCalls[0].ArgumentsJSON
+
+		if strings.Contains(serialized, secret) {
+			t.Fatalf("%s execution leaked credential plaintext: %s", label, serialized)
+		}
+		if !strings.Contains(result.Rows[0].InputJSON, "[REDACTED]") {
+			t.Fatalf("%s execution did not redact persisted row input: %s", label, result.Rows[0].InputJSON)
+		}
+		if !strings.Contains(result.ExecutedToolCalls[0].ArgumentsJSON, "{{credential: deploy-key}}") {
+			t.Fatalf("%s execution did not scrub model tool-call arguments: %s", label, result.ExecutedToolCalls[0].ArgumentsJSON)
+		}
+	}
+	if second.Rows[0].Status != "reused" {
+		t.Fatalf("expected second credential call to be marked reused, got %q", second.Rows[0].Status)
+	}
+}
+
 func TestResolveMaxLLMCallsPerRunRequiresFollowUpRound(t *testing.T) {
 	svc := &Service{cfg: config.NewRuntime(config.Config{MCPMaxLLMCallsPerRun: 1})}
 	if got := svc.resolveMaxLLMCallsPerRun(); got != 2 {
 		t.Fatalf("expected minimum LLM calls per run to be 2, got %d", got)
-	}
-}
-
-func TestValidateSelectedToolIDsUsesRuntimeLimit(t *testing.T) {
-	service := &Service{cfg: config.NewRuntime(config.Config{MCPMaxSelectedToolsPerMessage: 2})}
-
-	if err := service.ValidateSelectedToolIDs([]uint{1, 2}); err != nil {
-		t.Fatalf("expected two selected tools to pass, got %v", err)
-	}
-	if err := service.ValidateSelectedToolIDs([]uint{1, 2, 3}); err != ErrTooManySelectedTools {
-		t.Fatalf("expected ErrTooManySelectedTools, got %v", err)
 	}
 }
 

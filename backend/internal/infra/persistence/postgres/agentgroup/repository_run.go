@@ -124,6 +124,9 @@ func (r *Repo) CASUpdateAgentGroupRun(ctx context.Context, runID uint, expectedS
 	if patch.AssistantMessageID != nil {
 		fields["assistant_message_id"] = *patch.AssistantMessageID
 	}
+	if patch.ConfigSnapshotJSON != nil {
+		fields["config_snapshot_json"] = *patch.ConfigSnapshotJSON
+	}
 	if patch.ErrorCode != nil {
 		fields["error_code"] = *patch.ErrorCode
 	}
@@ -242,6 +245,9 @@ func (r *Repo) CASUpdateAgentGroupStepAttempt(ctx context.Context, attemptID uin
 	}
 	if patch.PartialOutputMarkdown != nil {
 		fields["partial_output_markdown"] = *patch.PartialOutputMarkdown
+	}
+	if patch.InputSnapshotJSON != nil {
+		fields["input_snapshot_json"] = *patch.InputSnapshotJSON
 	}
 	if patch.ErrorCode != nil {
 		fields["error_code"] = *patch.ErrorCode

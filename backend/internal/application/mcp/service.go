@@ -19,6 +19,7 @@ import (
 
 var (
 	ErrInvalidServerName           = errors.New("invalid mcp server name")
+	ErrInvalidServerDescription    = errors.New("invalid mcp server description")
 	ErrInvalidServerBaseURL        = errors.New("invalid mcp server base url")
 	ErrInvalidServerStatus         = errors.New("invalid mcp server status")
 	ErrInvalidServerHeaders        = errors.New("invalid mcp server headers json")
@@ -50,6 +51,7 @@ type systemEventWriter interface {
 
 type ServerInput struct {
 	Name        string
+	Description string
 	BaseURL     string
 	AuthToken   string
 	HeadersJSON string
@@ -102,6 +104,7 @@ func (s *Service) CreateServer(ctx context.Context, input ServerInput) (*domainm
 	}
 	return s.repo.CreateServer(ctx, repository.CreateMCPServerInput{
 		Name:         normalized.Name,
+		Description:  normalized.Description,
 		BaseURL:      normalized.BaseURL,
 		AuthTokenEnc: tokenEnc,
 		HeadersJSON:  normalized.HeadersJSON,
@@ -114,8 +117,17 @@ func (s *Service) UpdateServer(ctx context.Context, serverID uint, input ServerI
 	if err != nil {
 		return nil, err
 	}
+	existing, err := s.repo.GetServer(ctx, serverID)
+	if err != nil {
+		return nil, err
+	}
+	if existing == nil {
+		return nil, fmt.Errorf("mcp server %d not found", serverID)
+	}
+	normalized.HeadersJSON = mergeRedactedMCPHeaders(existing.HeadersJSON, normalized.HeadersJSON)
 	update := repository.UpdateMCPServerInput{
 		Name:        &normalized.Name,
+		Description: &normalized.Description,
 		BaseURL:     &normalized.BaseURL,
 		HeadersJSON: &normalized.HeadersJSON,
 		Status:      &normalized.Status,
@@ -395,6 +407,10 @@ func (s *Service) normalizeServerInput(input ServerInput, requireToken bool) (Se
 	if name == "" || len([]rune(name)) > 128 {
 		return ServerInput{}, ErrInvalidServerName
 	}
+	description := strings.TrimSpace(input.Description)
+	if len([]rune(description)) > 4096 {
+		return ServerInput{}, ErrInvalidServerDescription
+	}
 	baseURL := strings.TrimSpace(input.BaseURL)
 	parsedURL, err := url.Parse(baseURL)
 	if err != nil || parsedURL.Scheme == "" || parsedURL.Host == "" || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
@@ -424,6 +440,7 @@ func (s *Service) normalizeServerInput(input ServerInput, requireToken bool) (Se
 	}
 	return ServerInput{
 		Name:        name,
+		Description: description,
 		BaseURL:     baseURL,
 		AuthToken:   strings.TrimSpace(input.AuthToken),
 		HeadersJSON: headersJSON,
@@ -607,6 +624,30 @@ func (s *Service) encryptToken(token string) (string, error) {
 
 func (s *Service) decryptToken(encrypted string) (string, error) {
 	return secretbox.DecryptString(s.cfg.Snapshot().DataEncryptionKey, encrypted)
+}
+
+func mergeRedactedMCPHeaders(existingJSON, updateJSON string) string {
+	existing, existingErr := parseHeadersJSON(existingJSON)
+	update, updateErr := parseHeadersJSON(updateJSON)
+	if existingErr != nil || updateErr != nil {
+		return updateJSON
+	}
+	for key, value := range update {
+		if value != "********" || !security.IsSensitiveHeaderName(key) {
+			continue
+		}
+		for existingKey, existingValue := range existing {
+			if strings.EqualFold(existingKey, key) {
+				update[key] = existingValue
+				break
+			}
+		}
+	}
+	encoded, err := json.Marshal(update)
+	if err != nil {
+		return updateJSON
+	}
+	return string(encoded)
 }
 
 func parseHeadersJSON(raw string) (map[string]string, error) {

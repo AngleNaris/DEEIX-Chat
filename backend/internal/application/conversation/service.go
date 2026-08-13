@@ -10,23 +10,23 @@ import (
 	"sync"
 	"time"
 
+	appartifact "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/artifact"
 	appbilling "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/billing"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/channel"
 	appcompact "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/compact"
+	appcredentials "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/credentials"
 	appdoccard "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/doccard"
 	appdynamicprompt "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/dynamicprompt"
-	appcredentials "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/credentials"
 	appembedding "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/embedding"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/extraction"
-	appartifact "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/artifact"
 	appstorage "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/objectstorage"
 	appprocessing "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/processing"
 	apppromptpreset "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/promptpreset"
 	apprag "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/rag"
 	appskill "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/skill"
 	appupload "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/upload"
-	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 	domainagentgroup "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/agentgroup"
+	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 	domaindoccard "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/doccard"
 	domaindynamicprompt "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/dynamicprompt"
 	domainmcp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/mcp"
@@ -217,49 +217,49 @@ type basicServiceBillingContext struct {
 
 // Service 封装会话业务能力。
 type Service struct {
-	cfg               *config.Runtime
-	repo              repository.ConversationRepository
-	cache             repository.ConversationCacheRepository
-	routeResolver     routeResolver
-	memoryRecorder    memoryRecorder
-	mcpRepo           mcpToolResolver
-	agentGroupRepo    agentGroupResolver
+	cfg                   *config.Runtime
+	repo                  repository.ConversationRepository
+	cache                 repository.ConversationCacheRepository
+	routeResolver         routeResolver
+	memoryRecorder        memoryRecorder
+	mcpRepo               mcpToolResolver
+	agentGroupRepo        agentGroupResolver
 	agentGroupRunStore    repository.AgentGroupRunRepository
 	agentGroupSettings    agentGroupSettingsReader
-	agentGroupRunLocks    sync.Map // conversationID (uint) → *sync.Mutex，同会话串行
-	platformToolsSettings agentGroupSettingsReader // platform_tools 运行时设置
+	agentGroupRunLocks    sync.Map                    // conversationID (uint) → *sync.Mutex，同会话串行
+	platformToolsSettings agentGroupSettingsReader    // platform_tools 运行时设置
 	platformApprovals     *platformWriteApprovalStore // ask 模式待批准写操作
-	reindexScheduler      *fileReindexScheduler      // write_file 延迟重建（debounce）
-	userSettingsSvc       userSettingsWriter         // 用户个人设置读写（平台工具 list/update_user_setting）
-	agentGroupWriter      agentGroupWriter           // Agent 群组创建/列表（平台工具 create/list_agent_group）
-	userProfile           userProfileReader          // 用户档案读取（模板变量 {{language}}/{{username}}）
-	artifactSvc           *appartifact.Service       // 制品保存/分享（平台工具 save/list/delete/share_artifact）
-	docCards              docCardReader              // 文档卡片读取（关键字触发注入）
-	docCardCache          sync.Map                   // userID (uint) → *cachedDocCards
-	dynamicPrompts        dynamicPromptReader        // 动态提示词读取（{{script: name}} 展开 + 平台工具脚本管理）
-	credentials           credentialResolver         // 用户凭据（{{credential: name}} 展开 + 平台工具管理）
-	dynamicPromptCache    sync.Map                   // userID (uint) → *cachedDynamicPrompts
-	promptPresets         promptPresetResolver       // 预制提示词（平台工具 list/create/update/delete_prompt_preset）
-	llmClient         *llm.Client
-	mediaDownloader   generatedMediaDownloader
-	mcpClient         *mcp.Client
-	uploadSvc         *appupload.Service
-	compactSvc        *appcompact.Service
-	embeddingSvc      *appembedding.Service
-	processingSvc     *appprocessing.Service
-	extractSvc        *extraction.Service
-	ragSvc            *apprag.Service
-	skillResolver     skillResolver
-	billingSvc        *appbilling.Service
-	auditWriter       auditWriter
-	storeProvider     appstorage.Provider
-	logger            *zap.Logger
-	toolLimiters      sync.Map
-	generationStreams *generationStreamRegistry
-	snapshotCache     sync.Map // conversationID (uint) → *cachedSnapshot
-	userMemCache      sync.Map // userID (uint) → *cachedUserMemories
-	userSettingCache  sync.Map // "userID:key" (string) → *cachedUserSetting
-	imageContextCache *preparedConversationImageCache
+	reindexScheduler      *fileReindexScheduler       // write_file 延迟重建（debounce）
+	userSettingsSvc       userSettingsWriter          // 用户个人设置读写（平台工具 list/update_user_setting）
+	agentGroupWriter      agentGroupWriter            // Agent 群组创建/列表（平台工具 create/list_agent_group）
+	userProfile           userProfileReader           // 用户档案读取（模板变量 {{language}}/{{username}}）
+	artifactSvc           *appartifact.Service        // 制品保存/分享（平台工具 save/list/delete/share_artifact）
+	docCards              docCardReader               // 文档卡片读取（关键字触发注入）
+	docCardCache          sync.Map                    // userID (uint) → *cachedDocCards
+	dynamicPrompts        dynamicPromptReader         // 动态提示词读取（{{script: name}} 展开 + 平台工具脚本管理）
+	credentials           credentialResolver          // 用户凭据（{{credential: name}} 展开 + 平台工具管理）
+	dynamicPromptCache    sync.Map                    // userID (uint) → *cachedDynamicPrompts
+	promptPresets         promptPresetResolver        // 预制提示词（平台工具 list/create/update/delete_prompt_preset）
+	llmClient             *llm.Client
+	mediaDownloader       generatedMediaDownloader
+	mcpClient             *mcp.Client
+	uploadSvc             *appupload.Service
+	compactSvc            *appcompact.Service
+	embeddingSvc          *appembedding.Service
+	processingSvc         *appprocessing.Service
+	extractSvc            *extraction.Service
+	ragSvc                *apprag.Service
+	skillResolver         skillResolver
+	billingSvc            *appbilling.Service
+	auditWriter           auditWriter
+	storeProvider         appstorage.Provider
+	logger                *zap.Logger
+	toolLimiters          sync.Map
+	generationStreams     *generationStreamRegistry
+	snapshotCache         sync.Map // conversationID (uint) → *cachedSnapshot
+	userMemCache          sync.Map // userID (uint) → *cachedUserMemories
+	userSettingCache      sync.Map // "userID:key" (string) → *cachedUserSetting
+	imageContextCache     *preparedConversationImageCache
 }
 
 func (s *Service) llmAttribution() (string, string) {
@@ -620,15 +620,20 @@ func (s *Service) ApprovePlatformWrite(ctx context.Context, approvalID string, u
 		}
 		return marshalApprovalSummary(record)
 	}
-	entry, ok := platformToolRegistry()[record.ToolName]
-	if !ok || entry.handler == nil {
-		return "", fmt.Errorf("platform tool %q is not registered", record.ToolName)
+	executionToolName := strings.TrimSpace(record.ExecutionToolName)
+	if executionToolName == "" {
+		executionToolName = strings.TrimSpace(record.ToolName)
 	}
+	entry, ok := platformToolRegistry()[executionToolName]
+	if !ok || entry.handler == nil {
+		return "", fmt.Errorf("platform tool %q is not registered", executionToolName)
+	}
+	argumentsJSON := s.expandCredentialRefsInJSON(ctx, record.UserID, record.ArgumentsJSON)
 	output, err := entry.handler(s, ctx, platformToolCallContext{
 		UserID:         record.UserID,
 		ConversationID: record.ConversationID,
 		RequestID:      record.RequestID,
-		Arguments:      json.RawMessage(record.ArgumentsJSON),
+		Arguments:      json.RawMessage(argumentsJSON),
 	})
 	if err != nil {
 		return "", err

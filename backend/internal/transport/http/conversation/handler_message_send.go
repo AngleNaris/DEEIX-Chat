@@ -69,11 +69,6 @@ func (h *Handler) parseSendMessageInput(c *gin.Context) (appconversation.SendMes
 	}
 	req.ClientRunID = appconversation.EnsureMessageGenerationRunID(req.ClientRunID)
 	req.Options = sanitizeMessageOptions(req.Options)
-	// 流式接口写入响应头前先拦截明显超限请求，避免后续只能用 NDJSON error 表达 400。
-	if err = h.service.ValidateSelectedToolIDs(req.SelectedToolIDs); err != nil {
-		handleSendMessageError(c, err)
-		return appconversation.SendMessageInput{}, nil, nil, err
-	}
 
 	conversation, err := h.service.GetConversationByPublicID(c.Request.Context(), userID, publicID)
 	if err != nil {
@@ -372,8 +367,6 @@ func handleSendMessageError(c *gin.Context, err error) {
 		response.Error(c, http.StatusRequestEntityTooLarge, "file too large")
 	case errors.Is(err, appconversation.ErrTooManyMessageFiles):
 		response.Error(c, http.StatusBadRequest, "too many files in one message")
-	case errors.Is(err, appconversation.ErrTooManySelectedTools):
-		response.Error(c, http.StatusBadRequest, "too many selected tools")
 	case errors.Is(err, appconversation.ErrMultipleImageAttachmentProcessors):
 		response.Error(c, http.StatusBadRequest, "multiple image attachment processors selected")
 	case errors.Is(err, appconversation.ErrImageAttachmentProcessingFailed):

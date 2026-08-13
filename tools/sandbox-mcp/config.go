@@ -34,8 +34,12 @@ type Config struct {
 	PidsLimit int64
 	// CPUsLimit 容器 CPU 上限（docker --cpus）。
 	CPUsLimit float64
-	// CacheVolume 用户级共享包缓存卷名（pip/npm 缓存，跨会话保留，加速环境重建）。
+	// CacheVolume 用户级共享包缓存卷名前缀（pip/npm/uv 缓存，按 user_id 派生）。
 	CacheVolume string
+	// ImportsHostDir 宿主机按 scope 提供给沙箱的只读导入目录根路径。
+	ImportsHostDir string
+	// ImportsMountDir 沙箱容器内只读导入目录挂载点。
+	ImportsMountDir string
 	// SharedHostDir 共享目录的宿主路径（sandbox-mcp 进程与 Docker daemon 所在主机）。
 	// 会话容器只 bind mount 自己的 scope 子目录（SharedHostDir/<scope> → /shared/<scope>），
 	// 其他租户目录物理不可见；DEEIX 后端与 mm 网关挂载整目录只读。
@@ -128,12 +132,14 @@ func Load() *Config {
 		PidsLimit:          int64(envInt("SANDBOX_PIDS_LIMIT", 256)),
 		CPUsLimit:          envFloat("SANDBOX_CPUS_LIMIT", 0.5),
 		CacheVolume:        envStr("SANDBOX_CACHE_VOLUME", "deeix-sandbox-cache"),
+		ImportsHostDir:     envStr("SANDBOX_IMPORTS_HOST_DIR", "/opt/deeix-mcp/imports"),
+		ImportsMountDir:    envStr("SANDBOX_IMPORTS_DIR", "/imports"),
 		SharedHostDir:      envStr("SANDBOX_SHARED_HOST_DIR", "/opt/deeix-mcp/shared"),
 		SharedMountDir:     envStr("SANDBOX_SHARED_DIR", "/shared"),
 		MetaHMACKey:        os.Getenv("SANDBOX_META_HMAC_KEY"),
 		AllowedHosts:       splitEnvList("SANDBOX_ALLOWED_HOSTS"),
 		AllowedCIDRs:       splitEnvList("SANDBOX_ALLOWED_CIDRS"),
-		NetworkMode:        envStr("SANDBOX_NETWORK_MODE", ""),
+		NetworkMode:        envStr("SANDBOX_NETWORK_MODE", "deeix-sandbox-egress"),
 		MaxTasksPerSession: envInt("SANDBOX_MAX_TASKS_PER_SESSION", 4),
 	}
 }

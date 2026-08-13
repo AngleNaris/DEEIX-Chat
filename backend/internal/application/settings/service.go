@@ -264,15 +264,15 @@ func csvSet(raw string) map[string]struct{} {
 
 // validNamespaces 合法的 namespace 集合。
 var validNamespaces = map[string]bool{
-	"auth":          true,
-	"billing":       true,
-	"chat":          true,
-	"storage":       true,
-	"file":          true,
-	"extract":       true,
-	"mcp":           true,
-	"circuit":       true,
-	"agent_group":   true,
+	"auth":           true,
+	"billing":        true,
+	"chat":           true,
+	"storage":        true,
+	"file":           true,
+	"extract":        true,
+	"mcp":            true,
+	"circuit":        true,
+	"agent_group":    true,
 	"platform_tools": true,
 }
 
@@ -544,8 +544,6 @@ func validatePatchItem(item PatchItem) error {
 		return validateIntMinMax(value, 1, 64, key)
 	case "mcp:mcp_max_concurrent_calls":
 		return validateIntMinMax(value, 1, 64, key)
-	case "mcp:mcp_max_selected_tools_per_message":
-		return validateIntMinMax(value, 1, config.MaxMCPSelectedToolsPerMessage, key)
 	case "mcp:mcp_tool_timeout_seconds":
 		return validateIntMinMax(value, 0, maxMCPToolTimeoutSeconds, key)
 	case "mcp:mcp_tool_retry_count":

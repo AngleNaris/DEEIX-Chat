@@ -119,7 +119,7 @@ func platformToolRegistry() map[string]platformToolEntry {
 		},
 		"credential_delete": {
 			definition: llm.ToolDefinition{
-				Name: "credential_delete",
+				Name:        "credential_delete",
 				Description: "Delete a saved credential by name. Confirm with the user before deleting.",
 				InputSchema: json.RawMessage(`{
 					"type":"object","properties":{
@@ -620,7 +620,7 @@ func platformToolRegistry() map[string]platformToolEntry {
 		},
 		"delete_dynamic_prompt": {
 			definition: llm.ToolDefinition{
-				Name: "delete_dynamic_prompt",
+				Name:        "delete_dynamic_prompt",
 				Description: "Delete a user dynamic prompt script. This is a WRITE operation: it may require user approval.",
 				InputSchema: json.RawMessage(`{
 					"type":"object","properties":{
@@ -748,7 +748,7 @@ func platformToolRegistry() map[string]platformToolEntry {
 		},
 		"list_projects": {
 			definition: llm.ToolDefinition{
-				Name: "list_projects",
+				Name:        "list_projects",
 				Description: "List the user's conversation projects (name, description, system prompt, default tools/skills).",
 				InputSchema: json.RawMessage(`{
 					"type":"object","properties":{},"required":[]
@@ -979,10 +979,16 @@ func (s *Service) appendPlatformToolRuntime(ctx context.Context, result *selecte
 	toolsEnabled := strings.TrimSpace(values[platformToolsKeyEnabled]) == "true"
 	writeEnabled := strings.TrimSpace(values[platformToolsKeyWriteEnabled]) == "true"
 
-	usedNames := make(map[string]int, len(result.definitions))
-	for _, def := range result.definitions {
-		if name := strings.TrimSpace(def.Name); name != "" {
-			usedNames[name]++
+	usedNames := make(map[string]int, len(result.authorizedMCPTools)+len(result.definitions)+1)
+	usedNames[mcpActivateServerToolName] = 1
+	for name := range result.authorizedMCPTools {
+		if value := strings.TrimSpace(name); value != "" {
+			usedNames[value]++
+		}
+	}
+	for _, definition := range result.definitions {
+		if value := strings.TrimSpace(definition.Name); value != "" {
+			usedNames[value]++
 		}
 	}
 	if result.nameMap == nil {
@@ -1012,13 +1018,18 @@ func (s *Service) appendPlatformToolRuntime(ctx context.Context, result *selecte
 			continue
 		}
 		entry.definition.Name = modelName
+		result.platformDefinitions = append(result.platformDefinitions, entry.definition)
 		result.definitions = append(result.definitions, entry.definition)
-		result.nameMap[modelName] = name
-		result.schemas[modelName] = entry.definition.InputSchema
 		if result.platformEntries == nil {
 			result.platformEntries = map[string]platformToolEntry{}
 		}
+		if result.platformNameMap == nil {
+			result.platformNameMap = map[string]string{}
+		}
 		result.platformEntries[modelName] = entry
+		result.platformNameMap[modelName] = name
+		result.nameMap[modelName] = name
+		result.schemas[modelName] = entry.definition.InputSchema
 	}
 	return nil
 }
@@ -1035,7 +1046,7 @@ func (s *Service) executePlatformToolCall(ctx context.Context, entry platformToo
 			return "", err
 		}
 		if approval == platformToolsWriteApprovalAsk {
-			record := s.platformApprovals.create(input.UserID, input.ConversationID, input.RequestID, entry, input.ArgumentsJSON)
+			record := s.platformApprovals.create(input.UserID, input.ConversationID, input.RequestID, entry, input.ToolName, input.ArgumentsJSON)
 			return fmt.Sprintf(
 				`{"status":"pending_approval","approval_id":%q,"message":"write operation submitted for user approval","tool":%q}`,
 				record.ID,
@@ -1046,11 +1057,12 @@ func (s *Service) executePlatformToolCall(ctx context.Context, entry platformToo
 
 	limit := s.resolvePlatformToolConcurrency()
 	return s.executeWithToolLimiter(ctx, limit, func() (string, error) {
+		argumentsJSON := s.expandCredentialRefsInJSON(ctx, input.UserID, input.ArgumentsJSON)
 		return entry.handler(s, ctx, platformToolCallContext{
 			UserID:         input.UserID,
 			ConversationID: input.ConversationID,
 			RequestID:      strings.TrimSpace(input.RequestID),
-			Arguments:      json.RawMessage(strings.TrimSpace(input.ArgumentsJSON)),
+			Arguments:      json.RawMessage(strings.TrimSpace(argumentsJSON)),
 		})
 	})
 }

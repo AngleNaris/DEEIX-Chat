@@ -49,6 +49,23 @@ type CredentialResponse struct {
 	Credential appcredentials.View `json:"credential"`
 }
 
+// CredentialListResponseDoc 包裹凭据列表响应。
+type CredentialListResponseDoc struct {
+	ErrorMsg string                 `json:"errorMsg"`
+	Data     CredentialListResponse `json:"data"`
+}
+
+// CredentialResponseDoc 包裹单个凭据响应。
+type CredentialResponseDoc struct {
+	ErrorMsg string             `json:"errorMsg"`
+	Data     CredentialResponse `json:"data"`
+}
+
+// ErrorDoc 凭据接口错误响应。
+type ErrorDoc struct {
+	ErrorMsg string `json:"errorMsg"`
+}
+
 // ListCredentials godoc
 // @Summary 凭据列表
 // @Description 查询当前用户保存的凭据（不包含密钥值）

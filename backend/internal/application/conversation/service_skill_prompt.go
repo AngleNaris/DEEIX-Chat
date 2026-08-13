@@ -12,7 +12,10 @@ import (
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 )
 
-const skillPromptSystemMarker = "<skill_context>"
+const (
+	skillPromptSystemMarker     = "<skill_context>"
+	maxSelectedSkillsPerMessage = 128
+)
 
 type skillPrompts struct {
 	Skills   []domainskill.Skill
@@ -52,7 +55,7 @@ func (s *Service) resolveSkillPrompts(ctx context.Context, input SendMessageInpu
 }
 
 func (s *Service) resolveMaxSelectedSkillsPerMessage() int {
-	return s.resolveMaxSelectedToolsPerMessage()
+	return maxSelectedSkillsPerMessage
 }
 
 func normalizeSelectedSkillIDs(ids []uint) []uint {

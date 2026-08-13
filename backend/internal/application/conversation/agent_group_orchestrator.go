@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/channel"
 	domainagentgroup "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/agentgroup"
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/llm"
@@ -50,6 +51,7 @@ type agentGroupRunState struct {
 	// 工具行以 BillingRef 为 RunID 落盘（重试时按前缀恢复种子）。
 	ledger           *toolExecutionLedger
 	persistToolCalls bool
+	mcpActivation    *mcpActivationState
 }
 
 // executeAgentGroupRun 执行一次 Agent 群组串行运行（主管决策 → 成员执行 → 循环）。
@@ -180,6 +182,7 @@ func (s *Service) executeAgentGroupRun(
 		attemptLease:      s.agentGroupAttemptLease(ctx),
 		ledger:            newToolExecutionLedger(),
 		persistToolCalls:  true,
+		mcpActivation:     newMCPActivationState(snapshot.ActivatedMCPServerIDs),
 	}
 
 	// Cancelable 时注册取消。
@@ -200,6 +203,8 @@ func (s *Service) executeAgentGroupRun(
 		return st.failedResult(), ErrAgentGroupRunBlocked
 	}
 	st.stateVersion = 2
+	st.run.Status = running
+	st.run.StateVersion = st.stateVersion
 
 	err = st.runSerial(ctx)
 	st.persistTopLevelRun(ctx, err)
@@ -373,12 +378,90 @@ func (st *agentGroupRunState) agentTurnInput(
 		FileIDs:           st.input.FileIDs,
 		SkillIDs:          st.input.SkillIDs,
 		SelectedToolIDs:   st.input.SelectedToolIDs,
-		Options:           options,
-		Stream:            st.preferStream,
-		OnEvent:           st.forwardAgentGroupTurnEvent(step, attempt, member),
-		Ledger:            st.ledger,
-		PersistToolCalls:  st.persistToolCalls,
+		MCPActivation:     st.mcpActivation,
+		OnMCPActivation:   st.persistMCPActivation,
+		OnCredentialWrites: func(ctx context.Context, writes []credentialWrite) error {
+			return st.applyCredentialWritesForAttempt(ctx, step, attempt, writes)
+		},
+		ToolMessageID:    st.assistantMessage.ID,
+		Options:          options,
+		Stream:           st.preferStream,
+		OnEvent:          st.forwardAgentGroupTurnEvent(step, attempt, member),
+		Ledger:           st.ledger,
+		PersistToolCalls: st.persistToolCalls,
 	}
+}
+
+func (st *agentGroupRunState) persistMCPActivation(ctx context.Context, serverIDs []uint) error {
+	if st == nil || st.service == nil || st.service.agentGroupRunStore == nil || st.snapshot == nil || st.run == nil {
+		return ErrAgentGroupRunStateCorrupt
+	}
+	nextSnapshot := *st.snapshot
+	nextSnapshot.ActivatedMCPServerIDs = append([]uint(nil), serverIDs...)
+	snapshotJSON := marshalAgentGroupRunSnapshot(&nextSnapshot)
+	expectedStatus := domainagentgroup.RunStatusRunning
+	ok, err := st.service.agentGroupRunStore.CASUpdateAgentGroupRun(ctx, st.run.ID, st.stateVersion, expectedStatus,
+		domainagentgroup.RunPatch{ConfigSnapshotJSON: &snapshotJSON})
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return ErrAgentGroupCASConflict
+	}
+	st.stateVersion++
+	st.snapshot.ActivatedMCPServerIDs = append([]uint(nil), serverIDs...)
+	st.run.StateVersion = st.stateVersion
+	st.run.ConfigSnapshotJSON = snapshotJSON
+	return nil
+}
+
+func (st *agentGroupRunState) applyCredentialWrites(ctx context.Context, writes []credentialWrite) error {
+	if st == nil || st.service == nil || st.userMessage == nil || len(writes) == 0 {
+		return nil
+	}
+	if _, err := st.service.applyCredentialWritesToUserMessage(ctx, st.userMessage, st.input.ConversationID, st.input.UserID, writes); err != nil {
+		return err
+	}
+	st.input.Content, _ = applyCredentialWrites(st.input.Content, writes)
+	for index := range st.contextMessages {
+		st.contextMessages[index].Content, _ = applyCredentialWrites(st.contextMessages[index].Content, writes)
+		st.contextMessages[index].ReasoningContent, _ = applyCredentialWrites(st.contextMessages[index].ReasoningContent, writes)
+	}
+	for index := range st.summaries {
+		st.summaries[index].instruction, _ = applyCredentialWrites(st.summaries[index].instruction, writes)
+		st.summaries[index].outputSummary, _ = applyCredentialWrites(st.summaries[index].outputSummary, writes)
+	}
+	return nil
+}
+
+func (st *agentGroupRunState) applyCredentialWritesForAttempt(
+	ctx context.Context,
+	step *domainagentgroup.Step,
+	attempt *domainagentgroup.Attempt,
+	writes []credentialWrite,
+) error {
+	if attempt != nil {
+		if inputSnapshot, changed := applyCredentialWritesToJSON(attempt.InputSnapshotJSON, writes); changed {
+			ok, err := st.service.agentGroupRunStore.CASUpdateAgentGroupStepAttempt(ctx, attempt.ID, domainagentgroup.AttemptStatusRunning,
+				domainagentgroup.AttemptPatch{InputSnapshotJSON: &inputSnapshot})
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return ErrAgentGroupCASConflict
+			}
+			attempt.InputSnapshotJSON = inputSnapshot
+		}
+	}
+	if step != nil {
+		if instruction, changed := applyCredentialWrites(step.Instruction, writes); changed {
+			if err := st.service.agentGroupRunStore.UpdateAgentGroupStep(ctx, step.ID, map[string]interface{}{"instruction": instruction}); err != nil {
+				return err
+			}
+			step.Instruction = instruction
+		}
+	}
+	return st.applyCredentialWrites(ctx, writes)
 }
 
 // createAgentGroupStepAndAttempt 按 11.2 持久化顺序创建步骤与首次尝试：
@@ -970,12 +1053,35 @@ func (s *Service) buildAgentGroupRunSnapshot(ctx context.Context, input SendMess
 		RequestedSkillIDs: append([]uint(nil), input.SkillIDs...),
 	}
 
+	var defaultModel string
+	defaultModelResolved := false
+	resolveEffectiveModel := func(roleModel, memberModel string) (string, error) {
+		effectiveModel := domainagentgroup.ResolveEffectiveModel(roleModel, memberModel, conversation.Model)
+		if effectiveModel != "" {
+			return effectiveModel, nil
+		}
+		if defaultModelResolved {
+			return defaultModel, nil
+		}
+		defaultModelResolved = true
+		modelName, err := s.resolveAgentGroupDefaultModel(ctx, input)
+		if err != nil {
+			return "", err
+		}
+		defaultModel = modelName
+		return defaultModel, nil
+	}
+
 	for i := range group.Members {
 		member := &group.Members[i]
 		if !member.Enabled {
 			continue
 		}
 		role, err := s.GetConversationRole(ctx, input.UserID, member.RolePublicID)
+		if err != nil {
+			return nil, err
+		}
+		effectiveModel, err := resolveEffectiveModel(role.Model, member.ModelOverride)
 		if err != nil {
 			return nil, err
 		}
@@ -994,7 +1100,7 @@ func (s *Service) buildAgentGroupRunSnapshot(ctx context.Context, input SendMess
 			ReasoningEffort:  member.ReasoningEffort,
 			RoleDefaultModel: role.Model,
 			ModelOverride:    member.ModelOverride,
-			EffectiveModel:   domainagentgroup.ResolveEffectiveModel(role.Model, member.ModelOverride, conversation.Model),
+			EffectiveModel:   effectiveModel,
 			Provider:         role.Provider,
 		}
 		if member.MemberType == domainagentgroup.MemberTypeSupervisor {
@@ -1007,6 +1113,45 @@ func (s *Service) buildAgentGroupRunSnapshot(ctx context.Context, input SendMess
 		return nil, ErrConversationAgentGroupNotFound
 	}
 	return snapshot, nil
+}
+
+// resolveAgentGroupDefaultModel 将当前默认聊天模型冻结到运行快照。
+// 成员、角色或会话显式配置模型时不会进入该兜底，执行时仍按原模型失败关闭。
+func (s *Service) resolveAgentGroupDefaultModel(ctx context.Context, input SendMessageInput) (string, error) {
+	if s.routeResolver == nil {
+		return "", ErrModelRouteNotConfigured
+	}
+	resolver, ok := s.routeResolver.(defaultRouteResolver)
+	if !ok {
+		return "", ErrModelRouteNotConfigured
+	}
+	route, err := resolver.ResolveDefaultRoute(ctx, channel.ResolveRouteInput{
+		TaskType:       channel.TaskTypeChat,
+		Scope:          channel.RouteScopeUser,
+		UserID:         input.UserID,
+		ConversationID: input.ConversationID,
+		RequestID:      strings.TrimSpace(input.RequestID),
+	})
+	if err != nil {
+		if errors.Is(err, channel.ErrModelAccessDenied) {
+			return "", ErrModelAccessDenied
+		}
+		if errors.Is(err, channel.ErrRouteNotFound) || errors.Is(err, channel.ErrModelNotFound) {
+			return "", ErrModelRouteNotConfigured
+		}
+		if errors.Is(err, channel.ErrAllRoutesUnavailable) {
+			return "", wrapUpstreamRequestError(err)
+		}
+		return "", err
+	}
+	if route == nil {
+		return "", ErrModelRouteNotConfigured
+	}
+	modelName := strings.TrimSpace(route.PlatformModelName)
+	if modelName == "" {
+		return "", ErrModelRouteNotConfigured
+	}
+	return modelName, nil
 }
 
 // agentGroupFeatureEnabled 读取 agent_group.enabled（默认关闭）。

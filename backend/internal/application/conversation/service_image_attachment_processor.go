@@ -13,6 +13,7 @@ import (
 	domainconversation "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 	domainmcp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/mcp"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/llm"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/objectstore"
 )
 
@@ -32,15 +33,17 @@ type imageAttachmentAnalysis struct {
 }
 
 type imageAttachmentProcessingInput struct {
-	UserID         uint
-	ConversationID uint
-	MessageID      uint
-	RequestID      string
-	RunID          string
-	UserPrompt     string
-	Attachments    []AttachmentInput
-	Runtime        selectedToolRuntime
-	TraceRecorder  *messageTraceRecorder
+	UserID          uint
+	ConversationID  uint
+	MessageID       uint
+	RequestID       string
+	RunID           string
+	UserPrompt      string
+	Attachments     []AttachmentInput
+	Runtime         selectedToolRuntime
+	TraceRecorder   *messageTraceRecorder
+	ToolCallLimit   *int
+	SkipPersistence bool
 }
 
 type imageAttachmentProcessingResult struct {
@@ -58,7 +61,7 @@ func (s *Service) processImageAttachments(
 	input imageAttachmentProcessingInput,
 ) (imageAttachmentProcessingResult, error) {
 	processor := input.Runtime.attachmentProcessor
-	if processor == nil {
+	if processor == nil || !input.Runtime.attachmentProcessorActive() {
 		return imageAttachmentProcessingResult{}, nil
 	}
 	// mode 为空时回退 image 行为（兼容存量工具与旧测试构造）。
@@ -76,7 +79,11 @@ func (s *Service) processImageAttachments(
 		Rows:                  make([]domainconversation.ToolCall, 0, len(attachments)),
 		PersistedToolCallKeys: make(map[string]struct{}, len(attachments)),
 	}
-	if len(attachments) > s.resolveMaxToolCallsPerRun() {
+	toolCallLimit := s.resolveMaxToolCallsPerRun()
+	if input.ToolCallLimit != nil {
+		toolCallLimit = *input.ToolCallLimit
+	}
+	if len(attachments) > toolCallLimit {
 		return result, fmt.Errorf("%w: attachment count exceeds the tool call limit", ErrImageAttachmentProcessingFailed)
 	}
 	if processor.argument == "" ||
@@ -121,7 +128,11 @@ func (s *Service) processImageAttachments(
 		if marshalErr != nil {
 			return result, fmt.Errorf("%w: encode processor arguments: %v", ErrImageAttachmentProcessingFailed, marshalErr)
 		}
-		normalizedArguments, validationErr := normalizeToolArguments(string(argumentsJSON), input.Runtime.schemas[processor.modelName])
+		schema := processor.schema
+		if len(schema) == 0 {
+			schema = input.Runtime.schemas[processor.modelName]
+		}
+		normalizedArguments, validationErr := normalizeToolArguments(string(argumentsJSON), schema)
 		row := domainconversation.ToolCall{
 			MessageID:      input.MessageID,
 			ConversationID: input.ConversationID,
@@ -136,16 +147,20 @@ func (s *Service) processImageAttachments(
 		if validationErr != nil {
 			row.Status = "error"
 			row.ErrorJSON = validationErr.Error()
-			s.persistImageAttachmentToolRow(ctx, &row, &result)
+			s.persistImageAttachmentToolRow(ctx, &row, &result, input.SkipPersistence)
 			return result, fmt.Errorf("%w: %v", ErrImageAttachmentProcessingFailed, validationErr)
 		}
 
-		mcpConfig, ok := input.Runtime.mcpConfigs[processor.modelName]
-		if !ok {
-			row.Status = "error"
-			row.ErrorJSON = "processor is not enabled for this run"
-			s.persistImageAttachmentToolRow(ctx, &row, &result)
-			return result, fmt.Errorf("%w: processor is not enabled", ErrImageAttachmentProcessingFailed)
+		mcpConfig := processor.config
+		if strings.TrimSpace(mcpConfig.BaseURL) == "" {
+			var ok bool
+			mcpConfig, ok = input.Runtime.mcpConfigs[processor.modelName]
+			if !ok {
+				row.Status = "error"
+				row.ErrorJSON = "processor is not enabled for this run"
+				s.persistImageAttachmentToolRow(ctx, &row, &result, input.SkipPersistence)
+				return result, fmt.Errorf("%w: processor is not enabled", ErrImageAttachmentProcessingFailed)
+			}
 		}
 		startedAt := time.Now()
 		output, executeErr := s.executeToolCall(ctx, ExecuteToolInput{
@@ -160,7 +175,7 @@ func (s *Service) processImageAttachments(
 		if executeErr != nil {
 			row.Status = "error"
 			row.ErrorJSON = sanitizeOpaqueToolOutput(executeErr.Error())
-			s.persistImageAttachmentToolRow(ctx, &row, &result)
+			s.persistImageAttachmentToolRow(ctx, &row, &result, input.SkipPersistence)
 			return result, fmt.Errorf("%w: %v", ErrImageAttachmentProcessingFailed, executeErr)
 		}
 		row.OutputJSON = sanitizeOpaqueToolOutput(output)
@@ -171,11 +186,11 @@ func (s *Service) processImageAttachments(
 		if analysis == "" {
 			row.Status = "error"
 			row.ErrorJSON = "processor returned no textual analysis"
-			s.persistImageAttachmentToolRow(ctx, &row, &result)
+			s.persistImageAttachmentToolRow(ctx, &row, &result, input.SkipPersistence)
 			return result, fmt.Errorf("%w: processor returned no textual analysis", ErrImageAttachmentProcessingFailed)
 		}
 		row.Status = "success"
-		s.persistImageAttachmentToolRow(ctx, &row, &result)
+		s.persistImageAttachmentToolRow(ctx, &row, &result, input.SkipPersistence)
 		analysis = contextArtifactExcerpt(analysis, analysisCharLimit)
 		result.Analyses = append(result.Analyses, imageAttachmentAnalysis{
 			FileID:   strings.TrimSpace(attachment.FileID),
@@ -304,11 +319,15 @@ func (s *Service) persistImageAttachmentToolRow(
 	ctx context.Context,
 	row *domainconversation.ToolCall,
 	result *imageAttachmentProcessingResult,
+	skipPersistence bool,
 ) {
 	if row == nil || result == nil {
 		return
 	}
-	persisted := s.persistToolCallResult(ctx, row)
+	persisted := false
+	if !skipPersistence {
+		persisted = s.persistToolCallResult(ctx, row)
+	}
 	result.Rows = append(result.Rows, *row)
 	if persisted {
 		result.PersistedToolCallKeys[toolCallPersistenceKey(*row)] = struct{}{}
@@ -345,6 +364,62 @@ func imageAttachmentAnalysisText(raw string) string {
 		return ""
 	}
 	return strings.TrimSpace(modelToolOutputForModel(value))
+}
+
+func appendAttachmentAnalysesToActivationResult(results []llm.ToolResult, analyses []imageAttachmentAnalysis, maxTokens int64) {
+	if len(results) == 0 || len(analyses) == 0 {
+		return
+	}
+	items := make([]map[string]string, 0, len(analyses))
+	for _, analysis := range analyses {
+		content := strings.TrimSpace(analysis.Content)
+		if content == "" {
+			continue
+		}
+		items = append(items, map[string]string{
+			"file_id":   strings.TrimSpace(analysis.FileID),
+			"file_name": strings.TrimSpace(analysis.FileName),
+			"tool":      strings.TrimSpace(analysis.ToolName),
+			"content":   content,
+		})
+	}
+	if len(items) == 0 {
+		return
+	}
+	for index := range results {
+		if results[index].ToolName != mcpActivateServerToolName || !strings.EqualFold(results[index].Status, "success") {
+			continue
+		}
+		payload := map[string]interface{}{}
+		_ = json.Unmarshal([]byte(results[index].OutputJSON), &payload)
+		payload["attachment_analyses"] = items
+		if encoded, err := json.Marshal(payload); err == nil {
+			results[index].OutputJSON = string(encoded)
+			availableTokens := maxTokens
+			for otherIndex := range results {
+				if otherIndex != index {
+					availableTokens -= toolResultModelTokens(results[otherIndex])
+				}
+			}
+			applyToolResultTokenBudget(&results[index], max(availableTokens, 0))
+		}
+		return
+	}
+}
+
+func mergeImageAttachmentProcessingResult(target *imageAttachmentProcessingResult, next imageAttachmentProcessingResult) {
+	if target == nil {
+		return
+	}
+	target.Routed = target.Routed || next.Routed
+	target.Analyses = append(target.Analyses, next.Analyses...)
+	target.Rows = append(target.Rows, next.Rows...)
+	if target.PersistedToolCallKeys == nil {
+		target.PersistedToolCallKeys = make(map[string]struct{}, len(next.PersistedToolCallKeys))
+	}
+	for key := range next.PersistedToolCallKeys {
+		target.PersistedToolCallKeys[key] = struct{}{}
+	}
 }
 
 func withoutCurrentImageAttachments(plan conversationFileContextPlan) conversationFileContextPlan {

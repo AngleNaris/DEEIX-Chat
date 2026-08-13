@@ -5,6 +5,7 @@ import "time"
 type ServerResponse struct {
 	ID                                   uint       `json:"id"`
 	Name                                 string     `json:"name"`
+	Description                          string     `json:"description"`
 	BaseURL                              string     `json:"baseURL"`
 	HeadersJSON                          string     `json:"headersJSON"`
 	Status                               string     `json:"status"`
@@ -26,7 +27,7 @@ type ToolResponse struct {
 	DisplayName              string    `json:"displayName"`
 	Description              string    `json:"description"`
 	InputSchemaJSON          string    `json:"inputSchemaJSON"`
-	AttachmentInputMode      string    `json:"attachmentInputMode" enums:"none,image"`
+	AttachmentInputMode      string    `json:"attachmentInputMode" enums:"none,image,audio,file"`
 	AttachmentArgument       string    `json:"attachmentArgument"`
 	AttachmentEncoding       string    `json:"attachmentEncoding" enums:",base64,data_url"`
 	AttachmentPromptArgument string    `json:"attachmentPromptArgument"`
@@ -38,6 +39,7 @@ type ToolResponse struct {
 
 type CreateServerRequest struct {
 	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
 	BaseURL     string `json:"baseURL"`
 	AuthToken   string `json:"authToken,omitempty"`
 	HeadersJSON string `json:"headersJSON,omitempty"`
@@ -47,7 +49,7 @@ type CreateServerRequest struct {
 type UpdateToolRequest struct {
 	DisplayName              *string `json:"displayName,omitempty"`
 	Description              *string `json:"description,omitempty"`
-	AttachmentInputMode      *string `json:"attachmentInputMode,omitempty" enums:"none,image"`
+	AttachmentInputMode      *string `json:"attachmentInputMode,omitempty" enums:"none,image,audio,file"`
 	AttachmentArgument       *string `json:"attachmentArgument,omitempty"`
 	AttachmentEncoding       *string `json:"attachmentEncoding,omitempty" enums:"base64,data_url"`
 	AttachmentPromptArgument *string `json:"attachmentPromptArgument,omitempty"`

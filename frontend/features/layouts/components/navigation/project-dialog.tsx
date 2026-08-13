@@ -23,7 +23,6 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { listAvailableMCPTools } from "@/shared/api/mcp";
 import type { MCPToolDTO } from "@/shared/api/mcp.types";
-import { getMCPPolicy } from "@/shared/api/settings";
 import { listVisibleSkills } from "@/shared/api/skills";
 import type { SkillSummaryDTO } from "@/shared/api/skills.types";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
@@ -65,7 +64,6 @@ export function ProjectDialog({
   const [catalogLoading, setCatalogLoading] = React.useState(false);
   const [mcpTools, setMCPTools] = React.useState<MCPToolDTO[]>([]);
   const [skills, setSkills] = React.useState<SkillSummaryDTO[]>([]);
-  const [selectionLimit, setSelectionLimit] = React.useState(1);
   const stableDraft = useDialogSnapshot(draft);
   const open = Boolean(draft);
   const nameInputID = React.useId();
@@ -109,15 +107,13 @@ export function ProjectDialog({
         if (!token) {
           throw new Error("missing access token");
         }
-        const [tools, visibleSkills, policy] = await Promise.all([
+        const [tools, visibleSkills] = await Promise.all([
           listAvailableMCPTools(token),
           listAllVisibleSkills(token),
-          getMCPPolicy(token),
         ]);
         if (!cancelled) {
           setMCPTools(tools);
           setSkills(visibleSkills);
-          setSelectionLimit(Math.max(1, policy.maxSelectedToolsPerMessage));
           const availableMCPToolIDs = new Set(tools.map((tool) => tool.id));
           const availableSkillIDs = new Set(visibleSkills.map((skill) => skill.id));
           setDraft((current) => {
@@ -125,7 +121,7 @@ export function ProjectDialog({
               return current;
             }
             const defaultMCPToolIDs = normalizeImageAttachmentProcessorSelection(
-              current.defaultMCPToolIDs.filter((id) => availableMCPToolIDs.has(id)).slice(0, Math.max(1, policy.maxSelectedToolsPerMessage)),
+              current.defaultMCPToolIDs.filter((id) => availableMCPToolIDs.has(id)),
               tools,
             );
             const defaultSkillIDs = current.defaultSkillIDs.filter((id) => availableSkillIDs.has(id));
@@ -255,7 +251,6 @@ export function ProjectDialog({
                       detail: tool.serverName,
                     }))}
                     selectedIDs={stableDraft?.defaultMCPToolIDs ?? []}
-                    selectionLimit={selectionLimit}
                     loading={catalogLoading}
                     disabled={submitting}
                     onChange={(defaultMCPToolIDs) => {
@@ -288,7 +283,7 @@ export function ProjectDialog({
                   detail: skill.description.trim() || (skill.trigger ? `/${skill.trigger}` : ""),
                 }))}
                 selectedIDs={stableDraft?.defaultSkillIDs ?? []}
-                selectionLimit={selectionLimit}
+                selectionLimit={128}
                 loading={catalogLoading}
                 disabled={submitting}
                 onChange={(defaultSkillIDs) => {
@@ -344,7 +339,7 @@ export function ProjectDefaultSelector({
   searchPlaceholder: string;
   options: ProjectDefaultOption[];
   selectedIDs: number[];
-  selectionLimit: number;
+  selectionLimit?: number;
   loading: boolean;
   disabled: boolean;
   onChange: (ids: number[]) => void;
@@ -411,7 +406,7 @@ export function ProjectDefaultSelector({
                         onChange(selectedIDs.filter((id) => id !== option.id));
                         return;
                       }
-                      if (selectedIDs.length >= selectionLimit) {
+                      if (selectionLimit !== undefined && selectedIDs.length >= selectionLimit) {
                         toast.error(t("defaultsSelectionLimit", { limit: selectionLimit }));
                         return;
                       }

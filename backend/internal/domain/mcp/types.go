@@ -28,6 +28,7 @@ func IsValidAttachmentMode(mode string) bool {
 type Server struct {
 	ID                                   uint
 	Name                                 string
+	Description                          string
 	BaseURL                              string
 	AuthTokenEnc                         string
 	HeadersJSON                          string

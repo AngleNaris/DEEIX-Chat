@@ -31,6 +31,7 @@ func (r *Repo) CreateServer(ctx context.Context, input repository.CreateMCPServe
 		}
 		item := model.MCPServer{
 			Name:         input.Name,
+			Description:  input.Description,
 			BaseURL:      input.BaseURL,
 			AuthTokenEnc: input.AuthTokenEnc,
 			HeadersJSON:  input.HeadersJSON,
@@ -52,6 +53,9 @@ func (r *Repo) UpdateServer(ctx context.Context, serverID uint, input repository
 	updates := map[string]interface{}{}
 	if input.Name != nil {
 		updates["name"] = *input.Name
+	}
+	if input.Description != nil {
+		updates["description"] = *input.Description
 	}
 	if input.BaseURL != nil {
 		updates["base_url"] = *input.BaseURL
@@ -474,6 +478,7 @@ func toDomainServer(row model.MCPServer) domainmcp.Server {
 	return domainmcp.Server{
 		ID:              row.ID,
 		Name:            row.Name,
+		Description:     row.Description,
 		BaseURL:         row.BaseURL,
 		AuthTokenEnc:    row.AuthTokenEnc,
 		HeadersJSON:     row.HeadersJSON,

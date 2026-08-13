@@ -40,11 +40,6 @@ const (
 const (
 	// DefaultTurnstileSiteverifyURL 是 Cloudflare Turnstile 默认校验端点。
 	DefaultTurnstileSiteverifyURL = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
-
-	// DefaultMCPMaxSelectedToolsPerMessage 是单次消息可选择 MCP 工具数量的默认值。
-	DefaultMCPMaxSelectedToolsPerMessage = 32
-	// MaxMCPSelectedToolsPerMessage 是运行时配置允许的安全上限，防止一次请求暴露过多工具 schema。
-	MaxMCPSelectedToolsPerMessage = 128
 )
 
 // DefaultModelOptionAllowedPathsJSON 返回用户可透传模型参数的默认白名单。
@@ -518,17 +513,19 @@ type Config struct {
 	ProcessTracePersistInflight    bool // 是否在流式阶段持久化轨迹
 	ContextArtifactRetentionDays   int  // 上下文证据保留天数，<=0 表示不自动过期
 	// MCP 配置
-	MCPEnable                     bool
-	MCPToolTimeoutSeconds         int
-	MCPToolRetryCount             int
-	MCPMaxConcurrentCalls         int
-	MCPMaxSelectedToolsPerMessage int
-	MCPMaxLLMCallsPerRun          int
-	MCPMaxToolCallsPerRun         int
-	MCPToolPrompt                 string
+	MCPEnable             bool
+	MCPToolTimeoutSeconds int
+	MCPToolRetryCount     int
+	MCPMaxConcurrentCalls int
+	MCPMaxLLMCallsPerRun  int
+	MCPMaxToolCallsPerRun int
+	MCPToolPrompt         string
 	// SandboxSharedDir 沙箱与多模态 MCP 的共享目录挂载点（DEEIX 容器内路径）。
 	// 工具结果携带 __export__ 标记时，从该目录读取文件并落库为用户文件。
 	SandboxSharedDir string
+	// SandboxImportsDir 当前消息附件导入目录（DEEIX 容器内路径）。
+	// 非空时按已验证的 user/conversation scope 同步当前附件，供沙箱与多模态 MCP 只读使用。
+	SandboxImportsDir string
 	// SandboxMetaHMACKey 沙箱 MCP _meta 签名的 HMAC 密钥（与 sandbox-mcp 的 SANDBOX_META_HMAC_KEY 一致）。
 	// 非空时后端在每次 MCP tools/call 的 _meta 中附带签名与时间戳，供沙箱校验身份。
 	SandboxMetaHMACKey string
@@ -750,11 +747,11 @@ func Load() Config {
 		MCPToolTimeoutSeconds:             10,
 		MCPToolRetryCount:                 0,
 		MCPMaxConcurrentCalls:             8,
-		MCPMaxSelectedToolsPerMessage:     DefaultMCPMaxSelectedToolsPerMessage,
 		MCPMaxLLMCallsPerRun:              5,
 		MCPMaxToolCallsPerRun:             8,
 		MCPToolPrompt:                     "",
 		SandboxSharedDir:                  envOr("SANDBOX_SHARED_DIR", "", "/shared"),
+		SandboxImportsDir:                 strings.TrimSpace(os.Getenv("SANDBOX_IMPORTS_DIR")),
 		SandboxMetaHMACKey:                os.Getenv("SANDBOX_META_HMAC_KEY"),
 	}
 }

@@ -1240,6 +1240,29 @@ func (r *Repo) UpdateMessageState(
 		Error)
 }
 
+func (r *Repo) UpdateUserMessageContent(
+	ctx context.Context,
+	messageID uint,
+	conversationID uint,
+	userID uint,
+	content string,
+) error {
+	if messageID == 0 || conversationID == 0 || userID == 0 {
+		return repository.ErrInvalidInput
+	}
+	result := r.db.WithContext(ctx).
+		Model(&models.Message{}).
+		Where("id = ? AND conversation_id = ? AND user_id = ? AND role = ?", messageID, conversationID, userID, "user").
+		Update("content", content)
+	if result.Error != nil {
+		return translateError(result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return repository.ErrNotFound
+	}
+	return nil
+}
+
 // UpdateAssistantMessageContent 更新当前用户 assistant 消息正文并标记编辑时间。
 func (r *Repo) UpdateAssistantMessageContent(
 	ctx context.Context,

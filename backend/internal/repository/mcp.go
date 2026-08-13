@@ -9,6 +9,7 @@ import (
 // CreateMCPServerInput 定义创建 MCP 服务字段。
 type CreateMCPServerInput struct {
 	Name         string
+	Description  string
 	BaseURL      string
 	AuthTokenEnc string
 	HeadersJSON  string
@@ -18,6 +19,7 @@ type CreateMCPServerInput struct {
 // UpdateMCPServerInput 定义更新 MCP 服务字段。
 type UpdateMCPServerInput struct {
 	Name         *string
+	Description  *string
 	BaseURL      *string
 	AuthTokenEnc *string
 	HeadersJSON  *string

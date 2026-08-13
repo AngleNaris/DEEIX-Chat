@@ -29,17 +29,20 @@ services:
       SANDBOX_PIDS_LIMIT: "${SANDBOX_PIDS_LIMIT:-256}"
       SANDBOX_CPUS_LIMIT: "${SANDBOX_CPUS_LIMIT:-0.5}"
       SANDBOX_CACHE_VOLUME: "${SANDBOX_CACHE_VOLUME:-deeix-sandbox-cache}"
+      SANDBOX_IMPORTS_HOST_DIR: "${SANDBOX_IMPORTS_HOST_DIR:-/opt/deeix-mcp/imports}"
+      SANDBOX_IMPORTS_DIR: "${SANDBOX_IMPORTS_DIR:-/imports}"
       SANDBOX_SHARED_HOST_DIR: "${SANDBOX_SHARED_HOST_DIR:-/opt/deeix-mcp/shared}"
       SANDBOX_SHARED_DIR: "${SANDBOX_SHARED_DIR:-/shared}"
       SANDBOX_META_HMAC_KEY: "${SANDBOX_META_HMAC_KEY:-}"
       SANDBOX_ALLOWED_HOSTS: "${SANDBOX_ALLOWED_HOSTS:-}"
       SANDBOX_ALLOWED_CIDRS: "${SANDBOX_ALLOWED_CIDRS:-}"
-      SANDBOX_NETWORK_MODE: "${SANDBOX_NETWORK_MODE:-}"
+      SANDBOX_NETWORK_MODE: "${SANDBOX_NETWORK_MODE:-deeix-sandbox-egress}"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      # 与容器内同路径挂载共享宿主目录：sandbox-mcp 进程在其中创建各 scope 子目录
+      # 与容器内同路径挂载共享/导入宿主目录：sandbox-mcp 进程在其中创建各 scope 子目录
       # （会话容器仅 bind 挂载自己 scope 的子目录，租户间物理不可见）。
       - "${SANDBOX_SHARED_HOST_DIR:-/opt/deeix-mcp/shared}:${SANDBOX_SHARED_HOST_DIR:-/opt/deeix-mcp/shared}"
+      - "${SANDBOX_IMPORTS_HOST_DIR:-/opt/deeix-mcp/imports}:${SANDBOX_IMPORTS_HOST_DIR:-/opt/deeix-mcp/imports}"
     # 沙箱 MCP 需要按 (user, conversation) 创建/销毁容器，故授予 docker.sock；
     # 镜像体积小、无宿主目录挂载，容器 root 能力由 AppArmor/SELinux 默认策略与资源限额兜底。
     group_add:
@@ -48,12 +51,17 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8081/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
 
-  # ---- Qwen-MM-Plugins 桥接（supergateway: stdio -> Streamable HTTP）----
-  # 依赖固定到 Qwen-MM-Plugins 不可变 commit（2026-08-12 main HEAD），保证可重建（P0-08）。
-  # omni-av 入口已随上游废弃，迁移为官方 core + api 两个入口。
-  # VPS 直连 github.com 不通（构建卡死），git URL 走 gh-proxy.com 镜像前缀；
-  # 网络可达 GitHub 的部署环境可去掉前缀：git+https://github.com/QwenLM/Qwen-MM-Plugins.git@114aaaefc3f23d132c6ecc9df50fae72703f14fa
+  # ---- MM isolation wrappers + Qwen-MM-Plugins upstreams ----
+  # The wrappers verify backend-signed _meta and reject replayed call IDs. Each
+  # wrapper serializes tools/call, exposes only that call's staged inputs to its
+  # upstream, and clears staging immediately after the upstream response.
   mm-core:
     build:
       context: .
@@ -64,12 +72,12 @@ services:
     image: deeix-mm-gateway-core:latest
     container_name: deeix-mm-core
     restart: unless-stopped
-    ports:
-      - "127.0.0.1:8082:8082"
+    expose:
+      - "8082"
     networks:
-      - onepanel
+      - mm-private
     volumes:
-      - "${SANDBOX_SHARED_HOST_DIR:-/opt/deeix-mcp/shared}:/shared:ro"
+      - "${MM_STAGING_HOST_DIR:-/opt/deeix-mcp/mm-staging}/core:/shared:rw"
     environment:
       SUPER_GATEWAY_PORT: "8082"
       DASHSCOPE_API_KEY: "${DASHSCOPE_API_KEY:?set in .env}"
@@ -77,6 +85,12 @@ services:
       QWEN_MM_MAX_RESPONSE_BYTES: "${QWEN_MM_MAX_RESPONSE_BYTES:-6291456}"
       QWEN_MM_CHAT_TIMEOUT: "${QWEN_MM_CHAT_TIMEOUT:-600}"
       SERPER_API_KEY: "${SERPER_API_KEY:-}"
+    healthcheck:
+      test: ["CMD", "node", "-e", "const n=require('net').connect(8082,'127.0.0.1',()=>{n.destroy();process.exit(0)});n.on('error',()=>process.exit(1));setTimeout(()=>process.exit(1),3000)"]
+      interval: 10s
+      timeout: 4s
+      retries: 30
+      start_period: 30s
 
   mm-omni-av:
     build:
@@ -88,24 +102,109 @@ services:
     image: deeix-mm-gateway-omni-av:latest
     container_name: deeix-mm-omni-av
     restart: unless-stopped
-    ports:
-      - "127.0.0.1:8083:8083"
+    expose:
+      - "8083"
     networks:
-      - onepanel
+      - mm-private
     volumes:
-      - "${SANDBOX_SHARED_HOST_DIR:-/opt/deeix-mcp/shared}:/shared:ro"
+      - "${MM_STAGING_HOST_DIR:-/opt/deeix-mcp/mm-staging}/api:/shared:ro"
     environment:
       SUPER_GATEWAY_PORT: "8083"
       DASHSCOPE_API_KEY: "${DASHSCOPE_API_KEY:?set in .env}"
       DASHSCOPE_BASE_URL: "${DASHSCOPE_BASE_URL:-}"
       QWEN_MM_MAX_RESPONSE_BYTES: "${QWEN_MM_MAX_RESPONSE_BYTES:-6291456}"
       QWEN_MM_CHAT_TIMEOUT: "${QWEN_MM_CHAT_TIMEOUT:-600}"
+    healthcheck:
+      test: ["CMD", "node", "-e", "const n=require('net').connect(8083,'127.0.0.1',()=>{n.destroy();process.exit(0)});n.on('error',()=>process.exit(1));setTimeout(()=>process.exit(1),3000)"]
+      interval: 10s
+      timeout: 4s
+      retries: 30
+      start_period: 30s
 
-# 共享目录已从命名卷改为宿主 bind 目录（SANDBOX_SHARED_HOST_DIR）：
-# 沙箱会话容器经 Docker API 只挂自己 scope 子目录；mm 网关与 DEEIX 后端挂整目录只读。
-# 迁移旧数据：docker run --rm -v deeix-mcp-shared:/data -v <hostDir>:/out alpine cp -a /data/. /out/
+  mm-core-isolation:
+    build:
+      context: ../../../
+      dockerfile: tools/mm-isolation/Dockerfile
+    image: deeix-mm-isolation:latest
+    container_name: deeix-mm-core-isolation
+    restart: unless-stopped
+    depends_on:
+      mm-core:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8082:8082"
+    networks:
+      - onepanel
+      - mm-private
+    volumes:
+      - "${SANDBOX_SHARED_HOST_DIR:-/opt/deeix-mcp/shared}:/input:ro"
+      - "${SANDBOX_SHARED_HOST_DIR:-/opt/deeix-mcp/shared}:/output:rw"
+      - "${MM_IMPORTS_HOST_DIR:-/opt/deeix-mcp/imports}:/imports:ro"
+      - "${MM_STAGING_HOST_DIR:-/opt/deeix-mcp/mm-staging}/core:/staging"
+    environment:
+      MM_ISOLATION_ADDR: "0.0.0.0:8082"
+      MM_UPSTREAM: "http://mm-core:8082"
+      MM_META_HMAC_KEY: "${SANDBOX_META_HMAC_KEY:?set in .env}"
+      MM_SOURCE_SHARED: "/input"
+      MM_SOURCE_IMPORTS: "/imports"
+      MM_STAGING_ROOT: "/staging"
+      MM_OUTPUT_SHARED: "/output"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8082/readyz"]
+      interval: 10s
+      timeout: 4s
+      retries: 30
+      start_period: 10s
+
+  mm-omni-av-isolation:
+    build:
+      context: ../../../
+      dockerfile: tools/mm-isolation/Dockerfile
+    image: deeix-mm-isolation:latest
+    container_name: deeix-mm-omni-av-isolation
+    restart: unless-stopped
+    depends_on:
+      mm-omni-av:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8083:8083"
+    networks:
+      - onepanel
+      - mm-private
+    volumes:
+      - "${SANDBOX_SHARED_HOST_DIR:-/opt/deeix-mcp/shared}:/input:ro"
+      - "${MM_IMPORTS_HOST_DIR:-/opt/deeix-mcp/imports}:/imports:ro"
+      - "${MM_STAGING_HOST_DIR:-/opt/deeix-mcp/mm-staging}/api:/staging"
+    environment:
+      MM_ISOLATION_ADDR: "0.0.0.0:8083"
+      MM_UPSTREAM: "http://mm-omni-av:8083"
+      MM_META_HMAC_KEY: "${SANDBOX_META_HMAC_KEY:?set in .env}"
+      MM_SOURCE_SHARED: "/input"
+      MM_SOURCE_IMPORTS: "/imports"
+      MM_STAGING_ROOT: "/staging"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8083/readyz"]
+      interval: 10s
+      timeout: 4s
+      retries: 30
+      start_period: 10s
+
+# 完整 shared/imports 根目录不挂载给 MM upstream。wrapper 只读 /input 与 /imports，
+# core producer 仅可写当前调用 staging；wrapper 校验后原子发布到当前 scope 的 /output。
+# tools/call 串行执行，每次只把当前签名调用所需文件放入 staging，响应后立即清理。
+# 旧注册 URL（8082/8083）保持端口和 MCP server identity 不变，只需重启 compose。
 
 networks:
   onepanel:
     external: true
     name: 1panel-network
+  mm-private:
+    driver: bridge

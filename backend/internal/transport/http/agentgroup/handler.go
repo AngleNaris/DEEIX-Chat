@@ -52,6 +52,7 @@ func resolveError(c *gin.Context, err error, defaultStatus int, defaultMsg strin
 		errors.Is(err, appagentgroup.ErrInvalidAgentGroupDescription),
 		errors.Is(err, appagentgroup.ErrInvalidCoordinationPrompt),
 		errors.Is(err, appagentgroup.ErrInvalidDutyInstruction),
+		errors.Is(err, appagentgroup.ErrInvalidReasoningEffort),
 		errors.Is(err, appagentgroup.ErrInvalidAgentGroupMemberType),
 		errors.Is(err, appagentgroup.ErrInvalidAgentGroupModelOverride),
 		errors.Is(err, appagentgroup.ErrAgentGroupSupervisorRequired),

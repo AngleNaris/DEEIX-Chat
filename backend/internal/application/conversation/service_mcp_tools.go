@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	domainmcp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/mcp"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/llm"
@@ -16,16 +17,92 @@ import (
 )
 
 type selectedToolRuntime struct {
-	definitions         []llm.ToolDefinition
-	nameMap             map[string]string
-	mcpConfigs          map[string]mcp.CallConfig
-	schemas             map[string]json.RawMessage
-	attachmentProcessor *selectedAttachmentProcessor
-	platformEntries     map[string]platformToolEntry // 平台内置工具（本地执行，无 MCP 配置）
+	definitions          []llm.ToolDefinition
+	nameMap              map[string]string
+	mcpConfigs           map[string]mcp.CallConfig
+	schemas              map[string]json.RawMessage
+	attachmentProcessor  *selectedAttachmentProcessor
+	platformEntries      map[string]platformToolEntry // 平台内置工具（本地执行，无 MCP 配置）
+	platformDefinitions  []llm.ToolDefinition
+	platformNameMap      map[string]string
+	authorizedMCPTools   map[string]authorizedMCPTool
+	authorizedMCPOrder   []string
+	authorizedMCPServers map[uint]authorizedMCPServer
+	mcpActivation        *mcpActivationState
+	onMCPActivation      func(context.Context, []uint) error
+}
+
+const mcpActivateServerToolName = "mcp_activate_server"
+
+var mcpActivateServerInputSchema = json.RawMessage(`{
+	"type":"object",
+	"properties":{"server_id":{"type":"integer","minimum":1,"description":"Authorized MCP server ID to activate"}},
+	"required":["server_id"]
+}`)
+
+type authorizedMCPTool struct {
+	serverID   uint
+	definition llm.ToolDefinition
+	toolName   string
+	config     mcp.CallConfig
+	schema     json.RawMessage
+}
+
+type authorizedMCPServer struct {
+	id          uint
+	name        string
+	description string
+}
+
+type mcpActivationState struct {
+	mu        sync.Mutex
+	serverIDs map[uint]struct{}
+}
+
+func newMCPActivationState(serverIDs []uint) *mcpActivationState {
+	state := &mcpActivationState{serverIDs: make(map[uint]struct{}, len(serverIDs))}
+	for _, serverID := range serverIDs {
+		if serverID != 0 {
+			state.serverIDs[serverID] = struct{}{}
+		}
+	}
+	return state
+}
+
+func (s *mcpActivationState) activeServerIDs() []uint {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return sortedMCPServerIDs(s.serverIDs)
+}
+
+func (s *mcpActivationState) retainAuthorizedServers(servers map[uint]authorizedMCPServer) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for serverID := range s.serverIDs {
+		if _, ok := servers[serverID]; !ok {
+			delete(s.serverIDs, serverID)
+		}
+	}
+}
+
+func sortedMCPServerIDs(items map[uint]struct{}) []uint {
+	result := make([]uint, 0, len(items))
+	for serverID := range items {
+		result = append(result, serverID)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i] < result[j] })
+	return result
 }
 
 type selectedAttachmentProcessor struct {
 	toolID         uint
+	serverID       uint
 	modelName      string
 	toolName       string
 	displayName    string
@@ -33,6 +110,8 @@ type selectedAttachmentProcessor struct {
 	argument       string
 	encoding       string
 	promptArgument string
+	config         mcp.CallConfig
+	schema         json.RawMessage
 }
 
 func injectMCPToolGuidance(messages []llm.Message, runtime selectedToolRuntime, customPrompt string) []llm.Message {
@@ -142,11 +221,27 @@ func schemaFieldType(prop map[string]interface{}) string {
 }
 
 func (s *Service) resolveSelectedToolRuntime(ctx context.Context, toolIDs []uint) (selectedToolRuntime, error) {
+	return s.resolveSelectedToolRuntimeWithActivation(ctx, toolIDs, nil, nil)
+}
+
+func (s *Service) resolveSelectedToolRuntimeWithActivation(
+	ctx context.Context,
+	toolIDs []uint,
+	activation *mcpActivationState,
+	onActivation func(context.Context, []uint) error,
+) (selectedToolRuntime, error) {
+	if activation == nil {
+		activation = newMCPActivationState(nil)
+	}
 	result := selectedToolRuntime{
-		definitions: make([]llm.ToolDefinition, 0, len(toolIDs)+8),
-		nameMap:     map[string]string{},
-		mcpConfigs:  map[string]mcp.CallConfig{},
-		schemas:     map[string]json.RawMessage{},
+		definitions:          make([]llm.ToolDefinition, 0, len(toolIDs)+8),
+		nameMap:              map[string]string{},
+		mcpConfigs:           map[string]mcp.CallConfig{},
+		schemas:              map[string]json.RawMessage{},
+		authorizedMCPTools:   map[string]authorizedMCPTool{},
+		authorizedMCPServers: map[uint]authorizedMCPServer{},
+		mcpActivation:        activation,
+		onMCPActivation:      onActivation,
 	}
 	if len(toolIDs) > 0 && s.cfg.Snapshot().MCPEnable {
 		if s.mcpRepo == nil {
@@ -160,7 +255,8 @@ func (s *Service) resolveSelectedToolRuntime(ctx context.Context, toolIDs []uint
 	if err := s.appendPlatformToolRuntime(ctx, &result); err != nil {
 		return selectedToolRuntime{}, err
 	}
-	return result, nil
+	activation.retainAuthorizedServers(result.authorizedMCPServers)
+	return result.visibleRuntime(), nil
 }
 
 // resolveMCPToolRuntime 解析用户勾选的 MCP 工具（原 resolveSelectedToolRuntime 主体）。
@@ -175,7 +271,7 @@ func (s *Service) resolveMCPToolRuntime(ctx context.Context, toolIDs []uint, res
 
 	cfg := s.cfg.Snapshot()
 	outboundPolicy := cfg.TrustedOutboundPolicy()
-	usedNames := map[string]int{}
+	usedNames := map[string]int{mcpActivateServerToolName: 1}
 	serverCache := map[uint]*domainmcp.Server{}
 	for _, tool := range tools {
 		if tool.Status != "active" {
@@ -202,8 +298,8 @@ func (s *Service) resolveMCPToolRuntime(ctx context.Context, toolIDs []uint, res
 			}
 			serverCache[tool.ServerID] = server
 		}
-		modelName := uniqueModelToolName(llm.NormalizeToolName(tool.Name), usedNames)
-		if modelName == "" {
+		baseModelName := llm.NormalizeToolName(tool.Name)
+		if strings.TrimSpace(baseModelName) == "" {
 			continue
 		}
 		schema := json.RawMessage(strings.TrimSpace(tool.InputSchemaJSON))
@@ -218,35 +314,155 @@ func (s *Service) resolveMCPToolRuntime(ctx context.Context, toolIDs []uint, res
 			continue
 		}
 		headers := parseMCPHeaders(server.HeadersJSON)
-		result.definitions = append(result.definitions, llm.ToolDefinition{
-			Name:        modelName,
-			Description: strings.TrimSpace(tool.Description),
-			InputSchema: schema,
-		})
-		result.nameMap[modelName] = tool.Name
-		result.schemas[modelName] = schema
-		result.mcpConfigs[modelName] = mcp.CallConfig{
+		callConfig := mcp.CallConfig{
 			BaseURL:   server.BaseURL,
 			AuthToken: token,
 			TimeoutMS: cfg.MCPToolTimeoutSeconds * 1000,
 			Headers:   headers,
 		}
-			if isAttachmentProcessor {
-				if bindErr := result.bindAttachmentProcessor(selectedAttachmentProcessor{
-					toolID:         tool.ID,
-					modelName:      modelName,
-					toolName:       tool.Name,
-					displayName:    firstNonEmptyString(tool.DisplayName, tool.Name),
-					mode:           strings.ToLower(strings.TrimSpace(tool.AttachmentInputMode)),
-					argument:       strings.TrimSpace(tool.AttachmentArgument),
-					encoding:       strings.TrimSpace(tool.AttachmentEncoding),
-					promptArgument: strings.TrimSpace(tool.AttachmentPromptArgument),
-				}); bindErr != nil {
-					return bindErr
-				}
+		if isAttachmentProcessor {
+			if bindErr := result.bindAttachmentProcessor(selectedAttachmentProcessor{
+				toolID:         tool.ID,
+				serverID:       tool.ServerID,
+				modelName:      baseModelName,
+				toolName:       tool.Name,
+				displayName:    firstNonEmptyString(tool.DisplayName, tool.Name),
+				mode:           strings.ToLower(strings.TrimSpace(tool.AttachmentInputMode)),
+				argument:       strings.TrimSpace(tool.AttachmentArgument),
+				encoding:       strings.TrimSpace(tool.AttachmentEncoding),
+				promptArgument: strings.TrimSpace(tool.AttachmentPromptArgument),
+				config:         callConfig,
+				schema:         schema,
+			}); bindErr != nil {
+				return bindErr
 			}
+			result.authorizedMCPServers[tool.ServerID] = authorizedMCPServer{
+				id:          tool.ServerID,
+				name:        strings.TrimSpace(server.Name),
+				description: strings.TrimSpace(server.Description),
+			}
+			continue
+
+		}
+		modelName := uniqueModelToolName(baseModelName, usedNames)
+		if modelName == "" {
+			continue
+		}
+		definition := llm.ToolDefinition{
+			Name:        modelName,
+			Description: strings.TrimSpace(tool.Description),
+			InputSchema: schema,
+		}
+		result.authorizedMCPTools[modelName] = authorizedMCPTool{
+			serverID:   tool.ServerID,
+			definition: definition,
+			toolName:   tool.Name,
+			config:     callConfig,
+			schema:     schema,
+		}
+		result.authorizedMCPOrder = append(result.authorizedMCPOrder, modelName)
+		result.authorizedMCPServers[tool.ServerID] = authorizedMCPServer{
+			id:          tool.ServerID,
+			name:        strings.TrimSpace(server.Name),
+			description: strings.TrimSpace(server.Description),
+		}
 	}
 	return nil
+}
+
+func (r selectedToolRuntime) visibleRuntime() selectedToolRuntime {
+	r.definitions = append([]llm.ToolDefinition(nil), r.platformDefinitions...)
+	r.nameMap = make(map[string]string, len(r.platformEntries)+len(r.authorizedMCPTools)+1)
+	r.schemas = make(map[string]json.RawMessage, len(r.platformEntries)+len(r.authorizedMCPTools)+1)
+	r.mcpConfigs = make(map[string]mcp.CallConfig, len(r.authorizedMCPTools))
+	for modelName, entry := range r.platformEntries {
+		executionName := strings.TrimSpace(r.platformNameMap[modelName])
+		if executionName == "" {
+			executionName = entry.definition.Name
+		}
+		r.nameMap[modelName] = executionName
+		r.schemas[modelName] = entry.definition.InputSchema
+	}
+	if len(r.authorizedMCPServers) == 0 {
+		return r
+	}
+	r.definitions = append(r.definitions, llm.ToolDefinition{
+		Name:        mcpActivateServerToolName,
+		Description: r.mcpActivationDescription(),
+		InputSchema: mcpActivateServerInputSchema,
+	})
+	r.nameMap[mcpActivateServerToolName] = mcpActivateServerToolName
+	r.schemas[mcpActivateServerToolName] = mcpActivateServerInputSchema
+	active := make(map[uint]struct{})
+	if r.mcpActivation != nil {
+		for _, serverID := range r.mcpActivation.activeServerIDs() {
+			active[serverID] = struct{}{}
+		}
+	}
+	for _, modelName := range r.authorizedMCPOrder {
+		tool, ok := r.authorizedMCPTools[modelName]
+		if !ok {
+			continue
+		}
+		if _, ok := active[tool.serverID]; !ok {
+			continue
+		}
+		r.definitions = append(r.definitions, tool.definition)
+		r.nameMap[modelName] = tool.toolName
+		r.schemas[modelName] = tool.schema
+		r.mcpConfigs[modelName] = tool.config
+	}
+	return r
+}
+
+func (r selectedToolRuntime) mcpActivationDescription() string {
+	serverIDs := make([]uint, 0, len(r.authorizedMCPServers))
+	for serverID := range r.authorizedMCPServers {
+		serverIDs = append(serverIDs, serverID)
+	}
+	sort.Slice(serverIDs, func(i, j int) bool { return serverIDs[i] < serverIDs[j] })
+	var builder strings.Builder
+	builder.WriteString("Activate one MCP server authorized for this run. Its selected tool schemas become available on the next model request. Authorized servers:\n")
+	for _, serverID := range serverIDs {
+		server := r.authorizedMCPServers[serverID]
+		description := server.description
+		if description == "" {
+			description = "No administrator description provided."
+		}
+		fmt.Fprintf(&builder, "- server_id=%d; name=%s; description=%s\n", server.id, server.name, description)
+	}
+	builder.WriteString("Only activate a server when its described capability is needed. Do not guess or invoke undisclosed MCP tool names.")
+	return strings.TrimSpace(builder.String())
+}
+
+func (r *selectedToolRuntime) activateMCPServer(ctx context.Context, serverID uint) (bool, error) {
+	if r == nil || serverID == 0 {
+		return false, fmt.Errorf("invalid MCP server id")
+	}
+	if _, ok := r.authorizedMCPServers[serverID]; !ok {
+		return false, fmt.Errorf("MCP server %d is not authorized for this run", serverID)
+	}
+	if r.mcpActivation == nil {
+		return false, fmt.Errorf("MCP activation state is unavailable")
+	}
+	r.mcpActivation.mu.Lock()
+	defer r.mcpActivation.mu.Unlock()
+	if _, ok := r.mcpActivation.serverIDs[serverID]; ok {
+		return false, nil
+	}
+	next := make(map[uint]struct{}, len(r.mcpActivation.serverIDs)+1)
+	for activeServerID := range r.mcpActivation.serverIDs {
+		next[activeServerID] = struct{}{}
+	}
+	next[serverID] = struct{}{}
+	serverIDs := sortedMCPServerIDs(next)
+	if r.onMCPActivation != nil {
+		if err := r.onMCPActivation(ctx, serverIDs); err != nil {
+			return false, err
+		}
+	}
+	r.mcpActivation.serverIDs[serverID] = struct{}{}
+	return true, nil
 }
 
 func (r *selectedToolRuntime) bindAttachmentProcessor(processor selectedAttachmentProcessor) error {
@@ -257,23 +473,21 @@ func (r *selectedToolRuntime) bindAttachmentProcessor(processor selectedAttachme
 	return nil
 }
 
-func (r selectedToolRuntime) withoutAttachmentProcessor() selectedToolRuntime {
-	processor := r.attachmentProcessor
-	if processor == nil {
-		return r
+func (r selectedToolRuntime) attachmentProcessorActive() bool {
+	if r.attachmentProcessor == nil || r.attachmentProcessor.serverID == 0 || r.mcpActivation == nil {
+		return false
 	}
-	definitions := make([]llm.ToolDefinition, 0, len(r.definitions))
-	for _, definition := range r.definitions {
-		if definition.Name != processor.modelName {
-			definitions = append(definitions, definition)
+	for _, serverID := range r.mcpActivation.activeServerIDs() {
+		if serverID == r.attachmentProcessor.serverID {
+			return true
 		}
 	}
-	r.definitions = definitions
-	delete(r.nameMap, processor.modelName)
-	delete(r.mcpConfigs, processor.modelName)
-	delete(r.schemas, processor.modelName)
+	return false
+}
+
+func (r selectedToolRuntime) withoutAttachmentProcessor() selectedToolRuntime {
 	r.attachmentProcessor = nil
-	return r
+	return r.visibleRuntime()
 }
 
 func (r selectedToolRuntime) withoutDefinitions() selectedToolRuntime {
@@ -283,6 +497,11 @@ func (r selectedToolRuntime) withoutDefinitions() selectedToolRuntime {
 	r.schemas = nil
 	r.attachmentProcessor = nil
 	r.platformEntries = nil
+	r.platformDefinitions = nil
+	r.platformNameMap = nil
+	r.authorizedMCPTools = nil
+	r.authorizedMCPOrder = nil
+	r.authorizedMCPServers = nil
 	return r
 }
 

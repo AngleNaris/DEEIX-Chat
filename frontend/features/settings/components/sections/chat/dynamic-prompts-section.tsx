@@ -35,7 +35,6 @@ import {
   type DynamicPromptDTO,
 } from "@/shared/api/dynamic-prompts";
 import { SettingsSection } from "@/shared/components/settings-layout";
-import { cn } from "@/lib/utils";
 
 function AiBadge({ show }: { show: boolean }) {
   const t = useTranslations("settings.chatPage.dynamicPrompts");

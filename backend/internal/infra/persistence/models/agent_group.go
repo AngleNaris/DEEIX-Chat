@@ -33,7 +33,7 @@ type AgentGroupMember struct {
 	MemberType      string `gorm:"size:16;not null;default:'worker';comment:成员类型(supervisor/worker)"`
 	Enabled         bool   `gorm:"not null;default:true;comment:是否允许主管调度"`
 	ModelOverride   string `gorm:"size:128;not null;default:'';comment:当前群组内的模型覆盖"`
-	ReasoningEffort string `gorm:"size:16;not null;default:'';comment:思考强度(low/medium/high/xhigh，空=继承用户全局默认)"`
+	ReasoningEffort string `gorm:"size:16;not null;default:'';comment:思考强度(low/medium/high/xhigh/max，空=继承用户全局默认)"`
 	DutyInstruction string `gorm:"type:text;not null;default:'';comment:当前群组内的职责说明"`
 	SortOrder       int    `gorm:"not null;default:0;comment:成员排序"`
 }
@@ -46,24 +46,24 @@ func (AgentGroupMember) TableName() string {
 // AgentGroupRun 存储一条用户消息触发的完整群组执行（chat_agent_group_runs）。
 type AgentGroupRun struct {
 	BaseModel
-	PublicID           string     `gorm:"size:32;not null;default:'';uniqueIndex:idx_chat_agent_group_runs_public_id;comment:公开运行ID"`
-	ClientRunID        string     `gorm:"size:128;not null;default:'';uniqueIndex:idx_chat_agent_group_runs_client_run_id;comment:父流式运行ID"`
-	UserID             uint       `gorm:"not null;index:idx_chat_agent_group_runs_user_id;comment:用户ID"`
-	ConversationID     uint       `gorm:"not null;index:idx_chat_agent_group_runs_conversation_id;comment:会话ID"`
-	GroupID            uint       `gorm:"not null;index:idx_chat_agent_group_runs_group_id;comment:群组ID"`
-	UserMessageID      uint       `gorm:"not null;comment:用户消息ID"`
-	AssistantMessageID *uint      `gorm:"comment:完成后生成的最终主管消息ID"`
-	GroupRevision      int        `gorm:"not null;default:0;comment:群组配置版本"`
-	ConfigSnapshotJSON string     `gorm:"type:text;not null;default:'';comment:项目、群组、成员和模型快照JSON"`
-	Status             string     `gorm:"size:32;not null;default:'pending';index:idx_chat_agent_group_runs_status;comment:运行状态"`
-	CurrentStepID      *uint      `gorm:"comment:当前步骤ID"`
-	LastCompletedStepID *uint     `gorm:"comment:最后成功步骤ID"`
-	RetryableStepID    *uint      `gorm:"comment:当前可重试步骤ID"`
-	StateVersion       int        `gorm:"not null;default:0;comment:CAS版本"`
-	ErrorCode          string     `gorm:"size:64;not null;default:'';comment:整体错误码"`
-	ErrorMessage       string     `gorm:"type:text;not null;default:'';comment:整体错误信息"`
-	StartedAt          time.Time  `gorm:"not null;comment:开始时间"`
-	EndedAt            *time.Time `gorm:"comment:结束时间"`
+	PublicID            string     `gorm:"size:32;not null;default:'';uniqueIndex:idx_chat_agent_group_runs_public_id;comment:公开运行ID"`
+	ClientRunID         string     `gorm:"size:128;not null;default:'';uniqueIndex:idx_chat_agent_group_runs_client_run_id;comment:父流式运行ID"`
+	UserID              uint       `gorm:"not null;index:idx_chat_agent_group_runs_user_id;comment:用户ID"`
+	ConversationID      uint       `gorm:"not null;index:idx_chat_agent_group_runs_conversation_id;comment:会话ID"`
+	GroupID             uint       `gorm:"not null;index:idx_chat_agent_group_runs_group_id;comment:群组ID"`
+	UserMessageID       uint       `gorm:"not null;comment:用户消息ID"`
+	AssistantMessageID  *uint      `gorm:"comment:完成后生成的最终主管消息ID"`
+	GroupRevision       int        `gorm:"not null;default:0;comment:群组配置版本"`
+	ConfigSnapshotJSON  string     `gorm:"type:text;not null;default:'';comment:项目、群组、成员和模型快照JSON"`
+	Status              string     `gorm:"size:32;not null;default:'pending';index:idx_chat_agent_group_runs_status;comment:运行状态"`
+	CurrentStepID       *uint      `gorm:"comment:当前步骤ID"`
+	LastCompletedStepID *uint      `gorm:"comment:最后成功步骤ID"`
+	RetryableStepID     *uint      `gorm:"comment:当前可重试步骤ID"`
+	StateVersion        int        `gorm:"not null;default:0;comment:CAS版本"`
+	ErrorCode           string     `gorm:"size:64;not null;default:'';comment:整体错误码"`
+	ErrorMessage        string     `gorm:"type:text;not null;default:'';comment:整体错误信息"`
+	StartedAt           time.Time  `gorm:"not null;comment:开始时间"`
+	EndedAt             *time.Time `gorm:"comment:结束时间"`
 }
 
 // TableName 指定表名。
@@ -95,24 +95,24 @@ func (AgentGroupStep) TableName() string {
 // 重试增加新 Attempt，不覆盖旧 Attempt。
 type AgentGroupStepAttempt struct {
 	BaseModel
-	PublicID             string     `gorm:"size:32;not null;default:'';uniqueIndex:idx_chat_agent_group_attempts_public_id;comment:公开Attempt ID"`
-	StepID               uint       `gorm:"not null;uniqueIndex:idx_chat_agent_group_attempts_step_attempt_no;index:idx_chat_agent_group_attempts_step_id;comment:所属逻辑步骤ID"`
-	AttemptNo            int        `gorm:"not null;default:0;uniqueIndex:idx_chat_agent_group_attempts_step_attempt_no;comment:尝试序号"`
-	ChildRunID           string     `gorm:"size:128;not null;default:'';index:idx_chat_agent_group_attempts_child_run_id;comment:对应 ConversationRun.RunID"`
-	RetryRequestID       string     `gorm:"size:128;not null;default:'';uniqueIndex:idx_chat_agent_group_attempts_retry_request_id;comment:重试幂等键"`
-	RequestedModel       string     `gorm:"size:128;not null;default:'';comment:请求模型快照"`
-	ResolvedModel        string     `gorm:"size:128;not null;default:'';comment:实际模型快照"`
-	InputSnapshotJSON    string     `gorm:"type:text;not null;default:'';comment:当前步骤输入"`
-	ContextFingerprint   string     `gorm:"size:64;not null;default:'';comment:上下文指纹"`
-	OutputMarkdown       string     `gorm:"type:text;not null;default:'';comment:成员或主管输出"`
-	PartialOutputMarkdown string    `gorm:"type:text;not null;default:'';comment:中断前的部分输出"`
-	Status               string     `gorm:"size:32;not null;default:'pending';index:idx_chat_agent_group_attempts_status;comment:Attempt状态"`
-	ErrorCode            string     `gorm:"size:64;not null;default:'';comment:错误码"`
-	ErrorMessage         string     `gorm:"type:text;not null;default:'';comment:错误信息"`
-	BillingRef           string     `gorm:"size:128;not null;default:'';comment:Attempt计费幂等引用"`
-	LeaseExpiresAt       *time.Time `gorm:"index:idx_chat_agent_group_attempts_lease;comment:运行租约"`
-	StartedAt            time.Time  `gorm:"not null;comment:开始时间"`
-	EndedAt              *time.Time `gorm:"comment:结束时间"`
+	PublicID              string     `gorm:"size:32;not null;default:'';uniqueIndex:idx_chat_agent_group_attempts_public_id;comment:公开Attempt ID"`
+	StepID                uint       `gorm:"not null;uniqueIndex:idx_chat_agent_group_attempts_step_attempt_no;index:idx_chat_agent_group_attempts_step_id;comment:所属逻辑步骤ID"`
+	AttemptNo             int        `gorm:"not null;default:0;uniqueIndex:idx_chat_agent_group_attempts_step_attempt_no;comment:尝试序号"`
+	ChildRunID            string     `gorm:"size:128;not null;default:'';index:idx_chat_agent_group_attempts_child_run_id;comment:对应 ConversationRun.RunID"`
+	RetryRequestID        string     `gorm:"size:128;not null;default:'';uniqueIndex:idx_chat_agent_group_attempts_retry_request_id;comment:重试幂等键"`
+	RequestedModel        string     `gorm:"size:128;not null;default:'';comment:请求模型快照"`
+	ResolvedModel         string     `gorm:"size:128;not null;default:'';comment:实际模型快照"`
+	InputSnapshotJSON     string     `gorm:"type:text;not null;default:'';comment:当前步骤输入"`
+	ContextFingerprint    string     `gorm:"size:64;not null;default:'';comment:上下文指纹"`
+	OutputMarkdown        string     `gorm:"type:text;not null;default:'';comment:成员或主管输出"`
+	PartialOutputMarkdown string     `gorm:"type:text;not null;default:'';comment:中断前的部分输出"`
+	Status                string     `gorm:"size:32;not null;default:'pending';index:idx_chat_agent_group_attempts_status;comment:Attempt状态"`
+	ErrorCode             string     `gorm:"size:64;not null;default:'';comment:错误码"`
+	ErrorMessage          string     `gorm:"type:text;not null;default:'';comment:错误信息"`
+	BillingRef            string     `gorm:"size:128;not null;default:'';comment:Attempt计费幂等引用"`
+	LeaseExpiresAt        *time.Time `gorm:"index:idx_chat_agent_group_attempts_lease;comment:运行租约"`
+	StartedAt             time.Time  `gorm:"not null;comment:开始时间"`
+	EndedAt               *time.Time `gorm:"comment:结束时间"`
 }
 
 // TableName 指定表名。

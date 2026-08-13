@@ -171,7 +171,6 @@ type ChatInputProps = {
   defaultToolIDs: number[];
   queuedMessages: QueuedComposerMessage[];
   htmlVisualPromptEnabled: boolean;
-  maxSelectedTools: number;
   maxSelectedSkills: number;
   toolsLoading: boolean;
   options: ConversationOptions;
@@ -355,7 +354,6 @@ function ChatInputComponent({
   defaultToolIDs,
   queuedMessages,
   htmlVisualPromptEnabled,
-  maxSelectedTools,
   maxSelectedSkills,
   toolsLoading,
   options,
@@ -634,7 +632,6 @@ function ChatInputComponent({
       : disableGroupSummon
         ? COMPOSER_MENTION_KINDS_WITHOUT_GROUP
         : undefined,
-    maxSelectedTools,
     maxSelectedSkills,
     modelOptions,
     selectedPrompts,
@@ -657,11 +654,6 @@ function ChatInputComponent({
     onSkillLimitReached: () => {
       toast.error(tComposer("skillLimitTitle"), {
         description: tComposer("skillLimitDescription", { limit: maxSelectedSkills }),
-      });
-    },
-    onToolLimitReached: () => {
-      toast.error(tComposer("mcpToolLimitTitle"), {
-        description: tComposer("mcpToolLimitDescription", { limit: maxSelectedTools }),
       });
     },
   });
@@ -1219,7 +1211,6 @@ function ChatInputComponent({
                   availableTools={availableTools}
                   selectedToolIDs={selectedToolIDs}
                   defaultToolIDs={defaultToolIDs}
-                  maxSelectedTools={maxSelectedTools}
                   disabled={loading || uploading || toolsLoading}
                   onSelectedToolsChange={onSelectedToolsChange}
                   onDefaultToolsChange={onDefaultToolsChange}

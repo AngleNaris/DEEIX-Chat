@@ -57,18 +57,20 @@ func (d *dockerClient) ensureImage(ctx context.Context, ref string) error {
 
 // containerSpec 一次容器创建所需的全部参数。
 type containerSpec struct {
-	Name         string
-	Image        string
-	Env          []string
-	Memory       string
-	PidsLimit    int64
-	CPUs         float64
-	Workspace    string
-	CacheMount   bool   // 挂载用户级共享缓存卷（pip/npm 缓存）
-	CacheVol     string // 缓存卷名（使用配置值，禁止硬编码）
-	SharedBind   string // 宿主共享子目录（仅本 scope）bind 到 SharedTarget；空则不挂
-	SharedTarget string // 容器内共享目录路径（/shared/<scope>）
-	Network      string // 网络模式（空 = Docker 默认 bridge）
+	Name          string
+	Image         string
+	Env           []string
+	Memory        string
+	PidsLimit     int64
+	CPUs          float64
+	Workspace     string
+	CacheMount    bool   // 挂载用户级共享缓存卷（pip/npm 缓存）
+	CacheVol      string // 缓存卷名（使用配置值，禁止硬编码）
+	SharedBind    string // 宿主共享子目录（仅本 scope）bind 到 SharedTarget；空则不挂
+	SharedTarget  string // 容器内共享目录路径（/shared/<scope>）
+	ImportsBind   string // 当前 scope 的导入目录，始终只读
+	ImportsTarget string
+	Network       string // 专用沙箱网络（仅允许受控公网出口）
 }
 
 // createContainer 创建并启动一个会话容器。volumeName 为空时不挂工作区卷。
@@ -76,6 +78,20 @@ func (d *dockerClient) createContainer(ctx context.Context, spec containerSpec, 
 	if err := d.ensureImage(ctx, spec.Image); err != nil {
 		return err
 	}
+	cfg, host := buildContainerConfig(spec, volumeName)
+	_, err := d.cli.ContainerCreate(ctx, cfg, host, nil, nil, spec.Name)
+	if err != nil {
+		return fmt.Errorf("create container %s: %w", spec.Name, err)
+	}
+	if err := d.cli.ContainerStart(ctx, spec.Name, container.StartOptions{}); err != nil {
+		// 补偿清理：启动失败的容器不留残余（P1-04 顺手项）。
+		_ = d.removeContainer(ctx, spec.Name)
+		return fmt.Errorf("start container %s: %w", spec.Name, err)
+	}
+	return nil
+}
+
+func buildContainerConfig(spec containerSpec, volumeName string) (*container.Config, *container.HostConfig) {
 	mounts := []mount.Mount{
 		{Type: mount.TypeVolume, Source: volumeName, Target: spec.Workspace},
 	}
@@ -95,14 +111,26 @@ func (d *dockerClient) createContainer(ctx context.Context, spec containerSpec, 
 			Target: spec.SharedTarget,
 		})
 	}
+	if spec.ImportsBind != "" {
+		mounts = append(mounts, mount.Mount{
+			Type:     mount.TypeBind,
+			Source:   spec.ImportsBind,
+			Target:   spec.ImportsTarget,
+			ReadOnly: true,
+		})
+	}
 	cfg := &container.Config{
 		Image:      spec.Image,
+		User:       "0:0",
 		Env:        spec.Env,
 		WorkingDir: spec.Workspace,
 		Entrypoint: []string{"/bin/sh", "-c", "sleep infinity"},
 	}
 	host := &container.HostConfig{
-		Mounts: mounts,
+		Mounts:         mounts,
+		SecurityOpt:    []string{"no-new-privileges:true"},
+		Privileged:     false,
+		ReadonlyRootfs: false,
 		Resources: container.Resources{
 			Memory:    parseMemoryBytes(spec.Memory),
 			NanoCPUs:  int64(spec.CPUs * 1e9),
@@ -112,27 +140,130 @@ func (d *dockerClient) createContainer(ctx context.Context, spec containerSpec, 
 	if strings.TrimSpace(spec.Network) != "" {
 		host.NetworkMode = container.NetworkMode(strings.TrimSpace(spec.Network))
 	}
-	_, err := d.cli.ContainerCreate(ctx, cfg, host, nil, nil, spec.Name)
-	if err != nil {
-		return fmt.Errorf("create container %s: %w", spec.Name, err)
-	}
-	if err := d.cli.ContainerStart(ctx, spec.Name, container.StartOptions{}); err != nil {
-		// 补偿清理：启动失败的容器不留残余（P1-04 顺手项）。
-		_ = d.removeContainer(ctx, spec.Name)
-		return fmt.Errorf("start container %s: %w", spec.Name, err)
-	}
-	return nil
+	return cfg, host
 }
 
-func (d *dockerClient) containerExists(ctx context.Context, name string) (bool, error) {
-	_, err := d.cli.ContainerInspect(ctx, name)
+type inspectedContainerConfig struct {
+	Config     *container.Config
+	HostConfig *container.HostConfig
+	Running    bool
+	Networks   []string
+}
+
+func (d *dockerClient) inspectContainerConfig(ctx context.Context, name string) (*inspectedContainerConfig, bool, error) {
+	inspected, err := d.cli.ContainerInspect(ctx, name)
 	if err != nil {
 		if client.IsErrNotFound(err) {
-			return false, nil
+			return nil, false, nil
 		}
-		return false, err
+		return nil, false, err
 	}
-	return true, nil
+	result := &inspectedContainerConfig{
+		Config:     inspected.Config,
+		HostConfig: inspected.HostConfig,
+		Running:    inspected.State != nil && inspected.State.Running,
+	}
+	if inspected.NetworkSettings != nil {
+		result.Networks = make([]string, 0, len(inspected.NetworkSettings.Networks))
+		for name := range inspected.NetworkSettings.Networks {
+			result.Networks = append(result.Networks, name)
+		}
+	}
+	return result, true, nil
+}
+
+func containerConfigMatches(
+	actual *inspectedContainerConfig,
+	desiredConfig *container.Config,
+	desiredHost *container.HostConfig,
+) bool {
+	if actual == nil || actual.Config == nil || actual.HostConfig == nil || !actual.Running {
+		return false
+	}
+	if actual.Config.User != desiredConfig.User ||
+		actual.Config.WorkingDir != desiredConfig.WorkingDir ||
+		!stringSliceEqual(actual.Config.Entrypoint, desiredConfig.Entrypoint) ||
+		!containsAllStrings(actual.Config.Env, desiredConfig.Env) {
+		return false
+	}
+	if actual.HostConfig.Privileged != desiredHost.Privileged ||
+		actual.HostConfig.ReadonlyRootfs != desiredHost.ReadonlyRootfs ||
+		!containsAllStrings(actual.HostConfig.SecurityOpt, desiredHost.SecurityOpt) ||
+		actual.HostConfig.NetworkMode != desiredHost.NetworkMode ||
+		actual.HostConfig.Resources.Memory != desiredHost.Resources.Memory ||
+		actual.HostConfig.Resources.NanoCPUs != desiredHost.Resources.NanoCPUs ||
+		!equalInt64Pointers(actual.HostConfig.Resources.PidsLimit, desiredHost.Resources.PidsLimit) ||
+		len(actual.HostConfig.Binds) != 0 ||
+		len(actual.HostConfig.VolumesFrom) != 0 ||
+		!mountSetsEqual(actual.HostConfig.Mounts, desiredHost.Mounts) {
+		return false
+	}
+	network := strings.TrimSpace(string(desiredHost.NetworkMode))
+	return network == "" || len(actual.Networks) == 1 && actual.Networks[0] == network
+}
+
+func stringSliceEqual(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func containsAllStrings(actual, required []string) bool {
+	for _, expected := range required {
+		found := false
+		for _, value := range actual {
+			if value == expected {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+func equalInt64Pointers(left, right *int64) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return *left == *right
+}
+
+func mountSetsEqual(actual, desired []mount.Mount) bool {
+	if len(actual) != len(desired) {
+		return false
+	}
+	for _, expected := range desired {
+		found := false
+		for _, candidate := range actual {
+			if candidate.Type == expected.Type &&
+				candidate.Source == expected.Source &&
+				candidate.Target == expected.Target &&
+				candidate.ReadOnly == expected.ReadOnly {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+func (d *dockerClient) renameContainer(ctx context.Context, name, nextName string) error {
+	if err := d.cli.ContainerRename(ctx, name, nextName); err != nil {
+		return fmt.Errorf("rename container %s to %s: %w", name, nextName, err)
+	}
+	return nil
 }
 
 func (d *dockerClient) removeContainer(ctx context.Context, name string) error {

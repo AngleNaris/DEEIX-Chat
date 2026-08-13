@@ -42,11 +42,11 @@ var allowedKeys = map[string]string{
 	"chat.content_width":                        "compact",
 	"chat.default_mcp_tool_ids":                 "[]",
 	// 模型列表视图：grouped 按厂商分组 / custom 自定义排序（flat 拖拽）。
-	"chat.model_view":                           "grouped",
+	"chat.model_view": "grouped",
 	// 模型自定义排序：JSON 数组（platformModelName 顺序），空串表示未设置。
-	"chat.model_order":                          "",
+	"chat.model_order": "",
 	// 平台工具写操作批准模式：auto 自动执行 / ask 询问用户（模型先收到 pending，用户确认后执行）。
-	"platform_tools.write_approval":             "auto",
+	"platform_tools.write_approval": "auto",
 	// 用户时区（IANA 名称，如 Asia/Shanghai）：动态提示词 {{date}} 等按此渲染。
 	// 前端初始化时用浏览器时区静默写入；非法值由 validateValue 的 LoadLocation 校验拒绝。
 	"timezone": "Etc/UTC",
@@ -77,7 +77,7 @@ var enumKeys = map[string]map[string]bool{
 	"chat.content_width": {"compact": true, "standard": true, "wide": true},
 	"chat.model_view":    {"grouped": true, "custom": true},
 	"chat.default_reasoning_effort": {
-		"": true, "low": true, "medium": true, "high": true, "xhigh": true,
+		"": true, "low": true, "medium": true, "high": true, "xhigh": true, "max": true,
 	},
 	"platform_tools.write_approval": {"auto": true, "ask": true},
 }
@@ -117,9 +117,6 @@ func validateDefaultMCPToolIDs(value string, key string) error {
 	var toolIDs []uint64
 	if err := json.Unmarshal([]byte(strings.TrimSpace(value)), &toolIDs); err != nil {
 		return &ErrValidation{Msg: fmt.Sprintf("invalid value for %s: must be a JSON array of positive tool IDs", key)}
-	}
-	if len(toolIDs) > 128 {
-		return &ErrValidation{Msg: fmt.Sprintf("invalid value for %s: must contain at most 128 tool IDs", key)}
 	}
 	for _, id := range toolIDs {
 		if id == 0 {

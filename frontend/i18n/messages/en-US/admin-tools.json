@@ -15,10 +15,6 @@
       "description": "Controls when and how the model calls MCP tools. Leave empty to use the built-in default prompt."
     },
     "defaultPromptPlaceholder": "Leave empty to use the built-in default prompt",
-    "maxSelectedTools": {
-      "label": "Selectable tools per message",
-      "description": "Maximum MCP tools a user can select for one message. Default 32, maximum 128."
-    },
     "maxLLMCalls": {
       "label": "Max LLM requests",
       "description": "Total LLM requests allowed in one message, including the first request and final summary. Default 5, minimum 2."
@@ -126,6 +122,8 @@
     "createTitle": "Add MCP server",
     "editTitle": "Edit MCP server",
     "description": "Configure the MCP Streamable HTTP endpoint and credentials.",
+    "descriptionLabel": "Description",
+    "descriptionPlaceholder": "Describe this MCP server",
     "name": "Server name",
     "namePlaceholder": "Server name",
     "status": "Server status",

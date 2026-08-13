@@ -15,7 +15,7 @@ type CreateConversationProjectRequest struct {
 	Description       string `json:"description,omitempty" binding:"max=255"`
 	SystemPrompt      string `json:"systemPrompt,omitempty" binding:"max=12000"`
 	MCPDefaultMode    string `json:"mcpDefaultMode,omitempty" binding:"omitempty,oneof=inherit custom"`
-	DefaultMCPToolIDs []uint `json:"defaultMCPToolIDs,omitempty" binding:"max=128"`
+	DefaultMCPToolIDs []uint `json:"defaultMCPToolIDs,omitempty"`
 	DefaultSkillIDs   []uint `json:"defaultSkillIDs,omitempty" binding:"max=128"`
 	Color             string `json:"color,omitempty" binding:"max=32"`
 	Icon              string `json:"icon,omitempty" binding:"max=32"`
@@ -27,7 +27,7 @@ type UpdateConversationProjectRequest struct {
 	Description       *string `json:"description,omitempty" binding:"omitempty,max=255"`
 	SystemPrompt      *string `json:"systemPrompt,omitempty" binding:"omitempty,max=12000"`
 	MCPDefaultMode    *string `json:"mcpDefaultMode,omitempty" binding:"omitempty,oneof=inherit custom"`
-	DefaultMCPToolIDs *[]uint `json:"defaultMCPToolIDs,omitempty" binding:"omitempty,max=128"`
+	DefaultMCPToolIDs *[]uint `json:"defaultMCPToolIDs,omitempty" binding:"omitempty"`
 	DefaultSkillIDs   *[]uint `json:"defaultSkillIDs,omitempty" binding:"omitempty,max=128"`
 	Color             *string `json:"color,omitempty" binding:"omitempty,max=32"`
 	Icon              *string `json:"icon,omitempty" binding:"omitempty,max=32"`
@@ -48,7 +48,7 @@ type CreateConversationRoleRequest struct {
 	Provider          string `json:"provider,omitempty" binding:"max=32"`
 	ReasoningEffort   string `json:"reasoningEffort,omitempty" binding:"omitempty,oneof= low medium high xhigh max"`
 	MCPDefaultMode    string `json:"mcpDefaultMode,omitempty" binding:"omitempty,oneof=inherit custom"`
-	DefaultMCPToolIDs []uint `json:"defaultMCPToolIDs,omitempty" binding:"max=128"`
+	DefaultMCPToolIDs []uint `json:"defaultMCPToolIDs,omitempty"`
 	DefaultSkillIDs   []uint `json:"defaultSkillIDs,omitempty" binding:"max=128"`
 	Color             string `json:"color,omitempty" binding:"max=32"`
 	Icon              string `json:"icon,omitempty" binding:"max=32"`
@@ -65,7 +65,7 @@ type UpdateConversationRoleRequest struct {
 	Provider          *string `json:"provider,omitempty" binding:"omitempty,max=32"`
 	ReasoningEffort   *string `json:"reasoningEffort,omitempty" binding:"omitempty,oneof= low medium high xhigh max"`
 	MCPDefaultMode    *string `json:"mcpDefaultMode,omitempty" binding:"omitempty,oneof=inherit custom"`
-	DefaultMCPToolIDs *[]uint `json:"defaultMCPToolIDs,omitempty" binding:"omitempty,max=128"`
+	DefaultMCPToolIDs *[]uint `json:"defaultMCPToolIDs,omitempty" binding:"omitempty"`
 	DefaultSkillIDs   *[]uint `json:"defaultSkillIDs,omitempty" binding:"omitempty,max=128"`
 	Color             *string `json:"color,omitempty" binding:"omitempty,max=32"`
 	Icon              *string `json:"icon,omitempty" binding:"omitempty,max=32"`
@@ -139,7 +139,7 @@ type SendMessageRequest struct {
 	Options                 map[string]interface{} `json:"options,omitempty"`
 	ClientRunID             string                 `json:"clientRunID,omitempty" binding:"omitempty,max=64"`
 	FileIDs                 []string               `json:"fileIDs,omitempty" binding:"max=20"`
-	SelectedToolIDs         []uint                 `json:"selectedToolIDs,omitempty" binding:"max=128"`
+	SelectedToolIDs         []uint                 `json:"selectedToolIDs,omitempty"`
 	SkillIDs                []uint                 `json:"skillIDs,omitempty" binding:"max=128"`
 	HTMLVisualPromptEnabled bool                   `json:"htmlVisualPrompt,omitempty"`
 	ParentMessagePublicID   string                 `json:"parentMessagePublicID,omitempty" binding:"omitempty,max=32"`

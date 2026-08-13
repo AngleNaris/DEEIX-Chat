@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
@@ -56,7 +55,7 @@ type AgentTurnInput struct {
 	ActorColor  string
 	// PlatformModelName 是最终生效的模型（成员覆盖 > 角色默认 > 平台默认由编排器解析）。
 	PlatformModelName string
-	// ReasoningEffort 是思考强度语义档位（""/low/medium/high/xhigh）。
+	// ReasoningEffort 是思考强度语义档位（""/low/medium/high/xhigh/max）。
 	// 空串表示继承用户全局默认（chat.default_reasoning_effort）；协议不支持时不注入。
 	ReasoningEffort string
 	// SystemPrompt 只包含项目级提示词层（项目提示词 + 角色提示词 + 群组协调协议），
@@ -64,11 +63,15 @@ type AgentTurnInput struct {
 	SystemPrompt string
 	UserContent  string
 	// DomainMessages 是会话历史（不包含本次用户需求）。
-	DomainMessages  []model.Message
-	FileIDs         []string
-	SkillIDs        []uint
-	SelectedToolIDs []uint
-	Options         map[string]interface{}
+	DomainMessages     []model.Message
+	FileIDs            []string
+	SkillIDs           []uint
+	SelectedToolIDs    []uint
+	MCPActivation      *mcpActivationState
+	OnMCPActivation    func(context.Context, []uint) error
+	OnCredentialWrites func(context.Context, []credentialWrite) error
+	ToolMessageID      uint
+	Options            map[string]interface{}
 	// Stream 为 true 时通过 OnEvent 推送正文增量；思考与用量事件始终推送。
 	Stream  bool
 	OnEvent func(AgentTurnEvent) error
@@ -138,13 +141,10 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 	cfg := s.cfg.Snapshot()
 	reasoningContentPassback := s.reasoningContentPassbackEnabled(ctx, input.UserID, route)
 
-	// 2. 工具运行时：Actor 不落消息树，图片附件处理工具不可用，附件改走直传上下文。
-	toolRuntime, err := s.resolveSelectedToolRuntime(ctx, input.SelectedToolIDs)
+	// 2. 工具运行时：Actor 共享群组 MCP 激活状态，附件处理器仍保持后端私有。
+	toolRuntime, err := s.resolveSelectedToolRuntimeWithActivation(ctx, input.SelectedToolIDs, input.MCPActivation, input.OnMCPActivation)
 	if err != nil {
 		return nil, err
-	}
-	if toolRuntime.attachmentProcessor != nil {
-		toolRuntime = toolRuntime.withoutAttachmentProcessor()
 	}
 
 	// 3. 文件上下文：复用与普通消息一致的解析、就绪等待与全量/RAG 规划。
@@ -165,7 +165,51 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 	if err != nil {
 		return nil, err
 	}
+	imageAttachmentRoutingActive := toolRuntime.attachmentProcessor != nil
+	imageProcessing, err := s.processImageAttachments(ctx, imageAttachmentProcessingInput{
+		UserID:          input.UserID,
+		ConversationID:  input.ConversationID,
+		MessageID:       input.ToolMessageID,
+		RequestID:       input.RequestID,
+		RunID:           input.ClientRunID,
+		UserPrompt:      input.UserContent,
+		Attachments:     conversationAttachments,
+		Runtime:         toolRuntime,
+		SkipPersistence: !input.PersistToolCalls,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if imageProcessing.Routed {
+		toolRuntime = toolRuntime.withoutAttachmentProcessor()
+	}
+	var attachmentImports []attachmentImportPath
+	if len(toolRuntime.authorizedMCPServers) > 0 {
+		var cleanupAttachmentImports func()
+		attachmentImports, cleanupAttachmentImports, err = s.syncCurrentAttachmentsToImports(
+			ctx,
+			input.UserID,
+			input.ConversationID,
+			conversationAttachments,
+		)
+		if cleanupAttachmentImports != nil {
+			defer cleanupAttachmentImports()
+		}
+		if err != nil {
+			if s.logger != nil {
+				s.logger.Warn("attachment_import_sync_failed",
+					zap.Uint("user_id", input.UserID),
+					zap.Uint("conversation_id", input.ConversationID),
+					zap.Error(err),
+				)
+			}
+			attachmentImports = nil
+		}
+	}
 	fileContextPlan := buildConversationFileContextPlan(conversationAttachments, fileMode, cfg, route.UpstreamModel, route.ModelCapabilitiesJSON, capability.RAGAvailable)
+	if imageProcessing.Routed {
+		fileContextPlan = withoutCurrentImageAttachments(fileContextPlan)
+	}
 
 	// RAG 检索：与普通消息同口径，失败时优雅降级为附件全文/跳过。
 	promptScopeMessages := s.applyContextTokenBudget(input.DomainMessages, route.UpstreamModel, route.ModelCapabilitiesJSON, reasoningContentPassback)
@@ -233,6 +277,7 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 	stableFullContextAttachments = append(stableFullContextAttachments, ragFallbackEvidenceAttachments(retrievalRAGFallbacks)...)
 	userCtx := userContextInput{
 		Attachments:    imageAttachmentsForCurrentUser(stableFullContextAttachments),
+		ImageAnalyses:  imageProcessing.Analyses,
 		RAGChunks:      ragContextChunks,
 		SupportsVision: modelSupportsVision(route.PlatformModelName, route.ModelCapabilitiesJSON),
 	}
@@ -256,16 +301,18 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 		HTMLVisualPromptEnabled: false,
 		DomainMessages:          input.DomainMessages,
 		StableAttachments:       stableFullContextAttachments,
+		AttachmentImports:       attachmentImports,
 		DynamicContext:          userCtx,
 		PreferencePrompt:        "",
 		SkillPrompts:            skillPrompts,
 		ToolRuntime:             toolRuntime,
-		SkipImageAttachments:    false,
+		SkipImageAttachments:    imageAttachmentRoutingActive,
 		Config:                  cfg,
 	}
 	buildRoutePrompt := func(currentRoute *channel.ResolvedRoute) (PromptPlan, bool, error) {
 		passbackEnabled := s.reasoningContentPassbackEnabled(ctx, input.UserID, currentRoute)
 		currentInput := routePromptInput
+		currentInput.ToolRuntime = toolRuntime
 		currentInput.ReasoningContentPassback = passbackEnabled
 		plan, buildErr := s.buildMessageRoutePrompt(ctx, currentRoute, currentInput)
 		return plan, passbackEnabled, buildErr
@@ -340,7 +387,7 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 	if toolLedger == nil {
 		toolLedger = newToolExecutionLedger()
 	}
-	toolCallRows := make([]model.ToolCall, 0)
+	toolCallRows := append([]model.ToolCall(nil), imageProcessing.Rows...)
 	var streamedText strings.Builder
 	preferStream := input.Stream
 	onDelta := func(delta string) error {
@@ -609,7 +656,7 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 		usageAccumulator.setObservedUsage(totalUsage)
 	}
 	totalServerSideToolUsage := addServerSideToolUsage(nil, upstreamOutput.ServerSideToolUsage)
-	remainingToolCalls := s.resolveMaxToolCallsPerRun()
+	remainingToolCalls := max(s.resolveMaxToolCallsPerRun()-len(imageProcessing.Rows), 0)
 	llmCallCount := llmRequestCount
 
 	for len(upstreamOutput.ToolCalls) > 0 && llmCallCount < maxLLMCalls && remainingToolCalls > 0 {
@@ -647,10 +694,12 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 		toolResult := s.executeAgentTurnToolCalls(toolCtx, input, executeAgentTurnToolCallsInput{
 			UserID:            input.UserID,
 			ConversationID:    input.ConversationID,
+			MessageID:         input.ToolMessageID,
 			RequestID:         input.RequestID,
 			RunID:             input.ClientRunID,
 			ToolCalls:         pendingToolCalls,
 			ToolCallLimit:     remainingToolCalls,
+			ToolRuntime:       &toolRuntime,
 			ToolNameMap:       toolRuntime.nameMap,
 			MCPConfigs:        toolRuntime.mcpConfigs,
 			ToolSchemas:       toolRuntime.schemas,
@@ -668,6 +717,40 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 		toolSpan.End()
 		toolCallRows = append(toolCallRows, toolResult.Rows...)
 		remainingToolCalls -= len(toolResult.Rows)
+		if len(toolResult.CredentialWrites) > 0 {
+			assistantText, _ = applyCredentialWrites(assistantText, toolResult.CredentialWrites)
+			assistantToolMessage.Content, _ = applyCredentialWrites(assistantToolMessage.Content, toolResult.CredentialWrites)
+			assistantToolMessage.ReasoningContent, _ = applyCredentialWrites(assistantToolMessage.ReasoningContent, toolResult.CredentialWrites)
+			applyCredentialWritesToLLMMessages(llmMessages, toolResult.CredentialWrites)
+		}
+		if toolResult.MCPActivationChanged {
+			toolRuntime = toolRuntime.visibleRuntime()
+			if toolRuntime.attachmentProcessorActive() {
+				attachmentToolCallLimit := remainingToolCalls
+				activatedProcessing, processingErr := s.processImageAttachments(toolCtx, imageAttachmentProcessingInput{
+					UserID:          input.UserID,
+					ConversationID:  input.ConversationID,
+					MessageID:       input.ToolMessageID,
+					RequestID:       input.RequestID,
+					RunID:           input.ClientRunID,
+					UserPrompt:      input.UserContent,
+					Attachments:     conversationAttachments,
+					Runtime:         toolRuntime,
+					ToolCallLimit:   &attachmentToolCallLimit,
+					SkipPersistence: !input.PersistToolCalls,
+				})
+				if processingErr != nil {
+					return nil, processingErr
+				}
+				if activatedProcessing.Routed {
+					mergeImageAttachmentProcessingResult(&imageProcessing, activatedProcessing)
+					toolCallRows = append(toolCallRows, activatedProcessing.Rows...)
+					remainingToolCalls -= len(activatedProcessing.Rows)
+					appendAttachmentAnalysesToActivationResult(toolResult.ToolResults, activatedProcessing.Analyses, toolResultTokenBudget)
+					toolRuntime = toolRuntime.withoutAttachmentProcessor()
+				}
+			}
+		}
 		if toolResult.FatalErr != nil {
 			return nil, wrapUpstreamRequestError(toolResult.FatalErr)
 		}
@@ -704,13 +787,15 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 		}
 
 		followUpInput := generateInput
+		followUpInput.Tools = toolRuntime.definitions
+		followUpInput.DisableTools = false
 		if llmCallCount+1 >= maxLLMCalls {
 			followUpInput.Messages = buildFinalToolSynthesisMessages(llmMessages, "The maximum number of LLM calls for this run has been reached. Stop calling tools and produce the final answer based on the tool results already available. If the information is insufficient, state the missing information directly.")
 			followUpInput.Tools = nil
 			followUpInput.DisableTools = true
 			followUpInput.PreviousResponseID = ""
 			applyOpenAIResponsesInstructions(route, routeConfig.Endpoint, &followUpInput)
-		} else if !toolHistoryTrimmed && !toolResultsRebalanced && routeConfig.Endpoint == llm.EndpointResponses && supportsPreviousResponseIDRoute(route) && strings.TrimSpace(upstreamOutput.ResponseID) != "" {
+		} else if len(toolResult.CredentialWrites) == 0 && !toolResult.MCPActivationChanged && !toolHistoryTrimmed && !toolResultsRebalanced && routeConfig.Endpoint == llm.EndpointResponses && supportsPreviousResponseIDRoute(route) && strings.TrimSpace(upstreamOutput.ResponseID) != "" {
 			followUpInput.PreviousResponseID = strings.TrimSpace(upstreamOutput.ResponseID)
 			followUpInput.Messages = []llm.Message{{Role: "tool", ToolResults: toolResult.ToolResults}}
 		} else {
@@ -947,10 +1032,12 @@ func emitAgentTurnUsageEvent(input AgentTurnInput, usage llm.Usage) error {
 type executeAgentTurnToolCallsInput struct {
 	UserID            uint
 	ConversationID    uint
+	MessageID         uint
 	RequestID         string
 	RunID             string
 	ToolCalls         []llm.ToolCall
 	ToolCallLimit     int
+	ToolRuntime       *selectedToolRuntime
 	ToolNameMap       map[string]string
 	MCPConfigs        map[string]mcp.CallConfig
 	ToolSchemas       map[string]json.RawMessage
@@ -959,187 +1046,52 @@ type executeAgentTurnToolCallsInput struct {
 	ResultTokenBudget int64
 }
 
-// executeAgentTurnToolCalls 是 executeAssistantToolCalls 的 Actor 变体：
-// 执行/校验/内存幂等逻辑完全一致，但不挂 TraceRecorder；
-// 仅当 turn.PersistToolCalls（群组尝试）时把工具行写入 conversation_tool_calls（MessageID=0），
-// 并以 tool_call/tool_result 事件向外转发进度。
+// executeAgentTurnToolCalls 是 executeAssistantToolCalls 的 Actor 包装：
+// 复用普通消息的校验、凭据、激活、附件与导出链，只在调用前后转发群组事件。
 func (s *Service) executeAgentTurnToolCalls(ctx context.Context, turn AgentTurnInput, input executeAgentTurnToolCallsInput) executeAssistantToolCallsResult {
 	toolCalls := input.ToolCalls
 	if input.ToolCallLimit > 0 && len(toolCalls) > input.ToolCallLimit {
 		toolCalls = toolCalls[:input.ToolCallLimit]
 	}
-	if len(toolCalls) == 0 {
-		return executeAssistantToolCallsResult{}
-	}
-	executedToolCalls := append([]llm.ToolCall(nil), toolCalls...)
-	slots := make([]toolExecutionSlot, len(toolCalls))
-	var fatalErr error
-	for i, item := range toolCalls {
+	for _, item := range toolCalls {
 		modelToolName := strings.TrimSpace(item.ToolName)
 		executionToolName := resolveExecutionToolName(modelToolName, input.ToolNameMap)
-		row := model.ToolCall{
-			ConversationID: input.ConversationID,
-			UserID:         input.UserID,
-			RunID:          input.RunID,
-			ToolCallID:     strings.TrimSpace(item.ToolCallID),
-			ToolType:       normalizeToolType(item.ToolType),
-			ToolName:       executionToolName,
-			Status:         "requested",
-			LatencyMS:      0,
-			InputJSON:      strings.TrimSpace(item.ArgumentsJSON),
-			OutputJSON:     "",
-			ErrorJSON:      "",
-		}
+		_, isPlatform := input.PlatformTools[modelToolName]
 		_ = emitAgentTurnEvent(turn, AgentTurnEventToolCall, map[string]interface{}{
 			"tool_name":    modelToolName,
-			"tool_call_id": row.ToolCallID,
-			"arguments":    row.InputJSON,
+			"tool_call_id": strings.TrimSpace(item.ToolCallID),
+			"arguments":    maskCredentialToolInput(executionToolName, isPlatform, strings.TrimSpace(item.ArgumentsJSON)),
 		})
-		mcpConfig := resolveMCPConfig(modelToolName, input.MCPConfigs)
-		if mcpConfig == nil {
-			if entry, ok := input.PlatformTools[modelToolName]; ok {
-				// 平台内置工具（本地执行）：与 MCP 工具同一结果/持久化/预算通道。
-				toolStartedAt := time.Now()
-				outputJSON, executeErr := s.executePlatformToolCall(ctx, entry, ExecuteToolInput{
-					UserID:         input.UserID,
-					ConversationID: input.ConversationID,
-					RequestID:      strings.TrimSpace(input.RequestID),
-					ToolName:       row.ToolName,
-					ArgumentsJSON:  row.InputJSON,
-				})
-				row.LatencyMS = time.Since(toolStartedAt).Milliseconds()
-				if row.LatencyMS < 0 {
-					row.LatencyMS = 0
-				}
-				if executeErr != nil {
-					row.Status = "error"
-					row.ErrorJSON = strings.TrimSpace(executeErr.Error())
-				} else {
-					row.Status = "success"
-					row.OutputJSON = strings.TrimSpace(outputJSON)
-					if row.OutputJSON == "" {
-						row.OutputJSON = "{}"
-					}
-				}
-				result := buildToolResultForModel(row, modelToolName)
-				slot := toolExecutionSlot{row: row, result: result}
-				if turn.PersistToolCalls {
-					slot.persisted = s.persistToolCallResult(ctx, &row)
-					slot.row = row
-				}
-				slots[i] = slot
-				if input.Ledger != nil {
-					input.Ledger.store(row.ToolName, row.InputJSON, toolExecutionRecord{row: row, result: result})
-				}
-				_ = emitAgentTurnEvent(turn, AgentTurnEventToolResult, map[string]interface{}{
-					"tool_name":    modelToolName,
-					"tool_call_id": row.ToolCallID,
-					"status":       row.Status,
-					"error":        row.ErrorJSON,
-				})
-				continue
-			}
-			row.Status = "error"
-			row.ErrorJSON = toolNotEnabledForRunMessage(modelToolName)
-			slots[i] = toolExecutionSlot{row: row, result: buildToolResultForModel(row, modelToolName)}
-			if fatalErr == nil {
-				fatalErr = fmt.Errorf("model requested tool %q, but it is not enabled for this run", modelToolName)
-			}
-			if input.Ledger != nil {
-				input.Ledger.store(row.ToolName, row.InputJSON, toolExecutionRecord{row: row, result: slots[i].result})
-			}
-			_ = emitAgentTurnEvent(turn, AgentTurnEventToolResult, map[string]interface{}{
-				"tool_name":    modelToolName,
-				"tool_call_id": row.ToolCallID,
-				"status":       row.Status,
-				"error":        row.ErrorJSON,
-			})
-			continue
-		}
-		normalizedInput, validationErr := normalizeToolArguments(row.InputJSON, input.ToolSchemas[modelToolName])
-		if validationErr != nil {
-			row.Status = "error"
-			row.ErrorJSON = validationErr.Error()
-			slots[i] = toolExecutionSlot{row: row, result: buildToolResultForModel(row, modelToolName)}
-			if input.Ledger != nil {
-				input.Ledger.store(row.ToolName, row.InputJSON, toolExecutionRecord{row: row, result: slots[i].result})
-			}
-			_ = emitAgentTurnEvent(turn, AgentTurnEventToolResult, map[string]interface{}{
-				"tool_name":    modelToolName,
-				"tool_call_id": row.ToolCallID,
-				"status":       row.Status,
-				"error":        row.ErrorJSON,
-			})
-			continue
-		}
-		row.InputJSON = normalizedInput
-		if input.Ledger != nil {
-			if previous, ok := input.Ledger.lookup(row.ToolName, row.InputJSON); ok {
-				slot := buildRepeatedToolSlot(row, modelToolName, previous)
-				if turn.PersistToolCalls {
-					slot.persisted = s.persistToolCallResult(ctx, &slot.row)
-				}
-				slots[i] = slot
-				_ = emitAgentTurnEvent(turn, AgentTurnEventToolResult, map[string]interface{}{
-					"tool_name":    modelToolName,
-					"tool_call_id": row.ToolCallID,
-					"status":       slot.row.Status,
-					"error":        slot.row.ErrorJSON,
-				})
-				continue
-			}
-		}
-		toolStartedAt := time.Now()
-		outputJSON, executeErr := s.executeToolCall(ctx, ExecuteToolInput{
-			UserID:         input.UserID,
-			ConversationID: input.ConversationID,
-			RequestID:      strings.TrimSpace(input.RequestID),
-			ToolName:       row.ToolName,
-			ArgumentsJSON:  row.InputJSON,
-			MCPConfig:      mcpConfig,
-		})
-		row.LatencyMS = time.Since(toolStartedAt).Milliseconds()
-		if row.LatencyMS < 0 {
-			row.LatencyMS = 0
-		}
-		if executeErr != nil {
-			row.Status = "error"
-			row.ErrorJSON = strings.TrimSpace(executeErr.Error())
-		} else {
-			row.Status = "success"
-			row.OutputJSON = strings.TrimSpace(outputJSON)
-			if row.OutputJSON == "" {
-				row.OutputJSON = "{}"
-			}
-		}
-		result := buildToolResultForModel(row, modelToolName)
-		slot := toolExecutionSlot{row: row, result: result}
-		if turn.PersistToolCalls {
-			slot.persisted = s.persistToolCallResult(ctx, &row)
-			slot.row = row
-		}
-		slots[i] = slot
-		if input.Ledger != nil {
-			input.Ledger.store(row.ToolName, row.InputJSON, toolExecutionRecord{row: row, result: result})
-		}
+	}
+	result := s.executeAssistantToolCalls(ctx, executeAssistantToolCallsInput{
+		UserID:            input.UserID,
+		ConversationID:    input.ConversationID,
+		MessageID:         input.MessageID,
+		RequestID:         input.RequestID,
+		RunID:             input.RunID,
+		ToolCalls:         toolCalls,
+		ToolCallLimit:     input.ToolCallLimit,
+		ToolRuntime:       input.ToolRuntime,
+		ToolNameMap:       input.ToolNameMap,
+		MCPConfigs:        input.MCPConfigs,
+		ToolSchemas:       input.ToolSchemas,
+		PlatformTools:     input.PlatformTools,
+		Ledger:            input.Ledger,
+		SkipPersistence:   !turn.PersistToolCalls,
+		ResultTokenBudget: input.ResultTokenBudget,
+	})
+	for _, row := range result.Rows {
 		_ = emitAgentTurnEvent(turn, AgentTurnEventToolResult, map[string]interface{}{
-			"tool_name":    modelToolName,
+			"tool_name":    row.ToolName,
 			"tool_call_id": row.ToolCallID,
 			"status":       row.Status,
 			"error":        row.ErrorJSON,
 		})
 	}
-	rows := make([]model.ToolCall, 0, len(slots))
-	toolResults := make([]llm.ToolResult, 0, len(slots))
-	enforceToolResultAggregateBudget(slots, input.ResultTokenBudget)
-	for _, slot := range slots {
-		rows = append(rows, slot.row)
-		toolResults = append(toolResults, slot.result)
+	if len(result.CredentialWrites) > 0 && turn.OnCredentialWrites != nil {
+		if err := turn.OnCredentialWrites(ctx, result.CredentialWrites); err != nil && result.FatalErr == nil {
+			result.FatalErr = err
+		}
 	}
-	return executeAssistantToolCallsResult{
-		Rows:              rows,
-		ToolResults:       toolResults,
-		ExecutedToolCalls: executedToolCalls,
-		FatalErr:          fatalErr,
-	}
+	return result
 }

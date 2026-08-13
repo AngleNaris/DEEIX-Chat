@@ -24,14 +24,15 @@ type Meta struct {
 	UserID         uint
 	ConversationID uint
 	RequestID      string
+	CallID         string
 }
 
 // metaTimestampWindow _meta 签名的允许时钟偏移（短期签名，防重放）。
 const metaTimestampWindow = 5 * time.Minute
 
 // metaSignature 计算 _meta 的 HMAC-SHA256 签名（后端与沙箱共享密钥，canonical 串保持一致）。
-func metaSignature(secret string, userID, conversationID uint, requestID string, ts int64) string {
-	canonical := fmt.Sprintf("user_id=%d\nconversation_id=%d\nrequest_id=%s\nts=%d", userID, conversationID, requestID, ts)
+func metaSignature(secret string, userID, conversationID uint, requestID, callID string, ts int64) string {
+	canonical := fmt.Sprintf("user_id=%d\nconversation_id=%d\nrequest_id=%s\ncall_id=%s\nts=%d", userID, conversationID, requestID, callID, ts)
 	mac := hmac.New(sha256.New, []byte(secret))
 	mac.Write([]byte(canonical))
 	return hex.EncodeToString(mac.Sum(nil))
@@ -56,11 +57,23 @@ func ParseMeta(raw []byte, hmacKey string) (*Meta, error) {
 		return nil, fmt.Errorf("missing or invalid _meta.user_id")
 	}
 	meta := &Meta{UserID: userID}
-	if rid, ok := m["request_id"].(string); ok {
-		meta.RequestID = rid
-	}
 	if cid, ok := toUint(m["conversation_id"]); ok {
 		meta.ConversationID = cid
+	}
+	if meta.ConversationID == 0 {
+		return nil, fmt.Errorf("missing or invalid _meta.conversation_id")
+	}
+	if rid, ok := m["request_id"].(string); ok {
+		meta.RequestID = strings.TrimSpace(rid)
+	}
+	if meta.RequestID == "" {
+		return nil, fmt.Errorf("missing or invalid _meta.request_id")
+	}
+	if callID, ok := m["call_id"].(string); ok {
+		meta.CallID = strings.TrimSpace(callID)
+	}
+	if meta.CallID == "" {
+		return nil, fmt.Errorf("missing or invalid _meta.call_id")
 	}
 	if hmacKey == "" {
 		return nil, fmt.Errorf("meta hmac key not configured: refusing unsigned identity")
@@ -73,7 +86,7 @@ func ParseMeta(raw []byte, hmacKey string) (*Meta, error) {
 		return nil, fmt.Errorf("_meta timestamp expired")
 	}
 	sig, _ := m["sig"].(string)
-	expected := metaSignature(hmacKey, meta.UserID, meta.ConversationID, meta.RequestID, ts)
+	expected := metaSignature(hmacKey, meta.UserID, meta.ConversationID, meta.RequestID, meta.CallID, ts)
 	if sig == "" || subtle.ConstantTimeCompare([]byte(sig), []byte(expected)) != 1 {
 		return nil, fmt.Errorf("_meta signature mismatch: identity must be signed by DEEIX backend")
 	}
@@ -106,15 +119,21 @@ func toUint(v any) (uint, bool) {
 
 // Session 代表一个 (user, conversation) 隔离的容器会话。
 type Session struct {
-	Scope       string    // deeix-<uid>-<cid>
-	Image       string    // 会话当前使用的镜像（sandbox_spawn 可更换）
-	Container   string    // Docker 容器名
-	CreatedAt   time.Time
-	LastUsedAt  time.Time
-	Env         []string  // 创建容器时的环境变量（镜像拉取所需）
-	CacheMount  bool      // 是否挂用户级缓存卷
-	mu          sync.Mutex
-	tasks       map[string]*BackgroundTask // 后台任务
+	Scope      string // deeix-<uid>-<cid>
+	Image      string // 会话当前使用的镜像（sandbox_spawn 可更换）
+	Container  string // Docker 容器名
+	CreatedAt  time.Time
+	LastUsedAt time.Time
+	Env        []string // 创建容器时的环境变量（镜像拉取所需）
+	CacheMount bool     // 是否挂用户级缓存卷
+	CacheVol   string   // 按 verified user scope 派生的缓存卷
+	mu         sync.Mutex
+	ready      chan struct{}
+	createErr  error
+	activeOps  int
+	reclaiming bool
+	reclaimed  chan struct{}
+	tasks      map[string]*BackgroundTask // 后台任务
 }
 
 // BackgroundTask 容器内的后台任务（nohup + 输出文件轮询）。
@@ -157,89 +176,244 @@ func sessionBelongsToUser(scope string, userID uint) bool {
 	return scope == prefix || strings.HasPrefix(scope, prefix+"-")
 }
 
-// GetOrCreate 获取会话；不存在则懒创建（create_if_missing 语义）。
-// 返回会话与是否为新创建（重建时供工具回传 session_recreated 标志）。
-func (m *SessionManager) GetOrCreate(ctx context.Context, scope string) (*Session, bool, error) {
-	m.mu.Lock()
-	if s, ok := m.live[scope]; ok {
-		s.LastUsedAt = time.Now()
-		m.mu.Unlock()
-		return s, false, nil
+// cacheVolumeForScope derives a stable per-user cache volume from the verified scope.
+func cacheVolumeForScope(scope, prefix string) (string, error) {
+	if !validScopePattern.MatchString(scope) {
+		return "", fmt.Errorf("invalid session scope %q", scope)
 	}
-	m.mu.Unlock()
-
-	// 创建过程较慢，先建对象占位避免并发重复创建。
-	m.mu.Lock()
-	if s, ok := m.live[scope]; ok {
-		s.LastUsedAt = time.Now()
-		m.mu.Unlock()
-		return s, false, nil
-	}
-	s := &Session{
-		Scope:      scope,
-		Image:      m.cfg.BaseImage,
-		Container:  scope,
-		CreatedAt:  time.Now(),
-		LastUsedAt: time.Now(),
-		Env:        []string{"WORKSPACE=" + m.cfg.WorkspaceDir},
-		CacheMount: true,
-		tasks:      make(map[string]*BackgroundTask),
-	}
-	m.live[scope] = s
-	m.mu.Unlock()
-
-	exists, err := m.d.containerExists(ctx, s.Container)
-	if err != nil {
-		m.drop(scope)
-		return nil, false, err
-	}
-	if !exists {
-		if err := m.createSessionContainer(ctx, s); err != nil {
-			m.drop(scope)
-			return nil, false, err
-		}
-	}
-	return s, true, nil
+	parts := strings.Split(scope, "-")
+	return prefix + "-u" + parts[1], nil
 }
 
-// Get 仅读取已有会话（spawn/ps 等需要区分"新会话"语义时用）。
-func (m *SessionManager) Get(scope string) (*Session, bool) {
+// GetOrCreate 获取会话；不存在则懒创建（create_if_missing 语义）。
+// 返回的 release 必须在当前 Docker 操作完成后调用，避免租约回收删除执行中的容器。
+func (m *SessionManager) GetOrCreate(ctx context.Context, scope string) (*Session, bool, func(), error) {
+	if !validScopePattern.MatchString(scope) {
+		return nil, false, nil, fmt.Errorf("invalid session scope %q", scope)
+	}
+	for {
+		m.mu.Lock()
+		if s, ok := m.live[scope]; ok {
+			s.mu.Lock()
+			if s.reclaiming {
+				reclaimed := s.reclaimed
+				s.mu.Unlock()
+				m.mu.Unlock()
+				select {
+				case <-reclaimed:
+					continue
+				case <-ctx.Done():
+					return nil, false, nil, ctx.Err()
+				}
+			}
+			s.activeOps++
+			s.LastUsedAt = time.Now()
+			ready := s.ready
+			s.mu.Unlock()
+			m.mu.Unlock()
+
+			select {
+			case <-ready:
+				if s.createErr != nil {
+					releaseSessionOperation(s)()
+					return nil, false, nil, s.createErr
+				}
+				return s, false, releaseSessionOperation(s), nil
+			case <-ctx.Done():
+				releaseSessionOperation(s)()
+				return nil, false, nil, ctx.Err()
+			}
+		}
+
+		cacheVol, err := cacheVolumeForScope(scope, m.cfg.CacheVolume)
+		if err != nil {
+			m.mu.Unlock()
+			return nil, false, nil, err
+		}
+		now := time.Now()
+		s := &Session{
+			Scope: scope, Image: m.cfg.BaseImage, Container: scope,
+			CreatedAt: now, LastUsedAt: now,
+			Env: []string{"WORKSPACE=" + m.cfg.WorkspaceDir}, CacheMount: true, CacheVol: cacheVol,
+			ready: make(chan struct{}), activeOps: 1, tasks: make(map[string]*BackgroundTask),
+		}
+		m.live[scope] = s
+		m.mu.Unlock()
+
+		err = m.ensureSessionContainer(ctx, s)
+		s.mu.Lock()
+		s.createErr = err
+		close(s.ready)
+		s.mu.Unlock()
+		if err != nil {
+			releaseSessionOperation(s)()
+			m.dropSession(scope, s)
+			return nil, false, nil, err
+		}
+		return s, true, releaseSessionOperation(s), nil
+	}
+}
+
+func releaseSessionOperation(s *Session) func() {
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			s.mu.Lock()
+			if s.activeOps > 0 {
+				s.activeOps--
+			}
+			s.LastUsedAt = time.Now()
+			s.mu.Unlock()
+		})
+	}
+}
+
+func (m *SessionManager) dropSession(scope string, target *Session) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	s, ok := m.live[scope]
-	if ok {
-		s.LastUsedAt = time.Now()
+	if m.live[scope] == target {
+		delete(m.live, scope)
 	}
-	return s, ok
 }
 
-func (m *SessionManager) createSessionContainer(ctx context.Context, s *Session) error {
+func (m *SessionManager) acquireExisting(ctx context.Context, scope string) (*Session, func(), bool, error) {
+	if !validScopePattern.MatchString(scope) {
+		return nil, nil, false, fmt.Errorf("invalid session scope %q", scope)
+	}
+	for {
+		m.mu.Lock()
+		s, ok := m.live[scope]
+		if !ok {
+			m.mu.Unlock()
+			return nil, nil, false, nil
+		}
+		s.mu.Lock()
+		if s.reclaiming {
+			reclaimed := s.reclaimed
+			s.mu.Unlock()
+			m.mu.Unlock()
+			select {
+			case <-reclaimed:
+				continue
+			case <-ctx.Done():
+				return nil, nil, false, ctx.Err()
+			}
+		}
+		s.activeOps++
+		s.LastUsedAt = time.Now()
+		ready := s.ready
+		s.mu.Unlock()
+		m.mu.Unlock()
+
+		select {
+		case <-ready:
+			if s.createErr != nil {
+				releaseSessionOperation(s)()
+				return nil, nil, false, s.createErr
+			}
+			return s, releaseSessionOperation(s), true, nil
+		case <-ctx.Done():
+			releaseSessionOperation(s)()
+			return nil, nil, false, ctx.Err()
+		}
+	}
+}
+
+func beginSessionMaintenance(s *Session) (func(), error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.reclaiming || s.activeOps != 1 {
+		return nil, fmt.Errorf("sandbox session is busy")
+	}
+	s.reclaiming = true
+	s.reclaimed = make(chan struct{})
+	return func() {
+		s.mu.Lock()
+		reclaimed := s.reclaimed
+		s.reclaiming = false
+		s.reclaimed = nil
+		if reclaimed != nil {
+			close(reclaimed)
+		}
+		s.mu.Unlock()
+	}, nil
+}
+
+func (m *SessionManager) ensureSessionContainer(ctx context.Context, s *Session) error {
+	spec, volumeName, err := m.sessionContainerSpec(s)
+	if err != nil {
+		return err
+	}
+	actual, exists, err := m.d.inspectContainerConfig(ctx, s.Container)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return m.d.createContainer(ctx, spec, volumeName)
+	}
+	if actual.Config != nil && strings.TrimSpace(actual.Config.Image) != "" {
+		s.Image = actual.Config.Image
+		spec.Image = actual.Config.Image
+	}
+	desiredConfig, desiredHost := buildContainerConfig(spec, volumeName)
+	if containerConfigMatches(actual, desiredConfig, desiredHost) {
+		return nil
+	}
+	slog.Info("recreate sandbox container with current isolation constraints", "container", s.Container)
+	backupName := s.Container + "-migration-" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	if err := m.d.renameContainer(ctx, s.Container, backupName); err != nil {
+		return err
+	}
+	if err := m.d.createContainer(ctx, spec, volumeName); err != nil {
+		if restoreErr := m.d.renameContainer(ctx, backupName, s.Container); restoreErr != nil {
+			return fmt.Errorf("recreate sandbox container: %w; restore previous container name: %v", err, restoreErr)
+		}
+		return fmt.Errorf("recreate sandbox container: %w; previous container restored", err)
+	}
+	if err := m.d.removeContainer(ctx, backupName); err != nil {
+		slog.Warn("remove sandbox migration backup", "container", backupName, "err", err)
+	}
+	return nil
+}
+
+func (m *SessionManager) sessionContainerSpec(s *Session) (containerSpec, string, error) {
 	if !validScopePattern.MatchString(s.Scope) {
-		return fmt.Errorf("invalid session scope %q", s.Scope)
+		return containerSpec{}, "", fmt.Errorf("invalid session scope %q", s.Scope)
 	}
 	// 宿主侧预先创建本会话的共享子目录：容器只 bind 挂载这一份，
 	// 其他租户目录在容器内物理不可见（P0-05）。0755 允许后端只读挂载读取导出文件。
 	sharedHostSub := filepath.Join(m.cfg.SharedHostDir, s.Scope)
 	if err := os.MkdirAll(sharedHostSub, 0o755); err != nil {
-		return fmt.Errorf("create shared scope dir %s: %w", sharedHostSub, err)
+		return containerSpec{}, "", fmt.Errorf("create shared scope dir %s: %w", sharedHostSub, err)
 	}
-	if err := m.d.createContainer(ctx, containerSpec{
-		Name:       s.Container,
-		Image:      s.Image,
-		Env:        s.Env,
-		Memory:     m.cfg.MemoryLimit,
-		PidsLimit:  m.cfg.PidsLimit,
-		CPUs:       m.cfg.CPUsLimit,
-		Workspace:  m.cfg.WorkspaceDir,
-		CacheMount: s.CacheMount,
-		CacheVol:   m.cfg.CacheVolume,
-		SharedBind: sharedHostSub,
-		SharedTarget: filepath.Join(m.cfg.SharedMountDir, s.Scope),
-		Network:    m.cfg.NetworkMode,
-	}, "deeix-sandbox-ws-"+s.Scope); err != nil {
+	importsHostSub := filepath.Join(m.cfg.ImportsHostDir, s.Scope)
+	if err := os.MkdirAll(importsHostSub, 0o755); err != nil {
+		return containerSpec{}, "", fmt.Errorf("create imports scope dir %s: %w", importsHostSub, err)
+	}
+	return containerSpec{
+		Name:          s.Container,
+		Image:         s.Image,
+		Env:           s.Env,
+		Memory:        m.cfg.MemoryLimit,
+		PidsLimit:     m.cfg.PidsLimit,
+		CPUs:          m.cfg.CPUsLimit,
+		Workspace:     m.cfg.WorkspaceDir,
+		CacheMount:    s.CacheMount,
+		CacheVol:      s.CacheVol,
+		SharedBind:    sharedHostSub,
+		SharedTarget:  filepath.Join(m.cfg.SharedMountDir, s.Scope),
+		ImportsBind:   importsHostSub,
+		ImportsTarget: filepath.Clean(m.cfg.ImportsMountDir),
+		Network:       m.cfg.NetworkMode,
+	}, "deeix-sandbox-ws-" + s.Scope, nil
+}
+
+func (m *SessionManager) createSessionContainer(ctx context.Context, s *Session) error {
+	spec, volumeName, err := m.sessionContainerSpec(s)
+	if err != nil {
 		return err
 	}
-	return nil
+	return m.d.createContainer(ctx, spec, volumeName)
 }
 
 // SharedDir 返回当前会话在共享目录中的专属子目录（mm 多模态工具可读取）。
@@ -249,24 +423,38 @@ func (m *SessionManager) SharedDir(scope string) string {
 
 // Spawn 为会话更换/新建镜像容器（sandbox_spawn 语义）：销毁旧容器后按新镜像重建。
 func (m *SessionManager) Spawn(ctx context.Context, scope, image string) (bool, error) {
-	s, created, err := m.GetOrCreate(ctx, scope)
+	s, created, release, err := m.GetOrCreate(ctx, scope)
 	if err != nil {
 		return false, err
 	}
-	if created {
-		// 刚创建时已用默认镜像；若指定镜像不同则重建一次。
-		if image == "" || image == s.Image {
-			return true, nil
-		}
+	defer release()
+	finish, err := beginSessionMaintenance(s)
+	if err != nil {
+		return created, err
 	}
-	if image == "" {
+	defer finish()
+
+	s.mu.Lock()
+	currentImage := s.Image
+	s.mu.Unlock()
+	if image == "" || image == currentImage {
 		return created, nil
 	}
 	if err := m.d.removeContainer(ctx, s.Container); err != nil {
 		return created, err
 	}
+	s.mu.Lock()
+	s.tasks = make(map[string]*BackgroundTask)
 	s.Image = image
+	s.mu.Unlock()
 	if err := m.createSessionContainer(ctx, s); err != nil {
+		s.mu.Lock()
+		s.Image = currentImage
+		s.mu.Unlock()
+		if restoreErr := m.createSessionContainer(ctx, s); restoreErr != nil {
+			m.dropSession(scope, s)
+			return created, fmt.Errorf("spawn image %q: %w; restore image %q: %v", image, err, currentImage, restoreErr)
+		}
 		return created, err
 	}
 	return created, nil
@@ -274,43 +462,53 @@ func (m *SessionManager) Spawn(ctx context.Context, scope, image string) (bool, 
 
 // Kill 销毁会话容器（保留工作区卷与缓存卷，环境不丢）。
 func (m *SessionManager) Kill(ctx context.Context, scope string) error {
-	s, ok := m.Get(scope)
-	if !ok {
-		return nil
+	s, release, ok, err := m.acquireExisting(ctx, scope)
+	if err != nil || !ok {
+		return err
 	}
+	defer release()
+	finish, err := beginSessionMaintenance(s)
+	if err != nil {
+		return err
+	}
+	defer finish()
 	if err := m.d.removeContainer(ctx, s.Container); err != nil {
 		return err
 	}
+	m.dropSession(scope, s)
 	return nil
 }
 
 // Reset 销毁会话容器并清空其工作区卷。
 func (m *SessionManager) Reset(ctx context.Context, scope string) error {
-	s, ok := m.Get(scope)
-	if !ok {
-		return nil
+	s, release, ok, err := m.acquireExisting(ctx, scope)
+	if err != nil || !ok {
+		return err
+	}
+	defer release()
+	finish, err := beginSessionMaintenance(s)
+	if err != nil {
+		return err
+	}
+	defer finish()
+	if err := m.d.removeContainer(ctx, s.Container); err != nil {
+		return err
 	}
 	s.mu.Lock()
 	s.tasks = make(map[string]*BackgroundTask)
 	s.mu.Unlock()
-	if err := m.d.removeContainer(ctx, s.Container); err != nil {
-		return err
-	}
-	return m.removeWorkspaceVolume(scope)
+	volumeErr := m.removeWorkspaceVolume(scope)
+	m.dropSession(scope, s)
+	return volumeErr
 }
 
 func (m *SessionManager) removeWorkspaceVolume(scope string) error {
 	vol := "deeix-sandbox-ws-" + scope
 	if err := m.d.removeVolume(vol); err != nil {
 		slog.Warn("remove workspace volume", "volume", vol, "err", err)
+		return err
 	}
 	return nil
-}
-
-func (m *SessionManager) drop(scope string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	delete(m.live, scope)
 }
 
 // StartReclaimer 启动闲置会话回收 goroutine（租约制：超过 TTL 未使用即销毁容器）。
@@ -332,41 +530,79 @@ func (m *SessionManager) StartReclaimer(ctx context.Context) {
 	}()
 }
 
+func sessionReclaimable(s *Session, now time.Time, leaseTTL time.Duration) bool {
+	return !s.reclaiming && s.activeOps == 0 && len(s.tasks) == 0 && now.Sub(s.LastUsedAt) > leaseTTL
+}
+
 func (m *SessionManager) reclaimOnce(ctx context.Context) {
 	now := time.Now()
 	m.mu.Lock()
 	expired := make([]*Session, 0)
-	for scope, s := range m.live {
-		if now.Sub(s.LastUsedAt) > m.cfg.LeaseTTL {
+	for _, s := range m.live {
+		s.mu.Lock()
+		if sessionReclaimable(s, now, m.cfg.LeaseTTL) {
+			s.reclaiming = true
+			s.reclaimed = make(chan struct{})
 			expired = append(expired, s)
-			delete(m.live, scope)
 		}
+		s.mu.Unlock()
 	}
 	m.mu.Unlock()
 	for _, s := range expired {
 		slog.Info("reclaim idle session container", "container", s.Container)
-		if err := m.d.removeContainer(ctx, s.Container); err != nil {
+		err := m.d.removeContainer(ctx, s.Container)
+		if err != nil {
 			slog.Warn("reclaim container", "container", s.Container, "err", err)
 		}
+		m.mu.Lock()
+		s.mu.Lock()
+		if err == nil && m.live[s.Scope] == s {
+			delete(m.live, s.Scope)
+		}
+		reclaimed := s.reclaimed
+		s.reclaiming = false
+		s.reclaimed = nil
+		if reclaimed != nil {
+			close(reclaimed)
+		}
+		s.mu.Unlock()
+		m.mu.Unlock()
 	}
 }
 
-// List 列出全部存活会话（sandbox_ps 用）。
-func (m *SessionManager) List() []*Session {
+// Shutdown removes live session containers while preserving workspace and cache volumes.
+func (m *SessionManager) Shutdown(ctx context.Context) {
+	m.mu.Lock()
+	sessions := make([]*Session, 0, len(m.live))
+	for _, s := range m.live {
+		sessions = append(sessions, s)
+	}
+	m.mu.Unlock()
+	for _, s := range sessions {
+		if err := m.d.removeContainer(ctx, s.Container); err != nil {
+			slog.Warn("shutdown container", "container", s.Container, "err", err)
+			continue
+		}
+		m.dropSession(s.Scope, s)
+	}
+}
+
+type SessionInfo struct {
+	Scope      string
+	Image      string
+	LastUsedAt time.Time
+}
+
+func (m *SessionManager) List() []SessionInfo {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	out := make([]*Session, 0, len(m.live))
+	out := make([]SessionInfo, 0, len(m.live))
 	for _, s := range m.live {
-		out = append(out, s)
+		s.mu.Lock()
+		if !s.reclaiming {
+			out = append(out, SessionInfo{Scope: s.Scope, Image: s.Image, LastUsedAt: s.LastUsedAt})
+		}
+		s.mu.Unlock()
 	}
 	return out
-}
-
-// touch 更新会话最近使用时间（后台任务轮询时调用）。
-func (m *SessionManager) touch(scope string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if s, ok := m.live[scope]; ok {
-		s.LastUsedAt = time.Now()
-	}
 }

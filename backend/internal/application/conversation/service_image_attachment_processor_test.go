@@ -20,6 +20,7 @@ import (
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/llm"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/mcp"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/objectstore"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/pkg/secretbox"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/security"
 )
@@ -89,6 +90,7 @@ func TestProcessImageAttachmentsRoutesOnlyTextToMainModelContext(t *testing.T) {
 		},
 		attachmentProcessor: &selectedAttachmentProcessor{
 			toolID:         7,
+			serverID:       9,
 			modelName:      "vision_analyze",
 			toolName:       "vision_analyze",
 			displayName:    "图片分析",
@@ -96,9 +98,25 @@ func TestProcessImageAttachmentsRoutesOnlyTextToMainModelContext(t *testing.T) {
 			encoding:       domainmcp.AttachmentEncodingDataURL,
 			promptArgument: "prompt",
 		},
+		mcpActivation: newMCPActivationState([]uint{9}),
 	}
+	runtime.mcpActivation = newMCPActivationState(nil)
+	inactiveResult, inactiveErr := service.processImageAttachments(t.Context(), imageAttachmentProcessingInput{
+		UserID: 1, ConversationID: 2, MessageID: 3, RequestID: "request-1", RunID: "run-1",
+		UserPrompt: "图中有什么？",
+		Attachments: []AttachmentInput{{
+			FileID: "file-1", FileName: "current.png", Kind: "image", MimeType: "image/png",
+			StoragePath: "images/current.png", Current: true,
+		}},
+		Runtime: runtime,
+	})
+	if inactiveErr != nil || inactiveResult.Routed || receivedImage != "" {
+		t.Fatalf("inactive processor executed: result=%#v err=%v", inactiveResult, inactiveErr)
+	}
+	runtime.mcpActivation = newMCPActivationState([]uint{9})
 
 	result, err := service.processImageAttachments(t.Context(), imageAttachmentProcessingInput{
+
 		UserID:         1,
 		ConversationID: 2,
 		MessageID:      3,
@@ -191,6 +209,115 @@ func TestResolveSelectedToolRuntimeFailsClosedForUnavailableAttachmentProcessor(
 	_, err := service.resolveSelectedToolRuntime(t.Context(), []uint{1})
 	if !errors.Is(err, ErrImageAttachmentProcessingFailed) {
 		t.Fatalf("expected unavailable processor to fail closed, got %v", err)
+	}
+}
+
+func TestResolveSelectedToolRuntimeKeepsAttachmentProcessorBackendOnly(t *testing.T) {
+	const encryptionKey = "attachment-processor-test-key"
+	encryptedToken, err := secretbox.EncryptString(encryptionKey, "processor-token")
+	if err != nil {
+		t.Fatalf("encrypt processor token: %v", err)
+	}
+	service := &Service{
+		cfg: config.NewRuntime(config.Config{
+			MCPEnable:         true,
+			DataEncryptionKey: encryptionKey,
+		}),
+		mcpRepo: selectedToolRuntimeMCPRepositoryStub{
+			listToolsByIDs: func(context.Context, []uint) ([]domainmcp.Tool, error) {
+				return []domainmcp.Tool{{
+					ID:                       1,
+					ServerID:                 2,
+					Name:                     "analyze_image",
+					Description:              "Analyze an attached image",
+					InputSchemaJSON:          `{"type":"object","properties":{"image":{"type":"string"}},"required":["image"]}`,
+					Status:                   "active",
+					AttachmentInputMode:      domainmcp.AttachmentInputModeImage,
+					AttachmentArgument:       "image",
+					AttachmentEncoding:       domainmcp.AttachmentEncodingDataURL,
+					AttachmentPromptArgument: "prompt",
+				}}, nil
+			},
+			getServer: func(context.Context, uint) (*domainmcp.Server, error) {
+				return &domainmcp.Server{
+					ID:           2,
+					Name:         "Vision",
+					Description:  "Private attachment routing",
+					BaseURL:      "https://example.com/mcp",
+					AuthTokenEnc: encryptedToken,
+					Status:       "active",
+				}, nil
+			},
+		},
+	}
+
+	runtime, err := service.resolveSelectedToolRuntime(t.Context(), []uint{1})
+	if err != nil {
+		t.Fatalf("resolve attachment processor: %v", err)
+	}
+	if runtime.attachmentProcessor == nil || runtime.attachmentProcessor.config.BaseURL == "" || len(runtime.attachmentProcessor.schema) == 0 {
+		t.Fatalf("attachment processor lost private execution config: %#v", runtime.attachmentProcessor)
+	}
+	if len(runtime.authorizedMCPTools) != 0 {
+		t.Fatalf("attachment processor entered the model tool authorization directory: %#v", runtime.authorizedMCPTools)
+	}
+	if server, ok := runtime.authorizedMCPServers[2]; !ok || server.name != "Vision" {
+		t.Fatalf("attachment processor server missing from activation directory: %#v", runtime.authorizedMCPServers)
+	}
+	if len(runtime.definitions) != 1 || runtime.definitions[0].Name != mcpActivateServerToolName {
+		t.Fatalf("unexpected initial model-visible definitions: %#v", runtime.definitions)
+	}
+	for _, definition := range runtime.definitions {
+		if definition.Name == "analyze_image" {
+			t.Fatalf("attachment processor schema leaked before activation: %#v", runtime.definitions)
+		}
+	}
+}
+
+func TestAppendAttachmentAnalysesToSuccessfulActivationResult(t *testing.T) {
+	results := []llm.ToolResult{
+		{
+			ToolCallID: "activate-1",
+			ToolName:   mcpActivateServerToolName,
+			Status:     "success",
+			OutputJSON: `{"activated":true}`,
+		},
+		{
+			ToolCallID: "other-1",
+			ToolName:   "platform_tool",
+			Status:     "success",
+			OutputJSON: `{"value":"kept"}`,
+		},
+	}
+	appendAttachmentAnalysesToActivationResult(results, []imageAttachmentAnalysis{{
+		FileID:   "file-1",
+		FileName: "photo.png",
+		ToolName: "图片分析",
+		Content:  "画面中有一辆红色汽车。",
+	}}, 256)
+
+	if !strings.Contains(results[0].OutputJSON, `"attachment_analyses"`) ||
+		!strings.Contains(results[0].OutputJSON, "画面中有一辆红色汽车。") {
+		t.Fatalf("analysis missing from activation result: %s", results[0].OutputJSON)
+	}
+	if results[1].OutputJSON != `{"value":"kept"}` {
+		t.Fatalf("unrelated tool result changed: %s", results[1].OutputJSON)
+	}
+	if toolResultModelTokens(results[0])+toolResultModelTokens(results[1]) > 256 {
+		t.Fatalf("combined tool results exceed budget: %#v", results)
+	}
+}
+
+func TestAppendAttachmentAnalysesRejectsFailedActivationResult(t *testing.T) {
+	results := []llm.ToolResult{{
+		ToolCallID: "activate-1",
+		ToolName:   mcpActivateServerToolName,
+		Status:     "error",
+		OutputJSON: `{"activated":false}`,
+	}}
+	appendAttachmentAnalysesToActivationResult(results, []imageAttachmentAnalysis{{Content: "must not appear"}}, 256)
+	if strings.Contains(results[0].OutputJSON, "attachment_analyses") {
+		t.Fatalf("analysis attached to failed activation: %s", results[0].OutputJSON)
 	}
 }
 

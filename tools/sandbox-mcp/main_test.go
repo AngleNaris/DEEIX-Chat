@@ -1,18 +1,27 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/mount"
+	"github.com/docker/docker/client"
 )
 
 const testHmacKey = "test-hmac-key"
 
 // signedMetaBody 构造带有效 HMAC 签名的 _meta 请求体（后端签名格式）。
 func signedMetaBody(uid, cid uint, reqID string, ts int64) string {
-	return fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"sandbox_exec","arguments":{"command":"ls"},"_meta":{"user_id":%d,"conversation_id":%d,"request_id":%q,"ts":%d,"sig":%q}}}`,
-		uid, cid, reqID, ts, metaSignature(testHmacKey, uid, cid, reqID, ts))
+	callID := "call-" + reqID
+	return fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"sandbox_exec","arguments":{"command":"ls"},"_meta":{"user_id":%d,"conversation_id":%d,"request_id":%q,"call_id":%q,"ts":%d,"sig":%q}}}`,
+		uid, cid, reqID, callID, ts, metaSignature(testHmacKey, uid, cid, reqID, callID, ts))
 }
 
 func TestParseMeta(t *testing.T) {
@@ -30,13 +39,13 @@ func TestParseMeta(t *testing.T) {
 			wantUID: 42, wantCID: 7,
 		},
 		{
-			name:    "no conversation id",
-			body:    fmt.Sprintf(`{"params":{"_meta":{"user_id":9,"ts":%d,"sig":%q}}}`, now, metaSignature(testHmacKey, 9, 0, "", now)),
-			wantUID: 9, wantCID: 0,
+			name:    "missing conversation id rejected",
+			body:    fmt.Sprintf(`{"params":{"_meta":{"user_id":9,"request_id":"r","call_id":"c","ts":%d,"sig":%q}}}`, now, metaSignature(testHmacKey, 9, 0, "r", "c", now)),
+			wantErr: true,
 		},
 		{
 			name:    "string user id",
-			body:    fmt.Sprintf(`{"params":{"_meta":{"user_id":"3","conversation_id":"5","request_id":"r","ts":%d,"sig":%q}}}`, now, metaSignature(testHmacKey, 3, 5, "r", now)),
+			body:    fmt.Sprintf(`{"params":{"_meta":{"user_id":"3","conversation_id":"5","request_id":"r","call_id":"c","ts":%d,"sig":%q}}}`, now, metaSignature(testHmacKey, 3, 5, "r", "c", now)),
 			wantUID: 3, wantCID: 5,
 		},
 		{
@@ -55,13 +64,18 @@ func TestParseMeta(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name:    "missing call id rejected",
+			body:    fmt.Sprintf(`{"params":{"_meta":{"user_id":9,"conversation_id":1,"request_id":"r","ts":%d,"sig":"x"}}}`, now),
+			wantErr: true,
+		},
+		{
 			name:    "wrong signature rejected",
 			body:    fmt.Sprintf(`{"params":{"_meta":{"user_id":9,"ts":%d,"sig":"deadbeef"}}}`, now),
 			wantErr: true,
 		},
 		{
 			name:    "tampered user id rejected",
-			body:    fmt.Sprintf(`{"params":{"_meta":{"user_id":999,"conversation_id":7,"request_id":"req-1","ts":%d,"sig":%q}}}`, now, metaSignature(testHmacKey, 42, 7, "req-1", now)),
+			body:    fmt.Sprintf(`{"params":{"_meta":{"user_id":999,"conversation_id":7,"request_id":"req-1","call_id":"call-req-1","ts":%d,"sig":%q}}}`, now, metaSignature(testHmacKey, 42, 7, "req-1", "call-req-1", now)),
 			wantErr: true,
 		},
 		{
@@ -154,6 +168,177 @@ func utf8Valid(s string) bool {
 		_ = r
 	}
 	return true
+}
+
+func testContainerConfig() (containerSpec, *container.Config, *container.HostConfig, *inspectedContainerConfig) {
+	spec := containerSpec{
+		Image:         "custom/image:latest",
+		Env:           []string{"WORKSPACE=/workspace"},
+		Memory:        "1g",
+		PidsLimit:     256,
+		CPUs:          0.5,
+		Workspace:     "/workspace",
+		CacheMount:    true,
+		CacheVol:      "cache-u42",
+		SharedBind:    "/host/shared/deeix-42-7",
+		SharedTarget:  "/shared/deeix-42-7",
+		ImportsBind:   "/host/imports/deeix-42-7",
+		ImportsTarget: "/imports",
+		Network:       "deeix-sandbox-egress",
+	}
+	cfg, host := buildContainerConfig(spec, "workspace-u42-c7")
+	actual := &inspectedContainerConfig{
+		Config:     cfg,
+		HostConfig: host,
+		Running:    true,
+		Networks:   []string{spec.Network},
+	}
+	return spec, cfg, host, actual
+}
+
+func TestBuildContainerConfigPreservesSandboxConstraints(t *testing.T) {
+	spec, cfg, host, _ := testContainerConfig()
+	if cfg.Image != spec.Image || cfg.User != "0:0" || cfg.WorkingDir != spec.Workspace {
+		t.Fatalf("unexpected container config: %+v", cfg)
+	}
+	if host.Privileged || host.ReadonlyRootfs {
+		t.Fatalf("package installation contract broken: privileged=%v readonly=%v", host.Privileged, host.ReadonlyRootfs)
+	}
+	if len(host.SecurityOpt) != 1 || host.SecurityOpt[0] != "no-new-privileges:true" {
+		t.Fatalf("missing no-new-privileges: %v", host.SecurityOpt)
+	}
+	if host.NetworkMode != container.NetworkMode(spec.Network) {
+		t.Fatalf("network = %q, want %q", host.NetworkMode, spec.Network)
+	}
+	if host.Resources.Memory != 1<<30 || host.Resources.NanoCPUs != 500_000_000 || host.Resources.PidsLimit == nil || *host.Resources.PidsLimit != 256 {
+		t.Fatalf("unexpected resources: %+v", host.Resources)
+	}
+
+	mounts := make(map[string]mount.Mount, len(host.Mounts))
+	for _, item := range host.Mounts {
+		mounts[item.Target] = item
+	}
+	if mounts["/workspace"].Type != mount.TypeVolume || mounts["/workspace"].Source != "workspace-u42-c7" {
+		t.Fatalf("workspace mount missing: %+v", mounts["/workspace"])
+	}
+	if mounts["/root/.cache"].Type != mount.TypeVolume || mounts["/root/.cache"].Source != spec.CacheVol {
+		t.Fatalf("cache mount missing: %+v", mounts["/root/.cache"])
+	}
+	if mounts[spec.SharedTarget].Type != mount.TypeBind || mounts[spec.SharedTarget].Source != spec.SharedBind || mounts[spec.SharedTarget].ReadOnly {
+		t.Fatalf("shared scope mount invalid: %+v", mounts[spec.SharedTarget])
+	}
+	if mounts[spec.ImportsTarget].Type != mount.TypeBind || mounts[spec.ImportsTarget].Source != spec.ImportsBind || !mounts[spec.ImportsTarget].ReadOnly {
+		t.Fatalf("imports scope mount invalid: %+v", mounts[spec.ImportsTarget])
+	}
+}
+
+func TestContainerConfigMatchesCurrentIsolationConstraints(t *testing.T) {
+	_, desiredConfig, desiredHost, actual := testContainerConfig()
+	if !containerConfigMatches(actual, desiredConfig, desiredHost) {
+		t.Fatal("current container constraints should be reusable")
+	}
+
+	tests := []struct {
+		name   string
+		mutate func(*inspectedContainerConfig)
+	}{
+		{name: "stopped", mutate: func(item *inspectedContainerConfig) { item.Running = false }},
+		{name: "non root", mutate: func(item *inspectedContainerConfig) { item.Config.User = "1000:1000" }},
+		{name: "default network", mutate: func(item *inspectedContainerConfig) {
+			item.HostConfig.NetworkMode = "default"
+			item.Networks = []string{"bridge"}
+		}},
+		{name: "extra network", mutate: func(item *inspectedContainerConfig) {
+			item.Networks = append(item.Networks, "internal")
+		}},
+		{name: "missing imports", mutate: func(item *inspectedContainerConfig) {
+			item.HostConfig.Mounts = item.HostConfig.Mounts[:len(item.HostConfig.Mounts)-1]
+		}},
+		{name: "extra bind", mutate: func(item *inspectedContainerConfig) {
+			item.HostConfig.Binds = []string{"/host:/host"}
+		}},
+		{name: "privileged", mutate: func(item *inspectedContainerConfig) { item.HostConfig.Privileged = true }},
+		{name: "wrong memory", mutate: func(item *inspectedContainerConfig) { item.HostConfig.Resources.Memory /= 2 }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, _, candidate := testContainerConfig()
+			tc.mutate(candidate)
+			if containerConfigMatches(candidate, desiredConfig, desiredHost) {
+				t.Fatal("outdated or unsafe container config was accepted")
+			}
+		})
+	}
+}
+
+func TestEnsureSessionContainerRestoresPreviousNameWhenRecreateFails(t *testing.T) {
+	var requests []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestPath := strings.TrimPrefix(r.URL.Path, "/v1.49")
+		requests = append(requests, r.Method+" "+requestPath)
+		switch {
+		case r.Method == http.MethodGet && requestPath == "/containers/deeix-42-7/json":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"Config":{"Image":"custom/image:latest","User":"1000:1000"},"HostConfig":{},"State":{"Running":true},"NetworkSettings":{"Networks":{"bridge":{}}}}`))
+		case r.Method == http.MethodPost && strings.HasPrefix(requestPath, "/containers/deeix-42-7/rename"):
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodGet && requestPath == "/images/json":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[{}]`))
+		case r.Method == http.MethodPost && requestPath == "/containers/create":
+			http.Error(w, "create failed", http.StatusInternalServerError)
+		case r.Method == http.MethodPost && strings.Contains(requestPath, "-migration-") && strings.HasSuffix(requestPath, "/rename"):
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodDelete:
+			t.Fatalf("previous container was deleted during failed migration: %s", requestPath)
+		default:
+			http.Error(w, "unexpected request", http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	apiClient, err := client.NewClientWithOpts(
+		client.WithHost(server.URL),
+		client.WithVersion("1.49"),
+		client.WithHTTPClient(server.Client()),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer apiClient.Close()
+
+	root := t.TempDir()
+	cfg := &Config{
+		BaseImage:       "custom/image:latest",
+		WorkspaceDir:    "/workspace",
+		MemoryLimit:     "1g",
+		PidsLimit:       256,
+		CPUsLimit:       0.5,
+		CacheVolume:     "cache",
+		SharedHostDir:   filepath.Join(root, "shared"),
+		SharedMountDir:  "/shared",
+		ImportsHostDir:  filepath.Join(root, "imports"),
+		ImportsMountDir: "/imports",
+		NetworkMode:     "deeix-sandbox-egress",
+	}
+	manager := NewSessionManager(cfg, &dockerClient{cli: apiClient})
+	session := &Session{
+		Scope:      "deeix-42-7",
+		Image:      cfg.BaseImage,
+		Container:  "deeix-42-7",
+		Env:        []string{"WORKSPACE=/workspace"},
+		CacheMount: true,
+		CacheVol:   "cache-u42",
+	}
+
+	err = manager.ensureSessionContainer(context.Background(), session)
+	if err == nil || !strings.Contains(err.Error(), "previous container restored") {
+		t.Fatalf("expected restored migration error, got %v", err)
+	}
+	if len(requests) < 5 || !strings.HasPrefix(requests[1], "POST /containers/deeix-42-7/rename") ||
+		requests[3] != "POST /containers/create" || !strings.Contains(requests[4], "-migration-") {
+		t.Fatalf("unexpected Docker API sequence: %#v", requests)
+	}
 }
 
 func TestParseMemoryBytes(t *testing.T) {
@@ -283,6 +468,53 @@ func TestTruncateNoPanic(t *testing.T) {
 	_ = truncateUTF8(strings.Repeat("界", 1000), 10)
 }
 
+func TestSessionReclaimableRequiresTrueIdle(t *testing.T) {
+	now := time.Now()
+	ttl := 5 * time.Minute
+	base := Session{LastUsedAt: now.Add(-time.Hour), tasks: make(map[string]*BackgroundTask)}
+	if !sessionReclaimable(&base, now, ttl) {
+		t.Fatal("idle expired session should be reclaimable")
+	}
+
+	active := base
+	active.activeOps = 1
+	if sessionReclaimable(&active, now, ttl) {
+		t.Fatal("active operation must prevent reclaim")
+	}
+
+	background := base
+	background.tasks = map[string]*BackgroundTask{"t1": {ID: "t1"}}
+	if sessionReclaimable(&background, now, ttl) {
+		t.Fatal("background task must prevent reclaim")
+	}
+
+	reclaiming := base
+	reclaiming.reclaiming = true
+	if sessionReclaimable(&reclaiming, now, ttl) {
+		t.Fatal("session already reclaiming must not be selected again")
+	}
+
+	recent := base
+	recent.LastUsedAt = now
+	if sessionReclaimable(&recent, now, ttl) {
+		t.Fatal("recent session must not be reclaimed")
+	}
+}
+
+func TestReleaseSessionOperationUpdatesLease(t *testing.T) {
+	before := time.Now().Add(-time.Hour)
+	session := &Session{activeOps: 1, LastUsedAt: before}
+	release := releaseSessionOperation(session)
+	release()
+	release()
+	if session.activeOps != 0 {
+		t.Fatalf("activeOps = %d, want 0", session.activeOps)
+	}
+	if !session.LastUsedAt.After(before) {
+		t.Fatal("release did not update LastUsedAt")
+	}
+}
+
 func TestReclaimExpiry(t *testing.T) {
 	cfg := &Config{LeaseTTL: 5 * time.Minute}
 	d := &dockerClient{}
@@ -296,9 +528,11 @@ func TestReclaimExpiry(t *testing.T) {
 	now := time.Now()
 	expired := 0
 	for _, s := range m.live {
-		if now.Sub(s.LastUsedAt) > m.cfg.LeaseTTL {
+		s.mu.Lock()
+		if sessionReclaimable(s, now, m.cfg.LeaseTTL) {
 			expired++
 		}
+		s.mu.Unlock()
 	}
 	m.mu.Unlock()
 	if expired != 1 {

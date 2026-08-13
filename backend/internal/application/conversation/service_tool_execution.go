@@ -23,11 +23,13 @@ type executeAssistantToolCallsInput struct {
 	ToolCalls         []llm.ToolCall
 	ToolCallLimit     int
 	TraceRecorder     *messageTraceRecorder
+	ToolRuntime       *selectedToolRuntime
 	ToolNameMap       map[string]string
 	MCPConfigs        map[string]mcp.CallConfig
 	ToolSchemas       map[string]json.RawMessage
 	PlatformTools     map[string]platformToolEntry // 平台内置工具（模型名 → 注册项）
 	Ledger            *toolExecutionLedger
+	SkipPersistence   bool
 	ResultTokenBudget int64
 }
 
@@ -36,7 +38,14 @@ type executeAssistantToolCallsResult struct {
 	ToolResults           []llm.ToolResult
 	ExecutedToolCalls     []llm.ToolCall
 	PersistedToolCallKeys map[string]struct{}
+	CredentialWrites      []credentialWrite
+	MCPActivationChanged  bool
 	FatalErr              error
+}
+
+type credentialWrite struct {
+	Name  string
+	Value string
 }
 
 type toolExecutionRecord struct {
@@ -68,11 +77,18 @@ func (s *Service) executeAssistantToolCalls(ctx context.Context, input executeAs
 	}
 	executedToolCalls := append([]llm.ToolCall(nil), toolCalls...)
 	if input.TraceRecorder != nil {
-		summary, markdown, payload := buildToolTrace(buildRequestedToolCallRows(toolCalls, input.ToolNameMap, input.RunID))
+		requestedRows := buildRequestedToolCallRows(toolCalls, input.ToolNameMap, input.RunID)
+		for index := range requestedRows {
+			_, isPlatform := input.PlatformTools[toolCalls[index].ToolName]
+			requestedRows[index].InputJSON = maskCredentialToolInput(requestedRows[index].ToolName, isPlatform, requestedRows[index].InputJSON)
+		}
+		summary, markdown, payload := buildToolTrace(requestedRows)
 		input.TraceRecorder.syncToolSection(summary, markdown, payload, messageTraceStatusStreaming)
 	}
 
 	slots := make([]toolExecutionSlot, len(toolCalls))
+	credentialWrites := make([]credentialWrite, 0)
+	mcpActivationChanged := false
 	var fatalErr error
 	// 平台工具执行名集合：凭据工具落库打码时据此区分平台/MCP 工具。
 	platformExecutionNames := make(map[string]struct{}, len(input.PlatformTools))
@@ -99,18 +115,62 @@ func (s *Service) executeAssistantToolCalls(ctx context.Context, input executeAs
 		}
 
 		mcpConfig := resolveMCPConfig(modelToolName, input.MCPConfigs)
+		if modelToolName == mcpActivateServerToolName {
+			if input.ToolRuntime == nil {
+				row.Status = "error"
+				row.ErrorJSON = "MCP activation is not available for this run"
+			} else {
+				var arguments struct {
+					ServerID uint `json:"server_id"`
+				}
+				if err := json.Unmarshal([]byte(row.InputJSON), &arguments); err != nil || arguments.ServerID == 0 {
+					row.Status = "error"
+					row.ErrorJSON = "server_id must be a positive integer"
+				} else if changed, err := input.ToolRuntime.activateMCPServer(ctx, arguments.ServerID); err != nil {
+					row.Status = "error"
+					row.ErrorJSON = err.Error()
+				} else {
+					row.Status = "success"
+					row.OutputJSON = fmt.Sprintf(`{"status":"activated","server_id":%d,"message":"MCP server activated; its selected tools are available on the next model request"}`, arguments.ServerID)
+					mcpActivationChanged = mcpActivationChanged || changed
+				}
+			}
+			persisted := s.persistToolCallForInput(ctx, input, &row)
+			result := buildToolResultForModel(row, modelToolName)
+			slots[i] = toolExecutionSlot{row: row, result: result, persisted: persisted}
+			if input.Ledger != nil {
+				input.Ledger.store(row.ToolName, row.InputJSON, toolExecutionRecord{row: row, result: result})
+			}
+			continue
+		}
 		if mcpConfig == nil {
 			if entry, ok := input.PlatformTools[modelToolName]; ok {
-			// 平台内置工具（本地执行）：走同一结果/持久化/预算/去重通道。
-			// 执行参数在发送前展开 {{credential: name}} 占位符（落库保持占位符原文）。
-			toolStartedAt := time.Now()
-			outputJSON, executeErr := s.executePlatformToolCall(ctx, entry, ExecuteToolInput{
-				UserID:         input.UserID,
-				ConversationID: input.ConversationID,
-				RequestID:      strings.TrimSpace(input.RequestID),
-				ToolName:       row.ToolName,
-				ArgumentsJSON:  s.expandCredentialRefsInJSON(ctx, input.UserID, row.InputJSON),
-			})
+				if input.Ledger != nil {
+					if previous, found := input.Ledger.lookup(row.ToolName, row.InputJSON); found {
+						slot := buildRepeatedToolSlot(row, modelToolName, previous)
+						slot.row.InputJSON = maskCredentialToolInput(slot.row.ToolName, isPlatformTool, slot.row.InputJSON)
+						persisted := s.persistToolCallForInput(ctx, input, &slot.row)
+						slot.result = buildToolResultForModel(slot.row, modelToolName)
+						slot.persisted = persisted
+						slots[i] = slot
+						if slot.row.Status == "reused" {
+							if write, ok := credentialWriteFromSuccessfulCall(row.ToolName, isPlatformTool, row.InputJSON); ok {
+								credentialWrites = append(credentialWrites, write)
+							}
+						}
+						continue
+					}
+				}
+				// 平台内置工具（本地执行）：走同一结果/持久化/预算/去重通道。
+				// 执行参数在发送前展开 {{credential: name}} 占位符（落库保持占位符原文）。
+				toolStartedAt := time.Now()
+				outputJSON, executeErr := s.executePlatformToolCall(ctx, entry, ExecuteToolInput{
+					UserID:         input.UserID,
+					ConversationID: input.ConversationID,
+					RequestID:      strings.TrimSpace(input.RequestID),
+					ToolName:       row.ToolName,
+					ArgumentsJSON:  row.InputJSON,
+				})
 				row.LatencyMS = time.Since(toolStartedAt).Milliseconds()
 				if row.LatencyMS < 0 {
 					row.LatencyMS = 0
@@ -124,6 +184,9 @@ func (s *Service) executeAssistantToolCalls(ctx context.Context, input executeAs
 					if row.OutputJSON == "" {
 						row.OutputJSON = "{}"
 					}
+					if write, ok := credentialWriteFromSuccessfulCall(row.ToolName, isPlatformTool, row.InputJSON); ok {
+						credentialWrites = append(credentialWrites, write)
+					}
 					// 平台内置工具产物（图片等）同样附件化落库。
 					s.attachToolArtifacts(ctx, input, row.OutputJSON)
 					// __export__ 标记（image_gen 生成图等）：挂为消息附件卡片，模型无需重复给链接。
@@ -134,17 +197,18 @@ func (s *Service) executeAssistantToolCalls(ctx context.Context, input executeAs
 				// 落库前对凭据管理工具输入打码（value → [REDACTED]），防止密钥明文进 tool_calls 表。
 				persistedRow := row
 				persistedRow.InputJSON = maskCredentialToolInput(row.ToolName, isPlatformTool, row.InputJSON)
-				persisted := s.persistToolCallResult(ctx, &persistedRow)
-				result := buildToolResultForModel(row, modelToolName)
+				persisted := s.persistToolCallForInput(ctx, input, &persistedRow)
+				result := buildToolResultForModel(persistedRow, modelToolName)
 				slots[i] = toolExecutionSlot{
-					row:       row,
+					row:       persistedRow,
 					result:    result,
 					persisted: persisted,
 				}
 				if input.Ledger != nil {
-					input.Ledger.store(row.ToolName, row.InputJSON, toolExecutionRecord{row: row, result: result})
+					input.Ledger.store(row.ToolName, row.InputJSON, toolExecutionRecord{row: persistedRow, result: result})
 				}
 				continue
+
 			}
 			row.Status = "error"
 			row.ErrorJSON = toolNotEnabledForRunMessage(modelToolName)
@@ -180,7 +244,7 @@ func (s *Service) executeAssistantToolCalls(ctx context.Context, input executeAs
 			if previous, ok := input.Ledger.lookup(row.ToolName, row.InputJSON); ok {
 				slot := buildRepeatedToolSlot(row, modelToolName, previous)
 				slot.row.InputJSON = maskCredentialToolInput(slot.row.ToolName, isPlatformTool, slot.row.InputJSON)
-				persisted := s.persistToolCallResult(ctx, &slot.row)
+				persisted := s.persistToolCallForInput(ctx, input, &slot.row)
 				slot.result = buildToolResultForModel(slot.row, modelToolName)
 				slot.persisted = persisted
 				slots[i] = slot
@@ -224,7 +288,7 @@ func (s *Service) executeAssistantToolCalls(ctx context.Context, input executeAs
 		// 落库前对凭据管理工具输入打码（value → [REDACTED]），防止密钥明文进 tool_calls 表。
 		persistedRow := row
 		persistedRow.InputJSON = maskCredentialToolInput(row.ToolName, isPlatformTool, row.InputJSON)
-		persisted := s.persistToolCallResult(ctx, &persistedRow)
+		persisted := s.persistToolCallForInput(ctx, input, &persistedRow)
 		result := buildToolResultForModel(row, modelToolName)
 		slots[i] = toolExecutionSlot{
 			row:       row,
@@ -259,11 +323,18 @@ func (s *Service) executeAssistantToolCalls(ctx context.Context, input executeAs
 		input.TraceRecorder.appendToolSection(summary, markdown, payload, messageTraceStatusCompleted)
 		input.TraceRecorder.completeTools()
 	}
+	for index := range executedToolCalls {
+		if arguments, changed := applyCredentialWrites(executedToolCalls[index].ArgumentsJSON, credentialWrites); changed {
+			executedToolCalls[index].ArgumentsJSON = arguments
+		}
+	}
 	return executeAssistantToolCallsResult{
 		Rows:                  rows,
 		ToolResults:           toolResults,
 		ExecutedToolCalls:     executedToolCalls,
 		PersistedToolCallKeys: persistedToolCallKeys,
+		CredentialWrites:      credentialWrites,
+		MCPActivationChanged:  mcpActivationChanged,
 		FatalErr:              fatalErr,
 	}
 }
@@ -320,6 +391,13 @@ func buildRepeatedToolSlot(row model.ToolCall, modelToolName string, previous to
 			},
 		}
 	}
+}
+
+func (s *Service) persistToolCallForInput(ctx context.Context, input executeAssistantToolCallsInput, row *model.ToolCall) bool {
+	if input.SkipPersistence {
+		return false
+	}
+	return s.persistToolCallResult(ctx, row)
 }
 
 func (s *Service) persistToolCallResult(ctx context.Context, row *model.ToolCall) bool {

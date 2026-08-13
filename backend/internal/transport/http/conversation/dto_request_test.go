@@ -6,6 +6,41 @@ import (
 	"github.com/gin-gonic/gin/binding"
 )
 
+func TestConversationProjectAndRoleMCPDefaultsHaveNoSelectionLimit(t *testing.T) {
+	toolIDs := make([]uint, 256)
+	for index := range toolIDs {
+		toolIDs[index] = uint(index + 1)
+	}
+	for name, request := range map[string]any{
+		"create_project": CreateConversationProjectRequest{Name: "Project", DefaultMCPToolIDs: toolIDs},
+		"update_project": UpdateConversationProjectRequest{DefaultMCPToolIDs: &toolIDs},
+		"create_role":    CreateConversationRoleRequest{Name: "Role", DefaultMCPToolIDs: toolIDs},
+		"update_role":    UpdateConversationRoleRequest{DefaultMCPToolIDs: &toolIDs},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := binding.Validator.ValidateStruct(request); err != nil {
+				t.Fatalf("MCP selections must not have a hard count limit: %v", err)
+			}
+		})
+	}
+}
+
+func TestConversationProjectAndRoleSkillDefaultsKeepSelectionLimit(t *testing.T) {
+	skillIDs := make([]uint, 129)
+	for name, request := range map[string]any{
+		"create_project": CreateConversationProjectRequest{Name: "Project", DefaultSkillIDs: skillIDs},
+		"update_project": UpdateConversationProjectRequest{DefaultSkillIDs: &skillIDs},
+		"create_role":    CreateConversationRoleRequest{Name: "Role", DefaultSkillIDs: skillIDs},
+		"update_role":    UpdateConversationRoleRequest{DefaultSkillIDs: &skillIDs},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := binding.Validator.ValidateStruct(request); err == nil {
+				t.Fatal("Skill selections must keep the independent 128 limit")
+			}
+		})
+	}
+}
+
 func TestRequiredConversationBooleanFieldsAcceptExplicitFalse(t *testing.T) {
 	falseValue := false
 

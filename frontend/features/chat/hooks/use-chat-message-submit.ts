@@ -1545,6 +1545,7 @@ export function useChatMessageSubmit({
     [
       activeGenerationRunsRef,
       autoGenerateLabels,
+      autoEditDismissed,
       failedGenerationRunsRef,
       enqueueUpstreamThinkDelta,
       enqueueStreamText,

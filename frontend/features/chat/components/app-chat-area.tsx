@@ -79,6 +79,7 @@ import { resolveChatContentWidthClassName } from "@/shared/model/chat-content-wi
 
 const MODEL_OPTIONS_STORAGE_PREFIX = "deeix-chat:chat-model-options:";
 const DEFAULT_MCP_TOOLS_SETTING_KEY = "chat.default_mcp_tool_ids";
+const MAX_SELECTED_SKILLS_PER_MESSAGE = 128;
 const EMPTY_CONVERSATION_OPTIONS: ConversationOptions = {};
 const TOP_LOAD_OLDER_MESSAGES_THRESHOLD_PX = 48;
 const SCREENSHOT_PREVIEW_CLOSE_DELAY_MS = 220;
@@ -172,10 +173,9 @@ function normalizeAvailableMCPTools(tools: MCPToolDTO[]): MCPToolDTO[] {
   });
 }
 
-function filterAvailableMCPToolIDs(toolIDs: number[], tools: MCPToolDTO[], limit?: number): number[] {
+function filterAvailableMCPToolIDs(toolIDs: number[], tools: MCPToolDTO[]): number[] {
   const availableIDs = new Set(tools.map((tool) => tool.id));
-  const result = toolIDs.filter((id) => availableIDs.has(id));
-  return typeof limit === "number" && limit >= 0 ? result.slice(0, limit) : result;
+  return toolIDs.filter((id) => availableIDs.has(id));
 }
 
 export function AppChatArea() {
@@ -523,7 +523,6 @@ export function AppChatArea() {
     billingDisplayCurrency,
     billingDisplayUsdToCnyRate,
     modelOptionPolicy,
-    mcpMaxSelectedTools,
     selectedPlatformModelName,
     setSelectedPlatformModelName,
   } = useChatModelOptions({
@@ -577,15 +576,14 @@ export function AppChatArea() {
           ? newConversationProject.defaultMCPToolIDs
           : defaultToolIDs,
         availableTools,
-        mcpMaxSelectedTools,
       ),
       availableTools,
     ),
-    [availableTools, defaultToolIDs, mcpMaxSelectedTools, newConversationProject],
+    [availableTools, defaultToolIDs, newConversationProject],
   );
   const newConversationDefaultSkillIDs = React.useMemo(
-    () => (newConversationProject?.defaultSkillIDs ?? []).slice(0, mcpMaxSelectedTools),
-    [mcpMaxSelectedTools, newConversationProject],
+    () => (newConversationProject?.defaultSkillIDs ?? []).slice(0, MAX_SELECTED_SKILLS_PER_MESSAGE),
+    [newConversationProject],
   );
   const { onSelectedSkillsChange, onSelectedToolsChange: applySelectedToolsChange } = useNewConversationDefaults({
     conversationID,
@@ -611,28 +609,19 @@ export function AppChatArea() {
       return;
     }
     const normalized = normalizeImageAttachmentProcessorSelection(
-      filterAvailableMCPToolIDs(selectedToolIDs, availableTools, mcpMaxSelectedTools),
+      filterAvailableMCPToolIDs(selectedToolIDs, availableTools),
       availableTools,
     );
     if (normalized.length === selectedToolIDs.length && normalized.every((id, index) => id === selectedToolIDs[index])) {
       return;
     }
     setSelectedToolIDs(normalized);
-  }, [availableTools, mcpMaxSelectedTools, selectedToolIDs, setSelectedToolIDs, toolsLoading]);
+  }, [availableTools, selectedToolIDs, setSelectedToolIDs, toolsLoading]);
   const htmlVisualPrompt = useChatVisualPrompt();
   const initializedOptionsModelRef = React.useRef("");
   const selectedModelDefaultOptionsRef = React.useRef<ConversationOptions>({});
   const fileDragDepthRef = React.useRef(0);
   const [fileDragActive, setFileDragActive] = React.useState(false);
-
-  React.useEffect(() => {
-    setSelectedToolIDs((current) => {
-      if (current.length <= mcpMaxSelectedTools) {
-        return current;
-      }
-      return current.slice(0, mcpMaxSelectedTools);
-    });
-  }, [mcpMaxSelectedTools, setSelectedToolIDs]);
 
   React.useEffect(() => {
     const platformModelName = selectedModel?.platformModelName.trim() || "";
@@ -749,14 +738,13 @@ export function AppChatArea() {
           filterAvailableMCPToolIDs(
             parseDefaultMCPToolIDs(settings[DEFAULT_MCP_TOOLS_SETTING_KEY]),
             tools,
-            mcpMaxSelectedTools,
           ),
           tools,
         );
         setAvailableTools(tools);
         setDefaultToolIDs(userDefaultToolIDs);
         setSelectedToolIDs((previous) => normalizeImageAttachmentProcessorSelection(
-          filterAvailableMCPToolIDs(previous, tools, mcpMaxSelectedTools),
+          filterAvailableMCPToolIDs(previous, tools),
           tools,
         ));
       } catch {
@@ -775,10 +763,10 @@ export function AppChatArea() {
     return () => {
       cancelled = true;
     };
-  }, [conversationID, mcpMaxSelectedTools, setSelectedToolIDs]);
+  }, [conversationID, setSelectedToolIDs]);
 
   const onDefaultToolIDsChange = React.useCallback(async (nextToolIDs: number[]) => {
-    const nextDefaults = filterAvailableMCPToolIDs(nextToolIDs, availableTools, mcpMaxSelectedTools);
+    const nextDefaults = filterAvailableMCPToolIDs(nextToolIDs, availableTools);
     if (hasMultipleImageAttachmentProcessors(nextDefaults, availableTools)) {
       toast.error(t("composer.mcpImageProcessorLimitTitle"), {
         description: t("composer.mcpImageProcessorLimitDescription"),
@@ -802,7 +790,7 @@ export function AppChatArea() {
         description: error instanceof Error ? error.message : t("composer.retryLater"),
       });
     }
-  }, [availableTools, defaultToolIDs, mcpMaxSelectedTools, t]);
+  }, [availableTools, defaultToolIDs, t]);
 
   const {
     uploading,
@@ -1433,7 +1421,6 @@ export function AppChatArea() {
     defaultToolIDs,
     queuedMessages,
     htmlVisualPromptEnabled: htmlVisualPrompt.enabled,
-    maxSelectedTools: mcpMaxSelectedTools,
     toolsLoading,
     options: effectiveOptions,
     defaultOptions: selectedModelDefaultOptions,
@@ -1447,7 +1434,7 @@ export function AppChatArea() {
     onModelCatalogRefresh: refreshModelCatalogForComposer,
     onSelectedToolsChange,
     onSelectedPromptsChange: setSelectedPrompts,
-    maxSelectedSkills: mcpMaxSelectedTools,
+    maxSelectedSkills: MAX_SELECTED_SKILLS_PER_MESSAGE,
     onSelectedSkillsChange,
     onDefaultToolsChange: onDefaultToolIDsChange,
     onHTMLVisualPromptChange: htmlVisualPrompt.setEnabled,

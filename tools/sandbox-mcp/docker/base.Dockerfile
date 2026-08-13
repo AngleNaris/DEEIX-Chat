@@ -6,6 +6,9 @@ FROM python:3.12-slim
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PIP_NO_CACHE_DIR=0 \
+    PIP_CACHE_DIR=/root/.cache/pip \
+    NPM_CONFIG_CACHE=/root/.cache/npm \
+    UV_CACHE_DIR=/root/.cache/uv \
     PYTHONUNBUFFERED=1 \
     # 国内 pip 镜像：VPS 直连 PyPI 慢（曾导致 pip install 撞上工具超时）
     PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/ \
@@ -17,12 +20,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
         ca-certificates \
         git \
+        nodejs \
+        npm \
         procps \
         file \
     && rm -rf /var/lib/apt/lists/*
 
-# 常用数据分析/音频处理/抓取依赖
-RUN pip install --no-cache-dir \
+# uv 与常用数据分析/音频处理/抓取依赖。
+RUN pip install --no-cache-dir uv \
         numpy \
         pandas \
         requests \

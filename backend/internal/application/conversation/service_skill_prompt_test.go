@@ -8,7 +8,6 @@ import (
 
 	appskill "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/skill"
 	domainskill "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/skill"
-	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/llm"
 )
 
@@ -110,9 +109,13 @@ func TestRenderSkillPromptUsesCustomContract(t *testing.T) {
 }
 
 func TestResolveSkillPromptsRejectsTooManySelectedSkills(t *testing.T) {
-	service := &Service{cfg: config.NewRuntime(config.Config{MCPMaxSelectedToolsPerMessage: 2})}
+	skillIDs := make([]uint, maxSelectedSkillsPerMessage+1)
+	for index := range skillIDs {
+		skillIDs[index] = uint(index + 1)
+	}
+	service := &Service{}
 	_, err := service.resolveSkillPrompts(context.Background(), SendMessageInput{
-		SkillIDs: []uint{1, 2, 3},
+		SkillIDs: skillIDs,
 	})
 	if err != ErrTooManySelectedSkills {
 		t.Fatalf("expected ErrTooManySelectedSkills, got %v", err)

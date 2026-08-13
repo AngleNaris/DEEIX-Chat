@@ -1,11 +1,23 @@
 package conversation
 
 import (
+	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
 )
+
+type toolExportAttachmentRepositoryStub struct {
+	err error
+}
+
+func (r *toolExportAttachmentRepositoryStub) CreateAttachments(context.Context, []model.Attachment) error {
+	return r.err
+}
 
 func TestExportUserConversationDataRejectsWrongUser(t *testing.T) {
 	svc := &Service{}
@@ -63,6 +75,124 @@ func TestCollectExportMessageRunIDsSkipsEmpty(t *testing.T) {
 	runIDs := collectExportMessageRunIDs(messages)
 	if len(runIDs) != 0 {
 		t.Fatalf("expected 0 run IDs for empty inputs, got %d", len(runIDs))
+	}
+}
+
+func TestExportFilePathAndScopedOpen(t *testing.T) {
+	root := t.TempDir()
+	scope := filepath.Join(root, "deeix-4-9", "mm-call")
+	if err := os.MkdirAll(scope, 0700); err != nil {
+		t.Fatal(err)
+	}
+	filePath := filepath.Join(scope, "result.png")
+	if err := os.WriteFile(filePath, []byte("image"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	svc := &Service{cfg: config.NewRuntime(config.Config{SandboxSharedDir: root})}
+	input := executeAssistantToolCallsInput{UserID: 4, ConversationID: 9}
+	rel, err := svc.exportFilePath(input, filepath.ToSlash(filePath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantRel := filepath.Join("deeix-4-9", "mm-call", "result.png")
+	if rel != wantRel {
+		t.Fatalf("relative export path = %q, want %q", rel, wantRel)
+	}
+	reader, size, err := openExportRegularFile(root, rel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = reader.Close()
+	if size != 5 {
+		t.Fatalf("export size = %d, want 5", size)
+	}
+	if _, err := svc.exportFilePath(input, filepath.ToSlash(filepath.Join(root, "deeix-4-10", "result.png"))); err == nil {
+		t.Fatal("cross-scope export path accepted")
+	}
+}
+
+func TestOpenExportRegularFileRejectsSymlink(t *testing.T) {
+	root := t.TempDir()
+	scope := filepath.Join(root, "deeix-4-9")
+	if err := os.MkdirAll(scope, 0700); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(root, "outside.txt")
+	if err := os.WriteFile(outside, []byte("secret"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(scope, "escape.txt")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	if _, _, err := openExportRegularFile(root, filepath.Join("deeix-4-9", "escape.txt")); err == nil {
+		t.Fatal("symlink export accepted")
+	}
+}
+
+func TestRemoveExportFileCleansOnlyEmptyMMDirectory(t *testing.T) {
+	root := t.TempDir()
+	mmDir := filepath.Join(root, "deeix-4-9", "mm-call")
+	if err := os.MkdirAll(mmDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	rel := filepath.Join("deeix-4-9", "mm-call", "result.png")
+	if err := os.WriteFile(filepath.Join(root, rel), []byte("image"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := removeExportFile(root, rel); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(mmDir); !os.IsNotExist(err) {
+		t.Fatalf("empty MM directory was retained: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "deeix-4-9")); err != nil {
+		t.Fatalf("scope directory was removed: %v", err)
+	}
+
+	plainDir := filepath.Join(root, "deeix-4-9", "sandbox")
+	if err := os.MkdirAll(plainDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	plainRel := filepath.Join("deeix-4-9", "sandbox", "result.txt")
+	if err := os.WriteFile(filepath.Join(root, plainRel), []byte("result"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := removeExportFile(root, plainRel); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(plainDir); err != nil {
+		t.Fatalf("ordinary export directory was removed: %v", err)
+	}
+}
+
+func TestPersistToolExportAttachmentsCleansSourceOnlyAfterPersistence(t *testing.T) {
+	root := t.TempDir()
+	rel := filepath.Join("deeix-4-9", "sandbox", "result.txt")
+	path := filepath.Join(root, rel)
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("result"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	persistErr := errors.New("persist failed")
+	repo := &toolExportAttachmentRepositoryStub{err: persistErr}
+	attachments := []model.Attachment{{FileID: "file_1"}}
+	if err := persistToolExportAttachments(t.Context(), repo, attachments, root, []string{rel}); !errors.Is(err, persistErr) {
+		t.Fatalf("expected persistence error, got %v", err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("source file removed after persistence failure: %v", err)
+	}
+
+	repo.err = nil
+	if err := persistToolExportAttachments(t.Context(), repo, attachments, root, []string{rel}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("source file retained after persistence success: %v", err)
 	}
 }
 

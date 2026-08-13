@@ -85,6 +85,7 @@ func (h *Handler) CreateServer(c *gin.Context) {
 	}
 	item, err := h.service.CreateServer(c.Request.Context(), appmcp.ServerInput{
 		Name:        req.Name,
+		Description: req.Description,
 		BaseURL:     req.BaseURL,
 		AuthToken:   req.AuthToken,
 		HeadersJSON: req.HeadersJSON,
@@ -122,6 +123,7 @@ func (h *Handler) UpdateServer(c *gin.Context) {
 	}
 	item, err := h.service.UpdateServer(c.Request.Context(), serverID, appmcp.ServerInput{
 		Name:        req.Name,
+		Description: req.Description,
 		BaseURL:     req.BaseURL,
 		AuthToken:   req.AuthToken,
 		HeadersJSON: req.HeadersJSON,
@@ -358,6 +360,7 @@ func parseIDParam(c *gin.Context, key string, resource string) (uint, bool) {
 func writeServiceError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, appmcp.ErrInvalidServerName),
+		errors.Is(err, appmcp.ErrInvalidServerDescription),
 		errors.Is(err, appmcp.ErrInvalidServerBaseURL),
 		errors.Is(err, appmcp.ErrInvalidServerStatus),
 		errors.Is(err, appmcp.ErrInvalidServerHeaders),
@@ -376,6 +379,7 @@ func toServerResponse(item domainmcp.Server) ServerResponse {
 	return ServerResponse{
 		ID:                                   item.ID,
 		Name:                                 item.Name,
+		Description:                          item.Description,
 		BaseURL:                              item.BaseURL,
 		HeadersJSON:                          security.RedactHeadersJSON(item.HeadersJSON),
 		Status:                               item.Status,

@@ -102,10 +102,8 @@ type NativeToolDefinitionResponse struct {
 	UsageAliases   []string               `json:"usageAliases"`
 }
 
-// MCPPolicyResponse 返回聊天侧需要遵守的 MCP 工具运行策略。
-type MCPPolicyResponse struct {
-	MaxSelectedToolsPerMessage int `json:"maxSelectedToolsPerMessage"`
-}
+// MCPPolicyResponse returns the chat-side MCP policy.
+type MCPPolicyResponse struct{}
 
 // ChatContextPolicyResponse 返回聊天侧上下文能力策略。
 type ChatContextPolicyResponse struct {

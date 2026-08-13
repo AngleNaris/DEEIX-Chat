@@ -117,29 +117,30 @@ func (c *minimalDeEIXClient) callTool(t *testing.T, name string, arguments map[s
 // signedTestMeta 生成带有效 HMAC 签名的 _meta（key 与 newTestServer 的 APIKey 一致，签名回退 APIKey）。
 func signedTestMeta(apiKey string, uid, cid uint, reqID string) map[string]any {
 	ts := time.Now().Unix()
+	callID := "call-" + reqID
 	return map[string]any{
-		"user_id": uid, "conversation_id": cid, "request_id": reqID,
-		"ts": ts, "sig": metaSignature(apiKey, uid, cid, reqID, ts),
+		"user_id": uid, "conversation_id": cid, "request_id": reqID, "call_id": callID,
+		"ts": ts, "sig": metaSignature(apiKey, uid, cid, reqID, callID, ts),
 	}
 }
 
 func newTestServer(t *testing.T, apiKey string) (*httptest.Server, *SessionManager) {
 	t.Helper()
 	cfg := &Config{
-		ListenAddr:       "127.0.0.1:0",
-		APIKey:           apiKey,
-		BaseImage:        "deeix-sandbox-base:latest",
-		WorkspaceDir:     "/workspace",
-		SharedHostDir:    t.TempDir(),
-		SharedMountDir:   "/shared",
-		LeaseTTL:         5 * 1000 * 1000 * 1000,
-		ExecTimeout:      10 * 1000 * 1000 * 1000,
-		MaxExecTimeout:   30 * 1000 * 1000 * 1000,
-		OutputLimitBytes: 65536,
-		MemoryLimit:      "1g",
-		PidsLimit:        256,
-		CPUsLimit:        0.5,
-		CacheVolume:      "deeix-sandbox-cache",
+		ListenAddr:         "127.0.0.1:0",
+		APIKey:             apiKey,
+		BaseImage:          "deeix-sandbox-base:latest",
+		WorkspaceDir:       "/workspace",
+		SharedHostDir:      t.TempDir(),
+		SharedMountDir:     "/shared",
+		LeaseTTL:           5 * 1000 * 1000 * 1000,
+		ExecTimeout:        10 * 1000 * 1000 * 1000,
+		MaxExecTimeout:     30 * 1000 * 1000 * 1000,
+		OutputLimitBytes:   65536,
+		MemoryLimit:        "1g",
+		PidsLimit:          256,
+		CPUsLimit:          0.5,
+		CacheVolume:        "deeix-sandbox-cache",
 		MaxTasksPerSession: 4,
 	}
 	d := &dockerClient{} // 无真实 Docker（本测试不触 Docker 路径）

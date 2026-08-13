@@ -6,6 +6,7 @@ import "time"
 type MCPServer struct {
 	ControlPlaneModel
 	Name         string     `gorm:"size:128;not null;default:'';comment:MCP服务名称"`
+	Description  string     `gorm:"type:text;not null;default:'';comment:MCP服务说明"`
 	BaseURL      string     `gorm:"size:512;not null;default:'';comment:MCP服务地址"`
 	AuthTokenEnc string     `gorm:"type:text;not null;default:'';comment:加密后的鉴权Token"`
 	HeadersJSON  string     `gorm:"type:text;not null;default:'{}';comment:附加请求头JSON"`

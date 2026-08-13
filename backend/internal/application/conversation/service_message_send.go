@@ -182,11 +182,6 @@ func (s *Service) sendMessageInternal(
 		sendSpan.End()
 	}()
 
-	// application 层保留兜底校验，保证非 HTTP 调用路径也遵守同一 MCP 工具数量策略。
-	if err := s.ValidateSelectedToolIDs(input.SelectedToolIDs); err != nil {
-		return nil, err
-	}
-
 	startedAt := time.Now()
 	runID := normalizeRunID(input.ClientRunID)
 	if runID == "" {
@@ -196,6 +191,11 @@ func (s *Service) sendMessageInternal(
 	conversation, err := s.repo.GetConversationByUser(ctx, input.ConversationID, input.UserID)
 	if err != nil {
 		return nil, ErrConversationNotFound
+	}
+
+	// Agent 群组会话走独立的串行编排器（主管/成员状态机，逐 Attempt 计费）。
+	if conversation.AgentGroupID != nil && s.agentGroupRunStore != nil {
+		return s.executeAgentGroupRun(ctx, input, onDelta, preferStream, conversation, runID, startedAt)
 	}
 
 	branchPreparation, err := s.prepareMessageSendBranch(ctx, &input)
@@ -446,6 +446,29 @@ func (s *Service) sendMessageInternal(
 		retErr = err
 		return nil, err
 	}
+	var attachmentImports []attachmentImportPath
+	if len(toolRuntime.authorizedMCPServers) > 0 {
+		var cleanupAttachmentImports func()
+		attachmentImports, cleanupAttachmentImports, err = s.syncCurrentAttachmentsToImports(
+			ctx,
+			input.UserID,
+			input.ConversationID,
+			currentAttachments,
+		)
+		if cleanupAttachmentImports != nil {
+			defer cleanupAttachmentImports()
+		}
+		if err != nil {
+			if s.logger != nil {
+				s.logger.Warn("attachment_import_sync_failed",
+					zap.Uint("user_id", input.UserID),
+					zap.Uint("conversation_id", input.ConversationID),
+					zap.Error(err),
+				)
+			}
+			attachmentImports = nil
+		}
+	}
 	imageAttachmentRoutingActive := toolRuntime.attachmentProcessor != nil
 	imageProcessing, err := s.processImageAttachments(ctx, imageAttachmentProcessingInput{
 		UserID:         input.UserID,
@@ -478,7 +501,7 @@ func (s *Service) sendMessageInternal(
 
 	contextAssembler := NewContextAssembler(int64(cfg.ContextMaxInputTokens))
 	userCtx := userContextInput{
-		ImageAnalyses: imageProcessing.Analyses,
+		ImageAnalyses:  imageProcessing.Analyses,
 		SupportsVision: modelSupportsVision(route.PlatformModelName, route.ModelCapabilitiesJSON),
 	}
 	var prefixMemories []domainmemory.UserMemory
@@ -675,6 +698,7 @@ func (s *Service) sendMessageInternal(
 		HTMLVisualPromptEnabled: input.HTMLVisualPromptEnabled,
 		DomainMessages:          promptScope.activeMessages(),
 		StableAttachments:       stableFullContextAttachments,
+		AttachmentImports:       attachmentImports,
 		DynamicContext:          userCtx,
 		PreferencePrompt:        preferencePrompt,
 		SkillPrompts:            skillPrompts,
@@ -685,6 +709,7 @@ func (s *Service) sendMessageInternal(
 	buildRoutePrompt := func(currentRoute *channel.ResolvedRoute) (PromptPlan, bool, error) {
 		passbackEnabled := s.reasoningContentPassbackEnabled(ctx, input.UserID, currentRoute)
 		currentInput := routePromptInput
+		currentInput.ToolRuntime = toolRuntime
 		currentInput.ReasoningContentPassback = passbackEnabled
 		plan, buildErr := s.buildMessageRoutePrompt(ctx, currentRoute, currentInput)
 		return plan, passbackEnabled, buildErr
@@ -1272,7 +1297,9 @@ func (s *Service) sendMessageInternal(
 	windowBaseCalls := 0
 	windowCallCount := llmRequestCount
 	toolLedger := newToolExecutionLedger()
+	credentialStateChangedForRun := false
 	toolHistoryTrimmedForRun := false
+
 	toolStageMerges := 0
 	const maxToolStageMergesPerRun = 4 // 阶段合并续轮安全上限：复杂任务最多额外开启 4 个工具窗口
 
@@ -1320,6 +1347,7 @@ func (s *Service) sendMessageInternal(
 				ToolCalls:         pendingToolCalls,
 				ToolCallLimit:     remainingToolCalls,
 				TraceRecorder:     traceRecorder,
+				ToolRuntime:       &toolRuntime,
 				ToolNameMap:       toolRuntime.nameMap,
 				MCPConfigs:        toolRuntime.mcpConfigs,
 				ToolSchemas:       toolRuntime.schemas,
@@ -1338,6 +1366,51 @@ func (s *Service) sendMessageInternal(
 			toolCallRows = append(toolCallRows, toolResult.Rows...)
 			mergeToolCallPersistenceKeys(&persistedToolCallKeys, toolResult.PersistedToolCallKeys)
 			remainingToolCalls -= len(toolResult.Rows)
+			credentialStateChanged := len(toolResult.CredentialWrites) > 0
+			if credentialStateChanged {
+				credentialStateChangedForRun = true
+				if _, updateErr := s.applyCredentialWritesToUserMessage(toolCtx, userMessage, input.ConversationID, input.UserID, toolResult.CredentialWrites); updateErr != nil {
+					retErr = updateErr
+					return nil, updateErr
+				}
+				input.Content, _ = applyCredentialWrites(input.Content, toolResult.CredentialWrites)
+				assistantText, _ = applyCredentialWrites(assistantText, toolResult.CredentialWrites)
+				assistantToolMessage.Content, _ = applyCredentialWrites(assistantToolMessage.Content, toolResult.CredentialWrites)
+				assistantToolMessage.ReasoningContent, _ = applyCredentialWrites(assistantToolMessage.ReasoningContent, toolResult.CredentialWrites)
+				applyCredentialWritesToLLMMessages(fullLLMMessages, toolResult.CredentialWrites)
+				applyCredentialWritesToLLMMessages(llmMessages, toolResult.CredentialWrites)
+				_ = s.repo.UpdateConversationLastResponseID(ctx, input.ConversationID, "")
+			}
+			if toolResult.MCPActivationChanged {
+				toolRuntime = toolRuntime.visibleRuntime()
+				if toolRuntime.attachmentProcessorActive() {
+					attachmentToolCallLimit := remainingToolCalls
+					activatedProcessing, processingErr := s.processImageAttachments(toolCtx, imageAttachmentProcessingInput{
+						UserID:         input.UserID,
+						ConversationID: input.ConversationID,
+						MessageID:      assistantMessage.ID,
+						RequestID:      input.RequestID,
+						RunID:          runID,
+						UserPrompt:     input.Content,
+						Attachments:    currentAttachments,
+						Runtime:        toolRuntime,
+						TraceRecorder:  traceRecorder,
+						ToolCallLimit:  &attachmentToolCallLimit,
+					})
+					if processingErr != nil {
+						retErr = processingErr
+						return nil, processingErr
+					}
+					if activatedProcessing.Routed {
+						mergeImageAttachmentProcessingResult(&imageProcessing, activatedProcessing)
+						toolCallRows = append(toolCallRows, activatedProcessing.Rows...)
+						mergeToolCallPersistenceKeys(&persistedToolCallKeys, activatedProcessing.PersistedToolCallKeys)
+						remainingToolCalls -= len(activatedProcessing.Rows)
+						appendAttachmentAnalysesToActivationResult(toolResult.ToolResults, activatedProcessing.Analyses, toolResultTokenBudget)
+						toolRuntime = toolRuntime.withoutAttachmentProcessor()
+					}
+				}
+			}
 			if toolResult.FatalErr != nil {
 				retErr = wrapUpstreamRequestError(toolResult.FatalErr)
 				return nil, retErr
@@ -1376,13 +1449,15 @@ func (s *Service) sendMessageInternal(
 			}
 
 			followUpInput := generateInput
+			followUpInput.Tools = toolRuntime.definitions
+			followUpInput.DisableTools = false
 			if windowCallCount+1 >= maxLLMCalls {
 				followUpInput.Messages = buildFinalToolSynthesisMessages(llmMessages, "The maximum number of LLM calls for this run has been reached. Stop calling tools and produce the final answer based on the tool results already available. If the information is insufficient, state the missing information directly.")
 				followUpInput.Tools = nil
 				followUpInput.DisableTools = true
 				followUpInput.PreviousResponseID = ""
 				applyOpenAIResponsesInstructions(route, routeConfig.Endpoint, &followUpInput)
-			} else if !toolHistoryTrimmed && !toolResultsRebalanced && routeConfig.Endpoint == llm.EndpointResponses && supportsPreviousResponseIDRoute(route) && strings.TrimSpace(upstreamOutput.ResponseID) != "" {
+			} else if !credentialStateChanged && !toolResult.MCPActivationChanged && !toolHistoryTrimmed && !toolResultsRebalanced && routeConfig.Endpoint == llm.EndpointResponses && supportsPreviousResponseIDRoute(route) && strings.TrimSpace(upstreamOutput.ResponseID) != "" {
 				followUpInput.PreviousResponseID = strings.TrimSpace(upstreamOutput.ResponseID)
 				followUpInput.Messages = []llm.Message{{Role: "tool", ToolResults: toolResult.ToolResults}}
 			} else {
@@ -1649,6 +1724,11 @@ func (s *Service) sendMessageInternal(
 		Options:           filteredOptions,
 	})
 	responseIDForPersistence := upstreamOutput.ResponseID
+	// MCP 工具 schema 和凭据明文所在的 provider state 都不能泄漏到下一条消息。
+	if len(toolRuntime.mcpActivation.activeServerIDs()) > 0 || credentialStateChangedForRun {
+		responseIDForPersistence = ""
+		statefulPromptFingerprint = ""
+	}
 	// 历史裁剪后的上游 response 不再代表数据库可重建的完整历史，禁止跨轮复用。
 	if toolHistoryTrimmedForRun {
 		responseIDForPersistence = ""

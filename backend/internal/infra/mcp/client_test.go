@@ -291,8 +291,12 @@ func TestCallToolSignsMeta(t *testing.T) {
 	tsFloat, _ := captured["ts"].(float64)
 	ts := int64(tsFloat)
 	sig, _ := captured["sig"].(string)
+	callID, _ := captured["call_id"].(string)
+	if strings.TrimSpace(callID) == "" {
+		t.Fatal("expected non-empty per-call ID")
+	}
 	// 独立重算 HMAC（与 sandbox-mcp 相同的 canonical 格式），必须一致。
-	canonical := fmt.Sprintf("user_id=%d\nconversation_id=%d\nrequest_id=%s\nts=%d", 42, 7, "req-sig", ts)
+	canonical := fmt.Sprintf("user_id=%d\nconversation_id=%d\nrequest_id=%s\ncall_id=%s\nts=%d", 42, 7, "req-sig", callID, ts)
 	mac := hmac.New(sha256.New, []byte(key))
 	mac.Write([]byte(canonical))
 	expected := hex.EncodeToString(mac.Sum(nil))

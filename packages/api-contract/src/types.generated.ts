@@ -54,7 +54,7 @@ export interface AddAgentGroupMemberRequest {
   dutyInstruction?: string;
   /** @maxLength 128 */
   modelOverride?: string;
-  reasoningEffort?: "low" | "medium" | "high" | "xhigh";
+  reasoningEffort?: "low" | "medium" | "high" | "xhigh" | "max";
   /** @maxLength 32 */
   rolePublicID: string;
 }
@@ -138,7 +138,7 @@ export interface AgentGroupMemberRequest {
   dutyInstruction?: string;
   /** @maxLength 128 */
   modelOverride?: string;
-  reasoningEffort?: "low" | "medium" | "high" | "xhigh";
+  reasoningEffort?: "low" | "medium" | "high" | "xhigh" | "max";
   /** @maxLength 32 */
   rolePublicID: string;
 }
@@ -335,6 +335,11 @@ export interface AnnouncementResponseDoc {
 
 export interface AnnouncementStateRequest {
   updatedAt: string;
+}
+
+export interface ApprovalResponse {
+  /** Approval 待批准记录摘要（JSON 字符串，含 approval_id/tool/arguments/status）。 */
+  approval: string;
 }
 
 export interface AuditLogListResponseDoc {
@@ -914,6 +919,7 @@ export interface ConversationProjectResponse {
   defaultSkillIDs: number[];
   description: string;
   icon: string;
+  id: number;
   mcpDefaultMode: string;
   name: string;
   publicID: string;
@@ -970,9 +976,11 @@ export interface ConversationRoleResponse {
   description: string;
   groupName: string;
   icon: string;
+  id: number;
   mcpDefaultMode: string;
   model: string;
   name: string;
+  pinned: boolean;
   provider: string;
   publicID: string;
   reasoningEffort: string;
@@ -1093,7 +1101,6 @@ export interface CreateCheckoutRequest {
 export interface CreateConversationProjectRequest {
   /** @maxLength 32 */
   color?: string;
-  /** @maxItems 128 */
   defaultMCPToolIDs?: number[];
   /** @maxItems 128 */
   defaultSkillIDs?: number[];
@@ -1124,7 +1131,6 @@ export interface CreateConversationRequest {
 export interface CreateConversationRoleRequest {
   /** @maxLength 32 */
   color?: string;
-  /** @maxItems 128 */
   defaultMCPToolIDs?: number[];
   /** @maxItems 128 */
   defaultSkillIDs?: number[];
@@ -1139,9 +1145,10 @@ export interface CreateConversationRoleRequest {
   model?: string;
   /** @maxLength 80 */
   name: string;
+  pinned?: boolean;
   /** @maxLength 32 */
   provider?: string;
-  reasoningEffort?: "low" | "medium" | "high" | "xhigh";
+  reasoningEffort?: "low" | "medium" | "high" | "xhigh" | "max";
   /** @maxLength 12000 */
   systemPrompt?: string;
 }
@@ -1149,6 +1156,14 @@ export interface CreateConversationRoleRequest {
 export interface CreateConversationShareRequest {
   /** @maxItems 1000 */
   defaultMessagePublicIDs?: string[];
+}
+
+export interface CreateCredentialRequest {
+  description: string;
+  meta: Record<string, string>;
+  name: string;
+  type: string;
+  value: string;
 }
 
 export interface CreateModelDisplayGroupRequest {
@@ -1252,6 +1267,7 @@ export interface CreateRedemptionCodeRequest {
 export interface CreateServerRequest {
   authToken?: string;
   baseURL: string;
+  description?: string;
   headersJSON?: string;
   name: string;
   status?: string;
@@ -1330,6 +1346,28 @@ export interface CreateUserRequest {
 
 export interface CreateUserResponseDoc {
   data: UserDataResponse;
+  errorMsg: string;
+}
+
+export interface CredentialListResponse {
+  results: View[];
+}
+
+export interface CredentialListResponseDoc {
+  data: CredentialListResponse;
+  errorMsg: string;
+}
+
+export interface CredentialResponse {
+  credential: View;
+}
+
+export interface CredentialResponseDoc {
+  data: CredentialResponse;
+  errorMsg: string;
+}
+
+export interface CredentialsErrorDoc {
   errorMsg: string;
 }
 
@@ -2523,6 +2561,50 @@ export interface ProviderAuthBridgeStartResponseDoc {
   errorMsg: string;
 }
 
+export interface PublicGroupRunActorResponse {
+  color: string;
+  icon: string;
+  memberID: string;
+  model: string;
+  name: string;
+  type: string;
+}
+
+export interface PublicGroupRunAttemptResponse {
+  attemptID: string;
+  attemptNumber: number;
+  endedAt: string | null;
+  errorCode?: string;
+  output: string;
+  startedAt: string;
+  status: string;
+  updatedAt: string;
+}
+
+export interface PublicGroupRunStepResponse {
+  actor: PublicGroupRunActorResponse;
+  attempts: PublicGroupRunAttemptResponse[];
+  endedAt: string | null;
+  sequence: number;
+  startedAt: string;
+  status: string;
+  stepID: string;
+  stepType: string;
+  updatedAt: string;
+}
+
+export interface PublicGroupRunTimelineResponse {
+  currentAttemptID: string;
+  currentStepID: string;
+  endedAt: string | null;
+  errorCode?: string;
+  groupRunID: string;
+  startedAt: string;
+  status: string;
+  steps: PublicGroupRunStepResponse[];
+  updatedAt: string;
+}
+
 export interface PublicModelListResponseDoc {
   data: PublicModelResponse[];
   errorMsg: string;
@@ -2570,6 +2652,8 @@ export interface PublicModelResponse {
 export interface PublicSharedConversationResponse {
   createdAt: string;
   defaultMessagePublicIDs: string[];
+  /** GroupRuns 群组会话中间过程时间线（key: 消息 RunID），非群组会话为空。 */
+  groupRuns?: Record<string, PublicGroupRunTimelineResponse>;
   lastAccessedAt: string | null;
   messages: PublicSharedMessageResponse[];
   model: string;
@@ -2847,7 +2931,6 @@ export interface SendMessageRequest {
   options?: Record<string, any>;
   /** @maxLength 32 */
   parentMessagePublicID?: string;
-  /** @maxItems 128 */
   selectedToolIDs?: number[];
   /** @maxItems 128 */
   skillIDs?: number[];
@@ -2888,6 +2971,7 @@ export interface ServerResponse {
   activeToolCount: number;
   baseURL: string;
   createdAt: string;
+  description: string;
   headersJSON: string;
   id: number;
   lastError: string;
@@ -3189,7 +3273,7 @@ export interface UpdateAgentGroupMemberRequest {
   enabled?: boolean;
   /** @maxLength 128 */
   modelOverride?: string;
-  reasoningEffort?: "low" | "medium" | "high" | "xhigh";
+  reasoningEffort?: "low" | "medium" | "high" | "xhigh" | "max";
   /** @min 0 */
   sortOrder?: number;
 }
@@ -3243,7 +3327,6 @@ export interface UpdateConversationLabelsRequest {
 export interface UpdateConversationProjectRequest {
   /** @maxLength 32 */
   color?: string;
-  /** @maxItems 128 */
   defaultMCPToolIDs?: number[];
   /** @maxItems 128 */
   defaultSkillIDs?: number[];
@@ -3262,7 +3345,6 @@ export interface UpdateConversationProjectRequest {
 export interface UpdateConversationRoleRequest {
   /** @maxLength 32 */
   color?: string;
-  /** @maxItems 128 */
   defaultMCPToolIDs?: number[];
   /** @maxItems 128 */
   defaultSkillIDs?: number[];
@@ -3277,12 +3359,21 @@ export interface UpdateConversationRoleRequest {
   model?: string;
   /** @maxLength 80 */
   name?: string;
+  pinned?: boolean;
   /** @maxLength 32 */
   provider?: string;
-  reasoningEffort?: "low" | "medium" | "high" | "xhigh";
+  reasoningEffort?: "low" | "medium" | "high" | "xhigh" | "max";
   status?: "active" | "archived";
   /** @maxLength 12000 */
   systemPrompt?: string;
+}
+
+export interface UpdateCredentialRequest {
+  description: string;
+  meta: Record<string, string>;
+  name: string;
+  type: string;
+  value: string;
 }
 
 export interface UpdateCurrentSessionLocationRequest {
@@ -3982,6 +4073,16 @@ export interface UserSettingsResponse {
 export interface UserSettingsResponseDoc {
   data: UserSettingsResponse;
   errorMsg: string;
+}
+
+export interface View {
+  created_at: string;
+  description: string;
+  meta?: Record<string, string>;
+  name: string;
+  public_id: string;
+  type: string;
+  updated_at: string;
 }
 
 export interface WritePromptPresetRequest {
@@ -8127,6 +8228,78 @@ export namespace Conversations {
   }
 }
 
+export namespace Credentials {
+  /**
+   * @description 查询当前用户保存的凭据（不包含密钥值）
+   * @tags chat
+   * @name CredentialsList
+   * @summary 凭据列表
+   * @request GET:/credentials
+   * @secure
+   */
+  export namespace CredentialsList {
+    export type RequestParams = {};
+    export type RequestQuery = {};
+    export type RequestBody = never;
+    export type RequestHeaders = {};
+    export type ResponseBody = CredentialListResponseDoc;
+  }
+
+  /**
+   * @description 保存一条命名凭据（SSH/API key 等），密钥加密存储且永不回显
+   * @tags chat
+   * @name CredentialsCreate
+   * @summary 创建凭据
+   * @request POST:/credentials
+   * @secure
+   */
+  export namespace CredentialsCreate {
+    export type RequestParams = {};
+    export type RequestQuery = {};
+    export type RequestBody = CreateCredentialRequest;
+    export type RequestHeaders = {};
+    export type ResponseBody = CredentialResponseDoc;
+  }
+
+  /**
+   * @description 更新凭据名称/类型/描述/元数据；value 为空表示不修改密钥
+   * @tags chat
+   * @name CredentialsUpdate
+   * @summary 更新凭据
+   * @request PUT:/credentials/{id}
+   * @secure
+   */
+  export namespace CredentialsUpdate {
+    export type RequestParams = {
+      /** 凭据公开 ID */
+      id: string;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = UpdateCredentialRequest;
+    export type RequestHeaders = {};
+    export type ResponseBody = CredentialResponseDoc;
+  }
+
+  /**
+   * @description 删除一条凭据（软删除）
+   * @tags chat
+   * @name CredentialsDelete
+   * @summary 删除凭据
+   * @request DELETE:/credentials/{id}
+   * @secure
+   */
+  export namespace CredentialsDelete {
+    export type RequestParams = {
+      /** 凭据公开 ID */
+      id: string;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = never;
+    export type RequestHeaders = {};
+    export type ResponseBody = CredentialsErrorDoc;
+  }
+}
+
 export namespace Files {
   /**
    * @description 查询当前用户上传的文件
@@ -8461,6 +8634,46 @@ export namespace Models {
     export type RequestBody = never;
     export type RequestHeaders = {};
     export type ResponseBody = PublicModelListResponseDoc;
+  }
+}
+
+export namespace PlatformTools {
+  /**
+   * @description 批准一条待确认的平台工具写操作（ask 批准模式），批准后异步执行
+   * @tags platform-tools
+   * @name ApprovalsApproveCreate
+   * @summary 批准平台工具写操作
+   * @request POST:/platform-tools/approvals/{approval_id}/approve
+   * @secure
+   */
+  export namespace ApprovalsApproveCreate {
+    export type RequestParams = {
+      /** 待批准记录 ID */
+      approvalId: string;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = never;
+    export type RequestHeaders = {};
+    export type ResponseBody = ApprovalResponse;
+  }
+
+  /**
+   * @description 拒绝一条待确认的平台工具写操作（ask 批准模式），不执行
+   * @tags platform-tools
+   * @name ApprovalsRejectCreate
+   * @summary 拒绝平台工具写操作
+   * @request POST:/platform-tools/approvals/{approval_id}/reject
+   * @secure
+   */
+  export namespace ApprovalsRejectCreate {
+    export type RequestParams = {
+      /** 待批准记录 ID */
+      approvalId: string;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = never;
+    export type RequestHeaders = {};
+    export type ResponseBody = ApprovalResponse;
   }
 }
 

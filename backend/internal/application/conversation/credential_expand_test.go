@@ -85,6 +85,37 @@ func TestExpandCredentialRefsNilService(t *testing.T) {
 	}
 }
 
+func TestApplyCredentialWritesToJSONHandlesEscapedValues(t *testing.T) {
+	secret := "line 1\nquoted \"value\" and \\path"
+	rawBytes, err := json.Marshal(map[string]interface{}{
+		"instruction": "deploy with " + secret,
+		"nested":      []interface{}{secret, map[string]interface{}{"value": secret}},
+	})
+	if err != nil {
+		t.Fatalf("marshal snapshot: %v", err)
+	}
+
+	result, changed := applyCredentialWritesToJSON(string(rawBytes), []credentialWrite{{Name: "deploy-key", Value: secret}})
+	if !changed {
+		t.Fatalf("expected escaped secret to be replaced")
+	}
+	if containsStr(result, secret) || containsStr(result, `quoted \"value\"`) {
+		t.Fatalf("credential plaintext remained in JSON snapshot: %s", result)
+	}
+	var decoded map[string]interface{}
+	if err := json.Unmarshal([]byte(result), &decoded); err != nil {
+		t.Fatalf("scrubbed snapshot is invalid JSON: %v", err)
+	}
+	placeholder := "{{credential: deploy-key}}"
+	if decoded["instruction"] != "deploy with "+placeholder {
+		t.Fatalf("unexpected scrubbed instruction: %#v", decoded["instruction"])
+	}
+	nested := decoded["nested"].([]interface{})
+	if nested[0] != placeholder || nested[1].(map[string]interface{})["value"] != placeholder {
+		t.Fatalf("nested values were not scrubbed: %#v", nested)
+	}
+}
+
 func TestMaskCredentialToolInput(t *testing.T) {
 	cases := []struct {
 		name           string

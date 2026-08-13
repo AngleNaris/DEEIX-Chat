@@ -1,76 +1,82 @@
-# deeix-sandbox-mcp — DEEIX 多用户轻量沙箱 MCP 服务
+# deeix-sandbox-mcp
 
-DEEIX（X-DEEIX）配套的**多用户隔离沙箱**：Agent 可在远程沙箱容器内执行 shell/python 命令、处理文件（如用 ffmpeg/librosa 分析音频）、从网络抓取信息，并按需拉取所需环境（pip/apt 安装、指定镜像重建）。
+DEEIX 的多用户沙箱 MCP。Agent 在按用户/会话隔离的 Docker 容器中执行命令、安装依赖、处理当前消息附件，并通过现有 `__export__` 链把生成文件交付给用户。
 
-## 设计要点
+## Runtime contract
 
-- **多用户隔离**：DEEIX 后端在每次 MCP 调用中注入 `_meta{user_id, conversation_id, request_id}`（`backend/internal/infra/mcp/client.go`），本服务按 `(user_id, conversation_id)` 建立独立 Docker 容器会话，互不可见。
-- **会话租约制（参考 LobeHub Onlyboxes）**：懒创建（create_if_missing）、闲置超 `lease TTL`（默认 900s）自动回收；重建时工具结果回传 `session_recreated: true`，模型可感知工作区被重置。
-- **环境拉取**：容器内可自由 `pip install` / `apt-get install`；用户级共享缓存卷（`/root/.cache`）保证容器重建后安装秒级命中；`sandbox_spawn` 可按需拉任意镜像（如 `node:22-slim`）重建会话。
-- **共享卷桥接（沙箱 ↔ 多模态工具）**：会话容器挂载共享卷 `deeix-mcp-shared` 到 `/shared`，与 mm-core/mm-omni-av 容器互通。每次 `sandbox_exec` 结果返回 `shared_dir`（如 `/shared/deeix-42-7`，按会话隔离）；把文件复制到该目录后，mm 工具的 `file_path`/`image_path` 即可指向它（如 `transcribe_audio` / `ocr` / `read_image` / `media_info`）。
-- **网络**：默认允许出网（抓取信息需求）；仅接受 http/https URL。会话容器默认在 Docker bridge 网络（可访问任意公网；VPS 上回环/hairpin 访问自身公网 IP 由宿主 NAT 支持，实测 `https://<站点>` 可达）。如需让沙箱直接访问 DEEIX 本平台服务（如"AI 维护 DEEIX 所在服务器"任务），把 `SANDBOX_NETWORK_MODE` 设为 DEEIX 所在外部网络名（如 `1panel-network`），会话容器即可按服务名访问，例如 `http://deeix-chat-app:8080`（平台 API）——注意：加入外部网络后沙箱与平台内网互通，仅在单租户受信 VPS 上启用。
-- **传输**：Streamable HTTP（`/mcp`），Bearer Token 鉴权；仅建议 DEEIX 后端回环访问（VPS `127.0.0.1:8081`）。
+- DEEIX backend signs `_meta` fields `user_id`, `conversation_id`, `request_id`, `call_id`, and `ts`. Sandbox calls without a valid HMAC, nonzero user/conversation scope, or a fresh timestamp are rejected.
+- One session container is created for each `deeix-<user>-<conversation>` scope. Other users and conversations are not mounted into that container.
+- Session containers run as root, are non-privileged, and have configurable memory, PID, and CPU limits. The default image supports `apt`, `pip`, `npm`, and `uv`; package caches are mounted from a per-user Docker volume at `/root/.cache`.
+- `/workspace` is a per-conversation Docker volume. `/imports` is a read-only bind of the current conversation scope. Current-message files are prepared by the backend in a per-run lane and their exact paths are added to the transient model prompt.
+- `/shared/deeix-<user>-<conversation>` is the writable scope used for file export and sandbox-to-MM handoff. No complete tenant tree is mounted into a session container.
+- Session containers join only the dedicated IPv4 `deeix-sandbox-egress` bridge. They do not join `1panel-network` or the application network.
+- `sandbox_export_file` accepts a regular `/workspace` file, verifies the resolved path, copies it into the current shared scope, and returns `__export__` for the existing DEEIX attachment pipeline.
 
-## 工具
+## Tools
 
-| 工具 | 说明 |
+| Tool | Purpose |
 |---|---|
-| `sandbox_exec` | 执行 shell 命令（默认超时 120s，最大 600s，输出截断 64KB） |
-| `sandbox_task_start` / `sandbox_task_poll` / `sandbox_task_cancel` | 后台长任务（轮询/终止） |
-| `sandbox_write_file` | 写文件（`content_base64` / `content_text`；DEEIX 附件注入路径） |
-| `sandbox_read_file` / `sandbox_list_files` | 读文件（base64 + mime）/ 列目录 |
-| `sandbox_download` | 抓取 URL 存文件或返回正文 |
-| `sandbox_spawn` | 按需拉镜像重建会话容器（环境拉取） |
-| `sandbox_ps` / `sandbox_kill` / `sandbox_reset` | 会话管理 |
+| `sandbox_exec` | Run shell commands in `/workspace` |
+| `sandbox_task_start`, `sandbox_task_poll`, `sandbox_task_cancel` | Manage bounded background tasks |
+| `sandbox_write_file`, `sandbox_read_file`, `sandbox_list_files` | Work with files inside `/workspace` |
+| `sandbox_download` | Download a public HTTP(S) resource through SSRF checks |
+| `sandbox_export_file` | Return a `/workspace` file through `__export__` |
+| `sandbox_spawn` | Recreate the scope session with another image while retaining the workspace |
+| `sandbox_ps`, `sandbox_kill`, `sandbox_reset` | Inspect or reset authorized sessions |
 
-> 注：mm-core / mm-omni-av（Qwen-MM-Plugins 桥接）是独立部署的服务（见 `deploy/docker-compose.yml`），
-> 通过共享卷 `deeix-mcp-shared:/shared` 与沙箱互通文件。
+## Network isolation
 
-## 安全权衡（有意为之）
+`deploy/setup-sandbox-egress.sh` creates the dedicated bridge and installs idempotent host firewall rules:
 
-- 容器以 **root** 运行以支持 pip/apt 自装（环境拉取），由 `--memory 1g --pids-limit 256 --cpus 0.5`（可配）限额兜底；仅挂载工作区卷与缓存卷，不暴露宿主机目录。
-- 沙箱服务需挂载宿主 `/var/run/docker.sock`（唯一持该权限的服务，`cap_drop: ALL` + `no-new-privileges`）。
-- 路径消毒：文件工具仅允许 `/workspace` 内路径，拒绝 `..` 逃逸与 `/etc /proc /sys /tmp`。
-- 单租户 VPS 部署；多租户共享宿主需另行评估（建议每租户独立沙箱服务实例或加 seccomp 加固）。
+- `INPUT` drops all traffic from the sandbox bridge to host-local addresses, including the bridge gateway and host public IPs.
+- `DOCKER-USER` drops private, loopback, link-local, shared-address, documentation, multicast, and reserved IPv4 destination ranges.
+- The network is required to be IPv4-only. If Docker exposes IPv6 filter chains, defense-in-depth rules drop traffic arriving from the sandbox bridge.
+- Globally routed IPv4 remains available for package managers and normal public internet access.
 
-## 目录
-
-```
-tools/sandbox-mcp/
-├── main.go / server.go     入口 + Streamable HTTP + Bearer 鉴权 + _meta 提取
-├── config.go               环境变量配置
-├── sessions.go             会话管理（scope 路由、租约回收）
-├── docker.go               Docker 容器/exec/卷封装
-├── tools.go                MCP 工具注册 + exec/后台任务
-├── files.go                文件工具 + 路径消毒
-├── download.go             网络抓取
-├── spawn.go                spawn/ps/kill/reset
-├── main_test.go            单元测试（路由/消毒/解析）
-├── integration_test.go     与 DEEIX 客户端协议对打（initialize/session/_meta/鉴权）
-├── docker/base.Dockerfile  基础镜像（python3.12 + ffmpeg + 数据分析包）
-└── deploy/                 VPS 部署（compose + 镜像 Dockerfile + .env.example）
-```
-
-## 部署
-
-见 `deploy/docker-compose.yml`（含 Qwen-MM-Plugins 桥接服务）：
+Review the script on the target VPS before running it. The application never applies firewall changes automatically. Docker or 1Panel may recreate filter chains during reload; install `deploy/deeix-sandbox-egress.service` so the script runs after `docker.service`:
 
 ```bash
-cp deploy/.env.example deploy/.env   # 填 SANDBOX_MCP_API_KEY / DASHSCOPE_API_KEY
-# 构建基础镜像
+sudo install -m 0755 deploy/setup-sandbox-egress.sh /opt/deeix-mcp/setup-sandbox-egress.sh
+sudo install -m 0644 deploy/deeix-sandbox-egress.service /etc/systemd/system/deeix-sandbox-egress.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now deeix-sandbox-egress.service
+```
+
+After any Docker/1Panel firewall change, run `systemctl reload deeix-sandbox-egress.service` and repeat the egress smoke tests.
+
+## Deployment
+
+```bash
+cp deploy/.env.example deploy/.env
+# Set SANDBOX_MCP_API_KEY, SANDBOX_META_HMAC_KEY, and MM provider keys.
 docker build -t deeix-sandbox-base:latest -f docker/base.Dockerfile docker/
-# 构建并启动
-cd deploy && docker compose up -d --build
-# 验证
-curl -s http://127.0.0.1:8081/mcp -H 'Authorization: Bearer <key>' -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
+cd deploy
+docker compose config
+docker compose up -d --build
 ```
 
-DEEIX 管理后台 → MCP 服务：注册 `http://127.0.0.1:8081/mcp` + Bearer Token，同步工具后按需启用。
+The app compose must mount the same imports host directory read-write at its configured `SANDBOX_IMPORTS_DIR`. The sandbox MCP and MM wrappers mount that directory read-only. Shared and imports host paths must match across both compose projects.
 
-## 开发
+Register or update the MCP endpoints with `deploy/register-mcp.sh`. It upserts by server name so existing server IDs, tool associations, and user/project/role selections remain intact.
 
-本地无 Go 工具链时用容器（`deeix-build:1`）：
+## Required smoke tests
+
+Run these on the deployment host before enabling the tools for users:
+
+1. Confirm `apt`, `pip`, `npm`, and `uv` can install a small public package in a session.
+2. Confirm public HTTPS and DNS work.
+3. Confirm application, database, Redis, Docker gateway, host public IP, metadata, RFC1918, and sibling sandbox addresses are unreachable.
+4. Attach a file to the current message and confirm only its provided `/imports/...` lane is usable.
+5. Create a file in `/workspace`, call `sandbox_export_file`, and confirm it appears as a downloadable DEEIX attachment.
+6. Reset or expire a session and confirm other user/conversation scopes remain inaccessible.
+
+## Development
 
 ```bash
-MSYS_NO_PATHCONV=1 docker run --rm -v "$(cygpath -w <repo>/tools/sandbox-mcp)":/app -w /app -v deeix-gomod-cache:/go/pkg/mod deeix-build:1 sh -c 'go mod tidy && go test ./...'
+MSYS_NO_PATHCONV=1 docker run --rm \
+  -v "$(cygpath -w <repo>/tools/sandbox-mcp)":/app \
+  -w /app golang:1.26.5-bookworm \
+  sh -lc '/usr/local/go/bin/go test ./... && /usr/local/go/bin/go test -race ./...'
 ```
+
+MM input and generated-file isolation is implemented by `tools/mm-isolation`. The pinned Qwen core `crop`, `draw_bbox`, and `save_view` tools receive forced per-call output lanes; validated files are copied into the signed shared scope and returned through `__export__`.

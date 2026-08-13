@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	appskill "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/skill"
-	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/response"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/middleware"
 	"github.com/gin-gonic/gin"
@@ -45,10 +44,6 @@ const maxPackageZipUploadBytes = 10 << 20
 func (h *Handler) ListVisibleSkills(c *gin.Context) {
 	page, pageSize := pageParams(c)
 	rawIDs := c.QueryArray("id")
-	if len(rawIDs) > config.MaxMCPSelectedToolsPerMessage {
-		response.ErrorWithCode(c, http.StatusBadRequest, "skill.too_many_ids", "too many skill ids")
-		return
-	}
 	ids := make([]uint, 0, len(rawIDs))
 	seenIDs := make(map[uint]struct{}, len(rawIDs))
 	for _, rawID := range rawIDs {

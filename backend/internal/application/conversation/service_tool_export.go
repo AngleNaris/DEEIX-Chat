@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -24,12 +23,16 @@ type toolExportItem struct {
 	Name string `json:"name"`
 }
 
+type toolExportAttachmentRepository interface {
+	CreateAttachments(ctx context.Context, items []domainconversation.Attachment) error
+}
+
 // maxToolExportBytes 单文件导出上限（与上传默认上限一致）。
 const maxToolExportBytes = 20 << 20
 
 // parseToolExportItems 从工具结果 JSON 中解析 __export__ 标记。
 // 支持三种形态：纯 JSON、content 块包装、以及"JSON 标记 + 文本"拼接
-//（如 image_gen 返回 {"__export__":[...]} 后接 markdown 图片引用）。
+// （如 image_gen 返回 {"__export__":[...]} 后接 markdown 图片引用）。
 func parseToolExportItems(outputJSON string) []toolExportItem {
 	raw := strings.TrimSpace(outputJSON)
 	if raw == "" {
@@ -117,16 +120,16 @@ func matchJSONObjectEnd(raw string, openIndex int) int {
 	return -1
 }
 
-// exportFilePath 校验共享目录路径并返回容器内绝对路径。
+// exportFilePath 校验共享目录路径并返回相对共享根的路径。
 // 只允许读取共享目录（SandboxSharedDir）内的文件，且路径前缀必须属于当前用户会话
-// （/shared/deeix-<uid>-<cid>/），防跨用户导出。
-// P0-06：解析真实路径（EvalSymlinks）后再次校验前缀，防止共享目录内符号链接
-// 指向会话 scope 外的文件（如后端容器内 /etc/passwd）。
+// （/shared/deeix-<uid>-<cid>/），防跨用户导出。实际文件由 openExportRegularFile
+// 相对共享根原子打开，Linux 使用 openat2 拒绝 traversal、symlink 和 magic link。
 func (s *Service) exportFilePath(input executeAssistantToolCallsInput, path string) (string, error) {
 	sharedDir := strings.TrimSpace(s.cfg.Snapshot().SandboxSharedDir)
 	if sharedDir == "" {
 		sharedDir = "/shared"
 	}
+	sharedDir = filepath.ToSlash(filepath.Clean(strings.ReplaceAll(sharedDir, "\\", "/")))
 	p := filepath.ToSlash(filepath.Clean(strings.ReplaceAll(path, "\\", "/")))
 	if !strings.HasPrefix(p, sharedDir+"/") {
 		return "", fmt.Errorf("export path outside shared dir: %s", path)
@@ -138,15 +141,11 @@ func (s *Service) exportFilePath(input executeAssistantToolCallsInput, path stri
 	if !strings.HasPrefix(p, expected+"/") {
 		return "", fmt.Errorf("export path not in current session scope: %s", path)
 	}
-	resolved, err := filepath.EvalSymlinks(p)
-	if err != nil {
-		return "", fmt.Errorf("export path cannot be resolved: %s", path)
+	rel := filepath.Clean(filepath.FromSlash(strings.TrimPrefix(p, sharedDir+"/")))
+	if rel == "." || filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("export path outside shared dir: %s", path)
 	}
-	resolved = filepath.ToSlash(resolved)
-	if !strings.HasPrefix(resolved, expected+"/") {
-		return "", fmt.Errorf("export path resolves outside session scope: %s", path)
-	}
-	return resolved, nil
+	return rel, nil
 }
 
 // exportToolArtifacts 处理工具结果中的 __export__ 标记：
@@ -165,6 +164,8 @@ func (s *Service) exportToolArtifacts(ctx context.Context, input executeAssistan
 	now := time.Now()
 	attachments := make([]domainconversation.Attachment, 0, len(items))
 	links := make([]string, 0, len(items))
+	consumedExportPaths := make([]string, 0, len(items))
+	seenExportPaths := make(map[string]struct{}, len(items))
 	for _, item := range items {
 		// 平台已上传文件的导出（image_gen 等）：path 即 fileID，直接挂为附件。
 		if strings.HasPrefix(strings.TrimSpace(item.Path), "file://") {
@@ -192,34 +193,34 @@ func (s *Service) exportToolArtifacts(ctx context.Context, input executeAssistan
 			links = append(links, fmt.Sprintf("![%s](/api/v1/files/%s/content)", fileItem.FileName, fileItem.FileID))
 			continue
 		}
-		absPath, err := s.exportFilePath(input, item.Path)
+		relPath, err := s.exportFilePath(input, item.Path)
 		if err != nil {
 			slog.Warn("tool export rejected", "tool", input.RunID, "err", err)
 			continue
 		}
-		stat, err := os.Stat(absPath)
-		if err != nil || !stat.Mode().IsRegular() {
-			slog.Warn("tool export file not readable", "path", absPath, "err", err)
+		if _, exists := seenExportPaths[relPath]; exists {
 			continue
 		}
-		if stat.Size() <= 0 || stat.Size() > maxToolExportBytes {
-			slog.Warn("tool export file size invalid", "path", absPath, "size", stat.Size())
-			continue
-		}
-		reader, err := os.Open(absPath)
+		seenExportPaths[relPath] = struct{}{}
+		reader, size, err := openExportRegularFile(sharedDir, relPath)
 		if err != nil {
-			slog.Warn("tool export open failed", "path", absPath, "err", err)
+			slog.Warn("tool export file not readable", "path", item.Path, "err", err)
+			continue
+		}
+		if size <= 0 || size > maxToolExportBytes {
+			_ = reader.Close()
+			slog.Warn("tool export file size invalid", "path", item.Path, "size", size)
 			continue
 		}
 		name := strings.TrimSpace(item.Name)
 		if name == "" || name == "." || strings.ContainsAny(name, "/\\") {
-			name = filepath.Base(absPath)
+			name = filepath.Base(relPath)
 		}
 		uploadResult, uploadErr := s.UploadFile(ctx, appupload.UploadFileInput{
 			UserID:       input.UserID,
 			Purpose:      "sandbox_export",
 			FileName:     name,
-			DeclaredSize: stat.Size(),
+			DeclaredSize: size,
 			Reader:       reader,
 		})
 		_ = reader.Close()
@@ -243,12 +244,36 @@ func (s *Service) exportToolArtifacts(ctx context.Context, input executeAssistan
 			UploadedAt:     now,
 		})
 		links = append(links, fmt.Sprintf("[%s](/api/v1/files/%s/content)", file.FileName, file.FileID))
+		consumedExportPaths = append(consumedExportPaths, relPath)
 	}
 	if len(attachments) == 0 {
 		return ""
 	}
-	if err := s.repo.CreateAttachments(ctx, attachments); err != nil {
+	if err := persistToolExportAttachments(ctx, s.repo, attachments, sharedDir, consumedExportPaths); err != nil {
 		slog.Warn("tool export persist attachments failed", "count", len(attachments), "err", err)
+		return ""
 	}
 	return strings.Join(links, " ")
+}
+
+func persistToolExportAttachments(
+	ctx context.Context,
+	repo toolExportAttachmentRepository,
+	attachments []domainconversation.Attachment,
+	sharedDir string,
+	consumedExportPaths []string,
+) error {
+	if err := repo.CreateAttachments(ctx, attachments); err != nil {
+		return err
+	}
+	for _, relPath := range consumedExportPaths {
+		if err := removeExportFile(sharedDir, relPath); err != nil {
+			slog.Warn("tool export source cleanup failed", "path", filepath.ToSlash(relPath), "err", err)
+		}
+	}
+	return nil
+}
+
+func isMMExportDirectory(name string) bool {
+	return strings.HasPrefix(strings.TrimSpace(name), "mm-")
 }

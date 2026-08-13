@@ -1,0 +1,15 @@
+[Unit]
+Description=DEEIX sandbox egress firewall rules
+Requires=docker.service
+After=docker.service network-online.target
+PartOf=docker.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/opt/deeix-mcp/.env
+ExecStart=/opt/deeix-mcp/setup-sandbox-egress.sh
+ExecReload=/opt/deeix-mcp/setup-sandbox-egress.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

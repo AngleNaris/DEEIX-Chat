@@ -81,6 +81,7 @@ import type { PatchSettingItem } from "@/shared/api/settings.types";
 type ServerFormState = {
   id?: number;
   name: string;
+  description: string;
   baseURL: string;
   authToken: string;
   headersJSON: string;
@@ -96,6 +97,7 @@ type ToolSyncConfirmation = {
 
 const EMPTY_SERVER_FORM: ServerFormState = {
   name: "",
+  description: "",
   baseURL: "",
   authToken: "",
   headersJSON: "{}",
@@ -121,6 +123,7 @@ function toServerForm(server: AdminMCPServerDTO): ServerFormState {
   return {
     id: server.id,
     name: server.name,
+    description: server.description || "",
     baseURL: server.baseURL,
     authToken: "",
     headersJSON: server.headersJSON || "{}",
@@ -131,6 +134,7 @@ function toServerForm(server: AdminMCPServerDTO): ServerFormState {
 function toServerPayload(form: ServerFormState): AdminMCPServerPayload {
   return {
     name: form.name.trim(),
+    description: form.description.trim(),
     baseURL: form.baseURL.trim(),
     authToken: form.authToken.trim() || undefined,
     headersJSON: form.headersJSON.trim() || "{}",
@@ -1196,6 +1200,16 @@ export function AdminToolsPage() {
                     </SelectContent>
                   </Select>
                 </div>
+              </div>
+
+              <div className="space-y-1">
+                <p className="text-xs text-muted-foreground">{t("serverDialog.descriptionLabel")}</p>
+                <Textarea
+                  value={serverForm.description}
+                  className="min-h-20 resize-y"
+                  placeholder={t("serverDialog.descriptionPlaceholder")}
+                  onChange={(event) => setServerForm((prev) => ({ ...prev, description: event.target.value }))}
+                />
               </div>
 
               <div className="space-y-1">

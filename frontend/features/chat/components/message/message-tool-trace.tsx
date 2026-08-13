@@ -413,6 +413,7 @@ function ToolAudioList({ sources, labels }: { sources: string[]; labels: Process
     <div className="space-y-2">
       <ToolMiniLabel>{labels.tool.detail.response}</ToolMiniLabel>
       {unique.map((source, index) => (
+        // biome-ignore lint/a11y/useMediaCaption: generated audio has no transcript track available.
         <audio
           key={`${source}-${index}`}
           controls

@@ -1,6 +1,10 @@
 package usersettings
 
-import "testing"
+import (
+	"strconv"
+	"strings"
+	"testing"
+)
 
 func TestValidateDefaultMCPToolIDs(t *testing.T) {
 	t.Parallel()
@@ -10,6 +14,7 @@ func TestValidateDefaultMCPToolIDs(t *testing.T) {
 		"[1]",
 		"[1,2,3]",
 		" [42] ",
+		mcpToolIDJSON(256),
 	}
 	for _, value := range validValues {
 		if err := validateDefaultMCPToolIDs(value, "chat.default_mcp_tool_ids"); err != nil {
@@ -32,6 +37,14 @@ func TestValidateDefaultMCPToolIDs(t *testing.T) {
 	}
 }
 
+func mcpToolIDJSON(count int) string {
+	values := make([]string, count)
+	for index := range values {
+		values[index] = strconv.Itoa(index + 1)
+	}
+	return "[" + strings.Join(values, ",") + "]"
+}
+
 func TestDefaultMCPToolIDsSettingIsAllowed(t *testing.T) {
 	t.Parallel()
 
@@ -40,6 +53,19 @@ func TestDefaultMCPToolIDsSettingIsAllowed(t *testing.T) {
 	}
 	if err := validateValue("chat.default_mcp_tool_ids", "[1,2,3]"); err != nil {
 		t.Fatalf("expected chat.default_mcp_tool_ids to be accepted, got %v", err)
+	}
+}
+
+func TestDefaultReasoningEffortAcceptsMax(t *testing.T) {
+	t.Parallel()
+
+	for _, value := range []string{"", "low", "medium", "high", "xhigh", "max"} {
+		if err := validateValue("chat.default_reasoning_effort", value); err != nil {
+			t.Fatalf("expected chat.default_reasoning_effort=%q to be accepted, got %v", value, err)
+		}
+	}
+	if err := validateValue("chat.default_reasoning_effort", "highest"); err == nil {
+		t.Fatal("expected invalid chat.default_reasoning_effort to be rejected")
 	}
 }
 

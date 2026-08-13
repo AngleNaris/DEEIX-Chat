@@ -12,8 +12,9 @@ type RunSnapshot struct {
 	Members    []RunSnapshotMember
 	Limits     RunSnapshotLimits
 	// RequestedToolIDs / RequestedSkillIDs 是请求级工具与技能选择（重试恢复时还原执行能力）。
-	RequestedToolIDs  []uint
-	RequestedSkillIDs []uint
+	RequestedToolIDs      []uint
+	RequestedSkillIDs     []uint
+	ActivatedMCPServerIDs []uint
 }
 
 // RunSnapshotProject 项目快照。
@@ -49,7 +50,7 @@ type RunSnapshotMember struct {
 	Icon             string
 	Color            string
 	DutyInstruction  string
-	// ReasoningEffort 是成员配置的思考强度档位（""/low/medium/high/xhigh），空串=继承用户全局默认。
+	// ReasoningEffort 是成员配置的思考强度档位（""/low/medium/high/xhigh/max），空串=继承用户全局默认。
 	ReasoningEffort  string
 	RoleDefaultModel string
 	ModelOverride    string

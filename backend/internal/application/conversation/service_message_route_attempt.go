@@ -19,6 +19,7 @@ type messageRoutePromptInput struct {
 	ReasoningContentPassback bool
 	DomainMessages           []model.Message
 	StableAttachments        []AttachmentInput
+	AttachmentImports        []attachmentImportPath
 	DynamicContext           userContextInput
 	PreferencePrompt         string
 	SkillPrompts             *skillPrompts
@@ -93,6 +94,7 @@ func (s *Service) buildMessageRoutePrompt(ctx context.Context, route *channel.Re
 	return buildPromptPlan(ctx, promptPlanInput{
 		BaseMessages:      baseMessages,
 		StableAttachments: input.StableAttachments,
+		AttachmentImports: input.AttachmentImports,
 		DynamicContext:    input.DynamicContext,
 		SkillPrompts:      input.SkillPrompts,
 		ToolRuntime:       input.ToolRuntime,

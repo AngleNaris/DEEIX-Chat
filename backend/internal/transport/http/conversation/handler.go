@@ -132,9 +132,6 @@ func mapStreamError(err error) streamError {
 	case errors.Is(err, appconversation.ErrTooManyMessageFiles):
 		status = http.StatusBadRequest
 		message = "too many files in one message"
-	case errors.Is(err, appconversation.ErrTooManySelectedTools):
-		status = http.StatusBadRequest
-		message = "too many selected tools"
 	case errors.Is(err, appconversation.ErrMultipleImageAttachmentProcessors):
 		status = http.StatusBadRequest
 		message = "multiple image attachment processors selected"

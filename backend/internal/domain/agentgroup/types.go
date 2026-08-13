@@ -133,20 +133,20 @@ type GroupPatch struct {
 
 // Member 表示群组成员（角色与群组的关联）。
 type Member struct {
-	ID              uint
-	PublicID        string
-	GroupID         uint
-	RoleID          uint
-	RolePublicID    string
-	RoleName        string
-	RoleIcon        string
-	RoleColor       string
-	RoleModel       string
-	RoleProvider    string
-	MemberType      string
-	Enabled         bool
-	ModelOverride   string
-	// ReasoningEffort 是思考强度语义档位（""/low/medium/high/xhigh），空串=继承用户全局默认。
+	ID            uint
+	PublicID      string
+	GroupID       uint
+	RoleID        uint
+	RolePublicID  string
+	RoleName      string
+	RoleIcon      string
+	RoleColor     string
+	RoleModel     string
+	RoleProvider  string
+	MemberType    string
+	Enabled       bool
+	ModelOverride string
+	// ReasoningEffort 是思考强度语义档位（""/low/medium/high/xhigh/max），空串=继承用户全局默认。
 	ReasoningEffort string
 	DutyInstruction string
 	SortOrder       int
@@ -266,6 +266,7 @@ type RunPatch struct {
 	RetryableStepID     *uint
 	ClearRetryableStep  bool
 	AssistantMessageID  *uint
+	ConfigSnapshotJSON  *string
 	ErrorCode           *string
 	ErrorMessage        *string
 	EndedAt             *time.Time
@@ -279,6 +280,7 @@ type AttemptPatch struct {
 	ResolvedModel         *string
 	OutputMarkdown        *string
 	PartialOutputMarkdown *string
+	InputSnapshotJSON     *string
 	ErrorCode             *string
 	ErrorMessage          *string
 	ContextFingerprint    *string

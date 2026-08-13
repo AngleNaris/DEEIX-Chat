@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -12,6 +14,7 @@ import (
 
 	appcompact "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/compact"
 	domainagentgroup "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/agentgroup"
+	domainconversation "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
 	persistencemodels "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/models"
 	postgresagentgroup "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/agentgroup"
@@ -290,6 +293,176 @@ func listAgentGroupAttempts(t *testing.T, db *gorm.DB, stepID uint) []persistenc
 		t.Fatalf("list attempts: %v", err)
 	}
 	return rows
+}
+
+func TestAgentGroupCredentialWritesScrubPersistentCheckpoints(t *testing.T) {
+	db := openAgentGroupRetryTestDB(t)
+	seed := seedAgentGroupPausedRetryableRun(t, db, "worker", 3)
+	service := newAgentGroupRetryTestService(t, db)
+	const secret = `quoted "secret" \\path`
+
+	if err := db.Model(&persistencemodels.Message{}).Where("id = ?", seed.userMessage.ID).
+		Update("content", "deploy with "+secret).Error; err != nil {
+		t.Fatalf("seed user message secret: %v", err)
+	}
+	if err := db.Model(&persistencemodels.AgentGroupStep{}).Where("id = ?", seed.workerStep.ID).
+		Updates(map[string]interface{}{"instruction": "worker uses " + secret, "status": domainagentgroup.StepStatusRunning}).Error; err != nil {
+		t.Fatalf("seed running step: %v", err)
+	}
+	snapshotBytes, err := json.Marshal(map[string]interface{}{
+		"instruction": "worker uses " + secret,
+		"nested":      []string{secret},
+	})
+	if err != nil {
+		t.Fatalf("marshal attempt snapshot: %v", err)
+	}
+	if err := db.Model(&persistencemodels.AgentGroupStepAttempt{}).Where("id = ?", seed.workerAttempt.ID).
+		Updates(map[string]interface{}{"input_snapshot_json": string(snapshotBytes), "status": domainagentgroup.AttemptStatusRunning}).Error; err != nil {
+		t.Fatalf("seed running attempt: %v", err)
+	}
+
+	step := &domainagentgroup.Step{ID: seed.workerStep.ID, Instruction: "worker uses " + secret, Status: domainagentgroup.StepStatusRunning}
+	attempt := &domainagentgroup.Attempt{ID: seed.workerAttempt.ID, InputSnapshotJSON: string(snapshotBytes), Status: domainagentgroup.AttemptStatusRunning}
+	userMessage := &domainconversation.Message{
+		ID: seed.userMessage.ID, ConversationID: seed.conversation.ID, UserID: agentGroupRetryUserID,
+		Role: "user", Content: "deploy with " + secret,
+	}
+	state := &agentGroupRunState{
+		service:     service,
+		input:       SendMessageInput{UserID: agentGroupRetryUserID, ConversationID: seed.conversation.ID, Content: userMessage.Content},
+		userMessage: userMessage,
+		contextMessages: []domainconversation.Message{{
+			Role: "user", Content: "context " + secret, ReasoningContent: "reason " + secret,
+		}},
+		summaries: []agentGroupContextSummary{{instruction: "summary " + secret, outputSummary: "output " + secret}},
+	}
+	writes := []credentialWrite{{Name: "deploy-key", Value: secret}}
+	if err := state.applyCredentialWritesForAttempt(t.Context(), step, attempt, writes); err != nil {
+		t.Fatalf("scrub credential checkpoints: %v", err)
+	}
+
+	placeholder := "{{credential: deploy-key}}"
+	if state.input.Content != "deploy with "+placeholder || userMessage.Content != state.input.Content {
+		t.Fatalf("in-memory user message was not scrubbed: input=%q message=%q", state.input.Content, userMessage.Content)
+	}
+	if strings.Contains(state.contextMessages[0].Content, secret) || strings.Contains(state.contextMessages[0].ReasoningContent, secret) ||
+		strings.Contains(state.summaries[0].instruction, secret) || strings.Contains(state.summaries[0].outputSummary, secret) {
+		t.Fatalf("in-memory group context retained credential plaintext: %#v %#v", state.contextMessages, state.summaries)
+	}
+
+	var storedMessage persistencemodels.Message
+	if err := db.First(&storedMessage, seed.userMessage.ID).Error; err != nil {
+		t.Fatalf("reload user message: %v", err)
+	}
+	var storedStep persistencemodels.AgentGroupStep
+	if err := db.First(&storedStep, seed.workerStep.ID).Error; err != nil {
+		t.Fatalf("reload step: %v", err)
+	}
+	var storedAttempt persistencemodels.AgentGroupStepAttempt
+	if err := db.First(&storedAttempt, seed.workerAttempt.ID).Error; err != nil {
+		t.Fatalf("reload attempt: %v", err)
+	}
+	for label, value := range map[string]string{
+		"message": storedMessage.Content,
+		"step":    storedStep.Instruction,
+		"attempt": storedAttempt.InputSnapshotJSON,
+	} {
+		if strings.Contains(value, secret) || strings.Contains(value, `quoted \"secret\"`) {
+			t.Fatalf("%s retained credential plaintext: %s", label, value)
+		}
+		if !strings.Contains(value, placeholder) {
+			t.Fatalf("%s missing credential placeholder: %s", label, value)
+		}
+	}
+}
+
+func TestAgentGroupCredentialWriteCASConflictStopsOtherUpdates(t *testing.T) {
+	db := openAgentGroupRetryTestDB(t)
+	seed := seedAgentGroupPausedRetryableRun(t, db, "worker", 3)
+	service := newAgentGroupRetryTestService(t, db)
+	const secret = "conflict-secret"
+	if err := db.Model(&persistencemodels.Message{}).Where("id = ?", seed.userMessage.ID).
+		Update("content", secret).Error; err != nil {
+		t.Fatalf("seed user message: %v", err)
+	}
+	if err := db.Model(&persistencemodels.AgentGroupStep{}).Where("id = ?", seed.workerStep.ID).
+		Update("instruction", secret).Error; err != nil {
+		t.Fatalf("seed step: %v", err)
+	}
+	attemptSnapshot := `{"instruction":"conflict-secret"}`
+	if err := db.Model(&persistencemodels.AgentGroupStepAttempt{}).Where("id = ?", seed.workerAttempt.ID).
+		Updates(map[string]interface{}{"input_snapshot_json": attemptSnapshot, "status": domainagentgroup.AttemptStatusError}).Error; err != nil {
+		t.Fatalf("seed conflicting attempt: %v", err)
+	}
+
+	step := &domainagentgroup.Step{ID: seed.workerStep.ID, Instruction: secret}
+	attempt := &domainagentgroup.Attempt{ID: seed.workerAttempt.ID, InputSnapshotJSON: attemptSnapshot}
+	userMessage := &domainconversation.Message{
+		ID: seed.userMessage.ID, ConversationID: seed.conversation.ID, UserID: agentGroupRetryUserID,
+		Role: "user", Content: secret,
+	}
+	state := &agentGroupRunState{
+		service:     service,
+		input:       SendMessageInput{UserID: agentGroupRetryUserID, ConversationID: seed.conversation.ID, Content: secret},
+		userMessage: userMessage,
+	}
+	err := state.applyCredentialWritesForAttempt(t.Context(), step, attempt, []credentialWrite{{Name: "key", Value: secret}})
+	if !errors.Is(err, ErrAgentGroupCASConflict) {
+		t.Fatalf("expected attempt CAS conflict, got %v", err)
+	}
+	if state.input.Content != secret || step.Instruction != secret || userMessage.Content != secret {
+		t.Fatalf("CAS conflict must stop later in-memory updates")
+	}
+	var storedMessage persistencemodels.Message
+	var storedStep persistencemodels.AgentGroupStep
+	if err := db.First(&storedMessage, seed.userMessage.ID).Error; err != nil {
+		t.Fatalf("reload message: %v", err)
+	}
+	if err := db.First(&storedStep, seed.workerStep.ID).Error; err != nil {
+		t.Fatalf("reload step: %v", err)
+	}
+	if storedMessage.Content != secret || storedStep.Instruction != secret {
+		t.Fatalf("CAS conflict wrote later checkpoints: message=%q step=%q", storedMessage.Content, storedStep.Instruction)
+	}
+}
+
+func TestAgentGroupMCPActivationPersistsWithCAS(t *testing.T) {
+	db := openAgentGroupRetryTestDB(t)
+	seed := seedAgentGroupPausedRetryableRun(t, db, "worker", 3)
+	service := newAgentGroupRetryTestService(t, db)
+	if err := db.Model(&persistencemodels.AgentGroupRun{}).Where("id = ?", seed.run.ID).
+		Updates(map[string]interface{}{"status": domainagentgroup.RunStatusRunning, "state_version": 1}).Error; err != nil {
+		t.Fatalf("seed running group run: %v", err)
+	}
+
+	run := &domainagentgroup.Run{ID: seed.run.ID, Status: domainagentgroup.RunStatusRunning, StateVersion: 1, ConfigSnapshotJSON: seed.run.ConfigSnapshotJSON}
+	state := &agentGroupRunState{service: service, snapshot: seed.snapshot, run: run, stateVersion: 1}
+	if err := state.persistMCPActivation(t.Context(), []uint{8, 3}); err != nil {
+		t.Fatalf("persist activation: %v", err)
+	}
+	if state.stateVersion != 2 || !reflect.DeepEqual(state.snapshot.ActivatedMCPServerIDs, []uint{8, 3}) {
+		t.Fatalf("activation did not advance in-memory checkpoint: version=%d ids=%v", state.stateVersion, state.snapshot.ActivatedMCPServerIDs)
+	}
+	var stored persistencemodels.AgentGroupRun
+	if err := db.First(&stored, seed.run.ID).Error; err != nil {
+		t.Fatalf("reload group run: %v", err)
+	}
+	var storedSnapshot domainagentgroup.RunSnapshot
+	if err := json.Unmarshal([]byte(stored.ConfigSnapshotJSON), &storedSnapshot); err != nil {
+		t.Fatalf("decode stored snapshot: %v", err)
+	}
+	if stored.StateVersion != 2 || !reflect.DeepEqual(storedSnapshot.ActivatedMCPServerIDs, []uint{8, 3}) {
+		t.Fatalf("unexpected stored activation checkpoint: version=%d ids=%v", stored.StateVersion, storedSnapshot.ActivatedMCPServerIDs)
+	}
+
+	state.stateVersion = 1
+	before := append([]uint(nil), state.snapshot.ActivatedMCPServerIDs...)
+	if err := state.persistMCPActivation(t.Context(), []uint{99}); !errors.Is(err, ErrAgentGroupCASConflict) {
+		t.Fatalf("expected stale activation CAS conflict, got %v", err)
+	}
+	if !reflect.DeepEqual(state.snapshot.ActivatedMCPServerIDs, before) {
+		t.Fatalf("CAS conflict polluted in-memory snapshot: before=%v after=%v", before, state.snapshot.ActivatedMCPServerIDs)
+	}
 }
 
 // 验收 1：A 成功、B 失败时只重试 B——B 追加 Attempt 2（独立计费引用），

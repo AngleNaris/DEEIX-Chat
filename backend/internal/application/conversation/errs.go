@@ -81,8 +81,6 @@ var (
 	ErrEmbeddingUnavailable = errors.New("embedding unavailable")
 	// ErrTooManyMessageFiles 单条消息文件数超限。
 	ErrTooManyMessageFiles = errors.New("too many message files")
-	// ErrTooManySelectedTools 单条消息选择的 MCP 工具数超限。
-	ErrTooManySelectedTools = errors.New("too many selected tools")
 	// ErrMultipleImageAttachmentProcessors 单条消息不能同时选择多个图片附件处理器。
 	ErrMultipleImageAttachmentProcessors = errors.New("multiple image attachment processors selected")
 	// ErrImageAttachmentProcessingFailed 图片附件处理器调用失败。

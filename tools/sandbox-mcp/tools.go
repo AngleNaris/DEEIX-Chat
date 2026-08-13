@@ -42,7 +42,8 @@ func registerTools(mcpServer *server.MCPServer, s *sandboxServer) {
 	execTool := mcp.NewTool("sandbox_exec",
 		mcp.WithDescription(`在用户隔离的沙箱容器内执行 shell 命令（默认 /bin/sh）。
 工作目录为 /workspace，会话按 (user, conversation) 隔离，闲置自动回收、重建后环境保留（pip 缓存命中）。
-可在容器内自由 pip install / apt-get install 拉取所需环境。
+	可在容器内使用 apt、pip、npm、uv 安装所需环境。
+
 输出截断到 64KB。长任务建议使用 sandbox_task_start 后台执行。
 【共享目录】每次结果会返回 shared_dir（形如 /shared/deeix-<uid>-<cid>，本会话专属）。
 需要多模态工具（如 transcribe_audio / ocr / read_image）处理文件时，先把文件复制到 shared_dir 下，
@@ -88,11 +89,11 @@ func registerTools(mcpServer *server.MCPServer, s *sandboxServer) {
 		mcp.WithNumber("max_bytes", mcp.Description("返回正文上限（默认 65536；保存到文件时忽略）")),
 	)
 	exportTool := mcp.NewTool("sandbox_export_file",
-		mcp.WithDescription(`把沙箱文件发送给用户：文件将被移动到用户的 DEEIX 文件列表，用户可在对话中直接下载。
-文件必须位于共享目录（shared_dir，形如 /shared/deeix-<uid>-<cid>/，见 sandbox_exec 返回）。
-先确认文件已复制到 shared_dir（如 cp /workspace/report.pdf /shared/deeix-1-2/），再调用本工具。
-可选 name 指定用户看到的文件名（保留扩展名）。上限 20MB。`),
-		mcp.WithString("path", mcp.Required(), mcp.Description("共享目录内文件路径，如 /shared/deeix-1-2/report.pdf")),
+		mcp.WithDescription(`把 /workspace 中的沙箱文件发送给用户。工具会把文件复制到当前会话的共享 scope，并通过 DEEIX __export__ 附件链交付。
+	文件必须位于 /workspace，禁止路径逃逸或 symlink 越界；无需先手工复制到 shared_dir。
+	可选 name 指定用户看到的文件名（保留扩展名）。上限 20MB。`),
+		mcp.WithString("path", mcp.Required(), mcp.Description("工作区内文件路径，如 /workspace/report.pdf")),
+
 		mcp.WithString("name", mcp.Description("用户可见文件名（默认取原文件名）")),
 	)
 	spawnTool := mcp.NewTool("sandbox_spawn",
@@ -145,19 +146,20 @@ func withRecreatedFlag(v map[string]any, created bool) map[string]any {
 
 // execRequest 统一包装同步执行（供 exec / 文件 / 下载工具复用）。
 type execRequest struct {
-	scope    string
-	cmd      []string
-	cwd      string // 容器内工作目录（经 Exec WorkingDir 传递，必须已通过路径校验）
-	stdin    []byte
-	timeout  time.Duration
+	scope       string
+	cmd         []string
+	cwd         string // 容器内工作目录（经 Exec WorkingDir 传递，必须已通过路径校验）
+	stdin       []byte
+	timeout     time.Duration
 	outputLimit int
 }
 
 func (s *sandboxServer) exec(ctx context.Context, req execRequest) (*execResult, error) {
-	session, created, err := s.mgr.GetOrCreate(ctx, req.scope)
+	session, created, release, err := s.mgr.GetOrCreate(ctx, req.scope)
 	if err != nil {
 		return nil, err
 	}
+	defer release()
 	if req.timeout <= 0 {
 		req.timeout = s.cfg.ExecTimeout
 	}
@@ -229,32 +231,43 @@ func (s *sandboxServer) handleTaskStart(ctx context.Context, req mcp.CallToolReq
 	if command == "" {
 		return resultJSON(map[string]any{"ok": false, "error": "command is required"}), nil
 	}
-	session, created, err := s.mgr.GetOrCreate(ctx, scope)
+	session, created, release, err := s.mgr.GetOrCreate(ctx, scope)
 	if err != nil {
 		return resultJSON(map[string]any{"ok": false, "error": err.Error()}), nil
 	}
-	taskID := fmt.Sprintf("t%d", time.Now().UnixNano()/1e6)
-	out := fmt.Sprintf("/tmp/%s.out", taskID)
-	// nohup 后台执行：输出写入文件，PID 直接回 stdout（echo $! 不能重定向到文件，
-	// 否则返回值拿不到 PID，poll 的 kill -0 会因空 PID 误判任务已完成）。
-	cmd := fmt.Sprintf("nohup sh -c %q > %s 2>&1 & echo $!", command, out)
-	res, err := s.d.execInContainer(ctx, session.Container, []string{"/bin/sh", "-c", cmd}, "", nil, 30*time.Second)
-	if err != nil || res.ExitCode != 0 {
-		return resultJSON(map[string]any{"ok": false, "error": "failed to start task", "detail": safeErr(err, res)}), nil
-	}
-	pid := strings.TrimSpace(res.Stdout)
-	if pid == "" {
-		return resultJSON(map[string]any{"ok": false, "error": "failed to capture task pid"}), nil
-	}
-	task := &BackgroundTask{ID: taskID, PID: pid, Output: out, StartedAt: time.Now()}
+	defer release()
+	// Reserve the slot before starting the process so concurrent callers cannot exceed quota.
 	session.mu.Lock()
 	if len(session.tasks) >= s.cfg.MaxTasksPerSession {
 		session.mu.Unlock()
 		return resultJSON(map[string]any{"ok": false, "error": fmt.Sprintf("task limit %d reached for this session", s.cfg.MaxTasksPerSession)}), nil
 	}
+	taskID := fmt.Sprintf("t%d", time.Now().UnixNano()/1e6)
+	out := fmt.Sprintf("/tmp/%s.out", taskID)
+	task := &BackgroundTask{ID: taskID, Output: out, StartedAt: time.Now()}
 	session.tasks[taskID] = task
 	session.mu.Unlock()
-	return resultJSON(withRecreatedFlag(map[string]any{"ok": true, "task_id": taskID, "pid": task.PID}, created)), nil
+
+	cmd := fmt.Sprintf("nohup setsid /bin/sh -c %s > %s 2>&1 & echo $!", shellQuote(command), shellQuote(out))
+	res, err := s.d.execInContainer(ctx, session.Container, []string{"/bin/sh", "-c", cmd}, "", nil, 30*time.Second)
+	if err != nil || res.ExitCode != 0 {
+		session.mu.Lock()
+		delete(session.tasks, taskID)
+		session.mu.Unlock()
+		return resultJSON(map[string]any{"ok": false, "error": "failed to start task", "detail": safeErr(err, res)}), nil
+	}
+	pid := strings.TrimSpace(res.Stdout)
+	if pid == "" || strings.Trim(pid, "0123456789") != "" {
+		session.mu.Lock()
+		delete(session.tasks, taskID)
+		session.mu.Unlock()
+		return resultJSON(map[string]any{"ok": false, "error": "failed to capture task pid"}), nil
+	}
+	session.mu.Lock()
+	task.PID = pid
+	session.mu.Unlock()
+	return resultJSON(withRecreatedFlag(map[string]any{"ok": true, "task_id": taskID, "pid": pid}, created)), nil
+
 }
 
 func (s *sandboxServer) handleTaskPoll(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -266,17 +279,17 @@ func (s *sandboxServer) handleTaskPoll(ctx context.Context, req mcp.CallToolRequ
 	if taskID == "" {
 		return resultJSON(map[string]any{"ok": false, "error": "task_id is required"}), nil
 	}
-	session, _, err := s.mgr.GetOrCreate(ctx, scope)
+	session, _, release, err := s.mgr.GetOrCreate(ctx, scope)
 	if err != nil {
 		return resultJSON(map[string]any{"ok": false, "error": err.Error()}), nil
 	}
+	defer release()
 	session.mu.Lock()
 	task, ok := session.tasks[taskID]
 	session.mu.Unlock()
 	if !ok {
 		return resultJSON(map[string]any{"ok": false, "error": "unknown task_id (session 可能已重建)"}), nil
 	}
-	s.mgr.touch(scope)
 	// 判断任务是否结束：检查容器内进程是否仍存活。
 	alive, err := s.d.execInContainer(ctx, session.Container, []string{"/bin/sh", "-c", fmt.Sprintf("kill -0 %s 2>/dev/null", task.PID)}, "", nil, 20*time.Second)
 	done := err != nil || alive.ExitCode != 0
@@ -313,10 +326,11 @@ func (s *sandboxServer) handleTaskCancel(ctx context.Context, req mcp.CallToolRe
 	if taskID == "" {
 		return resultJSON(map[string]any{"ok": false, "error": "task_id is required"}), nil
 	}
-	session, _, err := s.mgr.GetOrCreate(ctx, scope)
+	session, _, release, err := s.mgr.GetOrCreate(ctx, scope)
 	if err != nil {
 		return resultJSON(map[string]any{"ok": false, "error": err.Error()}), nil
 	}
+	defer release()
 	session.mu.Lock()
 	task, ok := session.tasks[taskID]
 	if ok {
@@ -326,7 +340,8 @@ func (s *sandboxServer) handleTaskCancel(ctx context.Context, req mcp.CallToolRe
 	if !ok {
 		return resultJSON(map[string]any{"ok": false, "error": "unknown task_id"}), nil
 	}
-	_, _ = s.d.execInContainer(ctx, session.Container, []string{"/bin/sh", "-c", fmt.Sprintf("kill -9 %s 2>/dev/null; rm -f %s", task.PID, task.Output)}, "", nil, 20*time.Second)
+	_, _ = s.d.execInContainer(ctx, session.Container, []string{"/bin/sh", "-c", fmt.Sprintf("kill -TERM -- -%s 2>/dev/null; sleep 1; kill -KILL -- -%s 2>/dev/null; rm -f %s", shellQuote(task.PID), shellQuote(task.PID), shellQuote(task.Output))}, "", nil, 20*time.Second)
+
 	return resultJSON(map[string]any{"ok": true, "task_id": taskID, "cancelled": true}), nil
 }
 

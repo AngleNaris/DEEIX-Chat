@@ -10,6 +10,5 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/sandbox-mcp .
 FROM alpine:3.21
 RUN apk add --no-cache ca-certificates tzdata
 COPY --from=builder /out/sandbox-mcp /usr/local/bin/sandbox-mcp
-USER 65532:65532
 EXPOSE 8081
 ENTRYPOINT ["/usr/local/bin/sandbox-mcp"]

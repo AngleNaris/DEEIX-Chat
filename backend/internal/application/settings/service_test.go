@@ -271,18 +271,6 @@ func TestValidateBillingDisplayCurrencySetting(t *testing.T) {
 	}
 }
 
-func TestValidateMCPSelectedToolsSetting(t *testing.T) {
-	if err := validatePatchItem(PatchItem{Namespace: "mcp", Key: "mcp_max_selected_tools_per_message", Value: "32"}); err != nil {
-		t.Fatalf("expected selected tool limit to pass, got %v", err)
-	}
-	if err := validatePatchItem(PatchItem{Namespace: "mcp", Key: "mcp_max_selected_tools_per_message", Value: "0"}); err == nil {
-		t.Fatal("expected zero selected tool limit to fail")
-	}
-	if err := validatePatchItem(PatchItem{Namespace: "mcp", Key: "mcp_max_selected_tools_per_message", Value: "129"}); err == nil {
-		t.Fatal("expected selected tool limit above safe maximum to fail")
-	}
-}
-
 func TestValidateCustomPromptSettings(t *testing.T) {
 	for _, item := range []PatchItem{
 		{Namespace: "mcp", Key: "mcp_tool_prompt", Value: "Use MCP tools carefully."},

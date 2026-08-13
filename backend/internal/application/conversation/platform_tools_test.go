@@ -228,9 +228,15 @@ func TestPlatformWriteApprovalStoreLifecycle(t *testing.T) {
 	store := newPlatformWriteApprovalStore()
 	defer store.Stop()
 	entry := platformToolRegistry()["write_file"]
-	record := store.create(1, 2, "req-1", entry, `{"file_id":"f1","content":"x"}`)
+	record := store.create(1, 2, "req-1", entry, "write_file__platform", `{"file_id":"f1","content":"{{credential: deploy-key}}"}`)
 	if record == nil || record.ID == "" || record.Status != platformApprovalStatusPending {
 		t.Fatalf("unexpected record: %+v", record)
+	}
+	if record.ToolName != "write_file" || record.ExecutionToolName != "write_file__platform" {
+		t.Fatalf("approval must retain model-facing and canonical names: %+v", record)
+	}
+	if record.ArgumentsJSON != `{"file_id":"f1","content":"{{credential: deploy-key}}"}` {
+		t.Fatalf("approval arguments must remain unexpanded: %s", record.ArgumentsJSON)
 	}
 	if got := store.get(record.ID); got != record {
 		t.Fatalf("get mismatch")
@@ -252,6 +258,45 @@ func TestPlatformWriteApprovalStoreLifecycle(t *testing.T) {
 	// 已处理记录不可重复认领。
 	if claimed := store.claim(record.ID, 1, platformApprovalStatusRejected); claimed != nil {
 		t.Fatalf("processed record must not be claimed again")
+	}
+}
+
+func TestApprovePlatformWriteUsesCanonicalNameAndExpandsCredentialsAtExecution(t *testing.T) {
+	const secret = "approval-secret-value"
+	store := newPlatformWriteApprovalStore()
+	defer store.Stop()
+	service := &Service{
+		credentials:       &fakeCredentialResolver{values: map[string]string{"approval-key": secret}},
+		platformApprovals: store,
+	}
+	entry := platformToolRegistry()["execute_js"]
+	arguments := `{"code":"const value = '{{credential: approval-key}}'; if (value.startsWith('{{')) { throw new Error('credential not expanded'); } 'ok'"}`
+	record := store.create(7, 9, "req-approval", entry, "execute_js", arguments)
+	record.ToolName = "execute_js__platform"
+
+	pendingSummary, err := marshalApprovalSummary(record)
+	if err != nil {
+		t.Fatalf("marshal pending approval: %v", err)
+	}
+	if strings.Contains(pendingSummary, secret) || strings.Contains(record.ArgumentsJSON, secret) {
+		t.Fatalf("pending approval exposed credential plaintext: summary=%s record=%s", pendingSummary, record.ArgumentsJSON)
+	}
+	if !strings.Contains(pendingSummary, "{{credential: approval-key}}") {
+		t.Fatalf("pending approval lost credential placeholder: %s", pendingSummary)
+	}
+
+	approvedSummary, err := service.ApprovePlatformWrite(t.Context(), record.ID, 7, true)
+	if err != nil {
+		t.Fatalf("approve platform write: %v", err)
+	}
+	if record.Status != platformApprovalStatusApproved {
+		t.Fatalf("approval record was not marked approved: %+v", record)
+	}
+	if strings.Contains(approvedSummary, secret) || strings.Contains(record.ArgumentsJSON, secret) {
+		t.Fatalf("approved summary or record exposed credential plaintext: summary=%s record=%s", approvedSummary, record.ArgumentsJSON)
+	}
+	if !strings.Contains(approvedSummary, "execute_js__platform") {
+		t.Fatalf("approval summary lost model-facing tool name: %s", approvedSummary)
 	}
 }
 
