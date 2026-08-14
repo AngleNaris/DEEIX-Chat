@@ -540,7 +540,7 @@ func (st *agentGroupRunState) executeRetryableStep(
 		// 主管步骤重试走与首次执行相同的决策路径（含自动纠错），保证重试不重复失败。
 		decision, output, err := st.runSupervisorDecision(ctx, step, attempt, member)
 		if err != nil {
-			return st.failAgentGroupStepAndPause(ctx, step, attempt, member, err)
+			return st.failAgentGroupStepAndPause(ctx, step, attempt, member, output, err)
 		}
 		if decision.Action == agentGroupSupervisorActionFinish {
 			st.finalAnswer = decision.Answer
@@ -554,7 +554,7 @@ func (st *agentGroupRunState) executeRetryableStep(
 		}
 		target := agentGroupSnapshotMemberByID(st.snapshot, decision.MemberID)
 		if target == nil {
-			return st.failAgentGroupStepAndPause(ctx, step, attempt, member, ErrAgentGroupInvalidMember)
+			return st.failAgentGroupStepAndPause(ctx, step, attempt, member, output, ErrAgentGroupInvalidMember)
 		}
 		if err := st.finishAgentGroupStepSuccess(ctx, step, attempt, member, output); err != nil {
 			return err
@@ -576,7 +576,7 @@ func (st *agentGroupRunState) executeRetryableStep(
 			nil,
 		))
 		if err != nil {
-			return st.failAgentGroupStepAndPause(ctx, step, attempt, member, err)
+			return st.failAgentGroupStepAndPause(ctx, step, attempt, member, output, err)
 		}
 		if err := st.finishAgentGroupStepSuccess(ctx, step, attempt, member, output); err != nil {
 			return err
@@ -611,7 +611,7 @@ func (st *agentGroupRunState) executeMemberStepAfterSupervisor(
 		nil,
 	))
 	if err != nil {
-		return st.failAgentGroupStepAndPause(ctx, memberStep, memberAttempt, member, err)
+		return st.failAgentGroupStepAndPause(ctx, memberStep, memberAttempt, member, memberOutput, err)
 	}
 	if err := st.finishAgentGroupStepSuccess(ctx, memberStep, memberAttempt, member, memberOutput); err != nil {
 		return err

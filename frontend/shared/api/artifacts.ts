@@ -62,6 +62,13 @@ export async function listArtifacts(
   });
 }
 
+export async function getArtifact(accessToken: string, artifactId: string): Promise<ArtifactDetailDTO> {
+  return authedRequest(`/api/v1/artifacts/${pathParam(artifactId)}`, {
+    method: "GET",
+    accessToken,
+  });
+}
+
 export async function createArtifact(accessToken: string, input: CreateArtifactInput): Promise<ArtifactDetailDTO> {
   const body: Record<string, unknown> = { title: input.title, kind: input.kind, code: input.code };
   if (input.artifactId) {

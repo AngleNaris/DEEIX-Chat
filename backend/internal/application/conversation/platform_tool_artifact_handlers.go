@@ -170,6 +170,7 @@ func (s *Service) platformShareArtifact(ctx context.Context, call platformToolCa
 	})
 	return marshalPlatformResult(map[string]interface{}{
 		"artifact_id": artifactID,
+		"title":       share.TitleSnapshot,
 		"share_id":    share.ShareID,
 		"share_url":   s.absoluteArtifactShareURL(share.ShareID),
 		"note":        "anyone with the share link can view this artifact",

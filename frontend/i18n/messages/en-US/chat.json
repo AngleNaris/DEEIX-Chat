@@ -629,6 +629,9 @@
         "resultFile": "Result file",
         "prompt": "Prompt",
         "command": "Command",
+        "artifactSaved": "Artifact saved",
+        "viewArtifact": "View artifact",
+        "openShare": "Open share",
         "latencySeparator": "; "
       },
       "nativeStatus": {
@@ -702,6 +705,14 @@
       "detail": "Conversation context was compacted into a rolling summary.",
       "range": "Compacted range: turns {fromTurn}-{toTurn}.",
       "tokens": "Token reduction: {sourceTokens} -> {summaryTokens}."
+    },
+    "recalled": {
+      "title": "Recalled evidence",
+      "count": "{count, plural, one {# item} other {# items}}",
+      "loading": "Loading…",
+      "close": "Close",
+      "loadFailed": "Failed to load the evidence, please try again later",
+      "sessionExpired": "Your sign-in has expired, please sign in again"
     }
   },
   "optionLabels": {

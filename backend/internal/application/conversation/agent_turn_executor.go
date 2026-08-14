@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -693,160 +694,274 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 	}
 	totalServerSideToolUsage := addServerSideToolUsage(nil, upstreamOutput.ServerSideToolUsage)
 	remainingToolCalls := max(s.resolveMaxToolCallsPerRun()-len(imageProcessing.Rows), 0)
-	llmCallCount := llmRequestCount
+	windowBaseCalls := 0
+	llmCallCount := llmRequestCount - windowBaseCalls
+	toolStageMerges := 0
+	const maxToolStageMergesPerRun = 4 // 阶段合并续轮安全上限：复杂任务最多额外开启 4 个工具窗口
 
-	for len(upstreamOutput.ToolCalls) > 0 && llmCallCount < maxLLMCalls && remainingToolCalls > 0 {
-		pendingToolCalls := upstreamOutput.ToolCalls
-		if len(pendingToolCalls) > remainingToolCalls {
-			pendingToolCalls = pendingToolCalls[:remainingToolCalls]
-		}
-		reasoningContent := ""
-		if reasoningContentPassback {
-			reasoningContent = outputReasoningContent(upstreamOutput)
-		}
-		assistantToolMessage := llm.Message{
-			Role:             "assistant",
-			Content:          assistantText,
-			ReasoningContent: reasoningContent,
-			ToolCalls:        pendingToolCalls,
-		}
-		toolResultTokenBudget := resolveToolResultTokenBudget(
-			generateInput,
-			llmMessages,
-			assistantToolMessage,
-			route.UpstreamModel,
-			route.ModelCapabilitiesJSON,
-		)
-		toolCtx, toolSpan := platformtracing.Start(ctx, "conversation.agent_turn.tool.execute",
-			trace.WithAttributes(
-				attribute.Int64("conversation.id", int64(input.ConversationID)),
-				attribute.Int64("user.id", int64(input.UserID)),
-				attribute.String("agent.actor_id", input.ActorID),
-				attribute.Int("conversation.tool.request_count", len(upstreamOutput.ToolCalls)),
-				attribute.Int("conversation.tool.remaining_count", remainingToolCalls),
-				attribute.Int64("conversation.tool.result_token_budget", toolResultTokenBudget),
-			),
-		)
-		toolResult := s.executeAgentTurnToolCalls(toolCtx, input, executeAgentTurnToolCallsInput{
-			UserID:                  input.UserID,
-			ConversationID:          input.ConversationID,
-			MessageID:               input.ToolMessageID,
-			RequestID:               input.RequestID,
-			RunID:                   input.ClientRunID,
-			ToolCalls:               pendingToolCalls,
-			ToolCallLimit:           remainingToolCalls,
-			ToolRuntime:             &toolRuntime,
-			ToolNameMap:             toolRuntime.nameMap,
-			MCPConfigs:              toolRuntime.mcpConfigs,
-			ToolSchemas:             toolRuntime.schemas,
-			PlatformTools:           toolRuntime.platformEntries,
-			Ledger:                  toolLedger,
-			PriorCredentialAttempts: credentialAttemptsForTurn,
-			PriorCredentialWrites:   credentialWritesForTurn,
-			ResultTokenBudget:       toolResultTokenBudget,
-		})
-		toolSpan.SetAttributes(
-			attribute.Int("conversation.tool.executed_count", len(toolResult.Rows)),
-			attribute.Int("conversation.tool.result_count", len(toolResult.ToolResults)),
-		)
-		if toolExecutionHasError(toolResult.Rows) {
-			toolSpan.SetStatus(codes.Error, "tool execution failed")
-		}
-		toolSpan.End()
-		toolCallRows = append(toolCallRows, toolResult.Rows...)
-		remainingToolCalls -= len(toolResult.Rows)
-		credentialAttempted := len(toolResult.CredentialAttempts) > 0
-		if credentialAttempted {
-			credentialAttemptedForTurn = true
-			credentialAttemptsForTurn = mergeCredentialWrites(credentialAttemptsForTurn, toolResult.CredentialAttempts)
-			credentialWritesForTurn = mergeCredentialWrites(credentialWritesForTurn, toolResult.CredentialWrites)
-			assistantText, _ = applyCredentialReplacements(assistantText, toolResult.CredentialAttempts, toolResult.CredentialWrites)
-			assistantToolMessage.Content, _ = applyCredentialReplacements(assistantToolMessage.Content, toolResult.CredentialAttempts, toolResult.CredentialWrites)
-			assistantToolMessage.ReasoningContent, _ = applyCredentialReplacements(assistantToolMessage.ReasoningContent, toolResult.CredentialAttempts, toolResult.CredentialWrites)
-			applyCredentialReplacementsToLLMMessages(llmMessages, toolResult.CredentialAttempts, toolResult.CredentialWrites)
-		}
-		if toolResult.MCPActivationChanged {
-			toolRuntime = toolRuntime.visibleRuntime()
-			if toolRuntime.attachmentProcessorActive() {
-				attachmentToolCallLimit := remainingToolCalls
-				activatedProcessing, processingErr := s.processImageAttachments(toolCtx, imageAttachmentProcessingInput{
-					UserID:          input.UserID,
-					ConversationID:  input.ConversationID,
-					MessageID:       input.ToolMessageID,
-					RequestID:       input.RequestID,
-					RunID:           input.ClientRunID,
-					UserPrompt:      input.UserContent,
-					Attachments:     conversationAttachments,
-					Runtime:         toolRuntime,
-					ToolCallLimit:   &attachmentToolCallLimit,
-					SkipPersistence: !input.PersistToolCalls,
-				})
-				if processingErr != nil {
-					return nil, processingErr
-				}
-				if activatedProcessing.Routed {
-					mergeImageAttachmentProcessingResult(&imageProcessing, activatedProcessing)
-					toolCallRows = append(toolCallRows, activatedProcessing.Rows...)
-					remainingToolCalls -= len(activatedProcessing.Rows)
-					appendAttachmentAnalysesToActivationResult(toolResult.ToolResults, activatedProcessing.Analyses, toolResultTokenBudget)
-					toolRuntime = toolRuntime.withoutAttachmentProcessor()
+	// —— 阶段窗口循环 ——
+	// maxLLMCalls 只限制窗口内“连续”LLM 调用：连续预算耗尽且模型仍想调用工具时，
+	// 进入合并轮告知模型并让其总结进展、自主决定是否继续（新窗口重置预算）。
+	for {
+		for len(upstreamOutput.ToolCalls) > 0 && llmCallCount < maxLLMCalls && remainingToolCalls > 0 {
+			pendingToolCalls := upstreamOutput.ToolCalls
+			if len(pendingToolCalls) > remainingToolCalls {
+				pendingToolCalls = pendingToolCalls[:remainingToolCalls]
+			}
+			reasoningContent := ""
+			if reasoningContentPassback {
+				reasoningContent = outputReasoningContent(upstreamOutput)
+			}
+			assistantToolMessage := llm.Message{
+				Role:             "assistant",
+				Content:          assistantText,
+				ReasoningContent: reasoningContent,
+				ToolCalls:        pendingToolCalls,
+			}
+			toolResultTokenBudget := resolveToolResultTokenBudget(
+				generateInput,
+				llmMessages,
+				assistantToolMessage,
+				route.UpstreamModel,
+				route.ModelCapabilitiesJSON,
+			)
+			toolCtx, toolSpan := platformtracing.Start(ctx, "conversation.agent_turn.tool.execute",
+				trace.WithAttributes(
+					attribute.Int64("conversation.id", int64(input.ConversationID)),
+					attribute.Int64("user.id", int64(input.UserID)),
+					attribute.String("agent.actor_id", input.ActorID),
+					attribute.Int("conversation.tool.request_count", len(upstreamOutput.ToolCalls)),
+					attribute.Int("conversation.tool.remaining_count", remainingToolCalls),
+					attribute.Int64("conversation.tool.result_token_budget", toolResultTokenBudget),
+				),
+			)
+			toolResult := s.executeAgentTurnToolCalls(toolCtx, input, executeAgentTurnToolCallsInput{
+				UserID:                  input.UserID,
+				ConversationID:          input.ConversationID,
+				MessageID:               input.ToolMessageID,
+				RequestID:               input.RequestID,
+				RunID:                   input.ClientRunID,
+				ToolCalls:               pendingToolCalls,
+				ToolCallLimit:           remainingToolCalls,
+				ToolRuntime:             &toolRuntime,
+				ToolNameMap:             toolRuntime.nameMap,
+				MCPConfigs:              toolRuntime.mcpConfigs,
+				ToolSchemas:             toolRuntime.schemas,
+				PlatformTools:           toolRuntime.platformEntries,
+				Ledger:                  toolLedger,
+				PriorCredentialAttempts: credentialAttemptsForTurn,
+				PriorCredentialWrites:   credentialWritesForTurn,
+				ResultTokenBudget:       toolResultTokenBudget,
+			})
+			toolSpan.SetAttributes(
+				attribute.Int("conversation.tool.executed_count", len(toolResult.Rows)),
+				attribute.Int("conversation.tool.result_count", len(toolResult.ToolResults)),
+			)
+			if toolExecutionHasError(toolResult.Rows) {
+				toolSpan.SetStatus(codes.Error, "tool execution failed")
+			}
+			toolSpan.End()
+			toolCallRows = append(toolCallRows, toolResult.Rows...)
+			remainingToolCalls -= len(toolResult.Rows)
+			credentialAttempted := len(toolResult.CredentialAttempts) > 0
+			if credentialAttempted {
+				credentialAttemptedForTurn = true
+				credentialAttemptsForTurn = mergeCredentialWrites(credentialAttemptsForTurn, toolResult.CredentialAttempts)
+				credentialWritesForTurn = mergeCredentialWrites(credentialWritesForTurn, toolResult.CredentialWrites)
+				assistantText, _ = applyCredentialReplacements(assistantText, toolResult.CredentialAttempts, toolResult.CredentialWrites)
+				assistantToolMessage.Content, _ = applyCredentialReplacements(assistantToolMessage.Content, toolResult.CredentialAttempts, toolResult.CredentialWrites)
+				assistantToolMessage.ReasoningContent, _ = applyCredentialReplacements(assistantToolMessage.ReasoningContent, toolResult.CredentialAttempts, toolResult.CredentialWrites)
+				applyCredentialReplacementsToLLMMessages(llmMessages, toolResult.CredentialAttempts, toolResult.CredentialWrites)
+			}
+			if toolResult.MCPActivationChanged {
+				toolRuntime = toolRuntime.visibleRuntime()
+				if toolRuntime.attachmentProcessorActive() {
+					attachmentToolCallLimit := remainingToolCalls
+					activatedProcessing, processingErr := s.processImageAttachments(toolCtx, imageAttachmentProcessingInput{
+						UserID:          input.UserID,
+						ConversationID:  input.ConversationID,
+						MessageID:       input.ToolMessageID,
+						RequestID:       input.RequestID,
+						RunID:           input.ClientRunID,
+						UserPrompt:      input.UserContent,
+						Attachments:     conversationAttachments,
+						Runtime:         toolRuntime,
+						ToolCallLimit:   &attachmentToolCallLimit,
+						SkipPersistence: !input.PersistToolCalls,
+					})
+					if processingErr != nil {
+						return nil, processingErr
+					}
+					if activatedProcessing.Routed {
+						mergeImageAttachmentProcessingResult(&imageProcessing, activatedProcessing)
+						toolCallRows = append(toolCallRows, activatedProcessing.Rows...)
+						remainingToolCalls -= len(activatedProcessing.Rows)
+						appendAttachmentAnalysesToActivationResult(toolResult.ToolResults, activatedProcessing.Analyses, toolResultTokenBudget)
+						toolRuntime = toolRuntime.withoutAttachmentProcessor()
+					}
 				}
 			}
+			if toolResult.FatalErr != nil {
+				return nil, wrapUpstreamRequestError(toolResult.FatalErr)
+			}
+			if len(toolResult.ToolResults) == 0 {
+				break
+			}
+			assistantToolMessage.ToolCalls = toolResult.ExecutedToolCalls
+			llmMessages = append(llmMessages,
+				assistantToolMessage,
+				llm.Message{
+					Role:        "tool",
+					ToolResults: toolResult.ToolResults,
+				},
+			)
+			var toolHistoryTrimmed bool
+			llmMessages, toolHistoryTrimmed = trimToolFollowUpHistory(
+				generateInput,
+				llmMessages,
+				route.UpstreamModel,
+				route.ModelCapabilitiesJSON,
+			)
+			if toolHistoryTrimmed {
+				toolSpan.SetAttributes(attribute.Bool("conversation.tool.history_trimmed", true))
+			}
+			var toolResultsRebalanced bool
+			llmMessages, toolResultsRebalanced = rebalanceToolFollowUpResults(
+				generateInput,
+				llmMessages,
+				route.UpstreamModel,
+				route.ModelCapabilitiesJSON,
+			)
+			if toolResultsRebalanced {
+				toolSpan.SetAttributes(attribute.Bool("conversation.tool.results_rebalanced", true))
+			}
+
+			if llmCallCount+1 >= maxLLMCalls {
+				// 连续窗口预算耗尽：不再发起强制收尾轮。本轮工具结果已并入上下文，
+				// 退出内层循环进入合并轮，由模型总结进展并自主决定是否继续（新窗口重置预算）。
+				break
+			}
+			followUpInput := generateInput
+			followUpInput.Tools = toolRuntime.definitions
+			followUpInput.DisableTools = false
+			if !credentialAttempted && !toolResult.MCPActivationChanged && !toolHistoryTrimmed && !toolResultsRebalanced && routeConfig.Endpoint == llm.EndpointResponses && supportsPreviousResponseIDRoute(route) && strings.TrimSpace(upstreamOutput.ResponseID) != "" {
+				followUpInput.PreviousResponseID = strings.TrimSpace(upstreamOutput.ResponseID)
+				followUpInput.Messages = []llm.Message{{Role: "tool", ToolResults: toolResult.ToolResults}}
+			} else {
+				followUpInput.Messages = llmMessages
+				followUpInput.PreviousResponseID = ""
+				applyOpenAIResponsesInstructions(route, routeConfig.Endpoint, &followUpInput)
+			}
+
+			nextOutput, nextErr := runGenerate(followUpInput)
+			if handleCanceledGeneration(nextErr) {
+				return nil, ErrMessageGenerationCanceled
+			}
+			if nextErr != nil {
+				s.routeResolver.MarkRouteFailure(ctx, route, nextErr)
+				return nil, wrapUpstreamRequestError(nextErr)
+			}
+			s.routeResolver.MarkRouteSuccess(ctx, route)
+			totalUsage = addLLMUsage(totalUsage, nextOutput.Usage)
+			if nextOutput.Usage != (llm.Usage{}) {
+				usageAccumulator.setObservedUsage(totalUsage)
+			} else if usageAccumulator.usage() != (llm.Usage{}) {
+				totalUsage = usageAccumulator.usage()
+			}
+			totalServerSideToolUsage = addServerSideToolUsage(totalServerSideToolUsage, nextOutput.ServerSideToolUsage)
+			upstreamOutput = nextOutput
+			llmCallCount = llmRequestCount - windowBaseCalls
+			var nextNativeToolRows []model.ToolCall
+			assistantText, nextNativeToolRows = syncUpstreamOutputTrace(nil, upstreamOutput, input.ClientRunID)
+			toolCallRows = append(toolCallRows, nextNativeToolRows...)
 		}
-		if toolResult.FatalErr != nil {
-			return nil, wrapUpstreamRequestError(toolResult.FatalErr)
+		if len(upstreamOutput.ToolCalls) > 0 && remainingToolCalls <= 0 && llmCallCount < maxLLMCalls {
+			finalInput := generateInput
+			finalInput.Messages = buildFinalToolSynthesisMessages(llmMessages, "The maximum number of tool calls for this run has been reached. Stop calling tools and produce the final answer based on the tool results already available. If the information is insufficient, state the missing information directly.")
+			finalInput.Tools = nil
+			finalInput.DisableTools = true
+			finalInput.PreviousResponseID = ""
+			applyOpenAIResponsesInstructions(route, routeConfig.Endpoint, &finalInput)
+			nextOutput, nextErr := runGenerate(finalInput)
+			if handleCanceledGeneration(nextErr) {
+				return nil, ErrMessageGenerationCanceled
+			}
+			if nextErr != nil {
+				s.routeResolver.MarkRouteFailure(ctx, route, nextErr)
+				return nil, wrapUpstreamRequestError(nextErr)
+			}
+			s.routeResolver.MarkRouteSuccess(ctx, route)
+			totalUsage = addLLMUsage(totalUsage, nextOutput.Usage)
+			if nextOutput.Usage != (llm.Usage{}) {
+				usageAccumulator.setObservedUsage(totalUsage)
+			} else if usageAccumulator.usage() != (llm.Usage{}) {
+				totalUsage = usageAccumulator.usage()
+			}
+			totalServerSideToolUsage = addServerSideToolUsage(totalServerSideToolUsage, nextOutput.ServerSideToolUsage)
+			upstreamOutput = nextOutput
+			llmCallCount = llmRequestCount - windowBaseCalls
+			var nextNativeToolRows []model.ToolCall
+			assistantText, nextNativeToolRows = syncUpstreamOutputTrace(nil, upstreamOutput, input.ClientRunID)
+			toolCallRows = append(toolCallRows, nextNativeToolRows...)
 		}
-		if len(toolResult.ToolResults) == 0 {
+
+		// 内层循环在“下一轮调用将耗尽连续窗口预算”时提前退出（未发起该轮调用），
+		// 因此预算判断按 llmCallCount+1 计算：耗尽即进入合并轮告知模型，
+		// 由模型自主决定继续（新窗口重置预算）或收尾。
+		if !toolRunFinalAnswerMissing(upstreamOutput, len(toolCallRows) > 0, llmCallCount+1, maxLLMCalls, remainingToolCalls) {
 			break
 		}
-		assistantToolMessage.ToolCalls = toolResult.ExecutedToolCalls
-		llmMessages = append(llmMessages,
-			assistantToolMessage,
-			llm.Message{
-				Role:        "tool",
-				ToolResults: toolResult.ToolResults,
-			},
-		)
-		var toolHistoryTrimmed bool
-		llmMessages, toolHistoryTrimmed = trimToolFollowUpHistory(
-			generateInput,
-			llmMessages,
-			route.UpstreamModel,
-			route.ModelCapabilitiesJSON,
-		)
-		if toolHistoryTrimmed {
-			toolSpan.SetAttributes(attribute.Bool("conversation.tool.history_trimmed", true))
+		if toolStageMerges >= maxToolStageMergesPerRun {
+			break
 		}
-		var toolResultsRebalanced bool
-		llmMessages, toolResultsRebalanced = rebalanceToolFollowUpResults(
-			generateInput,
-			llmMessages,
-			route.UpstreamModel,
-			route.ModelCapabilitiesJSON,
-		)
-		if toolResultsRebalanced {
-			toolSpan.SetAttributes(attribute.Bool("conversation.tool.results_rebalanced", true))
-		}
+		toolStageMerges++
 
-		followUpInput := generateInput
-		followUpInput.Tools = toolRuntime.definitions
-		followUpInput.DisableTools = false
-		if llmCallCount+1 >= maxLLMCalls {
-			followUpInput.Messages = buildFinalToolSynthesisMessages(llmMessages, "The maximum number of LLM calls for this run has been reached. Stop calling tools and produce the final answer based on the tool results already available. If the information is insufficient, state the missing information directly.")
-			followUpInput.Tools = nil
-			followUpInput.DisableTools = true
-			followUpInput.PreviousResponseID = ""
-			applyOpenAIResponsesInstructions(route, routeConfig.Endpoint, &followUpInput)
-		} else if !credentialAttempted && !toolResult.MCPActivationChanged && !toolHistoryTrimmed && !toolResultsRebalanced && routeConfig.Endpoint == llm.EndpointResponses && supportsPreviousResponseIDRoute(route) && strings.TrimSpace(upstreamOutput.ResponseID) != "" {
-			followUpInput.PreviousResponseID = strings.TrimSpace(upstreamOutput.ResponseID)
-			followUpInput.Messages = []llm.Message{{Role: "tool", ToolResults: toolResult.ToolResults}}
-		} else {
-			followUpInput.Messages = llmMessages
-			followUpInput.PreviousResponseID = ""
-			applyOpenAIResponsesInstructions(route, routeConfig.Endpoint, &followUpInput)
+		// —— 阶段合并：禁用工具让模型总结已获取信息与剩余工作，随后开启新预算窗口继续。 ——
+		mergeInput := generateInput
+		mergeInput.Messages = append(cloneLLMMessages(llmMessages), llm.Message{Role: "system", Content: buildToolStageMergeInstruction()})
+		mergeInput.Tools = nil
+		mergeInput.DisableTools = true
+		mergeInput.PreviousResponseID = ""
+		applyOpenAIResponsesInstructions(route, routeConfig.Endpoint, &mergeInput)
+		silentDelta := onDelta
+		onDelta = nil // 阶段总结只注入上下文，不流入可见回答
+		mergeOutput, mergeErr := runGenerate(mergeInput)
+		onDelta = silentDelta
+		if handleCanceledGeneration(mergeErr) {
+			return nil, ErrMessageGenerationCanceled
 		}
-
-		nextOutput, nextErr := runGenerate(followUpInput)
+		if mergeErr != nil {
+			s.routeResolver.MarkRouteFailure(ctx, route, mergeErr)
+			return nil, wrapUpstreamRequestError(mergeErr)
+		}
+		s.routeResolver.MarkRouteSuccess(ctx, route)
+		totalUsage = addLLMUsage(totalUsage, mergeOutput.Usage)
+		if mergeOutput.Usage != (llm.Usage{}) {
+			usageAccumulator.setObservedUsage(totalUsage)
+		} else if usageAccumulator.usage() != (llm.Usage{}) {
+			totalUsage = usageAccumulator.usage()
+		}
+		totalServerSideToolUsage = addServerSideToolUsage(totalServerSideToolUsage, mergeOutput.ServerSideToolUsage)
+		mergeText := strings.TrimSpace(mergeOutput.Text)
+		if mergeText == "" {
+			break
+		}
+		mergeText = headTailToolOutput(mergeText, 1600)
+		llmMessages = append(llmMessages, llm.Message{
+			Role:    "system",
+			Content: fmt.Sprintf("【阶段性进展（第 %d 轮）】\n%s", toolStageMerges, mergeText),
+		})
+		// 开启新窗口：重置窗口内调用计数与工具额度，随后发起一次普通调用让模型继续工作。
+		windowBaseCalls = llmRequestCount
+		llmCallCount = 0
+		remainingToolCalls = max(s.resolveMaxToolCallsPerRun()-len(imageProcessing.Rows), 0)
+		continueInput := generateInput
+		continueInput.Messages = llmMessages
+		continueInput.Tools = toolRuntime.definitions
+		continueInput.DisableTools = false
+		continueInput.PreviousResponseID = ""
+		applyOpenAIResponsesInstructions(route, routeConfig.Endpoint, &continueInput)
+		nextOutput, nextErr := runGenerate(continueInput)
 		if handleCanceledGeneration(nextErr) {
 			return nil, ErrMessageGenerationCanceled
 		}
@@ -863,36 +978,7 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 		}
 		totalServerSideToolUsage = addServerSideToolUsage(totalServerSideToolUsage, nextOutput.ServerSideToolUsage)
 		upstreamOutput = nextOutput
-		llmCallCount = llmRequestCount
-		var nextNativeToolRows []model.ToolCall
-		assistantText, nextNativeToolRows = syncUpstreamOutputTrace(nil, upstreamOutput, input.ClientRunID)
-		toolCallRows = append(toolCallRows, nextNativeToolRows...)
-	}
-	if len(upstreamOutput.ToolCalls) > 0 && remainingToolCalls <= 0 && llmCallCount < maxLLMCalls {
-		finalInput := generateInput
-		finalInput.Messages = buildFinalToolSynthesisMessages(llmMessages, "The maximum number of tool calls for this run has been reached. Stop calling tools and produce the final answer based on the tool results already available. If the information is insufficient, state the missing information directly.")
-		finalInput.Tools = nil
-		finalInput.DisableTools = true
-		finalInput.PreviousResponseID = ""
-		applyOpenAIResponsesInstructions(route, routeConfig.Endpoint, &finalInput)
-		nextOutput, nextErr := runGenerate(finalInput)
-		if handleCanceledGeneration(nextErr) {
-			return nil, ErrMessageGenerationCanceled
-		}
-		if nextErr != nil {
-			s.routeResolver.MarkRouteFailure(ctx, route, nextErr)
-			return nil, wrapUpstreamRequestError(nextErr)
-		}
-		s.routeResolver.MarkRouteSuccess(ctx, route)
-		totalUsage = addLLMUsage(totalUsage, nextOutput.Usage)
-		if nextOutput.Usage != (llm.Usage{}) {
-			usageAccumulator.setObservedUsage(totalUsage)
-		} else if usageAccumulator.usage() != (llm.Usage{}) {
-			totalUsage = usageAccumulator.usage()
-		}
-		totalServerSideToolUsage = addServerSideToolUsage(totalServerSideToolUsage, nextOutput.ServerSideToolUsage)
-		upstreamOutput = nextOutput
-		llmCallCount++
+		llmCallCount = llmRequestCount - windowBaseCalls
 		var nextNativeToolRows []model.ToolCall
 		assistantText, nextNativeToolRows = syncUpstreamOutputTrace(nil, upstreamOutput, input.ClientRunID)
 		toolCallRows = append(toolCallRows, nextNativeToolRows...)
@@ -909,7 +995,7 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 	effectiveInputTokens := usageAccumulator.effectiveInputTokens(estimatedPromptTokens)
 	effectiveOutputTokens := resolveObservedOrEstimatedOutputTokens(totalUsage.OutputTokens, assistantText)
 
-	if toolRunFinalAnswerMissing(upstreamOutput, len(toolCallRows) > 0, llmCallCount, maxLLMCalls, remainingToolCalls) {
+	if toolRunFinalAnswerMissing(upstreamOutput, len(toolCallRows) > 0, llmCallCount+1, maxLLMCalls, remainingToolCalls) {
 		return nil, ErrToolRunFinalAnswerMissing
 	}
 	if strings.TrimSpace(assistantText) == "" && len(upstreamOutput.GeneratedImages) == 0 {
@@ -1152,12 +1238,16 @@ func (s *Service) executeAgentTurnToolCalls(ctx context.Context, turn AgentTurnI
 		ResultTokenBudget:       input.ResultTokenBudget,
 	})
 	for _, row := range result.Rows {
-		_ = emitAgentTurnEvent(turn, AgentTurnEventToolResult, map[string]interface{}{
+		payload := map[string]interface{}{
 			"tool_name":    row.ToolName,
 			"tool_call_id": row.ToolCallID,
 			"status":       row.Status,
 			"error":        row.ErrorJSON,
-		})
+		}
+		if output := strings.TrimSpace(row.OutputJSON); output != "" {
+			payload["output"] = truncateAgentGroupToolOutput(output)
+		}
+		_ = emitAgentTurnEvent(turn, AgentTurnEventToolResult, payload)
 	}
 	if len(result.CredentialAttempts) > 0 && turn.OnCredentialAttempts != nil {
 		if err := turn.OnCredentialAttempts(ctx, result.CredentialAttempts, result.CredentialWrites); err != nil && result.FatalErr == nil {

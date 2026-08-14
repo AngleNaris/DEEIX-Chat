@@ -199,15 +199,17 @@ export function MessageUpstreamThink({
   autoCollapseReady,
   title,
   subtitle,
+  defaultOpen = false,
 }: {
   block?: ChatTraceBlock;
   streaming?: boolean;
   autoCollapseReady?: boolean;
   title?: string;
   subtitle?: string;
+  defaultOpen?: boolean;
 }) {
   const labels = useProcessTraceLabels();
-  const [accordionValue, setAccordionValue] = React.useState(() => (streaming ? "upstream-think" : ""));
+  const [accordionValue, setAccordionValue] = React.useState(() => (streaming || defaultOpen ? "upstream-think" : ""));
   const wasStreamingRef = React.useRef(Boolean(streaming));
   const contentSegments = React.useMemo(
     () => block?.contentSegments?.filter((item) => item.trim()) ?? [],

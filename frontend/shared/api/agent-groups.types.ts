@@ -113,6 +113,8 @@ export type AgentGroupStepAttemptDTO = {
   errorCode: string;
   errorMessage: string;
   outputMarkdown: string;
+  thinkMarkdown?: string;
+  toolCallsJSON?: string;
   startedAt: string;
   endedAt: string | null;
   createdAt: string;

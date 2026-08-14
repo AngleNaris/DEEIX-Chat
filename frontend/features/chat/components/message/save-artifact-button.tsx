@@ -117,8 +117,8 @@ export function SaveArtifactButton({
           if (!saving) setOpen(next);
         }}
       >
-        <DialogContent className="min-w-0 overflow-x-hidden sm:max-w-[460px]">
-          <div className="min-w-0 space-y-4">
+        <DialogContent className="flex min-w-0 max-h-[calc(100svh-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-[460px]">
+          <div className="min-w-0 flex-1 space-y-4 overflow-y-auto p-5 pb-4">
             <DialogHeader>
               <DialogTitle>{t("saveTitle")}</DialogTitle>
               <DialogDescription>{t("saveDescription")}</DialogDescription>
@@ -136,28 +136,28 @@ export function SaveArtifactButton({
             </div>
 
             {share ? <ArtifactShareLink share={share} disabled={saving} /> : null}
-
-            <DialogFooter>
-              {!share ? (
-                <Button type="button" variant="ghost" disabled={saving} onClick={() => setOpen(false)}>
-                  {t("cancel")}
-                </Button>
-              ) : null}
-              <Button
-                type="button"
-                disabled={saving || (!share && !title.trim())}
-                onClick={() => {
-                  if (share) {
-                    setOpen(false);
-                    return;
-                  }
-                  void submit();
-                }}
-              >
-                {saving ? t("saving") : share ? tCommon("confirm") : t("saveAndShare")}
-              </Button>
-            </DialogFooter>
           </div>
+
+          <DialogFooter className="shrink-0 border-t border-border/60 px-5 py-3">
+            {!share ? (
+              <Button type="button" variant="ghost" disabled={saving} onClick={() => setOpen(false)}>
+                {t("cancel")}
+              </Button>
+            ) : null}
+            <Button
+              type="button"
+              disabled={saving || (!share && !title.trim())}
+              onClick={() => {
+                if (share) {
+                  setOpen(false);
+                  return;
+                }
+                void submit();
+              }}
+            >
+              {saving ? t("saving") : share ? tCommon("confirm") : t("saveAndShare")}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </>

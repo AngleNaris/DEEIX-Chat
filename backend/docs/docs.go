@@ -14619,7 +14619,9 @@ const docTemplate = `{
                 "requestedModel",
                 "resolvedModel",
                 "startedAt",
-                "status"
+                "status",
+                "thinkMarkdown",
+                "toolCallsJSON"
             ],
             "properties": {
                 "attemptNo": {
@@ -14653,6 +14655,12 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "status": {
+                    "type": "string"
+                },
+                "thinkMarkdown": {
+                    "type": "string"
+                },
+                "toolCallsJSON": {
                     "type": "string"
                 }
             }

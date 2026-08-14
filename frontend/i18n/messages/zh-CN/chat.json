@@ -629,6 +629,9 @@
         "resultFile": "结果文件",
         "prompt": "提示词",
         "command": "命令",
+        "artifactSaved": "已保存制品",
+        "viewArtifact": "查看制品",
+        "openShare": "打开分享",
         "latencySeparator": "；"
       },
       "nativeStatus": {
@@ -702,6 +705,14 @@
       "detail": "对话已压缩并生成滚动摘要。",
       "range": "压缩区间：第 {fromTurn}-{toTurn} 轮。",
       "tokens": "Tokens 缩减：{sourceTokens} -> {summaryTokens}。"
+    },
+    "recalled": {
+      "title": "召回证据",
+      "count": "{count} 条",
+      "loading": "正在加载…",
+      "close": "关闭",
+      "loadFailed": "证据加载失败，请稍后重试",
+      "sessionExpired": "登录状态已失效，请重新登录"
     }
   },
   "optionLabels": {

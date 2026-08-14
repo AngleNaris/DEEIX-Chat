@@ -855,7 +855,7 @@ export function ChatModelPicker({
                 <div className="flex shrink-0 items-center px-1 pb-1">
                   <ModelViewSwitch viewMode={viewMode} onViewChange={persistModelView} />
                 </div>
-                <ModelMenuScrollContainer maxHeight={resolveDesktopMenuListMaxHeight(420, 40)}>
+                <ModelMenuScrollContainer maxHeight={isMobile ? undefined : desktopGroupListMaxHeight}>
                   <ChatModelSortPanel
                     modelOptions={sortedModelOptions}
                     selectedPlatformModelName={selectedPlatformModelName}

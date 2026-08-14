@@ -364,7 +364,8 @@ function AgentGroupStepTrace({
             <MessageUpstreamThink
               block={latestAttempt.think}
               streaming={Boolean(isRunning && latestAttempt.think.status === "streaming")}
-              autoCollapseReady={!isRunning}
+              autoCollapseReady={false}
+              defaultOpen={true}
               title={actorLabel}
               subtitle={step.actor.model}
             />
@@ -374,7 +375,7 @@ function AgentGroupStepTrace({
               events={EMPTY_TRACE_EVENTS}
               activeToolBlock={latestAttempt.tools}
               streaming={toolsActive}
-              autoCollapseReady={!isRunning}
+              autoCollapseReady={false}
             />
           ) : null}
           {output ? (

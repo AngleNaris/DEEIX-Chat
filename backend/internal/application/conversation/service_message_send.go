@@ -1337,8 +1337,9 @@ func (s *Service) sendMessageInternal(
 	const maxToolStageMergesPerRun = 4 // 阶段合并续轮安全上限：复杂任务最多额外开启 4 个工具窗口
 
 	// —— 阶段窗口循环 ——
-	// 窗口内 LLM 调用不超过 maxLLMCalls；预算耗尽仍残留工具调用时，先让模型无工具
-	// 总结阶段进展（阶段合并），再以新预算开启下一个窗口，直到模型产出最终回答。
+	// maxLLMCalls 只限制窗口内“连续”LLM 调用：连续预算耗尽且模型仍想调用工具时，
+	// 进入合并轮告知模型并让其总结进展、自主决定是否继续（新窗口重置预算），
+	// 直到模型产出最终回答。
 	for {
 		for len(upstreamOutput.ToolCalls) > 0 && windowCallCount < maxLLMCalls && remainingToolCalls > 0 {
 			pendingToolCalls := upstreamOutput.ToolCalls
@@ -1496,16 +1497,15 @@ func (s *Service) sendMessageInternal(
 				sendSpan.SetAttributes(attribute.Bool("conversation.tool.results_rebalanced", true))
 			}
 
+			if windowCallCount+1 >= maxLLMCalls {
+				// 连续窗口预算耗尽：不再发起强制收尾轮。本轮工具结果已并入上下文，
+				// 退出内层循环进入合并轮，由模型总结进展并自主决定是否继续（新窗口重置预算）。
+				break
+			}
 			followUpInput := generateInput
 			followUpInput.Tools = toolRuntime.definitions
 			followUpInput.DisableTools = false
-			if windowCallCount+1 >= maxLLMCalls {
-				followUpInput.Messages = buildFinalToolSynthesisMessages(llmMessages, "The maximum number of LLM calls for this run has been reached. Stop calling tools and produce the final answer based on the tool results already available. If the information is insufficient, state the missing information directly.")
-				followUpInput.Tools = nil
-				followUpInput.DisableTools = true
-				followUpInput.PreviousResponseID = ""
-				applyOpenAIResponsesInstructions(route, routeConfig.Endpoint, &followUpInput)
-			} else if !credentialAttempted && !toolResult.MCPActivationChanged && !toolHistoryTrimmed && !toolResultsRebalanced && routeConfig.Endpoint == llm.EndpointResponses && supportsPreviousResponseIDRoute(route) && strings.TrimSpace(upstreamOutput.ResponseID) != "" {
+			if !credentialAttempted && !toolResult.MCPActivationChanged && !toolHistoryTrimmed && !toolResultsRebalanced && routeConfig.Endpoint == llm.EndpointResponses && supportsPreviousResponseIDRoute(route) && strings.TrimSpace(upstreamOutput.ResponseID) != "" {
 				followUpInput.PreviousResponseID = strings.TrimSpace(upstreamOutput.ResponseID)
 				followUpInput.Messages = []llm.Message{{Role: "tool", ToolResults: toolResult.ToolResults}}
 			} else {
@@ -1632,21 +1632,10 @@ func (s *Service) sendMessageInternal(
 			lastReadFileRequests = nil
 		}
 
-		if !toolRunFinalAnswerMissing(upstreamOutput, len(toolCallRows) > 0, windowCallCount, maxLLMCalls, remainingToolCalls) {
-			break
-		}
-		// 模型已产出可见内容：忽略残留工具调用，降级接受为最终回答。
-		// 工具禁用轮中模型仍可能违规输出文本编码工具调用，剥离后已有答案不应再判失败。
-		if strings.TrimSpace(assistantText) != "" || len(upstreamOutput.GeneratedImages) > 0 {
-			if s.logger != nil {
-				s.logger.Warn("tool_run_final_answer_degraded",
-					zap.String("trace_id", traceid.FromContext(ctx)),
-					zap.Uint("conversation_id", input.ConversationID),
-					zap.Int("stage_merges", toolStageMerges),
-					zap.Int("pending_tool_calls", len(upstreamOutput.ToolCalls)),
-					zap.Bool("text_tool_calls_stripped", upstreamOutput.TextToolCallsStripped),
-				)
-			}
+		// 内层循环在“下一轮调用将耗尽连续窗口预算”时提前退出（未发起该轮调用），
+		// 因此预算判断按 windowCallCount+1 计算：耗尽即进入合并轮告知模型，
+		// 由模型自主决定继续（新窗口重置预算）或收尾，不再降级接受残留的半截文本。
+		if !toolRunFinalAnswerMissing(upstreamOutput, len(toolCallRows) > 0, windowCallCount+1, maxLLMCalls, remainingToolCalls) {
 			break
 		}
 		if toolStageMerges >= maxToolStageMergesPerRun {
@@ -1739,7 +1728,7 @@ func (s *Service) sendMessageInternal(
 	effectiveInputTokens := usageAccumulator.effectiveInputTokens(estimatedPromptTokens)
 	effectiveOutputTokens := resolveObservedOrEstimatedOutputTokens(totalUsage.OutputTokens, assistantText)
 
-	if toolRunFinalAnswerMissing(upstreamOutput, len(toolCallRows) > 0, windowCallCount, maxLLMCalls, remainingToolCalls) &&
+	if toolRunFinalAnswerMissing(upstreamOutput, len(toolCallRows) > 0, windowCallCount+1, maxLLMCalls, remainingToolCalls) &&
 		strings.TrimSpace(assistantText) == "" && len(upstreamOutput.GeneratedImages) == 0 {
 		retErr = ErrToolRunFinalAnswerMissing
 		return nil, retErr

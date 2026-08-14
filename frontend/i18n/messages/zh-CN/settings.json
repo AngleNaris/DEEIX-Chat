@@ -527,7 +527,14 @@
       "shareTitle": "分享制品",
       "shareDescription": "任何人拿到链接即可查看该制品；预览宽度为打开分享页时的默认设置。",
       "close": "关闭",
-      "copyLink": "复制链接"
+      "copyLink": "复制链接",
+      "view": "查看",
+      "viewDialogLoading": "正在加载制品…",
+      "viewDialogLoadFailed": "加载制品失败",
+      "viewDialogRetry": "重试",
+      "viewDialogCopy": "复制代码",
+      "viewDialogCopied": "代码已复制",
+      "viewDialogCopyFailed": "复制失败"
     },
     "dynamicPrompts": {
       "sectionTitle": "动态提示词",

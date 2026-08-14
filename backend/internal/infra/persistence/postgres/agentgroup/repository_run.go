@@ -246,6 +246,12 @@ func (r *Repo) CASUpdateAgentGroupStepAttempt(ctx context.Context, attemptID uin
 	if patch.PartialOutputMarkdown != nil {
 		fields["partial_output_markdown"] = *patch.PartialOutputMarkdown
 	}
+	if patch.ThinkMarkdown != nil {
+		fields["think_markdown"] = *patch.ThinkMarkdown
+	}
+	if patch.ToolCallsJSON != nil {
+		fields["tool_calls_json"] = *patch.ToolCallsJSON
+	}
 	if patch.InputSnapshotJSON != nil {
 		fields["input_snapshot_json"] = *patch.InputSnapshotJSON
 	}

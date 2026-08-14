@@ -36,6 +36,15 @@ export type RAGTraceCounts = {
   chunkCount: number;
 };
 
+// 被召回的上下文证据（promptTrace.sourceRefs 中有标题的来源）。
+export type RecalledEvidenceItem = {
+  sourceType: string;
+  sourceID: string;
+  title: string;
+  artifactID?: number;
+  score?: number;
+};
+
 export type CompactionTracePayload = {
   fromTurn: number;
   toTurn: number;
@@ -66,6 +75,53 @@ export function parseRAGCitations(payloadJson: string | undefined): RAGCitation[
   } catch {
     return [];
   }
+}
+
+// 召回证据卡片展示的证据类型：文件 RAG 命中（file_rag_chunk/file_rag_fallback）已在
+// 检索引用区单独渲染，skill/tool 等能力声明不属于"被召回的证据"，这里只展示
+// 历史召回/记忆/工具结果等证据类型，避免与检索引用区重复。
+const RECALLED_EVIDENCE_SOURCE_TYPES = new Set([
+  "semantic_recall",
+  "user_memory",
+  "tool_result",
+  "native_tool_result",
+  "image_analysis",
+  "conversation_summary",
+]);
+
+// 提取本轮被召回的上下文证据：promptTrace 各块的 sourceRefs 中有标题的条目，
+// 按 (sourceType, sourceID, title) 去重，避免同一来源重复渲染。
+export function parseRecalledEvidence(trace: ChatPromptTrace | undefined): RecalledEvidenceItem[] {
+  if (!trace?.blocks || trace.blocks.length === 0) {
+    return [];
+  }
+  const seen = new Set<string>();
+  const items: RecalledEvidenceItem[] = [];
+  for (const block of trace.blocks) {
+    for (const ref of block.sourceRefs ?? []) {
+      const title = ref.title?.trim();
+      if (!title) {
+        continue;
+      }
+      const sourceType = ref.sourceType?.trim() ?? "";
+      if (!RECALLED_EVIDENCE_SOURCE_TYPES.has(sourceType)) {
+        continue;
+      }
+      const sourceID = ref.sourceID?.trim() ?? "";
+      const dedupeKey = JSON.stringify([sourceType, sourceID, title]);
+      if (seen.has(dedupeKey)) {
+        continue;
+      }
+      seen.add(dedupeKey);
+      items.push({
+        sourceType,
+        sourceID,
+        title,
+        artifactID: typeof ref.artifactID === "number" && ref.artifactID > 0 ? ref.artifactID : undefined,
+      });
+    }
+  }
+  return items;
 }
 
 function readStringArray(value: unknown): string[] {

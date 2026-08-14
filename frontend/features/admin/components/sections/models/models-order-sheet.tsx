@@ -243,7 +243,7 @@ export function ModelOrderSheet({
               {t("empty")}
             </div>
           ) : (
-            <div className="grid h-full min-h-0 grid-cols-1 gap-3 lg:grid-cols-[230px_minmax(0,1fr)]">
+            <div className="grid h-full min-h-0 grid-cols-1 gap-3 max-lg:grid-rows-2 lg:grid-cols-[230px_minmax(0,1fr)]">
               <section className="flex min-h-0 flex-col overflow-hidden rounded-lg border bg-background">
                 <div className="flex h-9 shrink-0 items-center justify-between gap-3 border-b px-3">
                   <span className="text-xs font-medium text-foreground">{t("groupHeader")}</span>

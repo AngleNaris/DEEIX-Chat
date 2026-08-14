@@ -106,6 +106,8 @@ type AgentGroupStepAttempt struct {
 	ContextFingerprint    string     `gorm:"size:64;not null;default:'';comment:上下文指纹"`
 	OutputMarkdown        string     `gorm:"type:text;not null;default:'';comment:成员或主管输出"`
 	PartialOutputMarkdown string     `gorm:"type:text;not null;default:'';comment:中断前的部分输出"`
+	ThinkMarkdown         string     `gorm:"type:text;not null;default:'';comment:思维过程Markdown"`
+	ToolCallsJSON         string     `gorm:"type:text;not null;default:'';comment:工具调用JSON快照"`
 	Status                string     `gorm:"size:32;not null;default:'pending';index:idx_chat_agent_group_attempts_status;comment:Attempt状态"`
 	ErrorCode             string     `gorm:"size:64;not null;default:'';comment:错误码"`
 	ErrorMessage          string     `gorm:"type:text;not null;default:'';comment:错误信息"`

@@ -93,6 +93,7 @@ export function AppRecent() {
           starredFilter={controller.starredFilter}
           shareFilter={controller.shareFilter}
           projects={controller.projects}
+          streamingPublicIDs={controller.streamingPublicIDs}
           rowStates={controller.rowStates}
           isSelectionMode={controller.isSelectionMode}
           loadMoreRef={controller.loadMoreRef}

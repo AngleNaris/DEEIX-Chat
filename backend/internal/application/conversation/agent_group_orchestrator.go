@@ -243,7 +243,7 @@ func (st *agentGroupRunState) runSerial(ctx context.Context) error {
 		st.emitAgentGroupStepStarted(ctx, supervisorStep, supervisorAttempt, &st.snapshot.Supervisor)
 		decision, supervisorOutput, err := st.runSupervisorDecision(ctx, supervisorStep, supervisorAttempt, &st.snapshot.Supervisor)
 		if err != nil {
-			return st.failAgentGroupStepAndPause(ctx, supervisorStep, supervisorAttempt, &st.snapshot.Supervisor, err)
+			return st.failAgentGroupStepAndPause(ctx, supervisorStep, supervisorAttempt, &st.snapshot.Supervisor, supervisorOutput, err)
 		}
 
 		if decision.Action == agentGroupSupervisorActionFinish {
@@ -260,7 +260,7 @@ func (st *agentGroupRunState) runSerial(ctx context.Context) error {
 		// delegate：runSupervisorDecision 已校验成员（10.2），这里仅兜底解析。
 		member := agentGroupSnapshotMemberByID(st.snapshot, decision.MemberID)
 		if member == nil {
-			return st.failAgentGroupStepAndPause(ctx, supervisorStep, supervisorAttempt, &st.snapshot.Supervisor, ErrAgentGroupInvalidMember)
+			return st.failAgentGroupStepAndPause(ctx, supervisorStep, supervisorAttempt, &st.snapshot.Supervisor, supervisorOutput, ErrAgentGroupInvalidMember)
 		}
 		if err := st.finishAgentGroupStepSuccess(ctx, supervisorStep, supervisorAttempt, &st.snapshot.Supervisor, supervisorOutput); err != nil {
 			return err
@@ -282,7 +282,7 @@ func (st *agentGroupRunState) runSerial(ctx context.Context) error {
 			nil,
 		))
 		if err != nil {
-			return st.failAgentGroupStepAndPause(ctx, memberStep, memberAttempt, member, err)
+			return st.failAgentGroupStepAndPause(ctx, memberStep, memberAttempt, member, memberOutput, err)
 		}
 		if err := st.finishAgentGroupStepSuccess(ctx, memberStep, memberAttempt, member, memberOutput); err != nil {
 			return err
@@ -696,9 +696,13 @@ func (st *agentGroupRunState) finishAgentGroupStepSuccess(
 	store := st.service.agentGroupRunStore
 	now := time.Now()
 
-	// 1. CAS attempt → success。
+	// 1. CAS attempt → success（附思考/工具调用快照，供刷新后重建思维链）。
 	success := domainagentgroup.AttemptStatusSuccess
 	patch := domainagentgroup.AttemptPatch{Status: &success, OutputMarkdown: &output.Text, EndedAt: &now}
+	if thinkToolPatch := agentGroupThinkToolPatch(output); thinkToolPatch.ThinkMarkdown != nil || thinkToolPatch.ToolCallsJSON != nil {
+		patch.ThinkMarkdown = thinkToolPatch.ThinkMarkdown
+		patch.ToolCallsJSON = thinkToolPatch.ToolCallsJSON
+	}
 	if output != nil && strings.TrimSpace(output.PlatformModelName) != "" {
 		resolvedModel := output.PlatformModelName
 		patch.ResolvedModel = &resolvedModel
@@ -748,6 +752,7 @@ func (st *agentGroupRunState) failAgentGroupStepAndPause(
 	step *domainagentgroup.Step,
 	attempt *domainagentgroup.Attempt,
 	member *domainagentgroup.RunSnapshotMember,
+	output *AgentTurnOutput,
 	execErr error,
 ) error {
 	store := st.service.agentGroupRunStore
@@ -766,8 +771,13 @@ func (st *agentGroupRunState) failAgentGroupStepAndPause(
 	case domainagentgroup.ErrorCodeInterrupted:
 		attemptStatus = domainagentgroup.AttemptStatusInterrupted
 	}
-	ok, err := store.CASUpdateAgentGroupStepAttempt(persistCtx, attempt.ID, domainagentgroup.AttemptStatusRunning,
-		domainagentgroup.AttemptPatch{Status: &attemptStatus, ErrorCode: &code, ErrorMessage: &message, EndedAt: &now})
+	attemptPatch := domainagentgroup.AttemptPatch{Status: &attemptStatus, ErrorCode: &code, ErrorMessage: &message, EndedAt: &now}
+	// 纠错耗尽/校验失败等场景仍有回合输出（部分思考或工具行）：一并落盘，刷新后可查看。
+	if thinkToolPatch := agentGroupThinkToolPatch(output); thinkToolPatch.ThinkMarkdown != nil || thinkToolPatch.ToolCallsJSON != nil {
+		attemptPatch.ThinkMarkdown = thinkToolPatch.ThinkMarkdown
+		attemptPatch.ToolCallsJSON = thinkToolPatch.ToolCallsJSON
+	}
+	ok, err := store.CASUpdateAgentGroupStepAttempt(persistCtx, attempt.ID, domainagentgroup.AttemptStatusRunning, attemptPatch)
 	if err != nil {
 		return err
 	}
@@ -1443,4 +1453,92 @@ func marshalAgentGroupAttemptInput(snapshot *domainagentgroup.RunSnapshot, stepT
 		return "{}"
 	}
 	return string(raw)
+}
+
+// agentGroupToolCallStatus 将工具行状态映射为前端重建时间线语义状态：
+// ErrorJSON 非空或 status error/failed → error；success/completed → success；
+// streaming/in_progress/queued → streaming；其余 → requested。
+func agentGroupToolCallStatus(row model.ToolCall) string {
+	if strings.TrimSpace(row.ErrorJSON) != "" {
+		return "error"
+	}
+	switch row.Status {
+	case "success", "completed", "done":
+		return "success"
+	case "error", "failed":
+		return "error"
+	case "streaming", "in_progress", "queued", "pending":
+		return "streaming"
+	default:
+		return "requested"
+	}
+}
+
+// agentGroupToolOutputCap 群组工具输出落盘/下发时的长度上限（展示细节默认折叠，
+// 截断保证流事件与持久化快照体积可控）。
+const agentGroupToolOutputCap = 4000
+
+// truncateAgentGroupToolOutput 按字符截断工具输出，超出部分以省略号标记。
+func truncateAgentGroupToolOutput(value string) string {
+	runes := []rune(strings.TrimSpace(value))
+	if len(runes) <= agentGroupToolOutputCap {
+		return string(runes)
+	}
+	return string(runes[:agentGroupToolOutputCap]) + "…"
+}
+
+// marshalAgentGroupToolCalls 将回合工具行序列化为前端重建时间线所需的
+// {"tool_calls":[{tool_call_id,name,status,input,output?,error?}]} JSON。
+// 跳过空名称行；无有效行或序列化失败返回空串（不落盘）。
+func marshalAgentGroupToolCalls(rows []model.ToolCall) string {
+	if len(rows) == 0 {
+		return ""
+	}
+	calls := make([]map[string]interface{}, 0, len(rows))
+	for _, row := range rows {
+		name := strings.TrimSpace(row.ToolName)
+		if name == "" {
+			continue
+		}
+		call := map[string]interface{}{
+			"tool_call_id": row.ToolCallID,
+			"name":         name,
+			"status":       agentGroupToolCallStatus(row),
+		}
+		if input := strings.TrimSpace(row.InputJSON); input != "" {
+			call["input"] = input
+		}
+		if output := strings.TrimSpace(row.OutputJSON); output != "" {
+			call["output"] = truncateAgentGroupToolOutput(output)
+		}
+		if errText := strings.TrimSpace(row.ErrorJSON); errText != "" {
+			call["error"] = errText
+		}
+		calls = append(calls, call)
+	}
+	if len(calls) == 0 {
+		return ""
+	}
+	raw, err := json.Marshal(map[string]interface{}{"tool_calls": calls})
+	if err != nil {
+		return ""
+	}
+	return string(raw)
+}
+
+// agentGroupThinkToolPatch 从回合输出构造思考/工具落盘补丁：
+// think 仅取 ReasoningText（trim 后非空才设置）；tools 仅在存在有效行时设置。
+// 输出为 nil 或无内容时返回空补丁，调用方合并进终态 CAS 即可。
+func agentGroupThinkToolPatch(output *AgentTurnOutput) domainagentgroup.AttemptPatch {
+	var patch domainagentgroup.AttemptPatch
+	if output == nil {
+		return patch
+	}
+	if think := strings.TrimSpace(output.ReasoningText); think != "" {
+		patch.ThinkMarkdown = &think
+	}
+	if toolsJSON := marshalAgentGroupToolCalls(output.ToolCallRows); toolsJSON != "" {
+		patch.ToolCallsJSON = &toolsJSON
+	}
+	return patch
 }

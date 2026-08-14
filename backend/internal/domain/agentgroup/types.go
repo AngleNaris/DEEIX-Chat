@@ -234,6 +234,8 @@ type Attempt struct {
 	ContextFingerprint    string
 	OutputMarkdown        string
 	PartialOutputMarkdown string
+	ThinkMarkdown         string
+	ToolCallsJSON         string
 	Status                string
 	ErrorCode             string
 	ErrorMessage          string
@@ -280,6 +282,8 @@ type AttemptPatch struct {
 	ResolvedModel         *string
 	OutputMarkdown        *string
 	PartialOutputMarkdown *string
+	ThinkMarkdown         *string
+	ToolCallsJSON         *string
 	InputSnapshotJSON     *string
 	ErrorCode             *string
 	ErrorMessage          *string

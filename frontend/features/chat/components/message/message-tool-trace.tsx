@@ -15,10 +15,12 @@ import {
   useProcessTraceLabels,
   type ProcessTraceLabels,
 } from "@/features/chat/hooks/use-process-trace-labels";
+import { Boxes, ExternalLink, Eye } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { TRACE_ROOT_CLASS } from "@/features/chat/components/shared/message-process-trace-shared";
 import { useAutoScrollFollow } from "@/shared/hooks/use-scroll-follow";
 import type { TraceDisplayEvent } from "@/features/chat/model/message-process-trace";
+import { ArtifactPreviewDialog } from "@/shared/components/artifact-preview-dialog";
 
 type ToolTraceCall = {
   tool_call_id?: string;
@@ -221,6 +223,90 @@ function resolveNativeToolKind(call: ToolTraceCall): NativeToolKind {
   if (value.includes("image_generation")) return "image_generation";
   if (value.includes("shell")) return "shell";
   return "generic";
+}
+
+type SavedArtifactInfo = {
+  artifactID: string;
+  title: string;
+  kind: string;
+  shareURL?: string;
+};
+
+// resolveSavedArtifactInfo 识别 save_artifact / share_artifact 平台工具的产出
+// （artifact_id/title/kind/share_url），用于在工具调用轨迹中展示可点击查看的制品卡片。
+function resolveSavedArtifactInfo(call: ToolTraceCall, output: unknown): SavedArtifactInfo | null {
+  const name = normalizeToolName(call.name);
+  if (!name.includes("save_artifact") && !name.includes("share_artifact") && !name.includes("artifact")) {
+    return null;
+  }
+  if (!isRecord(output)) {
+    return null;
+  }
+  const artifactID = readString(output.artifact_id) || readString(output.artifactId) || "";
+  const title = readString(output.title) || artifactID || "";
+  if (!artifactID || !title) {
+    return null;
+  }
+  return {
+    artifactID,
+    title,
+    kind: readString(output.kind) || "html",
+    shareURL: readString(output.share_url) || undefined,
+  };
+}
+
+// SavedArtifactToolCard 制品工具结果卡片：模型保存制品后，用户在对话中直接看到
+// 制品卡片并可点击查看，无需离开对话前往制品库。
+function SavedArtifactToolCard({
+  artifact,
+  statusText,
+  labels,
+}: {
+  artifact: SavedArtifactInfo;
+  statusText: string;
+  labels: ProcessTraceLabels;
+}) {
+  const [previewOpen, setPreviewOpen] = React.useState(false);
+  return (
+    <div className="space-y-2 text-muted-foreground/84">
+      <div>{statusText}</div>
+      <div className="flex items-center gap-2 rounded-lg border border-border/60 bg-muted/20 px-2.5 py-2">
+        <Boxes className="size-4 shrink-0 text-primary/80" strokeWidth={1.6} />
+        <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-foreground/88" title={artifact.title}>
+          {artifact.title}
+        </span>
+        <span className="shrink-0 rounded-sm bg-foreground/8 px-1.5 py-0.5 text-[10px] font-medium uppercase text-muted-foreground">
+          {artifact.kind}
+        </span>
+        {artifact.shareURL ? (
+          <a
+            href={artifact.shareURL}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-primary transition-colors hover:bg-primary/10"
+          >
+            <ExternalLink className="size-3.5" strokeWidth={1.8} />
+            {labels.tool.detail.openShare}
+          </a>
+        ) : null}
+        <button
+          type="button"
+          className="inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-primary transition-colors hover:bg-primary/10"
+          onClick={() => setPreviewOpen(true)}
+        >
+          <Eye className="size-3.5" strokeWidth={1.8} />
+          {labels.tool.detail.viewArtifact}
+        </button>
+      </div>
+      <ArtifactPreviewDialog
+        open={previewOpen}
+        onOpenChange={setPreviewOpen}
+        artifactId={artifact.artifactID}
+        title={artifact.title}
+        shareUrl={artifact.shareURL ?? null}
+      />
+    </div>
+  );
 }
 
 function toolStatusLabel(status: string | undefined, labels: ProcessTraceLabels): string {
@@ -689,6 +775,12 @@ function ToolTraceStructuredContent({
         ) : null}
       </div>
     );
+  }
+
+  // 制品保存工具（save_artifact）：展示可点击查看的制品卡片，替代原始 JSON。
+  const savedArtifact = resolveSavedArtifactInfo(call, output);
+  if (savedArtifact) {
+    return <SavedArtifactToolCard artifact={savedArtifact} statusText={statusText} labels={labels} />;
   }
 
   // 通用工具（MCP / 沙箱 / mm-plugins）：内联展示多模态产物（图片/音频）+ 原始结果。

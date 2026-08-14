@@ -310,14 +310,6 @@ export function AppChatArea() {
     failedGenerationRunsRef,
     isGroupConversation: Boolean(groupConversationAgentGroupID),
   });
-  // 进行中标记：当前会话有活跃流式 run 时通知侧边栏标题显示"进行中"动效。
-  React.useEffect(() => {
-    const normalizedConversationID = conversationID?.trim() || "";
-    if (!normalizedConversationID) {
-      return;
-    }
-    setConversationStreaming(normalizedConversationID, Boolean(resumingRunID));
-  }, [conversationID, resumingRunID, setConversationStreaming]);
   const { greetingTitle } = useChatViewerProfile();
   const [manualConversationTitle, setManualConversationTitle] = React.useState("");
   const [shareDialogOpen, setShareDialogOpen] = React.useState(false);
@@ -860,6 +852,15 @@ export function AppChatArea() {
     autoEditDismissed,
   });
   const generating = sending;
+  // 进行中标记：当前会话存在活跃流式 run（发送中或刷新恢复中）时，
+  // 通知侧边栏/最近列表行显示"进行中"动效。
+  React.useEffect(() => {
+    const normalizedConversationID = conversationID?.trim() || "";
+    if (!normalizedConversationID) {
+      return;
+    }
+    setConversationStreaming(normalizedConversationID, sending || Boolean(resumingRunID));
+  }, [conversationID, resumingRunID, sending, setConversationStreaming]);
   // §16.7/§16.10 刷新恢复：群组会话加载后重建最后一条 assistant 消息的运行时间线；
   // 重试/放弃结算后刷新消息列表（最终答案持久化在顶层消息中，需 reload 展示）。
   const recoveryTargetMessage = visibleMessages[visibleMessages.length - 1];

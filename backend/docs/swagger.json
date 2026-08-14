@@ -14612,7 +14612,9 @@
                 "requestedModel",
                 "resolvedModel",
                 "startedAt",
-                "status"
+                "status",
+                "thinkMarkdown",
+                "toolCallsJSON"
             ],
             "properties": {
                 "attemptNo": {
@@ -14646,6 +14648,12 @@
                     "type": "string"
                 },
                 "status": {
+                    "type": "string"
+                },
+                "thinkMarkdown": {
+                    "type": "string"
+                },
+                "toolCallsJSON": {
                     "type": "string"
                 }
             }

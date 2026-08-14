@@ -89,6 +89,7 @@ function RecentListSkeleton({
 function RecentConversationRow({
   item,
   projects,
+  streaming,
   hovered,
   selected,
   highlighted,
@@ -110,6 +111,7 @@ function RecentConversationRow({
 }: {
   item: ConversationDTO;
   projects: ConversationProjectDTO[];
+  streaming: boolean;
   hovered: boolean;
   selected: boolean;
   highlighted: boolean;
@@ -144,10 +146,13 @@ function RecentConversationRow({
   const rowContent = (
     <>
       <div className="flex items-center gap-2">
+        {streaming ? (
+          <span className="streaming-dot shrink-0" aria-hidden="true" />
+        ) : null}
         <AnimatedText
           text={title}
           className="min-w-0 shrink"
-          textClassName="text-sm font-medium text-foreground"
+          textClassName={cn("text-sm font-medium text-foreground", streaming && "text-primary/90")}
         />
         {visibleLabels.length > 0 ? (
           <div className="flex max-w-[55%] shrink-0 items-center gap-1 overflow-hidden">
@@ -344,6 +349,7 @@ type RecentListProps = {
   loadingInitial: boolean;
   filteredItems: ConversationDTO[];
   projects: ConversationProjectDTO[];
+  streamingPublicIDs: ReadonlySet<string>;
   normalizedQuery: string;
   statusFilter: ConversationStatusFilter;
   starredFilter: ConversationStarredFilter;
@@ -433,6 +439,7 @@ export function RecentList({
   loadingInitial,
   filteredItems,
   projects,
+  streamingPublicIDs,
   normalizedQuery,
   statusFilter,
   starredFilter,
@@ -512,6 +519,7 @@ export function RecentList({
                     key={item.publicID}
                     item={item}
                     projects={projects}
+                    streaming={streamingPublicIDs.has(item.publicID)}
                     hovered={currentState?.hovered ?? false}
                     selected={currentState?.selected ?? false}
                     highlighted={currentState?.highlighted ?? false}

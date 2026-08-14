@@ -527,7 +527,14 @@
       "shareTitle": "Share artifact",
       "shareDescription": "Anyone with the link can view this artifact; the preview width is the default when opening the shared page.",
       "close": "Close",
-      "copyLink": "Copy link"
+      "copyLink": "Copy link",
+      "view": "View",
+      "viewDialogLoading": "Loading artifact…",
+      "viewDialogLoadFailed": "Failed to load artifact",
+      "viewDialogRetry": "Retry",
+      "viewDialogCopy": "Copy code",
+      "viewDialogCopied": "Code copied",
+      "viewDialogCopyFailed": "Failed to copy"
     },
     "dynamicPrompts": {
       "sectionTitle": "Dynamic prompts",

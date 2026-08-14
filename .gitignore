@@ -179,3 +179,7 @@ backend/data/
 
 # Compiled Go binaries (sandbox-mcp build artifacts)
 tools/sandbox-mcp/sandbox-mcp
+
+# local Go build caches (dev tooling)
+.gomodcache/
+.gocache/

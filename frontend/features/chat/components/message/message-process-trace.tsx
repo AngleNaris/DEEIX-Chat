@@ -18,6 +18,7 @@ import {
   TRACE_ROOT_CLASS,
   TraceContent,
 } from "@/features/chat/components/shared/message-process-trace-shared";
+import { useAutoScrollFollow } from "@/shared/hooks/use-scroll-follow";
 import {
   filterProcessTraceStages,
   isRAGTraceStage,
@@ -25,6 +26,7 @@ import {
   mergePromptTraceStage,
   parseFileContextBadges,
   parseRAGCitations,
+  parseRecalledEvidence,
   parseStructuredTraceStages,
   parseTraceStages,
 } from "@/features/chat/model/message-process-trace";
@@ -50,6 +52,8 @@ export function MessageProcessTrace({
   const labels = useProcessTraceLabels();
   const processStreaming = Boolean(active && trace?.process?.status === "streaming");
   const [accordionValue, setAccordionValue] = React.useState(() => (processStreaming ? "message-process-trace" : ""));
+  // 过程轨迹内容与思考/工具调用保持一致：固定高度 + 跟随最新内容（用户上滚暂停、回底恢复）。
+  const { ref: processContentRef, onScroll: onProcessContentScroll } = useAutoScrollFollow<HTMLDivElement>(trace?.process?.contentMarkdown);
 
   React.useEffect(() => {
     if (processStreaming) {
@@ -68,6 +72,7 @@ export function MessageProcessTrace({
   const summary = localizeProcessSummary(buildProcessSummary(trace), trace.process.payloadJson, labels);
   const citations = parseRAGCitations(trace.process.payloadJson);
   const fileBadges = parseFileContextBadges(trace.process.payloadJson, labels);
+  const recalledItems = parseRecalledEvidence(trace.promptTrace);
   const structuredStages = parseStructuredTraceStages(trace.process.payloadJson, labels);
   const parsedStages = structuredStages.length > 0 ? [] : parseTraceStages(trace.process.contentMarkdown);
   const stages = filterProcessTraceStages(mergePromptTraceStage(structuredStages.length > 0 ? structuredStages : parsedStages, trace.promptTrace, labels));
@@ -117,16 +122,23 @@ export function MessageProcessTrace({
               )}
             />
           </AccordionTrigger>
-          <AccordionContent className="space-y-2.5 px-0 pb-0 pt-1.5 duration-[350ms] ease-in-out">
-            <TraceContent
-              block={trace.process}
-              streaming={processStreaming}
-              citations={citations}
-              fileBadges={fileBadges}
-              promptTrace={trace.promptTrace}
-              labels={labels}
-            />
-            {!hasRAGStage ? <RAGCitationList citations={citations} labels={labels} /> : null}
+          <AccordionContent className="px-0 pb-0 pt-1.5 duration-[350ms] ease-in-out">
+            <div
+              ref={processContentRef}
+              onScroll={onProcessContentScroll}
+              className="max-h-80 space-y-2.5 overflow-y-auto pr-1"
+            >
+              <TraceContent
+                block={trace.process}
+                streaming={processStreaming}
+                citations={citations}
+                fileBadges={fileBadges}
+                promptTrace={trace.promptTrace}
+                recalledItems={recalledItems}
+                labels={labels}
+              />
+              {!hasRAGStage ? <RAGCitationList citations={citations} labels={labels} /> : null}
+            </div>
           </AccordionContent>
         </AccordionItem>
       </Accordion>

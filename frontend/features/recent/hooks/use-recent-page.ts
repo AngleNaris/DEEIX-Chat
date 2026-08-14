@@ -117,6 +117,7 @@ export function useRecentPage() {
     batchSetProjectByPublicIDs,
     touchByPublicID,
     lastChange,
+    streamingPublicIDs,
   } = useSidebarConversations();
   const [items, setItems] = React.useState<ConversationDTO[]>([]);
   const [loadingInitial, setLoadingInitial] = React.useState(true);
@@ -802,6 +803,7 @@ export function useRecentPage() {
 
   return {
     items,
+    streamingPublicIDs,
     filteredItems,
     normalizedQuery,
     loadingInitial,

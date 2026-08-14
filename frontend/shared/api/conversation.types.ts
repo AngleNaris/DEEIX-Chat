@@ -229,6 +229,8 @@ export type PublicSharedGroupRunTimelineDTO = {
       status: string;
       output: string;
       errorCode?: string;
+      thinkMarkdown?: string;
+      toolCallsJSON?: string;
       startedAt: string;
       endedAt?: string | null;
       updatedAt: string;
@@ -395,6 +397,7 @@ export type StreamMessageEvent =
       tool_name?: string;
       tool_call_id?: string;
       status?: string;
+      output?: string;
       error?: string;
     } & GroupStreamEventMeta)
   // Agent 群组 8 个流式事件（方案 §15.1-§15.2）。

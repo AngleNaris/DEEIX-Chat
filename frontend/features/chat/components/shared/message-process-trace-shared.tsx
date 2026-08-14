@@ -2,7 +2,17 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { Brain, FileText, MessageSquareText, Wrench } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { ChatPromptTrace, ChatTraceBlock, RAGCitation } from "@/features/chat/types/messages";
 import type { ProcessTraceLabels } from "@/features/chat/hooks/use-process-trace-labels";
@@ -19,8 +29,13 @@ import {
   parseStructuredTraceStages,
   parseTraceStages,
   type FileContextBadge,
+  type RecalledEvidenceItem,
   type TraceStage,
 } from "@/features/chat/model/message-process-trace";
+import { useLocalizedErrorMessage } from "@/i18n/use-localized-error";
+import { getContextArtifact } from "@/shared/api/conversation";
+import type { ContextArtifactDTO } from "@/shared/api/conversation.types";
+import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 import { StreamdownRender } from "@/shared/components/markdown/streamdown-render";
 import { cn } from "@/lib/utils";
 
@@ -189,6 +204,187 @@ export function RAGCitationList({
   );
 }
 
+function recalledSourceIcon(sourceType: string) {
+  const type = sourceType.trim().toLowerCase();
+  if (type.includes("memory")) return MessageSquareText;
+  if (type.includes("semantic") || type.includes("recall")) return Brain;
+  if (type.includes("tool")) return Wrench;
+  return FileText;
+}
+
+type RecalledEvidenceDialogState =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "ready"; artifact: ContextArtifactDTO }
+  | { status: "error"; message: string };
+
+// RecalledEvidenceDialog 展示被召回证据的 artifact 内容：点击卡片后按 artifactID 拉取详情。
+function RecalledEvidenceDialog({
+  item,
+  open,
+  onOpenChange,
+  labels,
+}: {
+  item: RecalledEvidenceItem | null;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  labels: ProcessTraceLabels;
+}) {
+  const resolveErrorMessage = useLocalizedErrorMessage();
+  const [state, setState] = React.useState<RecalledEvidenceDialogState>({ status: "idle" });
+  const artifactID = item?.artifactID;
+  const sessionExpired = labels.recalled.sessionExpired;
+  const loadFailed = labels.recalled.loadFailed;
+
+  React.useEffect(() => {
+    if (!open || !artifactID) {
+      return undefined;
+    }
+    let cancelled = false;
+    setState({ status: "loading" });
+    void (async () => {
+      try {
+        const token = await resolveAccessToken();
+        if (!token) {
+          throw new Error(sessionExpired);
+        }
+        const artifact = await getContextArtifact(token, artifactID);
+        if (cancelled) {
+          return;
+        }
+        setState({ status: "ready", artifact });
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+        setState({ status: "error", message: resolveErrorMessage(error, loadFailed) });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [artifactID, loadFailed, open, resolveErrorMessage, sessionExpired]);
+
+  const title = state.status === "ready" ? state.artifact.sourceTitle || item?.title || "" : item?.title || "";
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="flex min-w-0 max-h-[calc(100svh-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-[560px]">
+        <div className="min-w-0 flex-1 space-y-3 overflow-y-auto p-5 pb-4">
+          <DialogHeader>
+            <DialogTitle className="break-words">{title}</DialogTitle>
+            {state.status === "ready" ? (
+              <DialogDescription>
+                {state.artifact.kind}
+                {state.artifact.score > 0 ? ` · ${Math.round(state.artifact.score * 100)}%` : ""}
+              </DialogDescription>
+            ) : null}
+          </DialogHeader>
+          {state.status === "loading" ? (
+            <div className="flex items-center gap-2 py-2 text-[12px] text-muted-foreground/62">
+              <span className="inline-block size-3.5 animate-spin rounded-full border-2 border-muted border-t-foreground/50" />
+              {labels.recalled.loading}
+            </div>
+          ) : null}
+          {state.status === "error" ? (
+            <p className="text-[12px] leading-5 text-destructive/85">{state.message}</p>
+          ) : null}
+          {state.status === "ready" ? (
+            <pre className="max-h-[55vh] min-w-0 overflow-y-auto overflow-x-hidden rounded-md bg-muted/45 px-4 py-3 text-[12px] leading-6 whitespace-pre-wrap break-words text-foreground [overflow-wrap:anywhere]">
+              <code>{state.artifact.content}</code>
+            </pre>
+          ) : null}
+        </div>
+        <DialogFooter className="shrink-0 border-t border-border/60 px-5 py-3">
+          <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
+            {labels.recalled.close}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function RecalledEvidenceCard({
+  item,
+  onClick,
+  labels,
+}: {
+  item: RecalledEvidenceItem;
+  onClick?: () => void;
+  labels: ProcessTraceLabels;
+}) {
+  const Icon = recalledSourceIcon(item.sourceType);
+  const className = cn(
+    "inline-flex min-w-0 max-w-[200px] items-center gap-1.5 rounded-lg border border-border/35 bg-background/45 px-1.5 py-0.5 text-[11px] leading-5 text-muted-foreground/76 transition-colors",
+    onClick ? "cursor-pointer hover:border-border hover:text-foreground" : "",
+  );
+  const content = (
+    <>
+      <Icon className="size-3 shrink-0 text-muted-foreground/50" />
+      <span className="truncate font-medium">{item.title}</span>
+      {item.score != null ? (
+        <span className="shrink-0 text-muted-foreground/50">{Math.round(item.score * 100)}%</span>
+      ) : null}
+    </>
+  );
+  if (onClick) {
+    return (
+      <button type="button" className={className} title={item.title} onClick={onClick}>
+        {content}
+      </button>
+    );
+  }
+  return (
+    <span className={className} title={item.title}>
+      {content}
+    </span>
+  );
+}
+
+// RecalledEvidenceList 在过程轨迹正文底部渲染本轮被召回的上下文证据卡片。
+function RecalledEvidenceList({
+  items,
+  labels,
+}: {
+  items: RecalledEvidenceItem[];
+  labels: ProcessTraceLabels;
+}) {
+  const [openItem, setOpenItem] = React.useState<RecalledEvidenceItem | null>(null);
+  if (items.length === 0) {
+    return null;
+  }
+  return (
+    <div className="border-t border-border/30 pt-2">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <span className="text-[11px] font-medium text-muted-foreground/76">{labels.recalled.title}</span>
+        <span className="text-[10px] text-muted-foreground/56">{labels.recalled.count(items.length)}</span>
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {items.map((item) => (
+          <RecalledEvidenceCard
+            key={`${item.sourceType}-${item.sourceID}-${item.title}`}
+            item={item}
+            labels={labels}
+            onClick={
+              typeof item.artifactID === "number" && item.artifactID > 0 ? () => setOpenItem(item) : undefined
+            }
+          />
+        ))}
+      </div>
+      <RecalledEvidenceDialog
+        item={openItem}
+        open={openItem !== null}
+        onOpenChange={(next) => {
+          if (!next) {
+            setOpenItem(null);
+          }
+        }}
+        labels={labels}
+      />
+    </div>
+  );
+}
+
 function StreamingTraceText({
   text,
   active,
@@ -318,6 +514,7 @@ export function TraceContent({
   citations = [],
   fileBadges = [],
   promptTrace,
+  recalledItems = [],
   labels,
 }: {
   block: ChatTraceBlock;
@@ -325,6 +522,7 @@ export function TraceContent({
   citations?: RAGCitation[];
   fileBadges?: FileContextBadge[];
   promptTrace?: ChatPromptTrace;
+  recalledItems?: RecalledEvidenceItem[];
   labels: ProcessTraceLabels;
 }) {
   const structuredStages = parseStructuredTraceStages(block.payloadJson, labels);
@@ -332,14 +530,17 @@ export function TraceContent({
   const stages = filterProcessTraceStages(mergePromptTraceStage(structuredStages.length > 0 ? structuredStages : parsedStages, promptTrace, labels));
   if (stages.length > 0) {
     return (
-      <TraceStageRows
-        stages={stages}
-        streaming={streaming}
-        citations={citations}
-        fileBadges={fileBadges}
-        payloadJson={block.payloadJson}
-        labels={labels}
-      />
+      <>
+        <TraceStageRows
+          stages={stages}
+          streaming={streaming}
+          citations={citations}
+          fileBadges={fileBadges}
+          payloadJson={block.payloadJson}
+          labels={labels}
+        />
+        {recalledItems.length > 0 ? <RecalledEvidenceList items={recalledItems} labels={labels} /> : null}
+      </>
     );
   }
   if (parsedStages.length > 0) {

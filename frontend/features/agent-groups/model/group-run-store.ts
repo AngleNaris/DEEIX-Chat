@@ -472,6 +472,7 @@ type LiveGroupToolCall = {
   name: string;
   status: string;
   input?: string;
+  output?: string;
   error?: string;
 };
 
@@ -498,6 +499,38 @@ function buildGroupToolBlock(calls: LiveGroupToolCall[]): ChatTraceBlock {
     status: hasActive ? "streaming" : "completed",
     payloadJson: JSON.stringify({ tool_calls: calls }),
   };
+}
+
+// rebuildGroupAttemptTrace 从持久化字段（thinkMarkdown/toolCallsJSON）重建 Attempt 的
+// 思维与工具调用块。刷新恢复与公开分享页共用：think 固定为 completed 块，tools 复用
+// 实时路径的构建器；字段缺失或损坏时返回空对象，调用方安全展开。
+export function rebuildGroupAttemptTrace(
+  thinkMarkdown: string | null | undefined,
+  toolCallsJSON: string | null | undefined,
+  updatedAt: string,
+): Pick<GroupRunAttemptState, "think" | "tools"> {
+  const think = thinkMarkdown?.trim()
+    ? ({
+        title: "",
+        summary: "",
+        contentMarkdown: thinkMarkdown.trim(),
+        status: "completed",
+        stage: "think",
+        updatedAt,
+        payloadJson: undefined,
+      } as ChatTraceBlock)
+    : undefined;
+  let tools: ChatTraceBlock | undefined;
+  const toolCallsRaw = toolCallsJSON?.trim();
+  if (toolCallsRaw) {
+    try {
+      const parsed = JSON.parse(toolCallsRaw) as { tool_calls?: LiveGroupToolCall[] };
+      tools = buildGroupToolBlock(Array.isArray(parsed.tool_calls) ? parsed.tool_calls : []);
+    } catch {
+      tools = undefined;
+    }
+  }
+  return { think, tools };
 }
 
 // ensureLiveGroupRunPlaceholder 在用户发送消息后立即创建占位运行（§16.8：模型未返回 Token 时
@@ -576,6 +609,9 @@ export function upsertLiveGroupRunTool(clientRunID: string | null | undefined, e
               return attempt;
             }
             target.status = event.status === "error" ? "error" : "success";
+            if (event.output?.trim()) {
+              target.output = event.output.trim();
+            }
             if (event.error?.trim()) {
               target.error = event.error;
             }
@@ -748,18 +784,28 @@ export function importGroupRunDetail(clientRunID: string | null | undefined, det
         model: latestAttempt?.requestedModel || "",
       },
       status: step.status,
-      attempts: step.attempts.map((attempt) => ({
-        attemptID: attempt.publicID,
-        attemptNumber: attempt.attemptNo,
-        status: attempt.status,
-        output: attempt.outputMarkdown || "",
-        errorCode: attempt.errorCode || undefined,
-        errorMessage: attempt.errorMessage || undefined,
-        startedAt: attempt.startedAt,
-        endedAt: attempt.endedAt || undefined,
-        updatedAt: attempt.createdAt,
-        lastEventAt: nowTimestamp(),
-      })),
+      attempts: step.attempts.map((attempt) => {
+        // 刷新恢复：从持久化的 thinkMarkdown/toolCallsJSON 重建思维与工具调用块。
+        const { think, tools } = rebuildGroupAttemptTrace(
+          attempt.thinkMarkdown,
+          attempt.toolCallsJSON,
+          attempt.createdAt,
+        );
+        return {
+          attemptID: attempt.publicID,
+          attemptNumber: attempt.attemptNo,
+          status: attempt.status,
+          think,
+          tools,
+          output: attempt.outputMarkdown || "",
+          errorCode: attempt.errorCode || undefined,
+          errorMessage: attempt.errorMessage || undefined,
+          startedAt: attempt.startedAt,
+          endedAt: attempt.endedAt || undefined,
+          updatedAt: attempt.createdAt,
+          lastEventAt: nowTimestamp(),
+        };
+      }),
       startedAt: step.createdAt,
       endedAt: step.status === "success" || step.status === "failed" ? step.updatedAt : undefined,
       updatedAt: step.updatedAt,

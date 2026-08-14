@@ -74,6 +74,9 @@ export type ProcessTraceLabels = {
       resultFile: string;
       prompt: string;
       command: string;
+      artifactSaved: string;
+      viewArtifact: string;
+      openShare: string;
       latencySeparator: string;
     };
     nativeStatus: {
@@ -147,6 +150,14 @@ export type ProcessTraceLabels = {
     detail: string;
     range: (fromTurn: number, toTurn: number) => string;
     tokens: (sourceTokens: number, summaryTokens: number) => string;
+  };
+  recalled: {
+    title: string;
+    count: (count: number) => string;
+    loading: string;
+    close: string;
+    loadFailed: string;
+    sessionExpired: string;
   };
 };
 
@@ -226,6 +237,9 @@ export function useProcessTraceLabels(): ProcessTraceLabels {
           resultFile: t("tool.detail.resultFile"),
           prompt: t("tool.detail.prompt"),
           command: t("tool.detail.command"),
+          artifactSaved: t("tool.detail.artifactSaved"),
+          viewArtifact: t("tool.detail.viewArtifact"),
+          openShare: t("tool.detail.openShare"),
           latencySeparator: t("tool.detail.latencySeparator"),
         },
         nativeStatus: {
@@ -300,6 +314,14 @@ export function useProcessTraceLabels(): ProcessTraceLabels {
         detail: t("compaction.detail"),
         range: (fromTurn: number, toTurn: number) => t("compaction.range", { fromTurn, toTurn }),
         tokens: (sourceTokens: number, summaryTokens: number) => t("compaction.tokens", { sourceTokens, summaryTokens }),
+      },
+      recalled: {
+        title: t("recalled.title"),
+        count: (count: number) => t("recalled.count", { count }),
+        loading: t("recalled.loading"),
+        close: t("recalled.close"),
+        loadFailed: t("recalled.loadFailed"),
+        sessionExpired: t("recalled.sessionExpired"),
       },
     }),
     [t],

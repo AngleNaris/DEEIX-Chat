@@ -17,7 +17,7 @@ import {
   toBranchKey,
 } from "@/features/chat/model/chat-thread";
 import type { ChatAreaMessage } from "@/features/chat/types/messages";
-import type { GroupRunState } from "@/features/agent-groups/model/group-run-store";
+import { rebuildGroupAttemptTrace, type GroupRunState } from "@/features/agent-groups/model/group-run-store";
 import { cloneSharedConversation, getSharedConversation } from "@/shared/api/conversation";
 import type {
   MessageDTO,
@@ -158,17 +158,27 @@ function toStaticGroupRun(timeline: PublicSharedGroupRunTimelineDTO): GroupRunSt
         model: step.actor.model,
       },
       status: step.status,
-      attempts: step.attempts.map((attempt) => ({
-        attemptID: attempt.attemptID,
-        attemptNumber: attempt.attemptNumber,
-        status: attempt.status,
-        output: attempt.output,
-        errorCode: attempt.errorCode,
-        startedAt: attempt.startedAt,
-        endedAt: attempt.endedAt ?? undefined,
-        updatedAt: attempt.updatedAt,
-        lastEventAt: 0,
-      })),
+      attempts: step.attempts.map((attempt) => {
+        // 分享快照同样携带持久化的思维/工具调用，重建后与普通会话的呈现保持一致。
+        const { think, tools } = rebuildGroupAttemptTrace(
+          attempt.thinkMarkdown,
+          attempt.toolCallsJSON,
+          attempt.updatedAt,
+        );
+        return {
+          attemptID: attempt.attemptID,
+          attemptNumber: attempt.attemptNumber,
+          status: attempt.status,
+          think,
+          tools,
+          output: attempt.output,
+          errorCode: attempt.errorCode,
+          startedAt: attempt.startedAt,
+          endedAt: attempt.endedAt ?? undefined,
+          updatedAt: attempt.updatedAt,
+          lastEventAt: 0,
+        };
+      }),
       startedAt: step.startedAt,
       endedAt: step.endedAt ?? undefined,
       updatedAt: step.updatedAt,

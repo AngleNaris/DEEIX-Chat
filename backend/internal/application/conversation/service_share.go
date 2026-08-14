@@ -37,13 +37,13 @@ type ConversationShareResult struct {
 
 // PublicSharedConversationResult 是公开分享页可读取的快照内容。
 type PublicSharedConversationResult struct {
-	ShareID           string
-	Title             string
-	Model             string
-	CreatedAt         time.Time
-	LastAccessedAt    *time.Time
-	Messages          []model.Message
-	RunModels         map[string]PublicSharedRunModel
+	ShareID        string
+	Title          string
+	Model          string
+	CreatedAt      time.Time
+	LastAccessedAt *time.Time
+	Messages       []model.Message
+	RunModels      map[string]PublicSharedRunModel
 	// GroupRuns 是群组会话的中间过程时间线（key: 消息 RunID）。
 	// 由 chat_agent_group_runs/steps/attempts 重建并脱敏：剥离成员内部指令、
 	// 工具输入与失败诊断，仅保留公开可展示的成员活动过程。
@@ -53,28 +53,28 @@ type PublicSharedConversationResult struct {
 
 // PublicGroupRunTimeline 是公开分享页可展示的群组运行中间过程（对齐前端 GroupRunState）。
 type PublicGroupRunTimeline struct {
-	GroupRunID       string                     `json:"groupRunID"`
-	Status           string                     `json:"status"`
-	Steps            []PublicGroupRunStep       `json:"steps"`
-	CurrentStepID    string                     `json:"currentStepID"`
-	CurrentAttemptID string                     `json:"currentAttemptID"`
-	ErrorCode        string                     `json:"errorCode,omitempty"`
-	StartedAt        time.Time                  `json:"startedAt"`
-	EndedAt          *time.Time                 `json:"endedAt" extensions:"x-nullable,!x-omitempty"`
-	UpdatedAt        time.Time                  `json:"updatedAt"`
+	GroupRunID       string               `json:"groupRunID"`
+	Status           string               `json:"status"`
+	Steps            []PublicGroupRunStep `json:"steps"`
+	CurrentStepID    string               `json:"currentStepID"`
+	CurrentAttemptID string               `json:"currentAttemptID"`
+	ErrorCode        string               `json:"errorCode,omitempty"`
+	StartedAt        time.Time            `json:"startedAt"`
+	EndedAt          *time.Time           `json:"endedAt" extensions:"x-nullable,!x-omitempty"`
+	UpdatedAt        time.Time            `json:"updatedAt"`
 }
 
 // PublicGroupRunStep 群组中间过程的单个逻辑步骤。
 type PublicGroupRunStep struct {
-	StepID       string                   `json:"stepID"`
-	Sequence     int                      `json:"sequence"`
-	StepType     string                   `json:"stepType"` // supervisor_decide | member_execute
-	Actor        PublicGroupRunActor      `json:"actor"`
-	Status       string                   `json:"status"`
-	Attempts     []PublicGroupRunAttempt  `json:"attempts"`
-	StartedAt    time.Time                `json:"startedAt"`
-	EndedAt      *time.Time               `json:"endedAt" extensions:"x-nullable,!x-omitempty"`
-	UpdatedAt    time.Time                `json:"updatedAt"`
+	StepID    string                  `json:"stepID"`
+	Sequence  int                     `json:"sequence"`
+	StepType  string                  `json:"stepType"` // supervisor_decide | member_execute
+	Actor     PublicGroupRunActor     `json:"actor"`
+	Status    string                  `json:"status"`
+	Attempts  []PublicGroupRunAttempt `json:"attempts"`
+	StartedAt time.Time               `json:"startedAt"`
+	EndedAt   *time.Time              `json:"endedAt" extensions:"x-nullable,!x-omitempty"`
+	UpdatedAt time.Time               `json:"updatedAt"`
 }
 
 // PublicGroupRunActor 步骤执行者（主管/成员）的公开展示信息。
@@ -89,14 +89,16 @@ type PublicGroupRunActor struct {
 
 // PublicGroupRunAttempt 步骤的一次执行尝试（只保留正文输出与状态）。
 type PublicGroupRunAttempt struct {
-	AttemptID      string     `json:"attemptID"`
-	AttemptNumber  int        `json:"attemptNumber"`
-	Status         string     `json:"status"`
-	Output         string     `json:"output"`
-	ErrorCode      string     `json:"errorCode,omitempty"`
-	StartedAt      time.Time  `json:"startedAt"`
-	EndedAt        *time.Time `json:"endedAt" extensions:"x-nullable,!x-omitempty"`
-	UpdatedAt      time.Time  `json:"updatedAt"`
+	AttemptID     string     `json:"attemptID"`
+	AttemptNumber int        `json:"attemptNumber"`
+	Status        string     `json:"status"`
+	Output        string     `json:"output"`
+	ThinkMarkdown string     `json:"thinkMarkdown,omitempty"`
+	ToolCallsJSON string     `json:"toolCallsJSON,omitempty"`
+	ErrorCode     string     `json:"errorCode,omitempty"`
+	StartedAt     time.Time  `json:"startedAt"`
+	EndedAt       *time.Time `json:"endedAt" extensions:"x-nullable,!x-omitempty"`
+	UpdatedAt     time.Time  `json:"updatedAt"`
 }
 
 // PublicSharedRunModel 是公开分享页可展示的模型快照。
@@ -1222,9 +1224,12 @@ func buildPublicGroupRunTimeline(detail *domainagentgroup.RunDetail) PublicGroup
 				// 失败诊断不进入公开快照（§18：内部失败诊断不外泄）。
 				Output:    attempt.OutputMarkdown,
 				ErrorCode: attempt.ErrorCode,
-				StartedAt: attempt.StartedAt,
-				EndedAt:   attempt.EndedAt,
-				UpdatedAt: attempt.UpdatedAt,
+				// 思维过程与工具调用随公开快照下发，保证分享页与普通会话呈现一致。
+				ThinkMarkdown: attempt.ThinkMarkdown,
+				ToolCallsJSON: attempt.ToolCallsJSON,
+				StartedAt:     attempt.StartedAt,
+				EndedAt:       attempt.EndedAt,
+				UpdatedAt:     attempt.UpdatedAt,
 			})
 			if publicStep.Actor.Model == "" && attempt.ResolvedModel != "" {
 				publicStep.Actor.Model = attempt.ResolvedModel

@@ -127,6 +127,8 @@ type AgentGroupStepAttemptResponse struct {
 	ErrorCode      string     `json:"errorCode"`
 	ErrorMessage   string     `json:"errorMessage"`
 	OutputMarkdown string     `json:"outputMarkdown"`
+	ThinkMarkdown  string     `json:"thinkMarkdown"`
+	ToolCallsJSON  string     `json:"toolCallsJSON"`
 	StartedAt      time.Time  `json:"startedAt"`
 	EndedAt        *time.Time `json:"endedAt"`
 	CreatedAt      time.Time  `json:"createdAt"`
@@ -142,6 +144,8 @@ func toAgentGroupStepAttemptResponse(item *domainagentgroup.Attempt) AgentGroupS
 		ErrorCode:      item.ErrorCode,
 		ErrorMessage:   item.ErrorMessage,
 		OutputMarkdown: item.OutputMarkdown,
+		ThinkMarkdown:  item.ThinkMarkdown,
+		ToolCallsJSON:  item.ToolCallsJSON,
 		StartedAt:      item.StartedAt,
 		EndedAt:        item.EndedAt,
 		CreatedAt:      item.CreatedAt,
