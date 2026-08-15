@@ -22,48 +22,9 @@ import (
 
 // ResolveRoute 解析模型路由，应用权重随机负载均衡与两级熔断过滤。
 func (s *Service) ResolveRoute(ctx context.Context, input ResolveRouteInput) (*ResolvedRoute, error) {
-	platformModelName, err := normalizePlatformModelName(input.PlatformModelName)
-	if err != nil {
-		return nil, ErrModelNotFound
-	}
-	platformModel, err := s.repo.GetActiveModelByName(ctx, platformModelName)
+	available, err := s.resolveRouteReferences(ctx, input)
 	if err != nil {
 		return nil, err
-	}
-	if !routeScopeAllowsModelAccess(input.Scope, platformModel.AccessScope) {
-		return nil, ErrModelAccessDenied
-	}
-	if normalizeRouteScope(input.Scope) == RouteScopeUser && input.UserID > 0 {
-		accessible, err := s.isModelAccessible(ctx, platformModel.ID, input.UserID)
-		if err != nil {
-			return nil, err
-		}
-		if !accessible {
-			return nil, ErrModelAccessDenied
-		}
-	}
-
-	rows, err := s.repo.ListActiveRoutesByModel(ctx, platformModelName)
-	if err != nil {
-		return nil, err
-	}
-	if len(rows) == 0 {
-		return nil, ErrRouteNotFound
-	}
-
-	excludedRouteIDs := makeRouteIDSet(input.ExcludedRouteIDs)
-	available := make([]repository.ChannelUpstreamRouteRow, 0, len(rows))
-	for _, row := range rows {
-		if _, excluded := excludedRouteIDs[row.RouteID]; excluded {
-			continue
-		}
-		if !IsRouteAllowedForTask(input.TaskType, row.ModelKindsJSON, row.Protocol) {
-			continue
-		}
-		available = append(available, row)
-	}
-	if len(available) == 0 {
-		return nil, ErrAllRoutesUnavailable
 	}
 
 	for start := 0; start < len(available); {
@@ -74,16 +35,6 @@ func (s *Service) ResolveRoute(ctx context.Context, input ResolveRouteInput) (*R
 			row := available[start]
 			start++
 
-			if row.UpstreamModelID == 0 || strings.TrimSpace(row.BindingCode) == "" || strings.TrimSpace(row.UpstreamModelName) == "" {
-				continue
-			}
-			if !llm.IsImplementedAdapter(row.Protocol) {
-				continue
-			}
-			if err := s.validateUpstreamBaseURL(row.BaseURL); err != nil {
-				s.warn("unsafe_upstream_base_url_skipped", zap.Uint("upstream_id", row.UpstreamID), zap.Error(err))
-				continue
-			}
 			if s.isUpstreamRateLimited(ctx, row.UpstreamID) {
 				continue
 			}
@@ -143,6 +94,84 @@ func (s *Service) ResolveRoute(ctx context.Context, input ResolveRouteInput) (*R
 	}
 
 	return nil, ErrAllRoutesUnavailable
+}
+
+// ValidateModelRouteReference validates an explicit model reference without selecting a route,
+// API key, or half-open circuit probe. Runtime availability remains the executor's responsibility.
+func (s *Service) ValidateModelRouteReference(ctx context.Context, input ResolveRouteInput) error {
+	_, err := s.resolveRouteReferences(ctx, input)
+	return err
+}
+
+func (s *Service) resolveRouteReferences(ctx context.Context, input ResolveRouteInput) ([]repository.ChannelUpstreamRouteRow, error) {
+	platformModelName, err := normalizePlatformModelName(input.PlatformModelName)
+	if err != nil {
+		return nil, ErrModelNotFound
+	}
+	platformModel, err := s.repo.GetActiveModelByName(ctx, platformModelName)
+	if err != nil {
+		return nil, err
+	}
+	if !routeScopeAllowsModelAccess(input.Scope, platformModel.AccessScope) {
+		return nil, ErrModelAccessDenied
+	}
+	if normalizeRouteScope(input.Scope) == RouteScopeUser && input.UserID > 0 {
+		accessible, err := s.isModelAccessible(ctx, platformModel.ID, input.UserID)
+		if err != nil {
+			return nil, err
+		}
+		if !accessible {
+			return nil, ErrModelAccessDenied
+		}
+	}
+
+	rows, err := s.repo.ListActiveRoutesByModel(ctx, platformModelName)
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return nil, ErrRouteNotFound
+	}
+
+	excludedRouteIDs := makeRouteIDSet(input.ExcludedRouteIDs)
+	available := make([]repository.ChannelUpstreamRouteRow, 0, len(rows))
+	for _, row := range rows {
+		if _, excluded := excludedRouteIDs[row.RouteID]; excluded {
+			continue
+		}
+		if !IsRouteAllowedForTask(input.TaskType, row.ModelKindsJSON, row.Protocol) {
+			continue
+		}
+		if row.UpstreamModelID == 0 || row.UpstreamID == 0 || strings.TrimSpace(row.BindingCode) == "" || strings.TrimSpace(row.UpstreamModelName) == "" {
+			continue
+		}
+		if !llm.IsImplementedAdapter(row.Protocol) {
+			continue
+		}
+		if err := s.validateUpstreamBaseURL(row.BaseURL); err != nil {
+			s.warn("unsafe_upstream_base_url_skipped", zap.Uint("upstream_id", row.UpstreamID), zap.Error(err))
+			continue
+		}
+		keyCfg, err := s.parseAPIKeysConfig(row.APIKeysEnc)
+		if err != nil || !hasActiveRouteAPIKey(keyCfg) {
+			continue
+		}
+		available = append(available, row)
+	}
+	if len(available) == 0 {
+		return nil, ErrAllRoutesUnavailable
+	}
+	return available, nil
+}
+
+func hasActiveRouteAPIKey(cfg domainchannel.APIKeysConfig) bool {
+	for _, item := range cfg.Keys {
+		status := strings.TrimSpace(item.Status)
+		if (status == "" || status == "active") && strings.TrimSpace(item.Key) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func makeRouteIDSet(routeIDs []uint) map[uint]struct{} {

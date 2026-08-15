@@ -58,6 +58,13 @@ type defaultRouteResolver interface {
 	ResolveDefaultRoute(ctx context.Context, input channel.ResolveRouteInput) (*channel.ResolvedRoute, error)
 }
 
+// agentGroupRoutePreflightResolver 仅校验群组快照中的模型引用并冻结默认模型名，
+// 不选择具体执行路由、API key 或半开熔断探针。
+type agentGroupRoutePreflightResolver interface {
+	ValidateModelRouteReference(ctx context.Context, input channel.ResolveRouteInput) error
+	ResolveDefaultModel(ctx context.Context, input channel.ResolveRouteInput) (string, error)
+}
+
 type memoryRecorder interface {
 	UpsertUserMemory(ctx context.Context, userID uint, memoryKey string, value string, scope string, updatedBy string) error
 	// DeleteUserMemory 供平台工具 delete_memory 删除用户长期记忆。

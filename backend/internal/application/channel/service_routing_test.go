@@ -18,17 +18,115 @@ import (
 
 type routeResolutionRepositoryStub struct {
 	repository.ChannelRepository
-	model  domainchannel.PlatformModel
-	routes []repository.ChannelUpstreamRouteRow
+	model         domainchannel.PlatformModel
+	routes        []repository.ChannelUpstreamRouteRow
+	models        map[string]domainchannel.PlatformModel
+	routesByModel map[string][]repository.ChannelUpstreamRouteRow
+	modelRows     []repository.ChannelModelListRow
 }
 
-func (r *routeResolutionRepositoryStub) GetActiveModelByName(context.Context, string) (*domainchannel.PlatformModel, error) {
+func (r *routeResolutionRepositoryStub) GetActiveModelByName(_ context.Context, name string) (*domainchannel.PlatformModel, error) {
+	if model, ok := r.models[name]; ok {
+		result := model
+		return &result, nil
+	}
 	model := r.model
 	return &model, nil
 }
 
-func (r *routeResolutionRepositoryStub) ListActiveRoutesByModel(context.Context, string) ([]repository.ChannelUpstreamRouteRow, error) {
+func (r *routeResolutionRepositoryStub) ListActiveRoutesByModel(_ context.Context, name string) ([]repository.ChannelUpstreamRouteRow, error) {
+	if routes, ok := r.routesByModel[name]; ok {
+		return append([]repository.ChannelUpstreamRouteRow(nil), routes...), nil
+	}
 	return append([]repository.ChannelUpstreamRouteRow(nil), r.routes...), nil
+}
+
+func (r *routeResolutionRepositoryStub) ListModels(context.Context, repository.ListChannelModelsInput) ([]repository.ChannelModelListRow, int64, error) {
+	return append([]repository.ChannelModelListRow(nil), r.modelRows...), int64(len(r.modelRows)), nil
+}
+
+func TestValidateModelRouteReferenceDoesNotRequireDynamicRouteSelection(t *testing.T) {
+	const encryptionKey = "test-data-encryption-key-32-bytes"
+	apiKeysEnc, err := encryptAPIKeys(encryptionKey, `{"strategy":"round_robin","keys":[{"key":"sk-test","status":"active"}]}`)
+	if err != nil {
+		t.Fatalf("encryptAPIKeys() error = %v", err)
+	}
+	repo := &routeResolutionRepositoryStub{
+		model: domainchannel.PlatformModel{
+			ID:                10,
+			PlatformModelName: "test-model",
+			AccessScope:       ModelAccessScopePublic,
+		},
+		routes: []repository.ChannelUpstreamRouteRow{{
+			RouteID:           1,
+			UpstreamModelID:   101,
+			UpstreamID:        201,
+			PlatformModelID:   10,
+			PlatformModelName: "test-model",
+			ModelKindsJSON:    `["chat"]`,
+			Protocol:          llm.AdapterOpenAIChatCompletions,
+			BaseURL:           "https://example.com/v1",
+			APIKeysEnc:        apiKeysEnc,
+			BindingCode:       "test-binding",
+			UpstreamModelName: "test-upstream-model",
+		}},
+	}
+	service := NewService(config.Config{DataEncryptionKey: encryptionKey}, repo, nil, nil, nil)
+
+	err = service.ValidateModelRouteReference(t.Context(), ResolveRouteInput{
+		PlatformModelName: "test-model",
+		TaskType:          TaskTypeChat,
+		Scope:             RouteScopeUser,
+		UserID:            11,
+	})
+	if err != nil {
+		t.Fatalf("ValidateModelRouteReference() error = %v", err)
+	}
+}
+
+func TestResolveDefaultModelSkipsStructurallyUnusableCandidate(t *testing.T) {
+	const encryptionKey = "test-data-encryption-key-32-bytes"
+	apiKeysEnc, err := encryptAPIKeys(encryptionKey, `{"strategy":"failover","keys":[{"key":"sk-test","status":"active"}]}`)
+	if err != nil {
+		t.Fatalf("encryptAPIKeys() error = %v", err)
+	}
+	first := domainchannel.PlatformModel{ID: 10, PlatformModelName: "first-model", AccessScope: ModelAccessScopePublic, Status: "active", KindsJSON: `["chat"]`}
+	second := domainchannel.PlatformModel{ID: 11, PlatformModelName: "second-model", AccessScope: ModelAccessScopePublic, Status: "active", KindsJSON: `["chat"]`}
+	repo := &routeResolutionRepositoryStub{
+		models: map[string]domainchannel.PlatformModel{
+			first.PlatformModelName:  first,
+			second.PlatformModelName: second,
+		},
+		modelRows: []repository.ChannelModelListRow{
+			{PlatformModel: first, ActiveSourceCount: 1},
+			{PlatformModel: second, ActiveSourceCount: 1},
+		},
+		routesByModel: map[string][]repository.ChannelUpstreamRouteRow{
+			first.PlatformModelName: {{
+				RouteID: 1, UpstreamModelID: 101, UpstreamID: 201, PlatformModelID: first.ID,
+				PlatformModelName: first.PlatformModelName, ModelKindsJSON: `["chat"]`, Protocol: "unsupported_adapter",
+				BaseURL: "https://first.example.com/v1", APIKeysEnc: apiKeysEnc, BindingCode: "first-binding", UpstreamModelName: "first-upstream-model",
+			}},
+			second.PlatformModelName: {{
+				RouteID: 2, UpstreamModelID: 102, UpstreamID: 202, PlatformModelID: second.ID,
+				PlatformModelName: second.PlatformModelName, ModelKindsJSON: `["chat"]`, Protocol: llm.AdapterOpenAIChatCompletions,
+				BaseURL: "https://second.example.com/v1", APIKeysEnc: apiKeysEnc, BindingCode: "second-binding", UpstreamModelName: "second-upstream-model",
+			}},
+		},
+	}
+	service := NewService(config.Config{DataEncryptionKey: encryptionKey}, repo, nil, nil, nil)
+
+	modelName, err := service.ResolveDefaultModel(t.Context(), ResolveRouteInput{
+		TaskType: TaskTypeChat,
+		Scope:    RouteScopeUser,
+		UserID:   11,
+	})
+	if err != nil {
+		t.Fatalf("ResolveDefaultModel() error = %v", err)
+	}
+	if modelName != second.PlatformModelName {
+		t.Fatalf("ResolveDefaultModel() = %q, want %q", modelName, second.PlatformModelName)
+	}
 }
 
 func TestResolveRouteExcludesPreviouslyAttemptedRoutes(t *testing.T) {

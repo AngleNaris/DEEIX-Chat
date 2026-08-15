@@ -1209,9 +1209,29 @@ func (s *Service) buildAgentGroupRunSnapshot(ctx context.Context, input SendMess
 
 	var defaultModel string
 	defaultModelResolved := false
+	validatedModels := make(map[string]struct{})
+	preflight, ok := s.routeResolver.(agentGroupRoutePreflightResolver)
+	if !ok {
+		return nil, ErrModelRouteNotConfigured
+	}
 	resolveEffectiveModel := func(roleModel, memberModel string) (string, error) {
 		effectiveModel := domainagentgroup.ResolveEffectiveModel(roleModel, memberModel, conversation.Model)
 		if effectiveModel != "" {
+			if _, ok := validatedModels[effectiveModel]; ok {
+				return effectiveModel, nil
+			}
+			err := preflight.ValidateModelRouteReference(ctx, channel.ResolveRouteInput{
+				PlatformModelName: effectiveModel,
+				TaskType:          channel.TaskTypeChat,
+				Scope:             channel.RouteScopeUser,
+				UserID:            input.UserID,
+				ConversationID:    input.ConversationID,
+				RequestID:         strings.TrimSpace(input.RequestID),
+			})
+			if err != nil {
+				return "", mapAgentGroupRouteError(err)
+			}
+			validatedModels[effectiveModel] = struct{}{}
 			return effectiveModel, nil
 		}
 		if defaultModelResolved {
@@ -1272,14 +1292,11 @@ func (s *Service) buildAgentGroupRunSnapshot(ctx context.Context, input SendMess
 // resolveAgentGroupDefaultModel 将当前默认聊天模型冻结到运行快照。
 // 成员、角色或会话显式配置模型时不会进入该兜底，执行时仍按原模型失败关闭。
 func (s *Service) resolveAgentGroupDefaultModel(ctx context.Context, input SendMessageInput) (string, error) {
-	if s.routeResolver == nil {
-		return "", ErrModelRouteNotConfigured
-	}
-	resolver, ok := s.routeResolver.(defaultRouteResolver)
+	resolver, ok := s.routeResolver.(agentGroupRoutePreflightResolver)
 	if !ok {
 		return "", ErrModelRouteNotConfigured
 	}
-	route, err := resolver.ResolveDefaultRoute(ctx, channel.ResolveRouteInput{
+	modelName, err := resolver.ResolveDefaultModel(ctx, channel.ResolveRouteInput{
 		TaskType:       channel.TaskTypeChat,
 		Scope:          channel.RouteScopeUser,
 		UserID:         input.UserID,
@@ -1287,25 +1304,26 @@ func (s *Service) resolveAgentGroupDefaultModel(ctx context.Context, input SendM
 		RequestID:      strings.TrimSpace(input.RequestID),
 	})
 	if err != nil {
-		if errors.Is(err, channel.ErrModelAccessDenied) {
-			return "", ErrModelAccessDenied
-		}
-		if errors.Is(err, channel.ErrRouteNotFound) || errors.Is(err, channel.ErrModelNotFound) {
-			return "", ErrModelRouteNotConfigured
-		}
-		if errors.Is(err, channel.ErrAllRoutesUnavailable) {
-			return "", wrapUpstreamRequestError(err)
-		}
-		return "", err
+		return "", mapAgentGroupRouteError(err)
 	}
-	if route == nil {
-		return "", ErrModelRouteNotConfigured
-	}
-	modelName := strings.TrimSpace(route.PlatformModelName)
+	modelName = strings.TrimSpace(modelName)
 	if modelName == "" {
 		return "", ErrModelRouteNotConfigured
 	}
 	return modelName, nil
+}
+
+func mapAgentGroupRouteError(err error) error {
+	if errors.Is(err, channel.ErrModelAccessDenied) {
+		return ErrModelAccessDenied
+	}
+	if errors.Is(err, channel.ErrRouteNotFound) || errors.Is(err, channel.ErrModelNotFound) {
+		return ErrModelRouteNotConfigured
+	}
+	if errors.Is(err, channel.ErrAllRoutesUnavailable) {
+		return wrapUpstreamRequestError(err)
+	}
+	return err
 }
 
 // agentGroupFeatureEnabled 读取 agent_group.enabled（默认关闭）。

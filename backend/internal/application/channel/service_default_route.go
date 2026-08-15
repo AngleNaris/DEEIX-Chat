@@ -5,6 +5,27 @@ import (
 	"strings"
 )
 
+// ResolveDefaultModel 返回指定任务类型的第一个可用模型名，但不选择具体路由、API key 或半开探针。
+func (s *Service) ResolveDefaultModel(ctx context.Context, input ResolveRouteInput) (string, error) {
+	models, err := s.ListActiveModels(ctx, 0)
+	if err != nil {
+		return "", err
+	}
+	for _, item := range models {
+		name := strings.TrimSpace(item.PlatformModelName)
+		if name == "" || !defaultRouteModelMatchesTask(item.KindsJSON, input.TaskType) {
+			continue
+		}
+		candidate := input
+		candidate.PlatformModelName = name
+		candidate.ExcludedRouteIDs = nil
+		if err := s.ValidateModelRouteReference(ctx, candidate); err == nil {
+			return name, nil
+		}
+	}
+	return "", ErrAllRoutesUnavailable
+}
+
 // ResolveDefaultRoute 返回指定任务类型的第一个可路由模型。
 //
 // 内部服务任务使用 follow 时，如果当前会话模型不支持该任务类型，会走这里兜底；
