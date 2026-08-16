@@ -5,14 +5,17 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	pathpkg "path"
 	"strconv"
 	"strings"
+	"time"
 
 	appstorage "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/objectstorage"
 	domainskill "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/skill"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/objectstore"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
+	"github.com/google/uuid"
 )
 
 const (
@@ -173,7 +176,7 @@ func (s *Service) UpdateUser(ctx context.Context, userID uint, id uint, input Pa
 	if item.Scope != domainskill.ScopeUser || item.OwnerUserID != userID {
 		return nil, ErrSkillNotFound
 	}
-	return s.update(ctx, id, userID, input)
+	return s.update(ctx, id, userID, item.UpdatedAt, input)
 }
 
 // UpdateBuiltin 更新管理员内置技能。
@@ -188,7 +191,7 @@ func (s *Service) UpdateBuiltin(ctx context.Context, actorUserID uint, id uint, 
 	if item.Scope != domainskill.ScopeBuiltin {
 		return nil, ErrSkillNotFound
 	}
-	return s.update(ctx, id, actorUserID, input)
+	return s.update(ctx, id, actorUserID, item.UpdatedAt, input)
 }
 
 // DeleteUser 删除当前用户自定义技能。
@@ -203,10 +206,10 @@ func (s *Service) DeleteUser(ctx context.Context, userID uint, id uint) error {
 	if item.Scope != domainskill.ScopeUser || item.OwnerUserID != userID {
 		return ErrSkillNotFound
 	}
-	if err := s.deletePackageFiles(ctx, *item); err != nil {
-		return err
+	if err := s.repo.DeleteSkill(ctx, id, &item.UpdatedAt); err != nil {
+		return mapRepositoryError(err)
 	}
-	return mapRepositoryError(s.repo.DeleteSkill(ctx, id))
+	return s.deletePackageFiles(ctx, *item)
 }
 
 // DeleteBuiltin 删除管理员内置技能。
@@ -221,10 +224,10 @@ func (s *Service) DeleteBuiltin(ctx context.Context, actorUserID uint, id uint) 
 	if item.Scope != domainskill.ScopeBuiltin {
 		return ErrSkillNotFound
 	}
-	if err := s.deletePackageFiles(ctx, *item); err != nil {
-		return err
+	if err := s.repo.DeleteSkill(ctx, id, &item.UpdatedAt); err != nil {
+		return mapRepositoryError(err)
 	}
-	return mapRepositoryError(s.repo.DeleteSkill(ctx, id))
+	return s.deletePackageFiles(ctx, *item)
 }
 
 // PreviewPackage 解析上传的技能包并返回元数据预览，不落库。
@@ -318,7 +321,11 @@ func (s *Service) GetPackageFile(ctx context.Context, userID uint, skillID uint,
 	if err != nil {
 		return nil, err
 	}
-	reader, _, err := store.Open(ctx, packageObjectKey(item.Scope, item.ID, rel))
+	objectKey := packageFileObjectKey(*item, *target)
+	if objectKey == "" {
+		return nil, ErrPackageFileNotFound
+	}
+	reader, _, err := store.Open(ctx, objectKey)
 	if err != nil {
 		if errors.Is(err, objectstore.ErrNotFound) {
 			return nil, ErrPackageFileNotFound
@@ -361,25 +368,30 @@ func (s *Service) importPackageData(ctx context.Context, zipData []byte, scope s
 	return s.importPackage(ctx, item, contents)
 }
 
-// importPackage 创建技能行并写入包文件；任一步失败时回滚已写入的文件。
+// importPackage 创建技能行并写入包文件；任一步失败时清理本次生成的对象。
 func (s *Service) importPackage(ctx context.Context, item *domainskill.Skill, contents map[string][]byte) (*domainskill.Skill, error) {
-	result, err := s.repo.CreateSkill(ctx, item)
+	createItem := *item
+	createItem.PackageFiles = nil
+	result, err := s.repo.CreateSkill(ctx, &createItem)
 	if err != nil {
 		return nil, mapRepositoryError(err)
 	}
-	if err := s.writePackageFiles(ctx, result, contents); err != nil {
-		_ = s.repo.DeleteSkill(ctx, result.ID)
+	staged := *result
+	staged.PackageFiles = packageFilesWithObjectKeys(result.Scope, result.ID, item.PackageFiles)
+	if err := s.writePackageFiles(ctx, &staged, contents); err != nil {
+		_ = s.repo.DeleteSkill(ctx, result.ID, &result.UpdatedAt)
 		return nil, err
 	}
-	filesJSON := encodePackageFilesJSON(item.PackageFiles)
+	filesJSON := encodePackageFilesJSON(staged.PackageFiles)
 	patched, err := s.repo.PatchSkill(ctx, result.ID, repository.SkillPatch{
+		ExpectedUpdatedAt:  &result.UpdatedAt,
 		PackageFilesJSON:   &filesJSON,
 		UpdatedByUserID:    item.UpdatedByUserID,
 		UpdatedByUserIDSet: true,
 	})
 	if err != nil {
-		_ = s.deletePackageFiles(ctx, *result)
-		_ = s.repo.DeleteSkill(ctx, result.ID)
+		_ = s.deletePackageFiles(ctx, staged)
+		_ = s.repo.DeleteSkill(ctx, result.ID, &result.UpdatedAt)
 		return nil, mapRepositoryError(err)
 	}
 	return patched, nil
@@ -391,33 +403,37 @@ func (s *Service) replacePackage(ctx context.Context, item domainskill.Skill, zi
 	if err != nil {
 		return nil, err
 	}
+	staged := item
+	staged.PackageFiles = packageFilesWithObjectKeys(item.Scope, item.ID, preview.Files)
+	if err := s.writePackageFiles(ctx, &staged, contents); err != nil {
+		return nil, err
+	}
+	filesJSON := encodePackageFilesJSON(staged.PackageFiles)
 	patch := repository.SkillPatch{
+		ExpectedUpdatedAt:  &item.UpdatedAt,
 		Title:              &preview.Title,
 		Trigger:            &preview.Trigger,
 		Description:        &preview.Description,
 		Markdown:           &preview.Markdown,
 		PackageRootDir:     &preview.RootDir,
-		PackageFilesJSON:   ptrString(encodePackageFilesJSON(preview.Files)),
+		PackageFilesJSON:   &filesJSON,
 		UpdatedByUserID:    item.UpdatedByUserID,
 		UpdatedByUserIDSet: true,
 	}
-	// 先写新文件再更新元数据；失败时清理新文件并保留旧状态。
-	if err := s.writePackageFiles(ctx, &item, contents); err != nil {
-		return nil, err
-	}
 	patched, err := s.repo.PatchSkill(ctx, item.ID, patch)
 	if err != nil {
-		_ = s.deletePackageFiles(ctx, item)
+		_ = s.deletePackageFiles(ctx, staged)
 		return nil, mapRepositoryError(err)
 	}
-	// 删除旧清单中不再存在的文件（同名文件已被新内容覆盖）。
-	if err := s.deleteStalePackageFiles(ctx, item, contents); err != nil {
-		return nil, err
+	if err := s.deletePackageFiles(ctx, item); err != nil {
+		// Manifest 已切换到新 generation；旧对象清理失败只告警，
+		// 不把已成功的替换标记为失败（对象泄漏由存储层巡检兜底）。
+		slog.Warn("remove previous skill package generation failed", "skill_id", item.ID, "err", err)
 	}
 	return patched, nil
 }
 
-// writePackageFiles 将包文件写入对象存储，key = skills/{scope}/{skillID}/{path}。
+// writePackageFiles 将完整包版本写入其 manifest 指定的对象 key。
 func (s *Service) writePackageFiles(ctx context.Context, item *domainskill.Skill, contents map[string][]byte) error {
 	if len(contents) == 0 {
 		return nil
@@ -429,28 +445,77 @@ func (s *Service) writePackageFiles(ctx context.Context, item *domainskill.Skill
 	if err != nil {
 		return err
 	}
+	attempted, err := putPackageContents(ctx, store, *item, contents)
+	if err != nil {
+		if cleanupErr := deletePackageObjectKeys(ctx, store, attempted); cleanupErr != nil {
+			slog.Warn("cleanup partial package objects failed", "skill_id", item.ID, "err", cleanupErr)
+		}
+	}
+	return err
+}
+
+func putPackageContents(
+	ctx context.Context,
+	store objectstore.Store,
+	item domainskill.Skill,
+	contents map[string][]byte,
+) ([]string, error) {
+	attempted := make([]string, 0, len(contents))
 	for rel, data := range contents {
-		key := packageObjectKey(item.Scope, item.ID, rel)
+		file := packageFileByPath(item.PackageFiles, rel)
+		if file == nil {
+			return attempted, ErrInvalidPackage
+		}
+		key := packageFileObjectKey(item, *file)
+		if key == "" {
+			return attempted, ErrInvalidPackage
+		}
+		attempted = append(attempted, key)
 		if _, err := store.Put(ctx, key, bytes.NewReader(data), objectstore.PutOptions{
 			SizeBytes:   int64(len(data)),
 			ContentType: "application/octet-stream",
 		}); err != nil {
-			return err
+			return attempted, err
+		}
+	}
+	return attempted, nil
+}
+
+func packageFilesWithObjectKeys(scope string, skillID uint, files []domainskill.PackageFile) []domainskill.PackageFile {
+	generation := strings.ReplaceAll(uuid.NewString(), "-", "")
+	result := make([]domainskill.PackageFile, 0, len(files))
+	for _, file := range files {
+		file.ObjectKey = packageGenerationObjectKey(scope, skillID, generation, file.Path)
+		result = append(result, file)
+	}
+	return result
+}
+
+func packageFileByPath(files []domainskill.PackageFile, relPath string) *domainskill.PackageFile {
+	relPath = normalizePackagePath(relPath)
+	for index := range files {
+		if normalizePackagePath(files[index].Path) == relPath {
+			return &files[index]
 		}
 	}
 	return nil
 }
 
-// deletePackageFiles 删除技能包在对象存储中的全部文件。
-func (s *Service) deletePackageFiles(ctx context.Context, item domainskill.Skill) error {
-	if !item.IsPackage() || len(item.PackageFiles) == 0 {
-		return nil
+func deletePackageObjectKeys(ctx context.Context, store objectstore.Store, keys []string) error {
+	var cleanupErr error
+	for _, key := range keys {
+		if key == "" {
+			continue
+		}
+		if err := store.Delete(ctx, key); err != nil && !errors.Is(err, objectstore.ErrNotFound) {
+			cleanupErr = errors.Join(cleanupErr, err)
+		}
 	}
-	return s.deleteStalePackageFiles(ctx, item, nil)
+	return cleanupErr
 }
 
-// deleteStalePackageFiles 删除对象存储中旧清单的文件；keep 非空时跳过仍存在的路径。
-func (s *Service) deleteStalePackageFiles(ctx context.Context, item domainskill.Skill, keep map[string][]byte) error {
+// deletePackageFiles 删除技能包当前 manifest 指向的全部对象。
+func (s *Service) deletePackageFiles(ctx context.Context, item domainskill.Skill) error {
 	if !item.IsPackage() || len(item.PackageFiles) == 0 {
 		return nil
 	}
@@ -462,19 +527,63 @@ func (s *Service) deleteStalePackageFiles(ctx context.Context, item domainskill.
 		return err
 	}
 	for _, file := range item.PackageFiles {
-		if _, exists := keep[file.Path]; exists {
-			continue
+		key := packageFileObjectKey(item, file)
+		if key == "" {
+			return ErrInvalidPackage
 		}
-		if err := store.Delete(ctx, packageObjectKey(item.Scope, item.ID, file.Path)); err != nil {
+		if err := store.Delete(ctx, key); err != nil && !errors.Is(err, objectstore.ErrNotFound) {
 			return err
 		}
 	}
 	return nil
 }
 
-// packageObjectKey 构造包文件的对象存储 key。
+// packageObjectKey 构造旧版包文件的对象存储 key。
 func packageObjectKey(scope string, skillID uint, relPath string) string {
-	return "skills/" + strings.TrimSpace(scope) + "/" + strconv.FormatUint(uint64(skillID), 10) + "/" + normalizePackagePath(relPath)
+	base := packageObjectPrefix(scope, skillID)
+	relPath = normalizePackagePath(relPath)
+	if base == "" || relPath == "" {
+		return ""
+	}
+	return base + relPath
+}
+
+func packageGenerationObjectKey(scope string, skillID uint, generation string, relPath string) string {
+	base := packageObjectPrefix(scope, skillID)
+	generation = strings.TrimSpace(generation)
+	relPath = normalizePackagePath(relPath)
+	if base == "" || generation == "" || strings.ContainsAny(generation, "/\\") || relPath == "" {
+		return ""
+	}
+	return base + generation + "/" + relPath
+}
+
+func packageFileObjectKey(item domainskill.Skill, file domainskill.PackageFile) string {
+	if objectKey := normalizePackageObjectKey(item.Scope, item.ID, file.ObjectKey); objectKey != "" {
+		return objectKey
+	}
+	if strings.TrimSpace(file.ObjectKey) != "" {
+		return ""
+	}
+	return packageObjectKey(item.Scope, item.ID, file.Path)
+}
+
+func normalizePackageObjectKey(scope string, skillID uint, value string) string {
+	base := packageObjectPrefix(scope, skillID)
+	normalized := strings.ReplaceAll(strings.TrimSpace(value), "\\", "/")
+	cleanName := pathpkg.Clean(normalized)
+	if base == "" || cleanName == "." || cleanName != normalized || !strings.HasPrefix(cleanName, base) || len(cleanName) <= len(base) {
+		return ""
+	}
+	return cleanName
+}
+
+func packageObjectPrefix(scope string, skillID uint) string {
+	scope = strings.TrimSpace(scope)
+	if skillID == 0 || (scope != domainskill.ScopeBuiltin && scope != domainskill.ScopeUser) {
+		return ""
+	}
+	return "skills/" + scope + "/" + strconv.FormatUint(uint64(skillID), 10) + "/"
 }
 
 // normalizePackagePath 规范化包内相对路径，拒绝越界路径。
@@ -485,10 +594,6 @@ func normalizePackagePath(value string) string {
 		return ""
 	}
 	return cleanName
-}
-
-func ptrString(value string) *string {
-	return &value
 }
 
 // ListInput 定义技能列表入参。
@@ -528,11 +633,12 @@ func (s *Service) create(ctx context.Context, item *domainskill.Skill) (*domains
 	return result, nil
 }
 
-func (s *Service) update(ctx context.Context, id uint, actorUserID uint, input PatchInput) (*domainskill.Skill, error) {
+func (s *Service) update(ctx context.Context, id uint, actorUserID uint, expectedUpdatedAt time.Time, input PatchInput) (*domainskill.Skill, error) {
 	patch, err := normalizePatchInput(input, actorUserID)
 	if err != nil {
 		return nil, err
 	}
+	patch.ExpectedUpdatedAt = &expectedUpdatedAt
 	item, err := s.repo.PatchSkill(ctx, id, patch)
 	if err != nil {
 		return nil, mapRepositoryError(err)
@@ -652,6 +758,9 @@ func mapRepositoryError(err error) error {
 	}
 	if errors.Is(err, repository.ErrNotFound) {
 		return ErrSkillNotFound
+	}
+	if errors.Is(err, repository.ErrConflict) {
+		return ErrSkillVersionConflict
 	}
 	if errors.Is(err, repository.ErrDuplicate) {
 		return ErrSkillConflict

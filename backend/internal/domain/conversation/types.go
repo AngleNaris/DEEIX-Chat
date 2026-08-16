@@ -332,29 +332,30 @@ type FileObject struct {
 
 // FileObjectProcessing 表示 file_objects 中的服务端处理状态。
 type FileObjectProcessing struct {
-	ID                 uint
-	FileObjectID       uint
-	UserID             uint
-	DetectedMIME       string
-	FileCategory       string
-	ProcessingStatus   string
-	ExtractStatus      string
-	ExtractEngine      string
-	ExtractStoragePath string
-	ExtractChars       int
-	ExtractPages       int
-	PreviewText        string
-	OCRUsed            bool
-	RAGReady           bool
-	RAGReason          string
-	ErrorCode          string
-	ErrorMessage       string
-	ExtractorVersion   string
-	PayloadJSON        string
-	StartedAt          *time.Time
-	CompletedAt        *time.Time
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
+	ID                  uint
+	FileObjectID        uint
+	UserID              uint
+	ExpectedStoragePath string
+	DetectedMIME        string
+	FileCategory        string
+	ProcessingStatus    string
+	ExtractStatus       string
+	ExtractEngine       string
+	ExtractStoragePath  string
+	ExtractChars        int
+	ExtractPages        int
+	PreviewText         string
+	OCRUsed             bool
+	RAGReady            bool
+	RAGReason           string
+	ErrorCode           string
+	ErrorMessage        string
+	ExtractorVersion    string
+	PayloadJSON         string
+	StartedAt           *time.Time
+	CompletedAt         *time.Time
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
 }
 
 // FileChunk 表示文件分片。

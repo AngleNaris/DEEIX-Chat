@@ -3,7 +3,9 @@ package skill
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
+	"time"
 
 	domainskill "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/skill"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/dberror"
@@ -90,6 +92,9 @@ func (r *Repo) CreateSkill(ctx context.Context, item *domainskill.Skill) (*domai
 	}
 	var result domainskill.Skill
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := r.lockUserSkillOwner(tx, record.Scope, record.OwnerUserID); err != nil {
+			return err
+		}
 		if record.SortOrder <= 0 {
 			var maxSortOrder int
 			if err := tx.Model(&model.Skill{}).
@@ -119,11 +124,25 @@ func (r *Repo) PatchSkill(ctx context.Context, id uint, patch repository.SkillPa
 	}
 	var result domainskill.Skill
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var owner model.Skill
+		if err := tx.Select("id", "scope", "owner_user_id").Where("id = ?", id).First(&owner).Error; err != nil {
+			return translateError(err)
+		}
+		if err := r.lockUserSkillOwner(tx, owner.Scope, owner.OwnerUserID); err != nil {
+			return err
+		}
+
 		var record model.Skill
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("id = ?", id).
 			First(&record).Error; err != nil {
 			return translateError(err)
+		}
+		if record.Scope != owner.Scope || record.OwnerUserID != owner.OwnerUserID {
+			return repository.ErrConflict
+		}
+		if patch.ExpectedUpdatedAt != nil && !sameSkillVersion(record.UpdatedAt, *patch.ExpectedUpdatedAt) {
+			return repository.ErrConflict
 		}
 
 		updates := map[string]interface{}{}
@@ -158,8 +177,15 @@ func (r *Repo) PatchSkill(ctx context.Context, id uint, patch repository.SkillPa
 			updates["updated_by_user_id"] = patch.UpdatedByUserID
 		}
 		if len(updates) > 0 {
-			if err := tx.Model(&record).Updates(updates).Error; err != nil {
-				return translateError(err)
+			updates["updated_at"] = nextSkillVersion(record.UpdatedAt)
+			updateResult := tx.Model(&model.Skill{}).
+				Where("id = ? AND updated_at = ?", record.ID, record.UpdatedAt).
+				Updates(updates)
+			if updateResult.Error != nil {
+				return translateError(updateResult.Error)
+			}
+			if updateResult.RowsAffected == 0 {
+				return repository.ErrConflict
 			}
 		}
 		if err := tx.Where("id = ?", id).First(&record).Error; err != nil {
@@ -175,20 +201,59 @@ func (r *Repo) PatchSkill(ctx context.Context, id uint, patch repository.SkillPa
 }
 
 // DeleteSkill 删除技能。
-func (r *Repo) DeleteSkill(ctx context.Context, id uint) error {
+func (r *Repo) DeleteSkill(ctx context.Context, id uint, expectedUpdatedAt *time.Time) error {
 	if id == 0 {
 		return repository.ErrInvalidInput
 	}
 	if err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		result := tx.Delete(&model.Skill{}, id)
+		var owner model.Skill
+		if err := tx.Select("id", "scope", "owner_user_id").Where("id = ?", id).First(&owner).Error; err != nil {
+			return translateError(err)
+		}
+		if err := r.lockUserSkillOwner(tx, owner.Scope, owner.OwnerUserID); err != nil {
+			return err
+		}
+
+		var locked model.Skill
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", id).First(&locked).Error; err != nil {
+			return translateError(err)
+		}
+		if locked.Scope != owner.Scope || locked.OwnerUserID != owner.OwnerUserID {
+			return repository.ErrConflict
+		}
+		if expectedUpdatedAt != nil && !sameSkillVersion(locked.UpdatedAt, *expectedUpdatedAt) {
+			return repository.ErrConflict
+		}
+		result := tx.Where("id = ? AND updated_at = ?", id, locked.UpdatedAt).Delete(&model.Skill{})
 		if result.Error != nil {
 			return result.Error
 		}
 		if result.RowsAffected == 0 {
-			return repository.ErrNotFound
+			return repository.ErrConflict
 		}
 		return tx.Where("skill_id = ?", id).Delete(&model.ConversationProjectSkill{}).Error
 	}); err != nil {
+		return translateError(err)
+	}
+	return nil
+}
+
+func (r *Repo) lockUserSkillOwner(tx *gorm.DB, scope string, ownerUserID uint) error {
+	if strings.TrimSpace(scope) != domainskill.ScopeUser {
+		return nil
+	}
+	if ownerUserID == 0 {
+		return repository.ErrInvalidInput
+	}
+	query := tx.Model(&model.User{}).Select("id").Where("id = ?", ownerUserID)
+	if tx.Dialector != nil && tx.Dialector.Name() != "sqlite" {
+		query = query.Clauses(clause.Locking{Strength: "SHARE"})
+	}
+	var owner model.User
+	if err := query.First(&owner).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return repository.ErrNotFound
+		}
 		return translateError(err)
 	}
 	return nil
@@ -282,11 +347,25 @@ func translateError(err error) error {
 	return err
 }
 
+func sameSkillVersion(current time.Time, expected time.Time) bool {
+	return current.UTC().Truncate(time.Microsecond).Equal(expected.UTC().Truncate(time.Microsecond))
+}
+
+func nextSkillVersion(current time.Time) time.Time {
+	next := time.Now().UTC().Truncate(time.Microsecond)
+	current = current.UTC().Truncate(time.Microsecond)
+	if !next.After(current) {
+		next = current.Add(time.Microsecond)
+	}
+	return next
+}
+
 // packageFileRecord 是包文件清单的持久化形态（领域类型不含 JSON 契约，存储层负责映射）。
 type packageFileRecord struct {
-	Path string `json:"path"`
-	Size int64  `json:"size"`
-	Kind string `json:"kind"`
+	Path      string `json:"path"`
+	Size      int64  `json:"size"`
+	Kind      string `json:"kind"`
+	ObjectKey string `json:"object_key,omitempty"`
 }
 
 func encodePackageFiles(files []domainskill.PackageFile) string {
@@ -295,7 +374,7 @@ func encodePackageFiles(files []domainskill.PackageFile) string {
 	}
 	records := make([]packageFileRecord, 0, len(files))
 	for _, file := range files {
-		records = append(records, packageFileRecord{Path: file.Path, Size: file.Size, Kind: file.Kind})
+		records = append(records, packageFileRecord{Path: file.Path, Size: file.Size, Kind: file.Kind, ObjectKey: file.ObjectKey})
 	}
 	data, err := json.Marshal(records)
 	if err != nil {
@@ -315,7 +394,7 @@ func decodePackageFiles(raw string) []domainskill.PackageFile {
 	}
 	files := make([]domainskill.PackageFile, 0, len(records))
 	for _, record := range records {
-		files = append(files, domainskill.PackageFile{Path: record.Path, Size: record.Size, Kind: record.Kind})
+		files = append(files, domainskill.PackageFile{Path: record.Path, Size: record.Size, Kind: record.Kind, ObjectKey: record.ObjectKey})
 	}
 	return files
 }

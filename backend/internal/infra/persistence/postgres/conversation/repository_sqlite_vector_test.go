@@ -33,7 +33,7 @@ func TestSQLiteVectorStoreSearchesFileAndMessageChunks(t *testing.T) {
 		{1, 0, 0},
 		{0, 1, 0},
 	}
-	if err := repo.ReplaceFileChunks(ctx, 10, fileChunks, fileEmbeddings); err != nil {
+	if err := repo.ReplaceFileChunks(ctx, 10, "", fileChunks, fileEmbeddings); err != nil {
 		t.Fatalf("ReplaceFileChunks() error = %v", err)
 	}
 	fileResults, err := repo.SearchFileChunks(ctx, 1, []uint{10}, []float32{1, 0, 0}, 2)

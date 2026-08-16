@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	appskill "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/skill"
 	domainskill "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/skill"
@@ -34,7 +35,7 @@ func (r routeSkillRepo) PatchSkill(context.Context, uint, repository.SkillPatch)
 	return nil, repository.ErrInvalidInput
 }
 
-func (r routeSkillRepo) DeleteSkill(context.Context, uint) error {
+func (r routeSkillRepo) DeleteSkill(context.Context, uint, *time.Time) error {
 	return repository.ErrInvalidInput
 }
 

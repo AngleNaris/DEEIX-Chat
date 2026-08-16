@@ -3,8 +3,12 @@ package user
 import (
 	"context"
 	"crypto/subtle"
+	"encoding/json"
 	"errors"
 	"fmt"
+	pathpkg "path"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -881,11 +885,36 @@ func (r *Repo) ListLatestSessionActivityByUserIDs(ctx context.Context, userIDs [
 
 // DeleteAccountHard 删除用户主记录及主要用户域数据。
 func (r *Repo) DeleteAccountHard(ctx context.Context, userID uint) error {
-	return translateError(r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	_, err := r.DeleteAccountHardWithStoragePaths(ctx, userID)
+	return err
+}
+
+// DeleteAccountHardWithStoragePaths 原子硬删除账号，并返回提交后可安全清理的对象存储路径。
+func (r *Repo) DeleteAccountHardWithStoragePaths(ctx context.Context, userID uint) ([]string, error) {
+	var storagePaths []string
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		userLockQuery := tx.Model(&model.User{}).Select("id").Where("id = ?", userID)
+		if tx.Dialector != nil && tx.Dialector.Name() != "sqlite" {
+			userLockQuery = userLockQuery.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		var lockedUser model.User
+		if err := userLockQuery.First(&lockedUser).Error; err != nil {
+			return err
+		}
+
+		candidates, err := listAccountStoragePathCandidates(tx, userID)
+		if err != nil {
+			return fmt.Errorf("list account storage paths: %w", err)
+		}
+
 		conversationSubQuery := tx.Unscoped().Model(&model.Conversation{}).Select("id").Where("user_id = ?", userID)
 		projectSubQuery := tx.Unscoped().Model(&model.ConversationProject{}).Select("id").Where("user_id = ?", userID)
-		userSkillSubQuery := tx.Model(&model.Skill{}).Select("id").Where("scope = ? AND owner_user_id = ?", domainskill.ScopeUser, userID)
+		userSkillSubQuery := tx.Unscoped().Model(&model.Skill{}).Select("id").Where("scope = ? AND owner_user_id = ?", domainskill.ScopeUser, userID)
 		runSubQuery := tx.Unscoped().Model(&model.ConversationRun{}).Select("run_id").Where("user_id = ?", userID)
+		roleSubQuery := tx.Unscoped().Model(&model.ConversationRole{}).Select("id").Where("user_id = ?", userID)
+		agentGroupSubQuery := tx.Unscoped().Model(&model.AgentGroup{}).Select("id").Where("user_id = ?", userID)
+		agentGroupRunSubQuery := tx.Unscoped().Model(&model.AgentGroupRun{}).Select("id").Where("user_id = ?", userID)
+		artifactSubQuery := tx.Unscoped().Model(&model.Artifact{}).Select("id").Where("user_id = ?", userID)
 
 		steps := []struct {
 			label string
@@ -931,6 +960,102 @@ func (r *Repo) DeleteAccountHard(ctx context.Context, userID uint) error {
 				label: "identity_trusted_devices",
 				run: func(db *gorm.DB) error {
 					return db.Unscoped().Where("user_id = ?", userID).Delete(&model.TrustedDevice{}).Error
+				},
+			},
+			{
+				label: "agent_group_step_attempts",
+				run: func(db *gorm.DB) error {
+					return db.Unscoped().Where("step_id IN (?)", db.Unscoped().Model(&model.AgentGroupStep{}).Select("id").Where("group_run_id IN (?)", agentGroupRunSubQuery)).Delete(&model.AgentGroupStepAttempt{}).Error
+				},
+			},
+			{
+				label: "agent_group_steps",
+				run: func(db *gorm.DB) error {
+					return db.Unscoped().Where("group_run_id IN (?)", agentGroupRunSubQuery).Delete(&model.AgentGroupStep{}).Error
+				},
+			},
+			{
+				label: "agent_group_runs",
+				run: func(db *gorm.DB) error {
+					return db.Unscoped().Where("user_id = ?", userID).Delete(&model.AgentGroupRun{}).Error
+				},
+			},
+			{
+				label: "agent_group_members",
+				run: func(db *gorm.DB) error {
+					return db.Unscoped().Where("group_id IN (?)", agentGroupSubQuery).Delete(&model.AgentGroupMember{}).Error
+				},
+			},
+			{
+				label: "agent_groups",
+				run: func(db *gorm.DB) error {
+					return db.Unscoped().Where("user_id = ?", userID).Delete(&model.AgentGroup{}).Error
+				},
+			},
+			{
+				label: "conversation_role_mcp_tools",
+				run: func(db *gorm.DB) error {
+					return db.Unscoped().Where("role_id IN (?)", roleSubQuery).Delete(&model.ConversationRoleMCPTool{}).Error
+				},
+			},
+			{
+				label: "conversation_role_skills",
+				run: func(db *gorm.DB) error {
+					return db.Unscoped().Where("role_id IN (?)", roleSubQuery).Delete(&model.ConversationRoleSkill{}).Error
+				},
+			},
+			{
+				label: "conversation_roles",
+				run: func(db *gorm.DB) error {
+					return db.Unscoped().Where("user_id = ?", userID).Delete(&model.ConversationRole{}).Error
+				},
+			},
+			{
+				label: "artifact_shares",
+				run: func(db *gorm.DB) error {
+					return db.Unscoped().Where("artifact_id IN (?) OR user_id = ?", artifactSubQuery, userID).Delete(&model.ArtifactShare{}).Error
+				},
+			},
+			{
+				label: "artifacts",
+				run: func(db *gorm.DB) error {
+					return db.Unscoped().Where("user_id = ?", userID).Delete(&model.Artifact{}).Error
+				},
+			},
+			{
+				label: "conversation_shares",
+				run: func(db *gorm.DB) error {
+					return db.Unscoped().Where("conversation_id IN (?) OR user_id = ?", conversationSubQuery, userID).Delete(&model.ConversationShare{}).Error
+				},
+			},
+			{
+				label: "chat_credentials",
+				run: func(db *gorm.DB) error {
+					return db.Unscoped().Where("user_id = ?", userID).Delete(&model.Credential{}).Error
+				},
+			},
+			{
+				label: "doc_cards",
+				run: func(db *gorm.DB) error {
+					return db.Unscoped().Where("user_id = ?", userID).Delete(&model.DocCard{}).Error
+				},
+			},
+			{
+				label: "dynamic_prompts",
+				run: func(db *gorm.DB) error {
+					return db.Unscoped().Where("user_id = ?", userID).Delete(&model.DynamicPrompt{}).Error
+				},
+			},
+			{
+				label: "user_prompt_presets",
+				run: func(db *gorm.DB) error {
+					return db.Unscoped().Where("scope = ? AND owner_user_id = ?", "user", userID).Delete(&model.PromptPreset{}).Error
+				},
+			},
+			{
+				label: "announcement_user_states",
+				run: func(db *gorm.DB) error {
+					return db.Unscoped().Where("user_id = ?", userID).Delete(&model.AnnouncementUserState{}).Error
 				},
 			},
 			{
@@ -1042,9 +1167,8 @@ func (r *Repo) DeleteAccountHard(ctx context.Context, userID uint) error {
 					return db.Unscoped().Where("user_id = ?", userID).Delete(&model.PermissionGroupUserAccess{}).Error
 				},
 			},
-			// 财务审计事实不在账号硬删除中清理：
-			// billing_usage_ledgers、billing_balance_transactions、billing_payment_orders
-			// 保留调用、余额和支付追溯快照。
+			// 财务审计事实不在账号硬删除中清理：usage reservations、redemptions、
+			// usage ledgers、balance transactions、payment orders 均保留追溯快照。
 			{
 				label: "billing_subscriptions",
 				run: func(db *gorm.DB) error {
@@ -1071,20 +1195,166 @@ func (r *Repo) DeleteAccountHard(ctx context.Context, userID uint) error {
 			}
 		}
 
+		storagePaths, err = filterUnreferencedFileStoragePaths(tx, candidates, 0)
+		if err != nil {
+			return fmt.Errorf("filter file storage paths: %w", err)
+		}
 		return nil
-	}))
-}
-
-// ListDistinctFileStoragePathsByUserID 查询用户文件去重后的存储路径。
-func (r *Repo) ListDistinctFileStoragePathsByUserID(ctx context.Context, userID uint) ([]string, error) {
-	paths := make([]string, 0)
-	if err := r.db.WithContext(ctx).
-		Model(&model.FileObject{}).
-		Distinct("storage_path").
-		Where("user_id = ? AND storage_path <> ''", userID).
-		Pluck("storage_path", &paths).Error; err != nil {
+	})
+	if err != nil {
 		return nil, translateError(err)
 	}
+	return storagePaths, nil
+}
+
+type fileStoragePaths struct {
+	StoragePath        string
+	ExtractStoragePath string
+}
+
+type skillPackageFileRecord struct {
+	Path      string `json:"path"`
+	ObjectKey string `json:"object_key,omitempty"`
+}
+
+func listAccountStoragePathCandidates(db *gorm.DB, userID uint) (map[string]struct{}, error) {
+	candidates, err := listOwnedFileStoragePathCandidates(db, userID, true)
+	if err != nil {
+		return nil, err
+	}
+
+	var attachmentPaths []string
+	if err = db.Unscoped().
+		Model(&model.Attachment{}).
+		Where("user_id = ? AND storage_path <> ''", userID).
+		Pluck("storage_path", &attachmentPaths).Error; err != nil {
+		return nil, err
+	}
+	for _, storagePath := range attachmentPaths {
+		if normalized := strings.TrimSpace(storagePath); normalized != "" {
+			candidates[normalized] = struct{}{}
+		}
+	}
+
+	var skills []model.Skill
+	skillQuery := db.
+		Model(&model.Skill{}).
+		Select("id", "scope", "package_files_json").
+		Where("scope = ? AND owner_user_id = ?", domainskill.ScopeUser, userID)
+	if db.Dialector != nil && db.Dialector.Name() != "sqlite" {
+		skillQuery = skillQuery.Clauses(clause.Locking{Strength: "UPDATE"})
+	}
+	if err = skillQuery.Find(&skills).Error; err != nil {
+		return nil, err
+	}
+	for _, skill := range skills {
+		var files []skillPackageFileRecord
+		if raw := strings.TrimSpace(skill.PackageFilesJSON); raw != "" {
+			if err = json.Unmarshal([]byte(raw), &files); err != nil {
+				return nil, fmt.Errorf("decode skill %d package files: %w", skill.ID, err)
+			}
+		}
+		for _, file := range files {
+			if objectKey := skillPackageObjectKey(skill.Scope, skill.ID, file.Path, file.ObjectKey); objectKey != "" {
+				candidates[objectKey] = struct{}{}
+			}
+		}
+	}
+	return candidates, nil
+}
+
+func skillPackageObjectKey(scope string, skillID uint, relativePath string, manifestObjectKey string) string {
+	prefix := "skills/" + strings.TrimSpace(scope) + "/" + strconv.FormatUint(uint64(skillID), 10) + "/"
+	if rawKey := strings.TrimSpace(manifestObjectKey); rawKey != "" {
+		normalizedKey := strings.ReplaceAll(rawKey, "\\", "/")
+		cleanKey := pathpkg.Clean(normalizedKey)
+		if cleanKey == normalizedKey && strings.HasPrefix(cleanKey, prefix) && len(cleanKey) > len(prefix) {
+			return cleanKey
+		}
+		return ""
+	}
+	normalized := strings.ReplaceAll(strings.TrimSpace(relativePath), "\\", "/")
+	cleanName := pathpkg.Clean(normalized)
+	if cleanName == "." || cleanName == "" || strings.HasPrefix(cleanName, "../") || strings.HasPrefix(cleanName, "/") {
+		return ""
+	}
+	return prefix + cleanName
+}
+
+func listOwnedFileStoragePathCandidates(db *gorm.DB, userID uint, lockRows bool) (map[string]struct{}, error) {
+	var ownedRows []fileStoragePaths
+	query := db.
+		Unscoped().
+		Model(&model.FileObject{}).
+		Select("storage_path", "extract_storage_path").
+		Where("user_id = ?", userID)
+	if lockRows && db.Dialector != nil && db.Dialector.Name() != "sqlite" {
+		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+	}
+	if err := query.Find(&ownedRows).Error; err != nil {
+		return nil, err
+	}
+
+	candidates := make(map[string]struct{}, len(ownedRows)*2)
+	for _, row := range ownedRows {
+		for _, path := range []string{row.StoragePath, row.ExtractStoragePath} {
+			if normalized := strings.TrimSpace(path); normalized != "" {
+				candidates[normalized] = struct{}{}
+			}
+		}
+	}
+	return candidates, nil
+}
+
+func filterUnreferencedFileStoragePaths(db *gorm.DB, candidates map[string]struct{}, excludedUserID uint) ([]string, error) {
+	if len(candidates) == 0 {
+		return []string{}, nil
+	}
+
+	candidatePaths := make([]string, 0, len(candidates))
+	for path := range candidates {
+		candidatePaths = append(candidatePaths, path)
+	}
+	// 保留行（含软删除行）仍构成对象引用：账号硬删除事务已先删除了目标用户
+	// 自身的全部行，此处只需保护其他用户仍保留的行（软删文件行也一样指向对象，
+	// 删除对象会破坏其保留记录对应的内容）。
+	query := db.
+		Unscoped().
+		Model(&model.FileObject{}).
+		Select("storage_path", "extract_storage_path").
+		Where("TRIM(storage_path) IN ? OR TRIM(extract_storage_path) IN ?", candidatePaths, candidatePaths)
+	if excludedUserID != 0 {
+		query = query.Where("user_id <> ?", excludedUserID)
+	}
+
+	var sharedRows []fileStoragePaths
+	if err := query.Find(&sharedRows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range sharedRows {
+		for _, path := range []string{row.StoragePath, row.ExtractStoragePath} {
+			delete(candidates, strings.TrimSpace(path))
+		}
+	}
+
+	var attachmentRows []fileStoragePaths
+	if err := db.
+		Model(&model.Attachment{}).
+		Select("storage_path").
+		Where("status <> ?", "deleted").
+		Where("TRIM(storage_path) IN ?", candidatePaths).
+		Find(&attachmentRows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range attachmentRows {
+		delete(candidates, strings.TrimSpace(row.StoragePath))
+	}
+
+	paths := make([]string, 0, len(candidates))
+	for path := range candidates {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
 	return paths, nil
 }
 

@@ -895,7 +895,7 @@ func lockActiveFileObjectsForAttachments(tx *gorm.DB, userID uint, attachments [
 	for i := range attachments {
 		fileID := strings.TrimSpace(attachments[i].FileID)
 		if fileID == "" {
-			continue
+			return repository.ErrInvalidInput
 		}
 		attachmentUserID := attachments[i].UserID
 		if userID == 0 {
@@ -917,15 +917,29 @@ func lockActiveFileObjectsForAttachments(tx *gorm.DB, userID uint, attachments [
 		return repository.ErrInvalidInput
 	}
 
-	lockedIDs := make([]uint, 0, len(fileIDs))
+	lockedRows := make([]models.FileObject, 0, len(fileIDs))
 	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-		Model(&models.FileObject{}).
 		Where("user_id = ? AND status = ? AND file_id IN ?", userID, "active", fileIDs).
-		Pluck("id", &lockedIDs).Error; err != nil {
+		Order("file_id ASC, id ASC").
+		Find(&lockedRows).Error; err != nil {
 		return translateError(err)
 	}
-	if len(lockedIDs) != len(fileIDs) {
+	if len(lockedRows) != len(fileIDs) {
 		return repository.ErrNotFound
+	}
+	lockedByFileID := make(map[string]models.FileObject, len(lockedRows))
+	for _, row := range lockedRows {
+		lockedByFileID[row.FileID] = row
+	}
+	for i := range attachments {
+		fileID := strings.TrimSpace(attachments[i].FileID)
+		locked, exists := lockedByFileID[fileID]
+		if !exists {
+			return repository.ErrNotFound
+		}
+		if strings.TrimSpace(attachments[i].StoragePath) != strings.TrimSpace(locked.StoragePath) {
+			return repository.ErrConflict
+		}
 	}
 	return nil
 }
@@ -1102,6 +1116,14 @@ func (r *Repo) CreateMessagePairWithUserAttachments(
 	userAttachmentSnapshot := userMessage.Attachments
 	assistantAttachmentSnapshot := assistantMessage.Attachments
 	return translateError(r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if len(userAttachments) > 0 {
+			if err := r.lockUsersForFileWrite(tx, userMessage.UserID); err != nil {
+				return err
+			}
+			if err := lockActiveFileObjectsForAttachments(tx, userMessage.UserID, userAttachments); err != nil {
+				return err
+			}
+		}
 		userEntity := toMessageModel(userMessage)
 		if err := tx.Create(&userEntity).Error; err != nil {
 			return err
@@ -1110,9 +1132,6 @@ func (r *Repo) CreateMessagePairWithUserAttachments(
 		userMessage.Attachments = userAttachmentSnapshot
 
 		if len(userAttachments) > 0 {
-			if err := lockActiveFileObjectsForAttachments(tx, userMessage.UserID, userAttachments); err != nil {
-				return err
-			}
 			entities := make([]models.Attachment, 0, len(userAttachments))
 			for i := range userAttachments {
 				item := userAttachments[i]
@@ -1420,6 +1439,9 @@ func (r *Repo) CompleteAssistantMessageWithAttachments(
 ) error {
 	return translateError(r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if len(assistantAttachments) > 0 {
+			if err := r.lockUsersForAttachmentWrite(tx, assistantAttachments); err != nil {
+				return err
+			}
 			if err := lockActiveFileObjectsForAttachments(tx, 0, assistantAttachments); err != nil {
 				return err
 			}
@@ -1491,6 +1513,9 @@ func (r *Repo) CompleteAssistantMessageWithGeneratedAttachments(
 ) error {
 	return translateError(r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if len(assistantAttachments) > 0 {
+			if err := r.lockUsersForAttachmentWrite(tx, assistantAttachments); err != nil {
+				return err
+			}
 			if err := lockActiveFileObjectsForAttachments(tx, 0, assistantAttachments); err != nil {
 				return err
 			}
@@ -1773,11 +1798,30 @@ func (r *Repo) CreateAttachments(ctx context.Context, items []domainconversation
 	if len(items) == 0 {
 		return nil
 	}
-	entities := make([]models.Attachment, 0, len(items))
+	return translateError(r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := r.lockUsersForAttachmentWrite(tx, items); err != nil {
+			return err
+		}
+		if err := lockActiveFileObjectsForAttachments(tx, 0, items); err != nil {
+			return err
+		}
+		entities := make([]models.Attachment, 0, len(items))
+		for i := range items {
+			entities = append(entities, toAttachmentModel(&items[i]))
+		}
+		return tx.Create(&entities).Error
+	}))
+}
+
+func (r *Repo) lockUsersForAttachmentWrite(tx *gorm.DB, items []domainconversation.Attachment) error {
+	userIDs := make([]uint, 0, len(items))
 	for i := range items {
-		entities = append(entities, toAttachmentModel(&items[i]))
+		if items[i].UserID == 0 {
+			return repository.ErrInvalidInput
+		}
+		userIDs = append(userIDs, items[i].UserID)
 	}
-	return translateError(r.db.WithContext(ctx).Create(&entities).Error)
+	return r.lockUsersForFileWrite(tx, userIDs...)
 }
 
 const (
@@ -2904,6 +2948,106 @@ func buildSingleFileKindWhereClause(filterKind string) (string, []interface{}) {
 	}
 }
 
+func (r *Repo) lockUsersForFileWrite(tx *gorm.DB, userIDs ...uint) error {
+	uniqueIDs := make(map[uint]struct{}, len(userIDs))
+	for _, userID := range userIDs {
+		if userID != 0 {
+			uniqueIDs[userID] = struct{}{}
+		}
+	}
+	orderedIDs := make([]uint, 0, len(uniqueIDs))
+	for userID := range uniqueIDs {
+		orderedIDs = append(orderedIDs, userID)
+	}
+	sort.Slice(orderedIDs, func(i, j int) bool { return orderedIDs[i] < orderedIDs[j] })
+	for _, userID := range orderedIDs {
+		query := tx.Model(&models.User{}).Select("id").Where("id = ?", userID)
+		if !r.sqliteDialect() {
+			query = query.Clauses(clause.Locking{Strength: "SHARE"})
+		}
+		var lockedUser models.User
+		if err := query.First(&lockedUser).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return repository.ErrNotFound
+			}
+			return translateError(err)
+		}
+	}
+	return nil
+}
+
+// CloneActiveFileObjectAndConsumeQuota 在锁定账号与活动源文件的事务中克隆文件对象并扣减目标用户配额。
+func (r *Repo) CloneActiveFileObjectAndConsumeQuota(
+	ctx context.Context,
+	sourceUserID uint,
+	sourceFileID string,
+	targetUserID uint,
+	targetFileID string,
+	defaultQuotaBytes int64,
+) (*domainconversation.FileObject, *domainconversation.FileObject, error) {
+	var sourceEntity models.FileObject
+	var targetEntity models.FileObject
+
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := r.lockUsersForFileWrite(tx, sourceUserID, targetUserID); err != nil {
+			return err
+		}
+		sourceQuery := tx.Where(
+			"user_id = ? AND file_id = ? AND status = ?",
+			sourceUserID,
+			sourceFileID,
+			"active",
+		)
+		if !r.sqliteDialect() {
+			sourceQuery = sourceQuery.Clauses(clause.Locking{Strength: "SHARE"})
+		}
+		if err := sourceQuery.First(&sourceEntity).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrFileNotFound
+			}
+			return translateError(err)
+		}
+
+		targetEntity = sourceEntity
+		targetEntity.ID = 0
+		targetEntity.FileID = targetFileID
+		targetEntity.UserID = targetUserID
+		targetEntity.Status = "active"
+		targetEntity.LastAccessedAt = nil
+		targetEntity.CreatedAt = time.Time{}
+		targetEntity.UpdatedAt = time.Time{}
+		targetEntity.DeletedAt = gorm.DeletedAt{}
+		targetEntity.EmbedStatus = "none"
+		targetEntity.EmbedError = ""
+		targetEntity.ChunkCount = 0
+
+		quota, err := getOrInitQuotaForUpdate(tx, targetUserID, defaultQuotaBytes)
+		if err != nil {
+			return translateError(err)
+		}
+		nextUsed := quota.UsedBytes + targetEntity.SizeBytes
+		if quota.QuotaBytes > 0 && nextUsed+quota.ReservedBytes > quota.QuotaBytes {
+			return ErrStorageQuotaExceeded
+		}
+		if err = tx.Create(&targetEntity).Error; err != nil {
+			return translateError(err)
+		}
+		if err = tx.Model(&models.UserStorageQuota{}).
+			Where("id = ?", quota.ID).
+			Update("used_bytes", nextUsed).Error; err != nil {
+			return translateError(err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, nil, translateError(err)
+	}
+
+	source := toFileObjectDomain(sourceEntity)
+	target := toFileObjectDomain(targetEntity)
+	return &source, &target, nil
+}
+
 // CreateFileObjectAndConsumeQuota 创建文件对象并扣减配额。
 func (r *Repo) CreateFileObjectAndConsumeQuota(
 	ctx context.Context,
@@ -2913,6 +3057,9 @@ func (r *Repo) CreateFileObjectAndConsumeQuota(
 	var updatedQuota models.UserStorageQuota
 
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := r.lockUsersForFileWrite(tx, item.UserID); err != nil {
+			return err
+		}
 		entity := toFileObjectModel(item)
 		quota, err := getOrInitQuotaForUpdate(tx, entity.UserID, defaultQuotaBytes)
 		if err != nil {
@@ -3018,8 +3165,9 @@ func (r *Repo) DeleteFileObjectAndReleaseQuota(
 		}
 
 		var remainingPhysicalRefs int64
-		if err = tx.Model(&models.FileObject{}).
-			Where("status = ? AND storage_path = ? AND id <> ?", "active", deletedFile.StoragePath, deletedFile.ID).
+		if err = tx.Unscoped().
+			Model(&models.FileObject{}).
+			Where("storage_path = ? AND id <> ?", deletedFile.StoragePath, deletedFile.ID).
 			Count(&remainingPhysicalRefs).Error; err != nil {
 			return translateError(err)
 		}
@@ -3099,23 +3247,41 @@ func getOrInitQuotaForUpdate(tx *gorm.DB, userID uint, defaultQuotaBytes int64) 
 	return &quota, nil
 }
 
-// UpdateFileObjectEmbedStatus 更新文件对象的 embedding 状态及分片数量。
-func (r *Repo) UpdateFileObjectEmbedStatus(ctx context.Context, userID uint, fileID string, status string, embedErr string) error {
-	return translateError(r.db.WithContext(ctx).
+// UpdateFileObjectEmbedStatus 更新指定内容版本的 embedding 状态。
+func (r *Repo) UpdateFileObjectEmbedStatus(ctx context.Context, userID uint, fileID string, expectedStoragePath string, status string, embedErr string) error {
+	query := r.db.WithContext(ctx).
 		Model(&models.FileObject{}).
-		Where("user_id = ? AND file_id = ?", userID, fileID).
-		Updates(map[string]interface{}{
-			"embed_status": status,
-			"embed_error":  embedErr,
-		}).Error)
+		Where("user_id = ? AND file_id = ?", userID, fileID)
+	if expectedStoragePath != "" {
+		query = query.Where("storage_path = ?", expectedStoragePath)
+	}
+	result := query.Updates(map[string]interface{}{
+		"embed_status": status,
+		"embed_error":  embedErr,
+	})
+	if result.Error != nil {
+		return translateError(result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fileObjectVersionConflictOrNotFoundByFileID(r.db.WithContext(ctx), userID, fileID, expectedStoragePath)
+	}
+	return nil
 }
 
-// UpdateFileObjectChunkCount 在 embedding 完成后更新分片数量。
-func (r *Repo) UpdateFileObjectChunkCount(ctx context.Context, fileObjID uint, chunkCount int) error {
-	return translateError(r.db.WithContext(ctx).
-		Model(&models.FileObject{}).
-		Where("id = ?", fileObjID).
-		Update("chunk_count", chunkCount).Error)
+// UpdateFileObjectChunkCount 更新指定内容版本的分片数量。
+func (r *Repo) UpdateFileObjectChunkCount(ctx context.Context, fileObjID uint, expectedStoragePath string, chunkCount int) error {
+	query := r.db.WithContext(ctx).Model(&models.FileObject{}).Where("id = ?", fileObjID)
+	if expectedStoragePath != "" {
+		query = query.Where("storage_path = ?", expectedStoragePath)
+	}
+	result := query.Update("chunk_count", chunkCount)
+	if result.Error != nil {
+		return translateError(result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fileObjectVersionConflictOrNotFound(r.db.WithContext(ctx), fileObjID, 0, expectedStoragePath)
+	}
+	return nil
 }
 
 // CloneFileEmbeddingArtifacts 复用已完成 embedding 的文件分片到新的逻辑别名文件。
@@ -3196,12 +3362,25 @@ func (r *Repo) CloneFileEmbeddingArtifacts(ctx context.Context, source *domainco
 	})
 }
 
-// ReplaceFileChunks 替换文件的所有分片（删除旧的，插入新的，并用 raw SQL 更新 embedding）。
-func (r *Repo) ReplaceFileChunks(ctx context.Context, fileObjID uint, chunks []domainconversation.FileChunk, embeddings [][]float32) error {
+// ReplaceFileChunks 替换指定内容版本的所有分片（删除旧的，插入新的，并写入 embedding）。
+func (r *Repo) ReplaceFileChunks(ctx context.Context, fileObjID uint, expectedStoragePath string, chunks []domainconversation.FileChunk, embeddings [][]float32) error {
 	if len(chunks) != len(embeddings) {
 		return fmt.Errorf("embedding count mismatch: chunks=%d embeddings=%d", len(chunks), len(embeddings))
 	}
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if expectedStoragePath != "" {
+			var current models.FileObject
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+				Model(&models.FileObject{}).
+				Select("id").
+				Where("id = ? AND storage_path = ?", fileObjID, expectedStoragePath).
+				First(&current).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return fileObjectVersionConflictOrNotFound(tx, fileObjID, 0, expectedStoragePath)
+				}
+				return translateError(err)
+			}
+		}
 		entities := make([]models.FileChunk, 0, len(chunks))
 		for i := range chunks {
 			entities = append(entities, toFileChunkModel(&chunks[i]))
@@ -4446,29 +4625,30 @@ func toFileChunkModel(item *domainconversation.FileChunk) models.FileChunk {
 
 func toFileObjectProcessingStateDomain(item models.FileObject) domainconversation.FileObjectProcessing {
 	return domainconversation.FileObjectProcessing{
-		ID:                 item.ID,
-		FileObjectID:       item.ID,
-		UserID:             item.UserID,
-		DetectedMIME:       item.DetectedMIME,
-		FileCategory:       item.FileCategory,
-		ProcessingStatus:   item.ProcessingStatus,
-		ExtractStatus:      item.ExtractStatus,
-		ExtractEngine:      item.ExtractEngine,
-		ExtractStoragePath: item.ExtractStoragePath,
-		ExtractChars:       item.ExtractChars,
-		ExtractPages:       item.ExtractPages,
-		PreviewText:        item.PreviewText,
-		OCRUsed:            item.OCRUsed,
-		RAGReady:           item.RAGReady,
-		RAGReason:          item.RAGReason,
-		ErrorCode:          item.ProcessingErrorCode,
-		ErrorMessage:       item.ProcessingErrorMessage,
-		ExtractorVersion:   item.ExtractorVersion,
-		PayloadJSON:        item.ProcessingPayloadJSON,
-		StartedAt:          item.ProcessingStartedAt,
-		CompletedAt:        item.ProcessingCompletedAt,
-		CreatedAt:          item.CreatedAt,
-		UpdatedAt:          item.UpdatedAt,
+		ID:                  item.ID,
+		FileObjectID:        item.ID,
+		UserID:              item.UserID,
+		ExpectedStoragePath: item.StoragePath,
+		DetectedMIME:        item.DetectedMIME,
+		FileCategory:        item.FileCategory,
+		ProcessingStatus:    item.ProcessingStatus,
+		ExtractStatus:       item.ExtractStatus,
+		ExtractEngine:       item.ExtractEngine,
+		ExtractStoragePath:  item.ExtractStoragePath,
+		ExtractChars:        item.ExtractChars,
+		ExtractPages:        item.ExtractPages,
+		PreviewText:         item.PreviewText,
+		OCRUsed:             item.OCRUsed,
+		RAGReady:            item.RAGReady,
+		RAGReason:           item.RAGReason,
+		ErrorCode:           item.ProcessingErrorCode,
+		ErrorMessage:        item.ProcessingErrorMessage,
+		ExtractorVersion:    item.ExtractorVersion,
+		PayloadJSON:         item.ProcessingPayloadJSON,
+		StartedAt:           item.ProcessingStartedAt,
+		CompletedAt:         item.ProcessingCompletedAt,
+		CreatedAt:           item.CreatedAt,
+		UpdatedAt:           item.UpdatedAt,
 	}
 }
 

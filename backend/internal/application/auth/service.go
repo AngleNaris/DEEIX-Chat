@@ -49,6 +49,10 @@ type Service struct {
 	providerAuthBridge   repository.ProviderAuthBridgeRepository
 }
 
+type accountHardDeleteRepository interface {
+	DeleteAccountHardWithStoragePaths(ctx context.Context, userID uint) ([]string, error)
+}
+
 type subscriptionResolver interface {
 	GetCurrentSubscriptionSnapshot(
 		ctx context.Context,
@@ -885,7 +889,27 @@ func (s *Service) DeleteAccount(
 	}
 
 	normalizedAuditCtx := s.resolveSessionAuditContext(ctx, auditCtx)
-	storagePaths, err := s.repo.ListDistinctFileStoragePathsByUserID(ctx, userID)
+	hardDeleteRepo, ok := s.repo.(accountHardDeleteRepository)
+	if !ok {
+		err = fmt.Errorf("account hard delete repository is unavailable")
+		s.RecordAuthEvent(
+			ctx,
+			userID,
+			requestID,
+			"account_delete",
+			"failure",
+			"delete_account_failed",
+			normalizedAuditCtx.ClientIP,
+			normalizedAuditCtx.UserAgent,
+			marshalAuthEventDetail(map[string]interface{}{
+				"user_id":   userID,
+				"username":  item.Username,
+				"public_id": item.PublicID,
+			}),
+		)
+		return err
+	}
+	storagePaths, err := hardDeleteRepo.DeleteAccountHardWithStoragePaths(ctx, userID)
 	if err != nil {
 		s.RecordAuthEvent(
 			ctx,
@@ -893,7 +917,7 @@ func (s *Service) DeleteAccount(
 			requestID,
 			"account_delete",
 			"failure",
-			"list_storage_paths_failed",
+			"delete_account_failed",
 			normalizedAuditCtx.ClientIP,
 			normalizedAuditCtx.UserAgent,
 			marshalAuthEventDetail(map[string]interface{}{
@@ -905,62 +929,9 @@ func (s *Service) DeleteAccount(
 		return err
 	}
 
-	if err = s.repo.DeleteAccountHard(ctx, userID); err != nil {
-		s.RecordAuthEvent(
-			ctx,
-			userID,
-			requestID,
-			"account_delete",
-			"failure",
-			"delete_account_failed",
-			normalizedAuditCtx.ClientIP,
-			normalizedAuditCtx.UserAgent,
-			marshalAuthEventDetail(map[string]interface{}{
-				"user_id":            userID,
-				"username":           item.Username,
-				"public_id":          item.PublicID,
-				"storage_file_count": len(storagePaths),
-			}),
-		)
-		return err
-	}
-
-	failedPaths := s.cleanupDeletedAccountFiles(ctx, storagePaths)
-	s.RecordAuthEvent(
-		ctx,
-		userID,
-		requestID,
-		"account_delete",
-		"success",
-		"",
-		normalizedAuditCtx.ClientIP,
-		normalizedAuditCtx.UserAgent,
-		marshalAuthEventDetail(map[string]interface{}{
-			"user_id":                  userID,
-			"username":                 item.Username,
-			"public_id":                item.PublicID,
-			"client_ip":                normalizedAuditCtx.ClientIP,
-			"location":                 normalizedAuditCtx.LocationLabel(),
-			"storage_file_count":       len(storagePaths),
-			"storage_cleanup_failures": len(failedPaths),
-		}),
-	)
-	if len(failedPaths) > 0 {
-		s.RecordAuthEvent(
-			ctx,
-			userID,
-			requestID,
-			"account_delete_cleanup",
-			"failure",
-			"storage_cleanup_failed",
-			normalizedAuditCtx.ClientIP,
-			normalizedAuditCtx.UserAgent,
-			marshalAuthEventDetail(map[string]interface{}{
-				"user_id":           userID,
-				"failed_path_count": len(failedPaths),
-				"failed_paths":      trimStringSlice(failedPaths, 10),
-			}),
-		)
+	cleanup := appstorage.PurgePaths(ctx, s.storeProvider, storagePaths)
+	if cleanup.Failed > 0 {
+		s.warn("account_delete_storage_cleanup_failed", zap.Uint("user_id", userID), zap.Int("storage_file_count", cleanup.Attempted), zap.Int("storage_cleanup_failures", cleanup.Failed))
 	}
 
 	return nil
@@ -997,35 +968,6 @@ func (s *Service) RequestAccountDeleteVerification(ctx context.Context, userID u
 		return nil, fmt.Errorf("user email is invalid")
 	}
 	return s.requestEmailVerificationCode(ctx, userID, domainuser.ContactVerificationPurposeAccountDelete, normalizedEmail, "account_delete_code", requestID, auditCtx)
-}
-
-// cleanupDeletedAccountFiles 从对象存储删除用户文件，返回删除失败的路径列表。
-func (s *Service) cleanupDeletedAccountFiles(ctx context.Context, storagePaths []string) []string {
-	if s.storeProvider == nil {
-		s.storeProvider = appstorage.NewRuntimeProvider(s.cfg, nil)
-	}
-	store, err := s.storeProvider.Open(ctx)
-	if err != nil {
-		return append([]string(nil), storagePaths...)
-	}
-	seen := make(map[string]struct{}, len(storagePaths))
-	failed := make([]string, 0)
-	for _, rawPath := range storagePaths {
-		normalizedPath := strings.TrimSpace(rawPath)
-		if normalizedPath == "" {
-			continue
-		}
-		if _, ok := seen[normalizedPath]; ok {
-			continue
-		}
-		seen[normalizedPath] = struct{}{}
-
-		if err := store.Delete(ctx, normalizedPath); err != nil {
-			failed = append(failed, normalizedPath)
-		}
-	}
-	sort.Strings(failed)
-	return failed
 }
 
 // trimStringSlice 截取切片前 limit 个元素，不超出原始长度。

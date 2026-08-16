@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"errors"
+	"io"
 	"testing"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	domainbilling "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/billing"
 	domainchannel "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/channel"
 	domainuser "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/user"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/objectstore"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 )
 
@@ -449,10 +451,106 @@ func TestImportOpenWebUIUsersMapsInvalidLoaderInputToDSNError(t *testing.T) {
 	}
 }
 
+func TestDeleteUserByAdminPurgesStorageAfterDatabaseDeletion(t *testing.T) {
+	operations := make([]string, 0, 3)
+	users := newAdminUserServiceFake(map[uint]domainuser.User{
+		1: {ID: 1, PublicID: "admin_public", Username: "admin-user", Role: domainuser.RoleAdmin},
+		2: {ID: 2, PublicID: "target_public", Username: "target-user", Role: domainuser.RoleUser},
+	})
+	users.storagePaths = []string{"object-a", "object-a", "object-b"}
+	users.operations = &operations
+	store := &adminDeleteStore{operations: &operations, deleteErrors: map[string]error{"object-b": errors.New("delete failed")}}
+	writes := make([]auditWrite, 0, 1)
+	service := NewService(users, auditServiceFake{writes: &writes})
+	service.SetObjectStoreProvider(adminDeleteStoreProvider{store: store})
+
+	if err := service.DeleteUserByAdmin(context.Background(), "request", 1, 2, "127.0.0.1", "test-agent"); err != nil {
+		t.Fatalf("DeleteUserByAdmin() error = %v", err)
+	}
+	wantOperations := []string{"delete_account_with_storage_paths", "delete:object-a", "delete:object-b"}
+	if len(operations) != len(wantOperations) {
+		t.Fatalf("operations = %v, want %v", operations, wantOperations)
+	}
+	for index := range wantOperations {
+		if operations[index] != wantOperations[index] {
+			t.Fatalf("operations = %v, want %v", operations, wantOperations)
+		}
+	}
+	if len(writes) != 1 {
+		t.Fatalf("audit writes = %d, want 1", len(writes))
+	}
+	detail, ok := writes[0].detail.(map[string]string)
+	if !ok {
+		t.Fatalf("audit detail type = %T", writes[0].detail)
+	}
+	if detail["target_user_id"] != "2" || detail["storage_file_count"] != "2" || detail["storage_cleanup_failures"] != "1" {
+		t.Fatalf("audit detail = %v", detail)
+	}
+	for _, forbidden := range []string{"username", "public_id", "storage_path", "failed_paths"} {
+		if _, exists := detail[forbidden]; exists {
+			t.Fatalf("audit detail contains forbidden key %q: %v", forbidden, detail)
+		}
+	}
+}
+
+func TestDeleteUserByAdminStopsBeforePurgeWhenAtomicDeletionFails(t *testing.T) {
+	operations := make([]string, 0, 1)
+	users := newAdminUserServiceFake(map[uint]domainuser.User{
+		1: {ID: 1, Role: domainuser.RoleAdmin},
+		2: {ID: 2, Role: domainuser.RoleUser},
+	})
+	users.deleteAccountErr = errors.New("delete failed")
+	users.operations = &operations
+	service := NewService(users, auditServiceFake{})
+
+	err := service.DeleteUserByAdmin(context.Background(), "request", 1, 2, "", "")
+	if err == nil || err.Error() != "delete failed" {
+		t.Fatalf("DeleteUserByAdmin() error = %v, want delete failure", err)
+	}
+	if len(operations) != 1 || operations[0] != "delete_account_with_storage_paths" {
+		t.Fatalf("operations = %v, want atomic delete only", operations)
+	}
+}
+
+type adminDeleteStoreProvider struct {
+	store objectstore.Store
+}
+
+func (p adminDeleteStoreProvider) Open(context.Context) (objectstore.Store, error) {
+	return p.store, nil
+}
+
+type adminDeleteStore struct {
+	operations   *[]string
+	deleteErrors map[string]error
+}
+
+func (*adminDeleteStore) Put(context.Context, string, io.Reader, objectstore.PutOptions) (objectstore.ObjectInfo, error) {
+	return objectstore.ObjectInfo{}, errors.New("not implemented")
+}
+
+func (*adminDeleteStore) Open(context.Context, string) (io.ReadCloser, objectstore.ObjectInfo, error) {
+	return nil, objectstore.ObjectInfo{}, errors.New("not implemented")
+}
+
+func (s *adminDeleteStore) Delete(_ context.Context, key string) error {
+	if s.operations != nil {
+		*s.operations = append(*s.operations, "delete:"+key)
+	}
+	return s.deleteErrors[key]
+}
+
+func (*adminDeleteStore) Materialize(context.Context, string) (string, func(), error) {
+	return "", nil, errors.New("not implemented")
+}
+
 type adminUserServiceFake struct {
-	users           map[uint]domainuser.User
-	updateFieldsErr error
-	superAdminCount *int64
+	users            map[uint]domainuser.User
+	updateFieldsErr  error
+	superAdminCount  *int64
+	storagePaths     []string
+	deleteAccountErr error
+	operations       *[]string
 }
 
 func newAdminUserServiceFake(users map[uint]domainuser.User) *adminUserServiceFake {
@@ -560,8 +658,21 @@ func (s *adminUserServiceFake) ResetPasswordByAdmin(context.Context, uint, strin
 	return nil
 }
 
+func (s *adminUserServiceFake) DeleteAccountHardWithStoragePaths(context.Context, uint) ([]string, error) {
+	if s.operations != nil {
+		*s.operations = append(*s.operations, "delete_account_with_storage_paths")
+	}
+	if s.deleteAccountErr != nil {
+		return nil, s.deleteAccountErr
+	}
+	return append([]string(nil), s.storagePaths...), nil
+}
+
 func (s *adminUserServiceFake) DeleteAccountHard(context.Context, uint) error {
-	return nil
+	if s.operations != nil {
+		*s.operations = append(*s.operations, "delete_account")
+	}
+	return s.deleteAccountErr
 }
 
 func (s *adminUserServiceFake) RecordAuthEvent(context.Context, uint, string, string, string, string, string, string, string) error {
@@ -588,19 +699,31 @@ func (s *adminUserServiceFake) ImportUsersWithCredentialsAndBalances(context.Con
 	return []domainuser.User{}, nil
 }
 
-type auditServiceFake struct{}
+type auditServiceFake struct {
+	writes *[]auditWrite
+}
 
-func (auditServiceFake) Write(
-	context.Context,
-	string,
-	uint,
-	string,
-	string,
-	string,
-	string,
-	string,
-	interface{},
+type auditWrite struct {
+	action   string
+	resource string
+	id       string
+	detail   interface{}
+}
+
+func (a auditServiceFake) Write(
+	_ context.Context,
+	_ string,
+	_ uint,
+	action string,
+	resource string,
+	resourceID string,
+	_ string,
+	_ string,
+	detail interface{},
 ) {
+	if a.writes != nil {
+		*a.writes = append(*a.writes, auditWrite{action: action, resource: resource, id: resourceID, detail: detail})
+	}
 }
 
 func (auditServiceFake) List(context.Context, int, int, auditapp.ListFilter) ([]domainaudit.Log, int64, error) {

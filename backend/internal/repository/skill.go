@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"time"
 
 	domainskill "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/skill"
 )
@@ -12,7 +13,7 @@ type SkillRepository interface {
 	GetSkill(ctx context.Context, id uint) (*domainskill.Skill, error)
 	CreateSkill(ctx context.Context, item *domainskill.Skill) (*domainskill.Skill, error)
 	PatchSkill(ctx context.Context, id uint, patch SkillPatch) (*domainskill.Skill, error)
-	DeleteSkill(ctx context.Context, id uint) error
+	DeleteSkill(ctx context.Context, id uint, expectedUpdatedAt *time.Time) error
 }
 
 // SkillListFilter 描述技能列表筛选条件。
@@ -28,6 +29,7 @@ type SkillListFilter struct {
 
 // SkillPatch 描述可更新的技能字段。
 type SkillPatch struct {
+	ExpectedUpdatedAt  *time.Time
 	Title              *string
 	Trigger            *string
 	Description        *string

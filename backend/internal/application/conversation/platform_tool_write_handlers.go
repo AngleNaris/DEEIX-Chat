@@ -15,6 +15,7 @@ import (
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/skill"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/objectstore"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/pkg/traceid"
+	"github.com/google/uuid"
 )
 
 // platformWriteFile 覆盖用户文本文件内容（写操作，受批准模式管控）。
@@ -72,7 +73,7 @@ func (s *Service) overwriteFileContent(ctx context.Context, userID uint, fileID 
 		fmt.Sprintf("%d", userID),
 		now.Format("2006"),
 		now.Format("01"),
-		"file_"+sanitizePlatformFileName(item.FileName),
+		"file_"+sanitizePlatformFileName(fileID)+"_"+normalizePublicID(uuid.NewString())+"_"+sanitizePlatformFileName(item.FileName),
 	))
 	body := bytes.NewBufferString(content)
 	if _, err := store.Put(ctx, relativePath, body, objectstore.PutOptions{
@@ -83,12 +84,18 @@ func (s *Service) overwriteFileContent(ctx context.Context, userID uint, fileID 
 	}
 	sum := sha256.Sum256([]byte(content))
 	sha256Hex := hex.EncodeToString(sum[:])
-	if err := s.repo.ReplaceFileObjectContent(ctx, userID, fileID, relativePath, sha256Hex, int64(len(content))); err != nil {
+	cleanup, err := s.repo.ReplaceFileObjectContent(ctx, userID, fileID, relativePath, sha256Hex, int64(len(content)))
+	if err != nil {
 		_ = store.Delete(ctx, relativePath)
 		return err
 	}
-	if relativePath != item.StoragePath {
-		_ = store.Delete(ctx, item.StoragePath)
+	if cleanup.RemoveOldStorageObject && cleanup.OldStoragePath != relativePath {
+		_ = store.Delete(ctx, cleanup.OldStoragePath)
+	}
+	if cleanup.RemoveOldExtractObject &&
+		cleanup.OldExtractStoragePath != relativePath &&
+		cleanup.OldExtractStoragePath != cleanup.OldStoragePath {
+		_ = store.Delete(ctx, cleanup.OldExtractStoragePath)
 	}
 	// 延迟重建：缓冲窗口内合并多次修改，到期才触发一次提取/RAG 重建。
 	s.reindexScheduler.MarkDirty(userID, fileID)

@@ -16,6 +16,589 @@ import (
 	"gorm.io/gorm"
 )
 
+func TestCloneActiveFileObjectAndConsumeQuotaCopiesStorageArtifactsAtomically(t *testing.T) {
+	db := openConversationRepositoryTestDB(t)
+	if err := db.AutoMigrate(&model.User{}, &model.UserStorageQuota{}); err != nil {
+		t.Fatalf("migrate users and quota: %v", err)
+	}
+	users := []model.User{
+		{PublicID: "clone_source_user", Username: "clone-source", Role: "user", Status: "active"},
+		{PublicID: "clone_target_user", Username: "clone-target", Role: "user", Status: "active"},
+	}
+	if err := db.Create(&users).Error; err != nil {
+		t.Fatalf("seed users: %v", err)
+	}
+	source := model.FileObject{
+		FileID:                "file_source",
+		UserID:                users[0].ID,
+		FileName:              "source.pdf",
+		SizeBytes:             128,
+		StoragePath:           "objects/source.pdf",
+		Status:                "active",
+		ProcessingStatus:      "ready",
+		ProcessingReady:       true,
+		ExtractStatus:         "ready",
+		ExtractStoragePath:    ".extracts/source.txt",
+		ProcessingPayloadJSON: `{"processor":"test"}`,
+	}
+	if err := db.Create(&source).Error; err != nil {
+		t.Fatalf("seed source file: %v", err)
+	}
+
+	repo := NewRepo(db)
+	clonedSource, target, err := repo.CloneActiveFileObjectAndConsumeQuota(
+		context.Background(),
+		users[0].ID,
+		"file_source",
+		users[1].ID,
+		"file_target",
+		1024,
+	)
+	if err != nil {
+		t.Fatalf("CloneActiveFileObjectAndConsumeQuota() error = %v", err)
+	}
+	if clonedSource.ID != source.ID || target.ID == 0 || target.UserID != users[1].ID || target.FileID != "file_target" {
+		t.Fatalf("source/target identity mismatch: source=%+v target=%+v", clonedSource, target)
+	}
+	if target.StoragePath != source.StoragePath || target.ExtractStoragePath != source.ExtractStoragePath {
+		t.Fatalf("target storage paths = %q / %q, want %q / %q", target.StoragePath, target.ExtractStoragePath, source.StoragePath, source.ExtractStoragePath)
+	}
+	if target.ProcessingStatus != source.ProcessingStatus || target.ProcessingPayloadJSON != source.ProcessingPayloadJSON {
+		t.Fatalf("target processing state was not copied: %+v", target)
+	}
+	if target.EmbedStatus != "none" || target.ChunkCount != 0 {
+		t.Fatalf("target embedding state = %q / %d, want none / 0", target.EmbedStatus, target.ChunkCount)
+	}
+
+	var quota model.UserStorageQuota
+	if err = db.Where("user_id = ?", users[1].ID).First(&quota).Error; err != nil {
+		t.Fatalf("load target quota: %v", err)
+	}
+	if quota.UsedBytes != source.SizeBytes {
+		t.Fatalf("target quota used bytes = %d, want %d", quota.UsedBytes, source.SizeBytes)
+	}
+}
+
+func TestCloneActiveFileObjectAndConsumeQuotaRejectsDeletedSource(t *testing.T) {
+	db := openConversationRepositoryTestDB(t)
+	if err := db.AutoMigrate(&model.User{}, &model.UserStorageQuota{}); err != nil {
+		t.Fatalf("migrate users and quota: %v", err)
+	}
+	users := []model.User{
+		{PublicID: "deleted_clone_source_user", Username: "deleted-clone-source", Role: "user", Status: "active"},
+		{PublicID: "deleted_clone_target_user", Username: "deleted-clone-target", Role: "user", Status: "active"},
+	}
+	if err := db.Create(&users).Error; err != nil {
+		t.Fatalf("seed users: %v", err)
+	}
+	source := model.FileObject{FileID: "file_deleted_source", UserID: users[0].ID, SizeBytes: 128, StoragePath: "objects/deleted.pdf", Status: "deleted"}
+	if err := db.Create(&source).Error; err != nil {
+		t.Fatalf("seed source file: %v", err)
+	}
+
+	_, _, err := NewRepo(db).CloneActiveFileObjectAndConsumeQuota(
+		context.Background(),
+		users[0].ID,
+		"file_deleted_source",
+		users[1].ID,
+		"file_target",
+		1024,
+	)
+	if !errors.Is(err, ErrFileNotFound) {
+		t.Fatalf("CloneActiveFileObjectAndConsumeQuota() error = %v, want ErrFileNotFound", err)
+	}
+	var targetCount int64
+	if countErr := db.Model(&model.FileObject{}).Where("user_id = ?", users[1].ID).Count(&targetCount).Error; countErr != nil {
+		t.Fatalf("count target files: %v", countErr)
+	}
+	if targetCount != 0 {
+		t.Fatalf("target file count = %d, want 0", targetCount)
+	}
+}
+
+func TestReplaceFileObjectContentReturnsReferenceSafeCleanupDecisions(t *testing.T) {
+	db := openConversationRepositoryTestDB(t)
+	if err := db.AutoMigrate(&model.User{}); err != nil {
+		t.Fatalf("migrate users: %v", err)
+	}
+	users := []model.User{
+		{PublicID: "replace_owner", Username: "replace-owner", Role: "user", Status: "active"},
+		{PublicID: "replace_control", Username: "replace-control", Role: "user", Status: "active"},
+	}
+	if err := db.Create(&users).Error; err != nil {
+		t.Fatalf("seed users: %v", err)
+	}
+	files := []model.FileObject{
+		{
+			FileID:             "file_replace_target",
+			UserID:             users[0].ID,
+			StoragePath:        "objects/shared-old.txt",
+			ExtractStoragePath: ".extracts/exclusive-old.txt",
+			Status:             "active",
+			ProcessingStatus:   "ready",
+			ProcessingReady:    true,
+			ExtractStatus:      "ready",
+			EmbedStatus:        "ready",
+			ChunkCount:         3,
+		},
+		{FileID: "file_replace_shared", UserID: users[1].ID, StoragePath: "objects/shared-old.txt", Status: "active"},
+		{FileID: "file_replace_attachment", UserID: users[0].ID, StoragePath: "objects/attachment-old.txt", Status: "active"},
+		// 软删除行仍保留记录，必须继续保护其引用的对象（跨租户引用语义）。
+		{FileID: "file_replace_soft_deleted_shared", UserID: users[1].ID, StoragePath: "objects/soft-deleted-shared.txt", Status: "deleted"},
+	}
+	if err := db.Create(&files).Error; err != nil {
+		t.Fatalf("seed files: %v", err)
+	}
+	if err := db.Create(&model.Attachment{
+		UserID:      users[1].ID,
+		FileID:      "file_attachment_snapshot",
+		StoragePath: "objects/attachment-old.txt",
+		Status:      "active",
+	}).Error; err != nil {
+		t.Fatalf("seed attachment: %v", err)
+	}
+
+	repo := NewRepo(db)
+	cleanup, err := repo.ReplaceFileObjectContent(
+		context.Background(),
+		users[0].ID,
+		files[0].FileID,
+		"objects/replaced.txt",
+		"sha-replaced",
+		42,
+	)
+	if err != nil {
+		t.Fatalf("ReplaceFileObjectContent() error = %v", err)
+	}
+	if cleanup.OldStoragePath != "objects/shared-old.txt" || cleanup.RemoveOldStorageObject {
+		t.Fatalf("old shared storage cleanup = %+v, want retained", cleanup)
+	}
+	if cleanup.OldExtractStoragePath != ".extracts/exclusive-old.txt" || !cleanup.RemoveOldExtractObject {
+		t.Fatalf("old extract cleanup = %+v, want removable", cleanup)
+	}
+
+	softDeletedFile := model.FileObject{
+		FileID:      "file_replace_soft_deleted_target",
+		UserID:      users[0].ID,
+		StoragePath: "objects/soft-deleted-shared.txt",
+		Status:      "active",
+	}
+	if err := db.Create(&softDeletedFile).Error; err != nil {
+		t.Fatalf("seed soft-shared target: %v", err)
+	}
+	softCleanup, err := repo.ReplaceFileObjectContent(
+		context.Background(),
+		users[0].ID,
+		softDeletedFile.FileID,
+		"objects/soft-deleted-replaced.txt",
+		"sha-soft-replaced",
+		9,
+	)
+	if err != nil {
+		t.Fatalf("ReplaceFileObjectContent() soft-shared error = %v", err)
+	}
+	if softCleanup.RemoveOldStorageObject {
+		t.Fatalf("soft-deleted tenant row did not pin old storage: %+v", softCleanup)
+	}
+
+	var updated model.FileObject
+	if err = db.Where("id = ?", files[0].ID).First(&updated).Error; err != nil {
+		t.Fatalf("load updated file: %v", err)
+	}
+	if updated.StoragePath != "objects/replaced.txt" || updated.SHA256 != "sha-replaced" || updated.SizeBytes != 42 {
+		t.Fatalf("updated content metadata = %+v", updated)
+	}
+	if updated.ExtractStoragePath != "" || updated.ProcessingStatus != "pending" || updated.ProcessingReady || updated.ChunkCount != 0 {
+		t.Fatalf("updated processing state was not reset: %+v", updated)
+	}
+
+	attachmentCleanup, err := repo.ReplaceFileObjectContent(
+		context.Background(),
+		users[0].ID,
+		files[2].FileID,
+		"objects/attachment-replaced.txt",
+		"sha-attachment-replaced",
+		21,
+	)
+	if err != nil {
+		t.Fatalf("ReplaceFileObjectContent() attachment error = %v", err)
+	}
+	if attachmentCleanup.RemoveOldStorageObject {
+		t.Fatalf("attachment-pinned old storage marked removable: %+v", attachmentCleanup)
+	}
+}
+
+func TestCanRemoveExtractStoragePathHonorsRetainedReferences(t *testing.T) {
+	db := openConversationRepositoryTestDB(t)
+	if err := db.AutoMigrate(&model.User{}); err != nil {
+		t.Fatalf("migrate users: %v", err)
+	}
+	users := []model.User{
+		{PublicID: "extract_owner", Username: "extract-owner", Role: "user", Status: "active"},
+		{PublicID: "extract_clone", Username: "extract-clone", Role: "user", Status: "active"},
+	}
+	if err := db.Create(&users).Error; err != nil {
+		t.Fatalf("seed users: %v", err)
+	}
+	exclusive := model.FileObject{
+		FileID:             "file_extract_exclusive",
+		UserID:             users[0].ID,
+		StoragePath:        "objects/exclusive.pdf",
+		ExtractStoragePath: ".extracts/uid_1/exclusive.txt",
+		Status:             "active",
+	}
+	cloneShared := model.FileObject{
+		FileID:             "file_extract_clone",
+		UserID:             users[1].ID,
+		StoragePath:        "objects/shared.pdf",
+		ExtractStoragePath: ".extracts/uid_2/shared.txt",
+		Status:             "active",
+	}
+	softShared := model.FileObject{
+		FileID:             "file_extract_soft",
+		UserID:             users[1].ID,
+		StoragePath:        "objects/soft.pdf",
+		ExtractStoragePath: ".extracts/uid_2/soft.txt",
+		Status:             "deleted",
+	}
+	if err := db.Create(&exclusive).Error; err != nil {
+		t.Fatalf("seed exclusive file: %v", err)
+	}
+	if err := db.Create(&cloneShared).Error; err != nil {
+		t.Fatalf("seed clone file: %v", err)
+	}
+	if err := db.Create(&softShared).Error; err != nil {
+		t.Fatalf("seed soft-deleted file: %v", err)
+	}
+
+	repo := NewRepo(db)
+	removable, err := repo.CanRemoveExtractStoragePath(context.Background(), exclusive.ID, users[0].ID, exclusive.ExtractStoragePath)
+	if err != nil {
+		t.Fatalf("CanRemoveExtractStoragePath() exclusive error = %v", err)
+	}
+	if !removable {
+		t.Fatal("exclusive extract should be removable")
+	}
+
+	removable, err = repo.CanRemoveExtractStoragePath(context.Background(), exclusive.ID, users[0].ID, cloneShared.ExtractStoragePath)
+	if err != nil {
+		t.Fatalf("CanRemoveExtractStoragePath() clone error = %v", err)
+	}
+	if removable {
+		t.Fatal("extract still referenced by another active file must not be removed")
+	}
+
+	removable, err = repo.CanRemoveExtractStoragePath(context.Background(), exclusive.ID, users[0].ID, softShared.ExtractStoragePath)
+	if err != nil {
+		t.Fatalf("CanRemoveExtractStoragePath() soft error = %v", err)
+	}
+	if removable {
+		t.Fatal("extract still referenced by a soft-deleted file must not be removed")
+	}
+
+	if _, err := repo.CanRemoveExtractStoragePath(context.Background(), exclusive.ID, users[0].ID, " "); err != nil {
+		t.Fatalf("CanRemoveExtractStoragePath() empty error = %v", err)
+	}
+}
+
+func TestReplaceFileObjectContentRejectsMissingOwnerWithoutMutation(t *testing.T) {
+	db := openConversationRepositoryTestDB(t)
+	if err := db.AutoMigrate(&model.User{}); err != nil {
+		t.Fatalf("migrate users: %v", err)
+	}
+	orphan := model.FileObject{
+		FileID:      "file_orphan_replace",
+		UserID:      404,
+		StoragePath: "objects/orphan-old.txt",
+		SHA256:      "sha-old",
+		SizeBytes:   12,
+		Status:      "active",
+	}
+	if err := db.Create(&orphan).Error; err != nil {
+		t.Fatalf("seed orphan file: %v", err)
+	}
+
+	_, err := NewRepo(db).ReplaceFileObjectContent(
+		context.Background(),
+		orphan.UserID,
+		orphan.FileID,
+		"objects/orphan-new.txt",
+		"sha-new",
+		24,
+	)
+	if !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("ReplaceFileObjectContent() error = %v, want ErrNotFound", err)
+	}
+	var unchanged model.FileObject
+	if loadErr := db.Where("id = ?", orphan.ID).First(&unchanged).Error; loadErr != nil {
+		t.Fatalf("load orphan file: %v", loadErr)
+	}
+	if unchanged.StoragePath != orphan.StoragePath || unchanged.SHA256 != orphan.SHA256 || unchanged.SizeBytes != orphan.SizeBytes {
+		t.Fatalf("orphan file was mutated: %+v", unchanged)
+	}
+}
+
+func TestStaleFileVersionCannotRestoreProcessingOrEmbeddingState(t *testing.T) {
+	db := openConversationRepositoryTestDB(t)
+	file := model.FileObject{
+		FileID:           "file_version_guard",
+		UserID:           71,
+		StoragePath:      "objects/current-version.txt",
+		Status:           "active",
+		ProcessingStatus: "pending",
+		EmbedStatus:      "none",
+		ChunkCount:       1,
+	}
+	if err := db.Create(&file).Error; err != nil {
+		t.Fatalf("seed versioned file: %v", err)
+	}
+	existingChunk := model.FileChunk{
+		FileObjID:  file.ID,
+		UserID:     file.UserID,
+		ChunkIndex: 0,
+		Content:    "current chunk",
+		TokenCount: 2,
+	}
+	if err := db.Create(&existingChunk).Error; err != nil {
+		t.Fatalf("seed current chunk: %v", err)
+	}
+
+	repo := NewRepo(db)
+	ctx := context.Background()
+	stalePath := "objects/stale-version.txt"
+	ready := "ready"
+	for name, update := range map[string]func() error{
+		"processing state": func() error {
+			return repo.UpdateFileObjectProcessingState(ctx, &domainconversation.FileObjectProcessing{
+				FileObjectID:        file.ID,
+				UserID:              file.UserID,
+				ExpectedStoragePath: stalePath,
+				ProcessingStatus:    ready,
+			})
+		},
+		"processing fields": func() error {
+			return repo.UpdateFileObjectProcessing(ctx, file.UserID, file.FileID, repository.UpdateFileObjectProcessingInput{
+				ExpectedStoragePath: stalePath,
+				ProcessingStatus:    &ready,
+			})
+		},
+		"embedding status": func() error {
+			return repo.UpdateFileObjectEmbedStatus(ctx, file.UserID, file.FileID, stalePath, ready, "")
+		},
+		"chunk count": func() error {
+			return repo.UpdateFileObjectChunkCount(ctx, file.ID, stalePath, 99)
+		},
+		"chunks": func() error {
+			return repo.ReplaceFileChunks(ctx, file.ID, stalePath, []domainconversation.FileChunk{{
+				FileObjID:  file.ID,
+				UserID:     file.UserID,
+				ChunkIndex: 0,
+				Content:    "stale chunk",
+				TokenCount: 2,
+			}}, [][]float32{{1, 0, 0}})
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := update(); !errors.Is(err, repository.ErrConflict) {
+				t.Fatalf("stale update error = %v, want ErrConflict", err)
+			}
+		})
+	}
+
+	var unchanged model.FileObject
+	if err := db.Where("id = ?", file.ID).First(&unchanged).Error; err != nil {
+		t.Fatalf("load current file: %v", err)
+	}
+	if unchanged.ProcessingStatus != "pending" || unchanged.EmbedStatus != "none" || unchanged.ChunkCount != 1 {
+		t.Fatalf("stale task mutated current file state: %+v", unchanged)
+	}
+	var chunks []model.FileChunk
+	if err := db.Where("file_obj_id = ?", file.ID).Find(&chunks).Error; err != nil {
+		t.Fatalf("load current chunks: %v", err)
+	}
+	if len(chunks) != 1 || chunks[0].Content != "current chunk" {
+		t.Fatalf("stale task replaced current chunks: %+v", chunks)
+	}
+}
+
+func TestCloneFileObjectProcessingStateUsesTargetContentVersion(t *testing.T) {
+	db := openConversationRepositoryTestDB(t)
+	files := []model.FileObject{
+		{
+			FileID:           "file_processing_source",
+			UserID:           81,
+			StoragePath:      "objects/source-version.txt",
+			Status:           "active",
+			ProcessingStatus: "ready",
+			ExtractStatus:    "ready",
+		},
+		{
+			FileID:           "file_processing_target",
+			UserID:           82,
+			StoragePath:      "objects/target-version.txt",
+			Status:           "active",
+			ProcessingStatus: "pending",
+		},
+	}
+	if err := db.Create(&files).Error; err != nil {
+		t.Fatalf("seed processing files: %v", err)
+	}
+
+	if err := NewRepo(db).CloneFileObjectProcessingState(context.Background(), files[0].ID, files[1].ID, files[1].UserID); err != nil {
+		t.Fatalf("CloneFileObjectProcessingState() error = %v", err)
+	}
+	var target model.FileObject
+	if err := db.Where("id = ?", files[1].ID).First(&target).Error; err != nil {
+		t.Fatalf("load target file: %v", err)
+	}
+	if target.ProcessingStatus != "ready" || target.ExtractStatus != "ready" || target.StoragePath != files[1].StoragePath {
+		t.Fatalf("target processing clone = %+v", target)
+	}
+}
+
+func TestAttachmentWritesRejectBlankFileIDWithoutPartialMutation(t *testing.T) {
+	tests := map[string]func(*Repo, *gorm.DB, model.User, model.Conversation, model.Message, model.Message) error{
+		"create attachments": func(repo *Repo, _ *gorm.DB, user model.User, conversation model.Conversation, _ model.Message, assistant model.Message) error {
+			return repo.CreateAttachments(context.Background(), []domainconversation.Attachment{{
+				ConversationID: conversation.ID,
+				MessageID:      assistant.ID,
+				UserID:         user.ID,
+				StoragePath:    "objects/unvalidated.txt",
+				Status:         "active",
+			}})
+		},
+		"create message pair": func(repo *Repo, _ *gorm.DB, user model.User, conversation model.Conversation, _ model.Message, _ model.Message) error {
+			userMessage := &domainconversation.Message{ConversationID: conversation.ID, UserID: user.ID, PublicID: "blank_pair_user", Role: "user", Status: "pending"}
+			assistantMessage := &domainconversation.Message{ConversationID: conversation.ID, UserID: user.ID, PublicID: "blank_pair_assistant", Role: "assistant", Status: "pending"}
+			return repo.CreateMessagePairWithUserAttachments(context.Background(), userMessage, assistantMessage, []domainconversation.Attachment{{
+				UserID:      user.ID,
+				StoragePath: "objects/unvalidated.txt",
+				Status:      "active",
+			}})
+		},
+		"complete assistant": func(repo *Repo, _ *gorm.DB, user model.User, conversation model.Conversation, parent model.Message, assistant model.Message) error {
+			return repo.CompleteAssistantMessageWithAttachments(
+				context.Background(),
+				parent.ID,
+				repository.MessageUsageUpdate{},
+				assistant.ID,
+				repository.AssistantMessageCompletionUpdate{Content: "must rollback", Status: "success"},
+				[]domainconversation.Attachment{{
+					ConversationID: conversation.ID,
+					UserID:         user.ID,
+					StoragePath:    "objects/unvalidated.txt",
+					Status:         "active",
+				}},
+			)
+		},
+		"complete generated assistant": func(repo *Repo, _ *gorm.DB, user model.User, conversation model.Conversation, _ model.Message, assistant model.Message) error {
+			return repo.CompleteAssistantMessageWithGeneratedAttachments(
+				context.Background(),
+				assistant.ID,
+				repository.AssistantMessageCompletionUpdate{Content: "must rollback", Status: "success"},
+				[]domainconversation.Attachment{{
+					ConversationID: conversation.ID,
+					UserID:         user.ID,
+					StoragePath:    "objects/unvalidated.txt",
+					Status:         "active",
+				}},
+			)
+		},
+	}
+
+	for name, run := range tests {
+		t.Run(name, func(t *testing.T) {
+			db := openConversationRepositoryTestDB(t)
+			if err := db.AutoMigrate(&model.User{}); err != nil {
+				t.Fatalf("migrate users: %v", err)
+			}
+			user := model.User{PublicID: "blank_attachment_owner", Username: "blank-attachment-owner", Role: "user", Status: "active"}
+			if err := db.Create(&user).Error; err != nil {
+				t.Fatalf("seed user: %v", err)
+			}
+			conversation := model.Conversation{UserID: user.ID, PublicID: "conversation_blank_attachment", SessionKey: "session_blank_attachment"}
+			if err := db.Create(&conversation).Error; err != nil {
+				t.Fatalf("seed conversation: %v", err)
+			}
+			messages := []model.Message{
+				{ConversationID: conversation.ID, UserID: user.ID, PublicID: "blank_parent", Role: "user", Status: "pending"},
+				{ConversationID: conversation.ID, UserID: user.ID, PublicID: "blank_assistant", Role: "assistant", Status: "pending"},
+			}
+			if err := db.Create(&messages).Error; err != nil {
+				t.Fatalf("seed messages: %v", err)
+			}
+
+			if err := run(NewRepo(db), db, user, conversation, messages[0], messages[1]); !errors.Is(err, repository.ErrInvalidInput) {
+				t.Fatalf("attachment write error = %v, want ErrInvalidInput", err)
+			}
+			var attachmentCount int64
+			if err := db.Model(&model.Attachment{}).Count(&attachmentCount).Error; err != nil {
+				t.Fatalf("count attachments: %v", err)
+			}
+			if attachmentCount != 0 {
+				t.Fatalf("attachment count = %d, want 0", attachmentCount)
+			}
+			var storedAssistant model.Message
+			if err := db.Where("id = ?", messages[1].ID).First(&storedAssistant).Error; err != nil {
+				t.Fatalf("load assistant: %v", err)
+			}
+			if storedAssistant.Status != "pending" || storedAssistant.Content != "" {
+				t.Fatalf("assistant was partially completed: %+v", storedAssistant)
+			}
+			var seededMessageCount int64
+			if err := db.Model(&model.Message{}).Where("conversation_id = ?", conversation.ID).Count(&seededMessageCount).Error; err != nil {
+				t.Fatalf("count messages: %v", err)
+			}
+			if seededMessageCount != 2 {
+				t.Fatalf("message count = %d, want only two seeded rows", seededMessageCount)
+			}
+		})
+	}
+}
+
+func TestCreateMessagePairRejectsStaleAttachmentStorageSnapshot(t *testing.T) {
+	db := openConversationRepositoryTestDB(t)
+	user := model.User{PublicID: "stale_attachment_owner", Username: "stale-attachment-owner", Role: "user", Status: "active"}
+	if err := db.AutoMigrate(&model.User{}); err != nil {
+		t.Fatalf("migrate users: %v", err)
+	}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	conversation := model.Conversation{UserID: user.ID, PublicID: "conversation_stale_attachment", SessionKey: "session_stale_attachment"}
+	if err := db.Create(&conversation).Error; err != nil {
+		t.Fatalf("seed conversation: %v", err)
+	}
+	file := model.FileObject{FileID: "file_stale_attachment", UserID: user.ID, StoragePath: "objects/current.txt", Status: "active"}
+	if err := db.Create(&file).Error; err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+
+	userMessage := &domainconversation.Message{ConversationID: conversation.ID, UserID: user.ID, PublicID: "message_stale_user", Role: "user", Status: "pending"}
+	assistantMessage := &domainconversation.Message{ConversationID: conversation.ID, UserID: user.ID, PublicID: "message_stale_assistant", Role: "assistant", Status: "pending"}
+	err := NewRepo(db).CreateMessagePairWithUserAttachments(
+		context.Background(),
+		userMessage,
+		assistantMessage,
+		[]domainconversation.Attachment{{
+			UserID:      user.ID,
+			FileID:      file.FileID,
+			StoragePath: "objects/stale.txt",
+			Status:      "active",
+		}},
+	)
+	if !errors.Is(err, repository.ErrConflict) {
+		t.Fatalf("CreateMessagePairWithUserAttachments() error = %v, want ErrConflict", err)
+	}
+	var messageCount int64
+	if countErr := db.Model(&model.Message{}).Where("conversation_id = ?", conversation.ID).Count(&messageCount).Error; countErr != nil {
+		t.Fatalf("count messages: %v", countErr)
+	}
+	if messageCount != 0 {
+		t.Fatalf("message count = %d, want transaction rollback", messageCount)
+	}
+}
+
 func TestTranslateErrorAllowsNil(t *testing.T) {
 	if err := translateError(nil); err != nil {
 		t.Fatalf("translateError(nil) = %v, want nil", err)
@@ -1342,7 +1925,7 @@ func openConversationRepositoryTestDB(t *testing.T) *gorm.DB {
 			_ = sqlDB.Close()
 		}
 	})
-	if err := db.AutoMigrate(&model.Conversation{}, &model.ConversationProject{}, &model.ConversationProjectMCPTool{}, &model.ConversationProjectSkill{}, &model.ConversationShare{}, &model.Message{}, &model.Attachment{}, &model.FileObject{}, &model.ConversationRun{}, &model.ChatRunEvent{}); err != nil {
+	if err := db.AutoMigrate(&model.Conversation{}, &model.ConversationProject{}, &model.ConversationProjectMCPTool{}, &model.ConversationProjectSkill{}, &model.ConversationShare{}, &model.Message{}, &model.Attachment{}, &model.FileObject{}, &model.FileChunk{}, &model.ConversationRun{}, &model.ChatRunEvent{}); err != nil {
 		t.Fatalf("migrate models: %v", err)
 	}
 	return db
@@ -1598,5 +2181,98 @@ func TestHistoricalMessageScopeStopsAtUserBoundary(t *testing.T) {
 	}
 	if len(messageIDs) != 0 {
 		t.Fatalf("expected traversal to stop at foreign-user parent, got message ids %v", messageIDs)
+	}
+}
+
+func TestDeleteFileObjectAndReleaseQuotaPreservesObjectsReferencedBySoftDeletedRows(t *testing.T) {
+	db := openConversationRepositoryTestDB(t)
+	if err := db.AutoMigrate(&model.User{}, &model.UserStorageQuota{}, &model.Conversation{}, &model.Attachment{}); err != nil {
+		t.Fatalf("migrate users, quota and attachments: %v", err)
+	}
+	users := []model.User{
+		{PublicID: "delete_file_owner", Username: "delete-file-owner", Role: "user", Status: "active"},
+		{PublicID: "delete_file_control", Username: "delete-file-control", Role: "user", Status: "active"},
+	}
+	if err := db.Create(&users).Error; err != nil {
+		t.Fatalf("seed users: %v", err)
+	}
+	owner := model.FileObject{
+		FileID:      "file_delete_owner",
+		UserID:      users[0].ID,
+		StoragePath: "objects/delete-shared.bin",
+		SizeBytes:   64,
+		Status:      "active",
+	}
+	// 另一租户的软删除行仍保留记录并引用同一对象：物理删除必须被阻止。
+	controlSoft := model.FileObject{
+		FileID:      "file_delete_control_soft",
+		UserID:      users[1].ID,
+		StoragePath: "objects/delete-shared.bin",
+		Status:      "deleted",
+	}
+	if err := db.Create(&owner).Error; err != nil {
+		t.Fatalf("seed owner file: %v", err)
+	}
+	if err := db.Create(&controlSoft).Error; err != nil {
+		t.Fatalf("seed control soft-deleted file: %v", err)
+	}
+
+	_, _, shouldRemovePhysical, err := NewRepo(db).DeleteFileObjectAndReleaseQuota(
+		context.Background(),
+		users[0].ID,
+		owner.FileID,
+		1024,
+		repository.DeleteFileObjectOptions{},
+	)
+	if err != nil {
+		t.Fatalf("DeleteFileObjectAndReleaseQuota() error = %v", err)
+	}
+	if shouldRemovePhysical {
+		t.Fatal("soft-deleted tenant row did not pin the shared object")
+	}
+
+	var ownerRow model.FileObject
+	if err = db.Where("id = ?", owner.ID).First(&ownerRow).Error; err != nil {
+		t.Fatalf("load owner row: %v", err)
+	}
+	if ownerRow.Status != "deleted" {
+		t.Fatalf("owner row status = %q, want deleted", ownerRow.Status)
+	}
+}
+
+func TestDeleteFileObjectAndReleaseQuotaRemovesExclusiveObject(t *testing.T) {
+	db := openConversationRepositoryTestDB(t)
+	if err := db.AutoMigrate(&model.User{}, &model.UserStorageQuota{}, &model.Conversation{}, &model.Attachment{}); err != nil {
+		t.Fatalf("migrate users, quota and attachments: %v", err)
+	}
+	users := []model.User{
+		{PublicID: "delete_file_exclusive_owner", Username: "delete-file-exclusive-owner", Role: "user", Status: "active"},
+	}
+	if err := db.Create(&users).Error; err != nil {
+		t.Fatalf("seed users: %v", err)
+	}
+	owner := model.FileObject{
+		FileID:      "file_delete_exclusive",
+		UserID:      users[0].ID,
+		StoragePath: "objects/delete-exclusive.bin",
+		SizeBytes:   64,
+		Status:      "active",
+	}
+	if err := db.Create(&owner).Error; err != nil {
+		t.Fatalf("seed owner file: %v", err)
+	}
+
+	_, _, shouldRemovePhysical, err := NewRepo(db).DeleteFileObjectAndReleaseQuota(
+		context.Background(),
+		users[0].ID,
+		owner.FileID,
+		1024,
+		repository.DeleteFileObjectOptions{},
+	)
+	if err != nil {
+		t.Fatalf("DeleteFileObjectAndReleaseQuota() error = %v", err)
+	}
+	if !shouldRemovePhysical {
+		t.Fatal("exclusive object should be removable after file deletion")
 	}
 }

@@ -43,6 +43,18 @@ type UploadRepository interface {
 	GetOrInitUserStorageQuota(ctx context.Context, userID uint, quotaLimit int64) (*domainconversation.StorageQuota, error)
 }
 
+// SharedFileCloneRepository 封装跨用户共享文件的原子克隆能力。
+type SharedFileCloneRepository interface {
+	CloneActiveFileObjectAndConsumeQuota(
+		ctx context.Context,
+		sourceUserID uint,
+		sourceFileID string,
+		targetUserID uint,
+		targetFileID string,
+		quotaLimit int64,
+	) (*domainconversation.FileObject, *domainconversation.FileObject, error)
+}
+
 // FileEmbeddingArtifactsRepository 封装 embedding 工件克隆能力。
 type FileEmbeddingArtifactsRepository interface {
 	CloneFileEmbeddingArtifacts(ctx context.Context, source *domainconversation.FileObject, target *domainconversation.FileObject) error
@@ -53,9 +65,9 @@ type EmbeddingRepository interface {
 	VectorStoreAvailable(ctx context.Context) (bool, error)
 	GetActiveFileObjectByID(ctx context.Context, userID uint, fileID string) (*domainconversation.FileObject, error)
 	GetFileObjectProcessingByObjectID(ctx context.Context, fileObjID uint) (*domainconversation.FileObjectProcessing, error)
-	UpdateFileObjectEmbedStatus(ctx context.Context, userID uint, fileID string, status string, embedErr string) error
-	UpdateFileObjectChunkCount(ctx context.Context, fileObjID uint, chunkCount int) error
-	ReplaceFileChunks(ctx context.Context, fileObjID uint, chunks []domainconversation.FileChunk, embeddings [][]float32) error
+	UpdateFileObjectEmbedStatus(ctx context.Context, userID uint, fileID string, expectedStoragePath string, status string, embedErr string) error
+	UpdateFileObjectChunkCount(ctx context.Context, fileObjID uint, expectedStoragePath string, chunkCount int) error
+	ReplaceFileChunks(ctx context.Context, fileObjID uint, expectedStoragePath string, chunks []domainconversation.FileChunk, embeddings [][]float32) error
 	// MarkAllEmbeddedFilesStale 将所有 embed_status=ready 的文件标记为 stale，
 	// 在 Embedding 模型变更后调用，使旧向量失效并等待重建。
 	// 返回被标记的文件数量。
@@ -72,6 +84,14 @@ type RAGRepository interface {
 	BM25SearchFileChunks(ctx context.Context, userID uint, fileObjIDs []uint, query string, topK int) ([]domainconversation.FileChunkSearchResult, error)
 }
 
+// ReplaceFileObjectContentResult 返回覆盖前对象路径及提交后物理清理判定。
+type ReplaceFileObjectContentResult struct {
+	OldStoragePath         string
+	OldExtractStoragePath  string
+	RemoveOldStorageObject bool
+	RemoveOldExtractObject bool
+}
+
 // FileProcessingRepository 封装文件处理流水线状态能力。
 type FileProcessingRepository interface {
 	GetActiveFileObjectByID(ctx context.Context, userID uint, fileID string) (*domainconversation.FileObject, error)
@@ -79,13 +99,16 @@ type FileProcessingRepository interface {
 	GetFileObjectProcessingByObjectID(ctx context.Context, fileObjID uint) (*domainconversation.FileObjectProcessing, error)
 	CloneFileObjectProcessingState(ctx context.Context, sourceFileObjID uint, targetFileObjID uint, userID uint) error
 	UpdateFileObjectProcessing(ctx context.Context, userID uint, fileID string, input UpdateFileObjectProcessingInput) error
-	// ReplaceFileObjectContent 覆盖文件对象内容元数据并重置处理/提取/向量状态
-	// （供平台工具 write_file 覆盖内容后调用；重建由延迟调度器触发）。
-	ReplaceFileObjectContent(ctx context.Context, userID uint, fileID string, storagePath string, sha256 string, sizeBytes int64) error
+	// CanRemoveExtractStoragePath 判断提取产物是否已无任何保留引用（stale worker 清理用）。
+	CanRemoveExtractStoragePath(ctx context.Context, fileObjID uint, userID uint, extractPath string) (bool, error)
+	// ReplaceFileObjectContent 覆盖文件对象内容元数据并重置处理/提取/向量状态，
+	// 返回事务内计算的旧对象物理清理判定。
+	ReplaceFileObjectContent(ctx context.Context, userID uint, fileID string, storagePath string, sha256 string, sizeBytes int64) (ReplaceFileObjectContentResult, error)
 }
 
 // UpdateFileObjectProcessingInput 定义文件处理状态更新字段。
 type UpdateFileObjectProcessingInput struct {
+	ExpectedStoragePath    string
 	ProcessingStatus       *string
 	ProcessingReady        *bool
 	ProcessingErrorCode    *string

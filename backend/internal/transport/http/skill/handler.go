@@ -637,6 +637,10 @@ func writeSkillError(c *gin.Context, err error) {
 		response.Error(c, http.StatusConflict, "skill trigger already exists")
 		return
 	}
+	if errors.Is(err, appskill.ErrSkillVersionConflict) {
+		response.ErrorWithCode(c, http.StatusConflict, "skill.version_conflict", "skill has been modified")
+		return
+	}
 	if errors.Is(err, appskill.ErrInvalidSkill) {
 		response.ErrorFrom(c, http.StatusBadRequest, err)
 		return

@@ -397,6 +397,7 @@ func NewApp() (*App, error) {
 	mcpHandler := mcphttp.NewHandler(mcpService)
 	mcpModule := mcphttp.NewModule(mcpHandler)
 	adminService := admin.NewService(userService, auditService)
+	adminService.SetObjectStoreProvider(objectStoreProvider)
 	adminService.SetAuthSecurityService(authService)
 	adminService.SetSystemEventService(systemEventService)
 	adminService.SetUsageLogService(billingService)

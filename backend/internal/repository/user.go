@@ -250,7 +250,6 @@ type UserRepository interface {
 	UpdateLastLogin(ctx context.Context, userID uint) error
 	ListLatestSessionActivityByUserIDs(ctx context.Context, userIDs []uint) (map[uint]time.Time, error)
 	DeleteAccountHard(ctx context.Context, userID uint) error
-	ListDistinctFileStoragePathsByUserID(ctx context.Context, userID uint) ([]string, error)
 	RecordAuthEvent(
 		ctx context.Context,
 		userID uint,

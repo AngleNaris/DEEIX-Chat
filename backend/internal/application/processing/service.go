@@ -142,6 +142,7 @@ func (s *Service) InitializeUploadedFile(ctx context.Context, fileObj *domaincon
 		processingErrorMessage := ""
 		extractStatus := "none"
 		if err := s.repo.UpdateFileObjectProcessing(ctx, fileObj.UserID, fileObj.FileID, repository.UpdateFileObjectProcessingInput{
+			ExpectedStoragePath:    fileObj.StoragePath,
 			ProcessingStatus:       &processingStatus,
 			ProcessingReady:        &processingReady,
 			ProcessingErrorCode:    &processingErrorCode,
@@ -151,17 +152,18 @@ func (s *Service) InitializeUploadedFile(ctx context.Context, fileObj *domaincon
 			return err
 		}
 		return s.repo.UpdateFileObjectProcessingState(ctx, &domainconversation.FileObjectProcessing{
-			FileObjectID:     fileObj.ID,
-			UserID:           fileObj.UserID,
-			DetectedMIME:     fileObj.DetectedMIME,
-			FileCategory:     fileObj.FileCategory,
-			ProcessingStatus: "ready",
-			ExtractStatus:    "none",
-			RAGReady:         false,
-			RAGReason:        ragReason,
-			ExtractorVersion: s.version(),
-			StartedAt:        &now,
-			CompletedAt:      &now,
+			FileObjectID:        fileObj.ID,
+			ExpectedStoragePath: fileObj.StoragePath,
+			UserID:              fileObj.UserID,
+			DetectedMIME:        fileObj.DetectedMIME,
+			FileCategory:        fileObj.FileCategory,
+			ProcessingStatus:    "ready",
+			ExtractStatus:       "none",
+			RAGReady:            false,
+			RAGReason:           ragReason,
+			ExtractorVersion:    s.version(),
+			StartedAt:           &now,
+			CompletedAt:         &now,
 		})
 	}
 
@@ -173,21 +175,23 @@ func (s *Service) InitializeUploadedFile(ctx context.Context, fileObj *domaincon
 	processingReady := false
 	extractStatus := "none"
 	if err := s.repo.UpdateFileObjectProcessing(ctx, fileObj.UserID, fileObj.FileID, repository.UpdateFileObjectProcessingInput{
-		ProcessingStatus: &processingStatus,
-		ProcessingReady:  &processingReady,
-		ExtractStatus:    &extractStatus,
+		ExpectedStoragePath: fileObj.StoragePath,
+		ProcessingStatus:    &processingStatus,
+		ProcessingReady:     &processingReady,
+		ExtractStatus:       &extractStatus,
 	}); err != nil {
 		return err
 	}
 	if err := s.repo.UpdateFileObjectProcessingState(ctx, &domainconversation.FileObjectProcessing{
-		FileObjectID:     fileObj.ID,
-		UserID:           fileObj.UserID,
-		DetectedMIME:     fileObj.DetectedMIME,
-		FileCategory:     fileObj.FileCategory,
-		ProcessingStatus: "queued",
-		ExtractStatus:    "none",
-		ExtractorVersion: s.version(),
-		StartedAt:        &now,
+		FileObjectID:        fileObj.ID,
+		ExpectedStoragePath: fileObj.StoragePath,
+		UserID:              fileObj.UserID,
+		DetectedMIME:        fileObj.DetectedMIME,
+		FileCategory:        fileObj.FileCategory,
+		ProcessingStatus:    "queued",
+		ExtractStatus:       "none",
+		ExtractorVersion:    s.version(),
+		StartedAt:           &now,
 	}); err != nil {
 		return err
 	}
@@ -217,6 +221,7 @@ func (s *Service) ProcessFile(ctx context.Context, userID uint, fileID string) e
 	extractStatus := "processing"
 	extractorVersion := s.version()
 	if err = s.repo.UpdateFileObjectProcessing(runCtx, userID, fileID, repository.UpdateFileObjectProcessingInput{
+		ExpectedStoragePath:    fileObj.StoragePath,
 		ProcessingStatus:       &processingStatus,
 		ProcessingReady:        &processingReady,
 		ProcessingErrorCode:    &processingErrorCode,
@@ -238,7 +243,7 @@ func (s *Service) ProcessFile(ctx context.Context, userID uint, fileID string) e
 		return s.markFileProcessingFailed(runCtx, fileObj, "extract_failed", "无法提取文本")
 	}
 
-	extractPath, err := s.extractSvc.WriteExtractedText(runCtx, fileObj.UserID, fileObj.FileID, extractResult.Text)
+	extractPath, err := s.extractSvc.WriteExtractedText(runCtx, fileObj.UserID, fileObj.FileID, fileObj.StoragePath, extractResult.Text)
 	if err != nil {
 		return s.markFileProcessingFailed(runCtx, fileObj, "extract_failed", err.Error())
 	}
@@ -257,24 +262,28 @@ func (s *Service) ProcessFile(ctx context.Context, userID uint, fileID string) e
 		}
 	}
 	if err = s.repo.UpdateFileObjectProcessingState(runCtx, &domainconversation.FileObjectProcessing{
-		FileObjectID:       fileObj.ID,
-		UserID:             fileObj.UserID,
-		DetectedMIME:       fileObj.DetectedMIME,
-		FileCategory:       fileObj.FileCategory,
-		ProcessingStatus:   "extracted",
-		ExtractStatus:      "ready",
-		ExtractEngine:      extractResult.Engine,
-		ExtractStoragePath: extractPath,
-		ExtractChars:       len([]rune(extractResult.Text)),
-		ExtractPages:       extractResult.PageCount,
-		PreviewText:        preview,
-		OCRUsed:            extractResult.OCRUsed,
-		RAGReady:           resultRAGReady,
-		RAGReason:          resultRAGReason,
-		ExtractorVersion:   s.version(),
-		StartedAt:          &startedAt,
-		CompletedAt:        &now,
+		FileObjectID:        fileObj.ID,
+		ExpectedStoragePath: fileObj.StoragePath,
+		UserID:              fileObj.UserID,
+		DetectedMIME:        fileObj.DetectedMIME,
+		FileCategory:        fileObj.FileCategory,
+		ProcessingStatus:    "extracted",
+		ExtractStatus:       "ready",
+		ExtractEngine:       extractResult.Engine,
+		ExtractStoragePath:  extractPath,
+		ExtractChars:        len([]rune(extractResult.Text)),
+		ExtractPages:        extractResult.PageCount,
+		PreviewText:         preview,
+		OCRUsed:             extractResult.OCRUsed,
+		RAGReady:            resultRAGReady,
+		RAGReason:           resultRAGReason,
+		ExtractorVersion:    s.version(),
+		StartedAt:           &startedAt,
+		CompletedAt:         &now,
 	}); err != nil {
+		if errors.Is(err, repository.ErrNotFound) || errors.Is(err, repository.ErrConflict) {
+			s.removeOrphanExtract(runCtx, fileObj.ID, fileObj.UserID, fileObj.FileID, extractPath)
+		}
 		return err
 	}
 	processingStatus = "extracted"
@@ -283,51 +292,58 @@ func (s *Service) ProcessFile(ctx context.Context, userID uint, fileID string) e
 	extractedAt := &now
 	extractorVersion = s.version()
 	if err = s.repo.UpdateFileObjectProcessing(runCtx, fileObj.UserID, fileObj.FileID, repository.UpdateFileObjectProcessingInput{
-		ProcessingStatus: &processingStatus,
-		ProcessingReady:  &processingReady,
-		ExtractStatus:    &extractStatus,
-		PageCount:        &extractResult.PageCount,
-		ExtractedAt:      &extractedAt,
-		ExtractorVersion: &extractorVersion,
+		ExpectedStoragePath: fileObj.StoragePath,
+		ProcessingStatus:    &processingStatus,
+		ProcessingReady:     &processingReady,
+		ExtractStatus:       &extractStatus,
+		PageCount:           &extractResult.PageCount,
+		ExtractedAt:         &extractedAt,
+		ExtractorVersion:    &extractorVersion,
 	}); err != nil {
+		if errors.Is(err, repository.ErrNotFound) || errors.Is(err, repository.ErrConflict) {
+			s.removeOrphanExtract(runCtx, fileObj.ID, fileObj.UserID, fileObj.FileID, extractPath)
+		}
 		return err
 	}
 
 	if indexingAvailable && supportsRAG(fileObj.FileCategory) && s.embeddingSvc.ShouldTrigger(*fileObj) {
 		processingStatus = "embedding"
 		_ = s.repo.UpdateFileObjectProcessing(runCtx, fileObj.UserID, fileObj.FileID, repository.UpdateFileObjectProcessingInput{
-			ProcessingStatus: &processingStatus,
+			ExpectedStoragePath: fileObj.StoragePath,
+			ProcessingStatus:    &processingStatus,
 		})
 		embedCtx, embedCancel := context.WithTimeout(runCtx, fixedEmbeddingTimeout)
 		embedErr := s.embeddingSvc.ProcessFile(embedCtx, *fileObj)
 		embedCancel()
 		if embedErr != nil {
 			_ = s.repo.UpdateFileObjectProcessingState(runCtx, &domainconversation.FileObjectProcessing{
-				FileObjectID:       fileObj.ID,
-				UserID:             fileObj.UserID,
-				DetectedMIME:       fileObj.DetectedMIME,
-				FileCategory:       fileObj.FileCategory,
-				ProcessingStatus:   "ready",
-				ExtractStatus:      "ready",
-				ExtractEngine:      extractResult.Engine,
-				ExtractStoragePath: extractPath,
-				ExtractChars:       len([]rune(extractResult.Text)),
-				ExtractPages:       extractResult.PageCount,
-				PreviewText:        preview,
-				OCRUsed:            extractResult.OCRUsed,
-				RAGReady:           false,
-				RAGReason:          "embed_failed",
-				ErrorCode:          "embed_failed",
-				ErrorMessage:       truncateError(embedErr.Error(), 255),
-				ExtractorVersion:   s.version(),
-				StartedAt:          &startedAt,
-				CompletedAt:        &now,
+				FileObjectID:        fileObj.ID,
+				ExpectedStoragePath: fileObj.StoragePath,
+				UserID:              fileObj.UserID,
+				DetectedMIME:        fileObj.DetectedMIME,
+				FileCategory:        fileObj.FileCategory,
+				ProcessingStatus:    "ready",
+				ExtractStatus:       "ready",
+				ExtractEngine:       extractResult.Engine,
+				ExtractStoragePath:  extractPath,
+				ExtractChars:        len([]rune(extractResult.Text)),
+				ExtractPages:        extractResult.PageCount,
+				PreviewText:         preview,
+				OCRUsed:             extractResult.OCRUsed,
+				RAGReady:            false,
+				RAGReason:           "embed_failed",
+				ErrorCode:           "embed_failed",
+				ErrorMessage:        truncateError(embedErr.Error(), 255),
+				ExtractorVersion:    s.version(),
+				StartedAt:           &startedAt,
+				CompletedAt:         &now,
 			})
 			processingStatus = "ready"
 			processingReady = true
 			processingErrorCode = "embed_failed"
 			processingErrorMessage = truncateError(embedErr.Error(), 255)
 			_ = s.repo.UpdateFileObjectProcessing(runCtx, fileObj.UserID, fileObj.FileID, repository.UpdateFileObjectProcessingInput{
+				ExpectedStoragePath:    fileObj.StoragePath,
 				ProcessingStatus:       &processingStatus,
 				ProcessingReady:        &processingReady,
 				ProcessingErrorCode:    &processingErrorCode,
@@ -338,19 +354,20 @@ func (s *Service) ProcessFile(ctx context.Context, userID uint, fileID string) e
 	}
 
 	if err = s.repo.UpdateFileObjectProcessingState(runCtx, &domainconversation.FileObjectProcessing{
-		FileObjectID:       fileObj.ID,
-		UserID:             fileObj.UserID,
-		DetectedMIME:       fileObj.DetectedMIME,
-		FileCategory:       fileObj.FileCategory,
-		ProcessingStatus:   "ready",
-		ExtractStatus:      "ready",
-		ExtractEngine:      extractResult.Engine,
-		ExtractStoragePath: extractPath,
-		ExtractChars:       len([]rune(extractResult.Text)),
-		ExtractPages:       extractResult.PageCount,
-		PreviewText:        preview,
-		OCRUsed:            extractResult.OCRUsed,
-		RAGReady:           ragAvailable && supportsRAG(fileObj.FileCategory),
+		FileObjectID:        fileObj.ID,
+		ExpectedStoragePath: fileObj.StoragePath,
+		UserID:              fileObj.UserID,
+		DetectedMIME:        fileObj.DetectedMIME,
+		FileCategory:        fileObj.FileCategory,
+		ProcessingStatus:    "ready",
+		ExtractStatus:       "ready",
+		ExtractEngine:       extractResult.Engine,
+		ExtractStoragePath:  extractPath,
+		ExtractChars:        len([]rune(extractResult.Text)),
+		ExtractPages:        extractResult.PageCount,
+		PreviewText:         preview,
+		OCRUsed:             extractResult.OCRUsed,
+		RAGReady:            ragAvailable && supportsRAG(fileObj.FileCategory),
 		RAGReason: func() string {
 			if !supportsRAG(fileObj.FileCategory) {
 				return "not_applicable"
@@ -371,11 +388,32 @@ func (s *Service) ProcessFile(ctx context.Context, userID uint, fileID string) e
 	processingErrorCode = ""
 	processingErrorMessage = ""
 	return s.repo.UpdateFileObjectProcessing(runCtx, fileObj.UserID, fileObj.FileID, repository.UpdateFileObjectProcessingInput{
+		ExpectedStoragePath:    fileObj.StoragePath,
 		ProcessingStatus:       &processingStatus,
 		ProcessingReady:        &processingReady,
 		ProcessingErrorCode:    &processingErrorCode,
 		ProcessingErrorMessage: &processingErrorMessage,
 	})
+}
+
+// removeOrphanExtract 在版本冲突（文件内容已被其他任务覆盖）时清理本次未提交的
+// 提取对象；对象仍被其他保留行（如克隆文件）引用时不做删除。
+func (s *Service) removeOrphanExtract(ctx context.Context, fileObjID uint, userID uint, fileID string, extractPath string) {
+	if strings.TrimSpace(extractPath) == "" {
+		return
+	}
+	removable, err := s.repo.CanRemoveExtractStoragePath(ctx, fileObjID, userID, extractPath)
+	if err != nil || !removable {
+		return
+	}
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), failurePersistTimeout)
+	defer cancel()
+	if err := s.extractSvc.DeleteExtractedText(cleanupCtx, extractPath); err != nil && s.logger != nil {
+		s.logger.Warn("remove_uncommitted_extract_failed",
+			zap.String("file_id", fileID),
+			zap.Error(err),
+		)
+	}
 }
 
 // GetFileProcessingStatus 查询文件处理状态。
@@ -587,18 +625,19 @@ func (s *Service) markFileProcessingFailed(ctx context.Context, fileObj *domainc
 	}
 	now := time.Now()
 	if err := s.repo.UpdateFileObjectProcessingState(writeCtx, &domainconversation.FileObjectProcessing{
-		FileObjectID:     fileObj.ID,
-		UserID:           fileObj.UserID,
-		DetectedMIME:     fileObj.DetectedMIME,
-		FileCategory:     fileObj.FileCategory,
-		ProcessingStatus: "failed",
-		ExtractStatus:    "failed",
-		RAGReady:         false,
-		RAGReason:        code,
-		ErrorCode:        code,
-		ErrorMessage:     truncateError(message, 255),
-		ExtractorVersion: s.version(),
-		CompletedAt:      &now,
+		FileObjectID:        fileObj.ID,
+		ExpectedStoragePath: fileObj.StoragePath,
+		UserID:              fileObj.UserID,
+		DetectedMIME:        fileObj.DetectedMIME,
+		FileCategory:        fileObj.FileCategory,
+		ProcessingStatus:    "failed",
+		ExtractStatus:       "failed",
+		RAGReady:            false,
+		RAGReason:           code,
+		ErrorCode:           code,
+		ErrorMessage:        truncateError(message, 255),
+		ExtractorVersion:    s.version(),
+		CompletedAt:         &now,
 	}); err != nil {
 		return err
 	}
@@ -607,6 +646,7 @@ func (s *Service) markFileProcessingFailed(ctx context.Context, fileObj *domainc
 	processingErrorMessage := truncateError(message, 255)
 	extractStatus := "failed"
 	return s.repo.UpdateFileObjectProcessing(writeCtx, fileObj.UserID, fileObj.FileID, repository.UpdateFileObjectProcessingInput{
+		ExpectedStoragePath:    fileObj.StoragePath,
 		ProcessingStatus:       &processingStatus,
 		ProcessingReady:        &processingReady,
 		ProcessingErrorCode:    &code,

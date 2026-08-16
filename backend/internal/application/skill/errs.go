@@ -9,6 +9,8 @@ var (
 	ErrInvalidSkill = errors.New("invalid skill")
 	// ErrSkillConflict 表示触发词在当前作用域内已存在。
 	ErrSkillConflict = errors.New("skill trigger already exists")
+	// ErrSkillVersionConflict 表示技能已被并发修改。
+	ErrSkillVersionConflict = errors.New("skill has been modified")
 	// ErrInvalidPackage 表示技能包不合法（zip 损坏、缺少 SKILL.md、越界等）。
 	ErrInvalidPackage = errors.New("invalid skill package")
 	// ErrPackageFileNotFound 表示包内文件不存在。

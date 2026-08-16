@@ -148,29 +148,29 @@ func (s *Service) ProcessFile(ctx context.Context, fileObj domainconversation.Fi
 		return nil
 	}
 
-	if err := s.repo.UpdateFileObjectEmbedStatus(ctx, fileObj.UserID, fileObj.FileID, "processing", ""); err != nil {
+	if err := s.repo.UpdateFileObjectEmbedStatus(ctx, fileObj.UserID, fileObj.FileID, fileObj.StoragePath, "processing", ""); err != nil {
 		return err
 	}
 
 	text, err := s.loadSourceText(ctx, fileObj)
 	if err != nil {
-		_ = s.updateFileObjectEmbedStatus(ctx, fileObj.UserID, fileObj.FileID, "failed", "无法提取文本")
+		_ = s.updateFileObjectEmbedStatus(ctx, fileObj, "failed", "无法提取文本")
 		return err
 	}
 	if strings.TrimSpace(text) == "" {
-		_ = s.updateFileObjectEmbedStatus(ctx, fileObj.UserID, fileObj.FileID, "failed", "无法提取文本")
+		_ = s.updateFileObjectEmbedStatus(ctx, fileObj, "failed", "无法提取文本")
 		return fmt.Errorf("no extractable text in file %s", fileObj.FileID)
 	}
 
 	chunks := infraembedding.ChunkText(text, cfg.EmbedChunkSizeTokens, cfg.EmbedChunkOverlapTokens)
 	if len(chunks) == 0 {
-		_ = s.updateFileObjectEmbedStatus(ctx, fileObj.UserID, fileObj.FileID, "failed", "分片结果为空")
+		_ = s.updateFileObjectEmbedStatus(ctx, fileObj, "failed", "分片结果为空")
 		return nil
 	}
 
 	embeddings, err := s.embedTexts(ctx, chunks)
 	if err != nil {
-		_ = s.updateFileObjectEmbedStatus(ctx, fileObj.UserID, fileObj.FileID, "failed", truncateError(err.Error(), 255))
+		_ = s.updateFileObjectEmbedStatus(ctx, fileObj, "failed", truncateError(err.Error(), 255))
 		return err
 	}
 
@@ -186,16 +186,16 @@ func (s *Service) ProcessFile(ctx context.Context, fileObj domainconversation.Fi
 			CreatedAt:  now,
 		})
 	}
-	if err = s.repo.ReplaceFileChunks(ctx, fileObj.ID, fileChunks, embeddings); err != nil {
-		_ = s.updateFileObjectEmbedStatus(ctx, fileObj.UserID, fileObj.FileID, "failed", err.Error())
+	if err = s.repo.ReplaceFileChunks(ctx, fileObj.ID, fileObj.StoragePath, fileChunks, embeddings); err != nil {
+		_ = s.updateFileObjectEmbedStatus(ctx, fileObj, "failed", err.Error())
 		return err
 	}
 
-	_ = s.repo.UpdateFileObjectChunkCount(ctx, fileObj.ID, len(fileChunks))
-	return s.repo.UpdateFileObjectEmbedStatus(ctx, fileObj.UserID, fileObj.FileID, "ready", "")
+	_ = s.repo.UpdateFileObjectChunkCount(ctx, fileObj.ID, fileObj.StoragePath, len(fileChunks))
+	return s.repo.UpdateFileObjectEmbedStatus(ctx, fileObj.UserID, fileObj.FileID, fileObj.StoragePath, "ready", "")
 }
 
-func (s *Service) updateFileObjectEmbedStatus(ctx context.Context, userID uint, fileID string, status string, embedErr string) error {
+func (s *Service) updateFileObjectEmbedStatus(ctx context.Context, fileObj domainconversation.FileObject, status string, embedErr string) error {
 	if s == nil || s.repo == nil {
 		return nil
 	}
@@ -205,7 +205,7 @@ func (s *Service) updateFileObjectEmbedStatus(ctx context.Context, userID uint, 
 		writeCtx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 	}
-	return s.repo.UpdateFileObjectEmbedStatus(writeCtx, userID, fileID, status, embedErr)
+	return s.repo.UpdateFileObjectEmbedStatus(writeCtx, fileObj.UserID, fileObj.FileID, fileObj.StoragePath, status, embedErr)
 }
 
 // WaitReady 轮询等待文件 embedding 就绪。

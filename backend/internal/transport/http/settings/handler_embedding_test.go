@@ -55,15 +55,15 @@ func (testEmbeddingRepo) GetFileObjectProcessingByObjectID(context.Context, uint
 	return nil, nil
 }
 
-func (testEmbeddingRepo) UpdateFileObjectEmbedStatus(context.Context, uint, string, string, string) error {
+func (testEmbeddingRepo) UpdateFileObjectEmbedStatus(context.Context, uint, string, string, string, string) error {
 	return nil
 }
 
-func (testEmbeddingRepo) UpdateFileObjectChunkCount(context.Context, uint, int) error {
+func (testEmbeddingRepo) UpdateFileObjectChunkCount(context.Context, uint, string, int) error {
 	return nil
 }
 
-func (testEmbeddingRepo) ReplaceFileChunks(context.Context, uint, []domainconversation.FileChunk, [][]float32) error {
+func (testEmbeddingRepo) ReplaceFileChunks(context.Context, uint, string, []domainconversation.FileChunk, [][]float32) error {
 	return nil
 }
 

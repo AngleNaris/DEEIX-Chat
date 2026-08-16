@@ -197,6 +197,10 @@ func (s *handlerUserServiceFake) ResetPasswordByAdmin(context.Context, uint, str
 	return nil
 }
 
+func (s *handlerUserServiceFake) DeleteAccountHardWithStoragePaths(context.Context, uint) ([]string, error) {
+	return []string{}, nil
+}
+
 func (s *handlerUserServiceFake) DeleteAccountHard(context.Context, uint) error {
 	return nil
 }

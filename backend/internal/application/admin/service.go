@@ -14,6 +14,7 @@ import (
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/billing"
 	appconversation "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/conversation"
 	applogcleanup "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/logcleanup"
+	appstorage "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/objectstorage"
 	systemeventapp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/systemevent"
 	userapp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/user"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/userview"
@@ -52,6 +53,7 @@ type userService interface {
 	ResetLoginFailure(ctx context.Context, userID uint) error
 	ResetPasswordByAdmin(ctx context.Context, userID uint, newPassword string, mustResetPassword bool) error
 	DeleteAccountHard(ctx context.Context, userID uint) error
+	DeleteAccountHardWithStoragePaths(ctx context.Context, userID uint) ([]string, error)
 	RecordAuthEvent(
 		ctx context.Context,
 		userID uint,
@@ -135,6 +137,7 @@ type Service struct {
 	permissionGroupRepo                        permissionGroupRepo
 	permissionGroupModelLookup                 permissionGroupModelLookup
 	permissionGroupBillingPlanReferenceChecker permissionGroupBillingPlanReferenceChecker
+	objectStoreProvider                        appstorage.Provider
 }
 
 type subscriptionResolver interface {
@@ -172,6 +175,11 @@ func NewService(userService userService, auditService auditService) *Service {
 		userService:  userService,
 		auditService: auditService,
 	}
+}
+
+// SetObjectStoreProvider 注入对象存储 provider。
+func (s *Service) SetObjectStoreProvider(provider appstorage.Provider) {
+	s.objectStoreProvider = provider
 }
 
 // SetOpenWebUIRowLoader 注入 OpenWebUI 外部数据读取能力。
@@ -1217,9 +1225,11 @@ func (s *Service) DeleteUserByAdmin(
 		return ErrSuperAdminDeleteNotAllowed
 	}
 
-	if err = s.userService.DeleteAccountHard(ctx, targetUserID); err != nil {
+	storagePaths, err := s.userService.DeleteAccountHardWithStoragePaths(ctx, targetUserID)
+	if err != nil {
 		return err
 	}
+	cleanup := appstorage.PurgePaths(ctx, s.objectStoreProvider, storagePaths)
 
 	s.auditService.Write(
 		ctx,
@@ -1231,9 +1241,9 @@ func (s *Service) DeleteUserByAdmin(
 		ip,
 		userAgent,
 		map[string]string{
-			"target_user_id": strconv.FormatUint(uint64(targetUserID), 10),
-			"username":       targetUser.Username,
-			"public_id":      targetUser.PublicID,
+			"target_user_id":           strconv.FormatUint(uint64(targetUserID), 10),
+			"storage_file_count":       strconv.Itoa(cleanup.Attempted),
+			"storage_cleanup_failures": strconv.Itoa(cleanup.Failed),
 		},
 	)
 

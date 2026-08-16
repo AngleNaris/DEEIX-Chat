@@ -8,7 +8,6 @@ import (
 	appupload "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/upload"
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
-	"go.uber.org/zap"
 )
 
 // FileExtractResult 表示当前用户可读取的文件提取文本。
@@ -21,20 +20,9 @@ type FileExtractResult struct {
 	OCRUsed      bool
 }
 
-func (s *Service) cloneOrTriggerEmbedding(ctx context.Context, source *model.FileObject, target *model.FileObject) {
+func (s *Service) cloneOrTriggerEmbedding(_ context.Context, _ *model.FileObject, target *model.FileObject) {
 	if target == nil {
 		return
-	}
-	if source != nil && source.EmbedStatus == "ready" && source.ChunkCount > 0 {
-		if err := s.repo.CloneFileEmbeddingArtifacts(ctx, source, target); err == nil {
-			return
-		} else if s.logger != nil {
-			s.logger.Warn("clone_embedding_artifacts_failed",
-				zap.String("source_file_id", source.FileID),
-				zap.String("target_file_id", target.FileID),
-				zap.Error(err),
-			)
-		}
 	}
 	s.embeddingSvc.MaybeTrigger(*target)
 }

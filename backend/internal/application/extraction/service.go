@@ -3,6 +3,7 @@ package extraction
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -205,9 +206,10 @@ func (s *Service) ExtractStoredFile(ctx context.Context, input ExtractInput) (Re
 	return Result{}, fmt.Errorf("extract_failed")
 }
 
-// WriteExtractedText 将提取结果写入标准文本产物路径。
-func (s *Service) WriteExtractedText(ctx context.Context, userID uint, fileID string, text string) (string, error) {
+// WriteExtractedText 将提取结果写入按源对象版本隔离的文本产物路径。
+func (s *Service) WriteExtractedText(ctx context.Context, userID uint, fileID string, sourceStoragePath string, text string) (string, error) {
 	text = sanitizeExtractedText(text)
+	version := sha256.Sum256([]byte(strings.TrimSpace(sourceStoragePath)))
 
 	now := time.Now()
 	relativePath := filepath.ToSlash(filepath.Join(
@@ -215,7 +217,7 @@ func (s *Service) WriteExtractedText(ctx context.Context, userID uint, fileID st
 		fmt.Sprintf("uid_%d", userID),
 		now.Format("2006"),
 		now.Format("01"),
-		fileID+".txt",
+		fmt.Sprintf("%s_%x.txt", fileID, version[:8]),
 	))
 	store, err := s.openObjectStore(ctx)
 	if err != nil {
@@ -228,6 +230,15 @@ func (s *Service) WriteExtractedText(ctx context.Context, userID uint, fileID st
 		return "", err
 	}
 	return relativePath, nil
+}
+
+// DeleteExtractedText 删除未提交到文件记录的提取文本产物。
+func (s *Service) DeleteExtractedText(ctx context.Context, relativePath string) error {
+	store, err := s.openObjectStore(ctx)
+	if err != nil {
+		return err
+	}
+	return store.Delete(ctx, relativePath)
 }
 
 // ReadExtractedText 读取标准文本产物。

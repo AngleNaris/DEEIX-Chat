@@ -21,9 +21,10 @@ const (
 
 // PackageFile 描述技能包内的一个引用文件。
 type PackageFile struct {
-	Path string
-	Size int64
-	Kind string
+	Path      string
+	Size      int64
+	Kind      string
+	ObjectKey string
 }
 
 // Skill 表示可在会话中按需加载的 SKILL.md 能力包。

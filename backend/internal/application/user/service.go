@@ -27,6 +27,10 @@ type Service struct {
 	avatarFileValidator avatarFileValidator
 }
 
+type accountHardDeleteRepository interface {
+	DeleteAccountHardWithStoragePaths(ctx context.Context, userID uint) ([]string, error)
+}
+
 type avatarContentOpener interface {
 	OpenAvatarFileContent(ctx context.Context, userID uint, fileID string) (*AvatarFileContent, error)
 }
@@ -418,6 +422,22 @@ func (s *Service) ResetPasswordByAdmin(ctx context.Context, userID uint, newPass
 		return err
 	}
 	return nil
+}
+
+// DeleteAccountHardWithStoragePaths 删除账号并返回提交后可安全清理的对象存储路径。
+func (s *Service) DeleteAccountHardWithStoragePaths(ctx context.Context, userID uint) ([]string, error) {
+	repo, ok := s.repo.(accountHardDeleteRepository)
+	if !ok {
+		return nil, errors.New("account hard delete repository is unavailable")
+	}
+	paths, err := repo.DeleteAccountHardWithStoragePaths(ctx, userID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, ErrUserNotFound
+		}
+		return nil, err
+	}
+	return paths, nil
 }
 
 // DeleteAccountHard 删除用户主记录及主要用户域数据。

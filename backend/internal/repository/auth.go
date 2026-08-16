@@ -47,7 +47,6 @@ type AuthRepository interface {
 	MarkBootstrapSuperAdminPasswordResetRequired(ctx context.Context, username string) error
 	UpdateLastLogin(ctx context.Context, userID uint) error
 	DeleteAccountHard(ctx context.Context, userID uint) error
-	ListDistinctFileStoragePathsByUserID(ctx context.Context, userID uint) ([]string, error)
 	RecordAuthEvent(
 		ctx context.Context,
 		userID uint,

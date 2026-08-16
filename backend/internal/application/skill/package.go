@@ -319,9 +319,10 @@ func isLikelyText(file *zip.File) bool {
 
 // packageFileRecord 是包文件清单的持久化形态（领域类型不含 JSON 契约，存储层负责映射）。
 type packageFileRecord struct {
-	Path string `json:"path"`
-	Size int64  `json:"size"`
-	Kind string `json:"kind"`
+	Path      string `json:"path"`
+	Size      int64  `json:"size"`
+	Kind      string `json:"kind"`
+	ObjectKey string `json:"object_key,omitempty"`
 }
 
 // encodePackageFilesJSON 序列化包文件清单，供持久化。
@@ -331,7 +332,7 @@ func encodePackageFilesJSON(files []domainskill.PackageFile) string {
 	}
 	records := make([]packageFileRecord, 0, len(files))
 	for _, file := range files {
-		records = append(records, packageFileRecord{Path: file.Path, Size: file.Size, Kind: file.Kind})
+		records = append(records, packageFileRecord{Path: file.Path, Size: file.Size, Kind: file.Kind, ObjectKey: file.ObjectKey})
 	}
 	data, err := json.Marshal(records)
 	if err != nil {
@@ -352,7 +353,7 @@ func decodePackageFilesJSON(raw string) []domainskill.PackageFile {
 	}
 	files := make([]domainskill.PackageFile, 0, len(records))
 	for _, record := range records {
-		files = append(files, domainskill.PackageFile{Path: record.Path, Size: record.Size, Kind: record.Kind})
+		files = append(files, domainskill.PackageFile{Path: record.Path, Size: record.Size, Kind: record.Kind, ObjectKey: record.ObjectKey})
 	}
 	return files
 }
