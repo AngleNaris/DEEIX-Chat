@@ -287,3 +287,14 @@ func buildToolStageMergeInstruction() string {
 		"The system will grant a fresh tool budget after your summary so you can continue the remaining work. " +
 		"If you already have enough information, produce the final answer directly instead of a summary."
 }
+
+// buildToolStageFinalizeInstruction 构造合并轮收尾引导：模型在禁用工具轮仍输出工具调用
+// 语法时，明确告知其无法继续调用工具；若关键信息（如上传图片中的文字）无法读取，
+// 直接向用户说明缺失信息并请求补充，而不是反复尝试无效操作。
+func buildToolStageFinalizeInstruction() string {
+	return "You still may not call tools in this round and no new tool budget is guaranteed. " +
+		"If you have enough information, produce the final answer now in plain text. " +
+		"If the required information cannot be obtained (for example text inside an uploaded image " +
+		"that you cannot read), do not keep retrying tools: state clearly what information is missing " +
+		"and what you need from the user, then stop."
+}

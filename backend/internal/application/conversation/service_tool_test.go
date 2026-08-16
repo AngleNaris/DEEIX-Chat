@@ -281,3 +281,17 @@ func TestToolRunFinalAnswerMissingSeesStrippedTextToolCalls(t *testing.T) {
 		t.Fatalf("expected nil output to be accepted")
 	}
 }
+
+func TestBuildToolStageInstructionsCoverFinalizePath(t *testing.T) {
+	merge := buildToolStageMergeInstruction()
+	finalize := buildToolStageFinalizeInstruction()
+	if merge == "" || finalize == "" {
+		t.Fatal("merge and finalize instructions must be non-empty")
+	}
+	if strings.Contains(finalize, "tool budget") && !strings.Contains(finalize, "may not call tools") {
+		t.Fatalf("finalize instruction must forbid tools explicitly: %s", finalize)
+	}
+	if !strings.Contains(finalize, "missing") || !strings.Contains(finalize, "user") {
+		t.Fatalf("finalize instruction must guide the model to state missing info and request from user: %s", finalize)
+	}
+}

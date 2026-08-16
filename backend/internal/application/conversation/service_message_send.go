@@ -1671,27 +1671,91 @@ func (s *Service) sendMessageInternal(
 		}
 		totalServerSideToolUsage = addServerSideToolUsage(totalServerSideToolUsage, mergeOutput.ServerSideToolUsage)
 		mergeText := strings.TrimSpace(mergeOutput.Text)
-		if mergeText == "" {
+		if mergeText == "" && !mergeOutput.TextToolCallsStripped {
+			// 模型在禁用工具轮既没有文本也没有任何工具意图：无法收尾，放弃。
 			break
 		}
-		mergeText = headTailToolOutput(mergeText, 1600)
-		llmMessages = append(llmMessages, llm.Message{
-			Role:    "system",
-			Content: fmt.Sprintf("【阶段性进展（第 %d 轮）】\n%s", toolStageMerges, mergeText),
-		})
-		if traceRecorder != nil {
-			traceRecorder.appendProcessSection(
-				fmt.Sprintf("阶段性总结（第 %d 轮）：工具预算已耗尽，模型整理进展后开启新一轮", toolStageMerges),
-				formatTraceStep("阶段合并", mergeText),
-				map[string]interface{}{
-					processTracePayloadStage: map[string]interface{}{
-						"kind":   "stage_merge",
-						"status": messageTraceStatusCompleted,
+		if mergeText == "" {
+			// 模型在禁用工具轮仍输出被剥离的 DSML 工具块（DeepSeek 习惯行为）。
+			// 先给一次明确的收尾引导：若模型已能收尾（例如读图失败时请求用户
+			// 提供文字信息），直接产出文本；若仍坚持调用工具，才开启新工具窗口。
+			finalizeInput := generateInput
+			finalizeInput.Messages = append(cloneLLMMessages(llmMessages), llm.Message{Role: "system", Content: buildToolStageFinalizeInstruction()})
+			finalizeInput.Tools = nil
+			finalizeInput.DisableTools = true
+			finalizeInput.PreviousResponseID = ""
+			applyOpenAIResponsesInstructions(route, routeConfig.Endpoint, &finalizeInput)
+			silentDelta = onDelta
+			onDelta = nil // 收尾引导轮只产出最终回答，不流入可见中间输出
+			finalizeOutput, finalizeErr := runGenerate(finalizeInput)
+			onDelta = silentDelta
+			if handleCanceledGeneration(finalizeErr) {
+				return nil, retErr
+			}
+			if finalizeErr != nil {
+				s.routeResolver.MarkRouteFailure(ctx, route, finalizeErr)
+				retErr = wrapUpstreamRequestError(finalizeErr)
+				return nil, retErr
+			}
+			s.routeResolver.MarkRouteSuccess(ctx, route)
+			totalUsage = addLLMUsage(totalUsage, finalizeOutput.Usage)
+			if finalizeOutput.Usage != (llm.Usage{}) {
+				usageAccumulator.setObservedUsage(totalUsage)
+			} else if usageAccumulator.usage() != (llm.Usage{}) {
+				totalUsage = usageAccumulator.usage()
+			}
+			totalServerSideToolUsage = addServerSideToolUsage(totalServerSideToolUsage, finalizeOutput.ServerSideToolUsage)
+			finalizeText := strings.TrimSpace(finalizeOutput.Text)
+			if finalizeText != "" {
+				// 模型完成收尾（如说明缺失信息并请求用户补充）：直接作为最终回答结束，
+				// 不再开启新窗口。
+				upstreamOutput = finalizeOutput
+				var nextNativeToolRows []model.ToolCall
+				assistantText, nextNativeToolRows = syncUpstreamOutputTrace(traceRecorder, upstreamOutput, runID)
+				toolCallRows = append(toolCallRows, nextNativeToolRows...)
+				break
+			}
+			if finalizeOutput.TextToolCallsStripped {
+				// 模型仍坚持调用工具：视为继续意图，开启新工具窗口让其继续。
+				if traceRecorder != nil {
+					traceRecorder.appendProcessSection(
+						"工具预算已耗尽且模型仍想继续调用工具，自动开启新一轮",
+						formatTraceStep("阶段合并", "模型连续在禁用工具轮输出工具调用语法，系统按继续意图开启新窗口。"),
+						map[string]interface{}{
+							processTracePayloadStage: map[string]interface{}{
+								"kind":   "stage_merge",
+								"status": messageTraceStatusCompleted,
+							},
+							"stage_merge_round":    toolStageMerges,
+							"stripped_tool_intent": true,
+							"auto_continue_window": true,
+						},
+						messageTraceStatusCompleted,
+					)
+				}
+			} else {
+				break
+			}
+		} else {
+			mergeText = headTailToolOutput(mergeText, 1600)
+			llmMessages = append(llmMessages, llm.Message{
+				Role:    "system",
+				Content: fmt.Sprintf("【阶段性进展（第 %d 轮）】\n%s", toolStageMerges, mergeText),
+			})
+			if traceRecorder != nil {
+				traceRecorder.appendProcessSection(
+					fmt.Sprintf("阶段性总结（第 %d 轮）：工具预算已耗尽，模型整理进展后开启新一轮", toolStageMerges),
+					formatTraceStep("阶段合并", mergeText),
+					map[string]interface{}{
+						processTracePayloadStage: map[string]interface{}{
+							"kind":   "stage_merge",
+							"status": messageTraceStatusCompleted,
+						},
+						"stage_merge_round": toolStageMerges,
 					},
-					"stage_merge_round": toolStageMerges,
-				},
-				messageTraceStatusCompleted,
-			)
+					messageTraceStatusCompleted,
+				)
+			}
 		}
 		// 开启新窗口：重置窗口内调用计数与工具额度，随后发起一次普通调用让模型继续工作。
 		windowBaseCalls = llmRequestCount
