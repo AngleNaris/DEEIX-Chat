@@ -130,43 +130,7 @@ func TestOpenExportRegularFileRejectsSymlink(t *testing.T) {
 	}
 }
 
-func TestRemoveExportFileCleansOnlyEmptyMMDirectory(t *testing.T) {
-	root := t.TempDir()
-	mmDir := filepath.Join(root, "deeix-4-9", "mm-call")
-	if err := os.MkdirAll(mmDir, 0700); err != nil {
-		t.Fatal(err)
-	}
-	rel := filepath.Join("deeix-4-9", "mm-call", "result.png")
-	if err := os.WriteFile(filepath.Join(root, rel), []byte("image"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := removeExportFile(root, rel); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(mmDir); !os.IsNotExist(err) {
-		t.Fatalf("empty MM directory was retained: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(root, "deeix-4-9")); err != nil {
-		t.Fatalf("scope directory was removed: %v", err)
-	}
-
-	plainDir := filepath.Join(root, "deeix-4-9", "sandbox")
-	if err := os.MkdirAll(plainDir, 0700); err != nil {
-		t.Fatal(err)
-	}
-	plainRel := filepath.Join("deeix-4-9", "sandbox", "result.txt")
-	if err := os.WriteFile(filepath.Join(root, plainRel), []byte("result"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := removeExportFile(root, plainRel); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(plainDir); err != nil {
-		t.Fatalf("ordinary export directory was removed: %v", err)
-	}
-}
-
-func TestPersistToolExportAttachmentsCleansSourceOnlyAfterPersistence(t *testing.T) {
+func TestPersistToolExportAttachmentsKeepsSourceAfterPersistence(t *testing.T) {
 	root := t.TempDir()
 	rel := filepath.Join("deeix-4-9", "sandbox", "result.txt")
 	path := filepath.Join(root, rel)
@@ -180,7 +144,7 @@ func TestPersistToolExportAttachmentsCleansSourceOnlyAfterPersistence(t *testing
 	persistErr := errors.New("persist failed")
 	repo := &toolExportAttachmentRepositoryStub{err: persistErr}
 	attachments := []model.Attachment{{FileID: "file_1"}}
-	if err := persistToolExportAttachments(t.Context(), repo, attachments, root, []string{rel}); !errors.Is(err, persistErr) {
+	if err := persistToolExportAttachments(t.Context(), repo, attachments); !errors.Is(err, persistErr) {
 		t.Fatalf("expected persistence error, got %v", err)
 	}
 	if _, err := os.Stat(path); err != nil {
@@ -188,11 +152,11 @@ func TestPersistToolExportAttachmentsCleansSourceOnlyAfterPersistence(t *testing
 	}
 
 	repo.err = nil
-	if err := persistToolExportAttachments(t.Context(), repo, attachments, root, []string{rel}); err != nil {
+	if err := persistToolExportAttachments(t.Context(), repo, attachments); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Fatalf("source file retained after persistence success: %v", err)
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("source file removed after persistence success: %v", err)
 	}
 }
 

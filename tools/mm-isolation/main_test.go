@@ -30,6 +30,17 @@ func signedMeta(uid, cid uint, requestID, callID string, ts int64) map[string]an
 	}
 }
 
+func TestMMOutputRetentionDurationOverrides(t *testing.T) {
+	t.Setenv("MM_OUTPUT_TTL_SEC", "")
+	if got := durationEnv("MM_OUTPUT_TTL_SEC", defaultMMSweepTTL); got != 24*time.Hour {
+		t.Fatalf("default output TTL = %v", got)
+	}
+	t.Setenv("MM_OUTPUT_TTL_SEC", "120")
+	if got := durationEnv("MM_OUTPUT_TTL_SEC", defaultMMSweepTTL); got != 2*time.Minute {
+		t.Fatalf("overridden output TTL = %v", got)
+	}
+}
+
 func TestParseMetaAndReplay(t *testing.T) {
 	now := time.Now()
 	m, err := parseMeta(signedMeta(4, 9, "r1", "c1", now.Unix()), []byte("secret"))

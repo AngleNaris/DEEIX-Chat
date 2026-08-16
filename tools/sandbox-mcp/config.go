@@ -22,6 +22,10 @@ type Config struct {
 	LeaseTTL time.Duration
 	// ReclaimInterval 闲置扫描间隔。
 	ReclaimInterval time.Duration
+	// ExportTTL shared scope exports/staging retention time.
+	ExportTTL time.Duration
+	// ExportSweepInterval shared scope export sweep interval.
+	ExportSweepInterval time.Duration
 	// ExecTimeout 单条命令默认超时。
 	ExecTimeout time.Duration
 	// MaxExecTimeout 单条命令允许的最大超时（防止占用线程过久）。
@@ -119,28 +123,30 @@ func splitEnvList(key string) []string {
 // Load 读取环境变量构建配置。
 func Load() *Config {
 	return &Config{
-		ListenAddr:         envStr("SANDBOX_MCP_ADDR", "127.0.0.1:8081"),
-		APIKey:             os.Getenv("SANDBOX_MCP_API_KEY"),
-		BaseImage:          envStr("SANDBOX_BASE_IMAGE", "deeix-sandbox-base:latest"),
-		WorkspaceDir:       envStr("SANDBOX_WORKSPACE_DIR", "/workspace"),
-		LeaseTTL:           envDurationSeconds("SANDBOX_LEASE_TTL_SEC", 15*time.Minute),
-		ReclaimInterval:    envDurationSeconds("SANDBOX_RECLAIM_INTERVAL_SEC", 60*time.Second),
-		ExecTimeout:        envDurationSeconds("SANDBOX_EXEC_TIMEOUT_SEC", 120*time.Second),
-		MaxExecTimeout:     envDurationSeconds("SANDBOX_MAX_EXEC_TIMEOUT_SEC", 600*time.Second),
-		OutputLimitBytes:   envInt("SANDBOX_OUTPUT_LIMIT_BYTES", 64*1024),
-		MemoryLimit:        envStr("SANDBOX_MEMORY_LIMIT", "1g"),
-		PidsLimit:          int64(envInt("SANDBOX_PIDS_LIMIT", 256)),
-		CPUsLimit:          envFloat("SANDBOX_CPUS_LIMIT", 0.5),
-		CacheVolume:        envStr("SANDBOX_CACHE_VOLUME", "deeix-sandbox-cache"),
-		ImportsHostDir:     envStr("SANDBOX_IMPORTS_HOST_DIR", "/opt/deeix-mcp/imports"),
-		ImportsMountDir:    envStr("SANDBOX_IMPORTS_DIR", "/imports"),
-		SharedHostDir:      envStr("SANDBOX_SHARED_HOST_DIR", "/opt/deeix-mcp/shared"),
-		SharedMountDir:     envStr("SANDBOX_SHARED_DIR", "/shared"),
-		MetaHMACKey:        os.Getenv("SANDBOX_META_HMAC_KEY"),
-		AllowedHosts:       splitEnvList("SANDBOX_ALLOWED_HOSTS"),
-		AllowedCIDRs:       splitEnvList("SANDBOX_ALLOWED_CIDRS"),
-		NetworkMode:        envStr("SANDBOX_NETWORK_MODE", "deeix-sandbox-egress"),
-		MaxTasksPerSession: envInt("SANDBOX_MAX_TASKS_PER_SESSION", 4),
+		ListenAddr:          envStr("SANDBOX_MCP_ADDR", "127.0.0.1:8081"),
+		APIKey:              os.Getenv("SANDBOX_MCP_API_KEY"),
+		BaseImage:           envStr("SANDBOX_BASE_IMAGE", "deeix-sandbox-base:latest"),
+		WorkspaceDir:        envStr("SANDBOX_WORKSPACE_DIR", "/workspace"),
+		LeaseTTL:            envDurationSeconds("SANDBOX_LEASE_TTL_SEC", 15*time.Minute),
+		ReclaimInterval:     envDurationSeconds("SANDBOX_RECLAIM_INTERVAL_SEC", 60*time.Second),
+		ExportTTL:           envDurationSeconds("SANDBOX_EXPORT_TTL_SEC", 7*24*time.Hour),
+		ExportSweepInterval: envDurationSeconds("SANDBOX_EXPORT_SWEEP_INTERVAL_SEC", time.Hour),
+		ExecTimeout:         envDurationSeconds("SANDBOX_EXEC_TIMEOUT_SEC", 120*time.Second),
+		MaxExecTimeout:      envDurationSeconds("SANDBOX_MAX_EXEC_TIMEOUT_SEC", 600*time.Second),
+		OutputLimitBytes:    envInt("SANDBOX_OUTPUT_LIMIT_BYTES", 64*1024),
+		MemoryLimit:         envStr("SANDBOX_MEMORY_LIMIT", "1g"),
+		PidsLimit:           int64(envInt("SANDBOX_PIDS_LIMIT", 256)),
+		CPUsLimit:           envFloat("SANDBOX_CPUS_LIMIT", 0.5),
+		CacheVolume:         envStr("SANDBOX_CACHE_VOLUME", "deeix-sandbox-cache"),
+		ImportsHostDir:      envStr("SANDBOX_IMPORTS_HOST_DIR", "/opt/deeix-mcp/imports"),
+		ImportsMountDir:     envStr("SANDBOX_IMPORTS_DIR", "/imports"),
+		SharedHostDir:       envStr("SANDBOX_SHARED_HOST_DIR", "/opt/deeix-mcp/shared"),
+		SharedMountDir:      envStr("SANDBOX_SHARED_DIR", "/shared"),
+		MetaHMACKey:         os.Getenv("SANDBOX_META_HMAC_KEY"),
+		AllowedHosts:        splitEnvList("SANDBOX_ALLOWED_HOSTS"),
+		AllowedCIDRs:        splitEnvList("SANDBOX_ALLOWED_CIDRS"),
+		NetworkMode:         envStr("SANDBOX_NETWORK_MODE", "deeix-sandbox-egress"),
+		MaxTasksPerSession:  envInt("SANDBOX_MAX_TASKS_PER_SESSION", 4),
 	}
 }
 

@@ -164,7 +164,6 @@ func (s *Service) exportToolArtifacts(ctx context.Context, input executeAssistan
 	now := time.Now()
 	attachments := make([]domainconversation.Attachment, 0, len(items))
 	links := make([]string, 0, len(items))
-	consumedExportPaths := make([]string, 0, len(items))
 	seenExportPaths := make(map[string]struct{}, len(items))
 	for _, item := range items {
 		// 平台已上传文件的导出（image_gen 等）：path 即 fileID，直接挂为附件。
@@ -244,12 +243,11 @@ func (s *Service) exportToolArtifacts(ctx context.Context, input executeAssistan
 			UploadedAt:     now,
 		})
 		links = append(links, fmt.Sprintf("[%s](/api/v1/files/%s/content)", file.FileName, file.FileID))
-		consumedExportPaths = append(consumedExportPaths, relPath)
 	}
 	if len(attachments) == 0 {
 		return ""
 	}
-	if err := persistToolExportAttachments(ctx, s.repo, attachments, sharedDir, consumedExportPaths); err != nil {
+	if err := persistToolExportAttachments(ctx, s.repo, attachments); err != nil {
 		slog.Warn("tool export persist attachments failed", "count", len(attachments), "err", err)
 		return ""
 	}
@@ -260,20 +258,6 @@ func persistToolExportAttachments(
 	ctx context.Context,
 	repo toolExportAttachmentRepository,
 	attachments []domainconversation.Attachment,
-	sharedDir string,
-	consumedExportPaths []string,
 ) error {
-	if err := repo.CreateAttachments(ctx, attachments); err != nil {
-		return err
-	}
-	for _, relPath := range consumedExportPaths {
-		if err := removeExportFile(sharedDir, relPath); err != nil {
-			slog.Warn("tool export source cleanup failed", "path", filepath.ToSlash(relPath), "err", err)
-		}
-	}
-	return nil
-}
-
-func isMMExportDirectory(name string) bool {
-	return strings.HasPrefix(strings.TrimSpace(name), "mm-")
+	return repo.CreateAttachments(ctx, attachments)
 }

@@ -536,6 +536,22 @@ func TestValidScopePattern(t *testing.T) {
 	}
 }
 
+func TestLoadExportRetentionDefaultsAndOverrides(t *testing.T) {
+	t.Setenv("SANDBOX_EXPORT_TTL_SEC", "")
+	t.Setenv("SANDBOX_EXPORT_SWEEP_INTERVAL_SEC", "")
+	cfg := Load()
+	if cfg.ExportTTL != 7*24*time.Hour || cfg.ExportSweepInterval != time.Hour {
+		t.Fatalf("export retention defaults = ttl:%v interval:%v", cfg.ExportTTL, cfg.ExportSweepInterval)
+	}
+
+	t.Setenv("SANDBOX_EXPORT_TTL_SEC", "120")
+	t.Setenv("SANDBOX_EXPORT_SWEEP_INTERVAL_SEC", "15")
+	cfg = Load()
+	if cfg.ExportTTL != 2*time.Minute || cfg.ExportSweepInterval != 15*time.Second {
+		t.Fatalf("export retention overrides = ttl:%v interval:%v", cfg.ExportTTL, cfg.ExportSweepInterval)
+	}
+}
+
 func TestConfigValidateRequiresAPIKey(t *testing.T) {
 	// P0-07：API Key 缺失必须拒绝启动（原 TestAuthDisabledWhenKeyEmpty 反转）。
 	cfg := &Config{}

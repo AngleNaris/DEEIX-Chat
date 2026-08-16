@@ -10,7 +10,7 @@ DEEIX 的多用户沙箱 MCP。Agent 在按用户/会话隔离的 Docker 容器�
 - `/workspace` is a per-conversation Docker volume. `/imports` is a read-only bind of the current conversation scope. Current-message files are prepared by the backend in a per-run lane and their exact paths are added to the transient model prompt.
 - `/shared/deeix-<user>-<conversation>` is the writable scope used for file export and sandbox-to-MM handoff. No complete tenant tree is mounted into a session container.
 - Session containers join only the dedicated IPv4 `deeix-sandbox-egress` bridge. They do not join `1panel-network` or the application network.
-- `sandbox_export_file` accepts a regular `/workspace` file, verifies the resolved path, copies it into the current shared scope, and returns `__export__` for the existing DEEIX attachment pipeline.
+- `sandbox_export_file` accepts a regular `/workspace` file, verifies the resolved path, copies it into the current shared scope, and returns `__export__` for the existing DEEIX attachment pipeline. The producer-owned source remains available; a context-controlled sweeper removes expired top-level regular export/staging files after seven days by default. Scope directories stay stable so MM publication cannot race with directory removal.
 
 ## Tools
 
@@ -80,4 +80,4 @@ MSYS_NO_PATHCONV=1 docker run --rm \
   sh -lc '/usr/local/go/bin/go test ./... && /usr/local/go/bin/go test -race ./...'
 ```
 
-MM input and generated-file isolation is implemented by `tools/mm-isolation`. The pinned Qwen core `crop`, `draw_bbox`, and `save_view` tools receive forced per-call output lanes; validated files are copied into the signed shared scope and returned through `__export__`.
+MM producer output is retained under the signed scope for the producer-owned export lifecycle. The MM wrapper sweeps expired `mm-*` output directories and crash leftovers only when output is configured; it never sweeps sandbox files, scope roots, inputs, or imports.

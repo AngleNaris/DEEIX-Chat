@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -17,6 +18,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"os/signal"
 	"path"
 	"path/filepath"
 	"regexp"
@@ -24,6 +26,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -88,7 +91,17 @@ func main() {
 	}
 	addr := env("MM_ISOLATION_ADDR", "0.0.0.0:8082")
 	slog.Info("mm isolation proxy listening", "addr", addr, "upstream", p.upstream.String())
-	if err := (&http.Server{Addr: addr, Handler: p, ReadHeaderTimeout: 10 * time.Second}).ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	server := &http.Server{Addr: addr, Handler: p, ReadHeaderTimeout: 10 * time.Second}
+	go p.startSweeper(ctx)
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = server.Shutdown(shutdownCtx)
+	}()
+	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		slog.Error("server exited", "error", err)
 		os.Exit(1)
 	}
@@ -119,6 +132,30 @@ func newProxy() (*proxy, error) {
 		slog.Warn("MM upstream failed", "error", err)
 	}}
 	return p, nil
+}
+func (p *proxy) startSweeper(ctx context.Context) {
+	if p.output == "" || p.output == "." {
+		return
+	}
+	ttl := durationEnv("MM_OUTPUT_TTL_SEC", defaultMMSweepTTL)
+	interval := durationEnv("MM_OUTPUT_SWEEP_INTERVAL_SEC", defaultMMSweepInterval)
+	if ttl <= 0 || interval <= 0 {
+		return
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-ticker.C:
+			p.callMu.Lock()
+			if err := sweepMMOutputs(p.output, now, ttl); err != nil {
+				slog.Warn("sweep MM outputs", "err", err)
+			}
+			p.callMu.Unlock()
+		}
+	}
 }
 func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/healthz" {
@@ -780,6 +817,14 @@ func (c *replayCache) accept(key string, now time.Time) bool {
 	}
 	c.values[key] = now
 	return true
+}
+func durationEnv(key string, fallback time.Duration) time.Duration {
+	if raw := strings.TrimSpace(os.Getenv(key)); raw != "" {
+		if seconds, err := strconv.Atoi(raw); err == nil && seconds > 0 {
+			return time.Duration(seconds) * time.Second
+		}
+	}
+	return fallback
 }
 func env(k, d string) string {
 	if v := strings.TrimSpace(os.Getenv(k)); v != "" {

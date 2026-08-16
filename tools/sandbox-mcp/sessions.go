@@ -570,6 +570,36 @@ func (m *SessionManager) reclaimOnce(ctx context.Context) {
 	}
 }
 
+func (m *SessionManager) StartExportSweeper(ctx context.Context) {
+	if m.cfg.ExportSweepInterval <= 0 || m.cfg.ExportTTL <= 0 || strings.TrimSpace(m.cfg.SharedHostDir) == "" {
+		return
+	}
+	go func() {
+		ticker := time.NewTicker(m.cfg.ExportSweepInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				m.sweepExports()
+			}
+		}
+	}()
+}
+
+func (m *SessionManager) sweepExports() {
+	liveScopes := func(scope string) bool {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		_, ok := m.live[scope]
+		return ok
+	}
+	if err := sweepSharedExports(m.cfg.SharedHostDir, time.Now(), m.cfg.ExportTTL, liveScopes); err != nil {
+		slog.Warn("sweep sandbox exports", "err", err)
+	}
+}
+
 // Shutdown removes live session containers while preserving workspace and cache volumes.
 func (m *SessionManager) Shutdown(ctx context.Context) {
 	m.mu.Lock()

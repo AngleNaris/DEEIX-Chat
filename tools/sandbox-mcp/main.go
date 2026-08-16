@@ -44,6 +44,7 @@ func main() {
 		mgr.Shutdown(cleanupCtx)
 	}()
 	mgr.StartReclaimer(ctx)
+	mgr.StartExportSweeper(ctx)
 
 	if err := runServer(ctx, cfg, mgr); err != nil {
 		slog.Error("server exited", "err", err)
