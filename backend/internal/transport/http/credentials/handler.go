@@ -41,12 +41,38 @@ type UpdateCredentialRequest struct {
 
 // CredentialListResponse 凭据列表响应。
 type CredentialListResponse struct {
-	Results []appcredentials.View `json:"results"`
+	Results []CredentialResponseItem `json:"results"`
+}
+
+// CredentialResponseItem 凭据传输响应 DTO（不包含密钥值）。
+type CredentialResponseItem struct {
+	PublicID    string            `json:"public_id"`
+	Name        string            `json:"name"`
+	Type        string            `json:"type"`
+	Description string            `json:"description"`
+	Meta        map[string]string `json:"meta,omitempty"`
+	CreatedAt   string            `json:"created_at"`
+	UpdatedAt   string            `json:"updated_at"`
 }
 
 // CredentialResponse 单个凭据响应。
 type CredentialResponse struct {
-	Credential appcredentials.View `json:"credential"`
+	Credential CredentialResponseItem `json:"credential"`
+}
+
+func toCredentialResponseItem(view appcredentials.View) CredentialResponseItem {
+	return CredentialResponseItem{
+		PublicID: view.PublicID, Name: view.Name, Type: view.Type, Description: view.Description,
+		Meta: view.Meta, CreatedAt: view.CreatedAt, UpdatedAt: view.UpdatedAt,
+	}
+}
+
+func toCredentialResponseItems(views []appcredentials.View) []CredentialResponseItem {
+	items := make([]CredentialResponseItem, 0, len(views))
+	for _, view := range views {
+		items = append(items, toCredentialResponseItem(view))
+	}
+	return items
 }
 
 // CredentialListResponseDoc 包裹凭据列表响应。
@@ -83,7 +109,7 @@ func (h *Handler) ListCredentials(c *gin.Context) {
 		response.Error(c, http.StatusInternalServerError, "list credentials failed")
 		return
 	}
-	response.Success(c, CredentialListResponse{Results: views})
+	response.Success(c, CredentialListResponse{Results: toCredentialResponseItems(views)})
 }
 
 // CreateCredential godoc
@@ -122,7 +148,7 @@ func (h *Handler) CreateCredential(c *gin.Context) {
 		}
 		return
 	}
-	response.Success(c, CredentialResponse{Credential: *view})
+	response.Success(c, CredentialResponse{Credential: toCredentialResponseItem(*view)})
 }
 
 // UpdateCredential godoc
@@ -166,7 +192,7 @@ func (h *Handler) UpdateCredential(c *gin.Context) {
 		}
 		return
 	}
-	response.Success(c, CredentialResponse{Credential: *view})
+	response.Success(c, CredentialResponse{Credential: toCredentialResponseItem(*view)})
 }
 
 // DeleteCredential godoc

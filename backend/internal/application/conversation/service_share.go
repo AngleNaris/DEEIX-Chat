@@ -53,52 +53,52 @@ type PublicSharedConversationResult struct {
 
 // PublicGroupRunTimeline 是公开分享页可展示的群组运行中间过程（对齐前端 GroupRunState）。
 type PublicGroupRunTimeline struct {
-	GroupRunID       string               `json:"groupRunID"`
-	Status           string               `json:"status"`
-	Steps            []PublicGroupRunStep `json:"steps"`
-	CurrentStepID    string               `json:"currentStepID"`
-	CurrentAttemptID string               `json:"currentAttemptID"`
-	ErrorCode        string               `json:"errorCode,omitempty"`
-	StartedAt        time.Time            `json:"startedAt"`
-	EndedAt          *time.Time           `json:"endedAt" extensions:"x-nullable,!x-omitempty"`
-	UpdatedAt        time.Time            `json:"updatedAt"`
+	GroupRunID       string
+	Status           string
+	Steps            []PublicGroupRunStep
+	CurrentStepID    string
+	CurrentAttemptID string
+	ErrorCode        string
+	StartedAt        time.Time
+	EndedAt          *time.Time
+	UpdatedAt        time.Time
 }
 
 // PublicGroupRunStep 群组中间过程的单个逻辑步骤。
 type PublicGroupRunStep struct {
-	StepID    string                  `json:"stepID"`
-	Sequence  int                     `json:"sequence"`
-	StepType  string                  `json:"stepType"` // supervisor_decide | member_execute
-	Actor     PublicGroupRunActor     `json:"actor"`
-	Status    string                  `json:"status"`
-	Attempts  []PublicGroupRunAttempt `json:"attempts"`
-	StartedAt time.Time               `json:"startedAt"`
-	EndedAt   *time.Time              `json:"endedAt" extensions:"x-nullable,!x-omitempty"`
-	UpdatedAt time.Time               `json:"updatedAt"`
+	StepID    string
+	Sequence  int
+	StepType  string // supervisor_decide | member_execute
+	Actor     PublicGroupRunActor
+	Status    string
+	Attempts  []PublicGroupRunAttempt
+	StartedAt time.Time
+	EndedAt   *time.Time
+	UpdatedAt time.Time
 }
 
 // PublicGroupRunActor 步骤执行者（主管/成员）的公开展示信息。
 type PublicGroupRunActor struct {
-	MemberID string `json:"memberID"`
-	Name     string `json:"name"`
-	Type     string `json:"type"` // supervisor | worker
-	Icon     string `json:"icon"`
-	Color    string `json:"color"`
-	Model    string `json:"model"`
+	MemberID string
+	Name     string
+	Type     string // supervisor | worker
+	Icon     string
+	Color    string
+	Model    string
 }
 
 // PublicGroupRunAttempt 步骤的一次执行尝试（只保留正文输出与状态）。
 type PublicGroupRunAttempt struct {
-	AttemptID     string     `json:"attemptID"`
-	AttemptNumber int        `json:"attemptNumber"`
-	Status        string     `json:"status"`
-	Output        string     `json:"output"`
-	ThinkMarkdown string     `json:"thinkMarkdown,omitempty"`
-	ToolCallsJSON string     `json:"toolCallsJSON,omitempty"`
-	ErrorCode     string     `json:"errorCode,omitempty"`
-	StartedAt     time.Time  `json:"startedAt"`
-	EndedAt       *time.Time `json:"endedAt" extensions:"x-nullable,!x-omitempty"`
-	UpdatedAt     time.Time  `json:"updatedAt"`
+	AttemptID     string
+	AttemptNumber int
+	Status        string
+	Output        string
+	ThinkMarkdown string
+	ToolCallsJSON string
+	ErrorCode     string
+	StartedAt     time.Time
+	EndedAt       *time.Time
+	UpdatedAt     time.Time
 }
 
 // PublicSharedRunModel 是公开分享页可展示的模型快照。
@@ -492,21 +492,22 @@ func (s *Service) cloneSharedFiles(
 	cloned := make(map[string]*model.FileObject, len(fileIDs))
 	quotaLimit := s.cfg.Snapshot().UserStorageQuotaBytes
 	for _, sourceFileID := range fileIDs {
-		source, err := s.repo.GetActiveFileObjectByID(ctx, sourceUserID, sourceFileID)
+		targetFileID := "file_" + normalizePublicID(uuid.NewString())
+		source, target, err := s.repo.CloneActiveFileObjectAndConsumeQuota(
+			ctx,
+			sourceUserID,
+			sourceFileID,
+			targetUserID,
+			targetFileID,
+			quotaLimit,
+		)
 		if err != nil {
 			if isFileNotFoundError(err) {
 				return nil, ErrFileNotFound
 			}
-			return nil, err
-		}
-		target := cloneFileObjectForUser(source, targetUserID)
-		if _, err = s.repo.CreateFileObjectAndConsumeQuota(ctx, target, quotaLimit); err != nil {
 			if isStorageQuotaExceededError(err) {
 				return nil, ErrStorageQuotaExceeded
 			}
-			return nil, err
-		}
-		if err = s.repo.CloneFileObjectProcessingState(ctx, source.ID, target.ID, targetUserID); err != nil {
 			return nil, err
 		}
 		s.cloneOrTriggerEmbedding(ctx, source, target)
@@ -532,21 +533,6 @@ func collectSharedAttachmentFileIDs(messages []model.Message) []string {
 		}
 	}
 	return result
-}
-
-func cloneFileObjectForUser(source *model.FileObject, targetUserID uint) *model.FileObject {
-	if source == nil {
-		return &model.FileObject{}
-	}
-	target := *source
-	target.ID = 0
-	target.FileID = "file_" + normalizePublicID(uuid.NewString())
-	target.UserID = targetUserID
-	target.Status = "active"
-	target.LastAccessedAt = nil
-	target.CreatedAt = time.Time{}
-	target.UpdatedAt = time.Time{}
-	return &target
 }
 
 func (s *Service) cloneSharedMessage(

@@ -249,7 +249,7 @@ function generateSwagger(outputDir) {
     [
       "run", "--rm",
       "-v", "deeix-gomod:/go/pkg/mod",
-      "-v", "C:/_MY_WORK/DEEIX-Chat/backend:/app",
+      "-v", `${backendDir.replaceAll("\\", "/")}:/app`,
       "-v", `${hostOutput}:/host-out`,
       "-w", "/app",
       "deeix-build:1",

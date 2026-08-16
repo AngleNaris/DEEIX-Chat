@@ -18193,7 +18193,7 @@ const docTemplate = `{
                 "results": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/View"
+                        "$ref": "#/definitions/CredentialResponseItem"
                     }
                 }
             }
@@ -18220,7 +18220,7 @@ const docTemplate = `{
             ],
             "properties": {
                 "credential": {
-                    "$ref": "#/definitions/View"
+                    "$ref": "#/definitions/CredentialResponseItem"
                 }
             }
         },
@@ -18235,6 +18235,43 @@ const docTemplate = `{
                     "$ref": "#/definitions/CredentialResponse"
                 },
                 "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "CredentialResponseItem": {
+            "type": "object",
+            "required": [
+                "created_at",
+                "description",
+                "name",
+                "public_id",
+                "type",
+                "updated_at"
+            ],
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "meta": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "name": {
+                    "type": "string"
+                },
+                "public_id": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                },
+                "updated_at": {
                     "type": "string"
                 }
             }
@@ -22069,6 +22106,12 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "status": {
+                    "type": "string"
+                },
+                "thinkMarkdown": {
+                    "type": "string"
+                },
+                "toolCallsJSON": {
                     "type": "string"
                 },
                 "updatedAt": {
@@ -26901,43 +26944,6 @@ const docTemplate = `{
                     "$ref": "#/definitions/UserSettingsResponse"
                 },
                 "errorMsg": {
-                    "type": "string"
-                }
-            }
-        },
-        "View": {
-            "type": "object",
-            "required": [
-                "created_at",
-                "description",
-                "name",
-                "public_id",
-                "type",
-                "updated_at"
-            ],
-            "properties": {
-                "created_at": {
-                    "type": "string"
-                },
-                "description": {
-                    "type": "string"
-                },
-                "meta": {
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "string"
-                    }
-                },
-                "name": {
-                    "type": "string"
-                },
-                "public_id": {
-                    "type": "string"
-                },
-                "type": {
-                    "type": "string"
-                },
-                "updated_at": {
                     "type": "string"
                 }
             }

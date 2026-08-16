@@ -1,6 +1,7 @@
 package httpx
 
 import (
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -147,6 +148,7 @@ func assertNoForbiddenText(t *testing.T, root string, forbidden []string) {
 func assertExportedStructsHaveNoProtocolTags(t *testing.T, root string) {
 	t.Helper()
 	fileSet := token.NewFileSet()
+	var violations []string
 	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil || entry.IsDir() || filepath.Ext(path) != ".go" || strings.HasSuffix(path, "_test.go") {
 			return walkErr
@@ -154,22 +156,12 @@ func assertExportedStructsHaveNoProtocolTags(t *testing.T, root string) {
 		// 例外：定制版视图模型包（artifact/doccard/dynamicprompt 的 CardView/PromptView 等，
 		// jseval 的 Result 工具输出）由传输层或平台工具直接序列化为线上契约；
 		// 迁移到传输层 DTO 前保持豁免。
-		exemptPrefixes := []string{
-			"/artifact/",
-			"/doccard/",
-			"/dynamicprompt/",
-			"/jseval/",
-		}
+		exemptPrefixes := []string{"/artifact/", "/doccard/", "/dynamicprompt/", "/jseval/"}
 		slashPath := filepath.ToSlash(path)
-		exempt := false
 		for _, prefix := range exemptPrefixes {
 			if strings.Contains(slashPath, prefix) {
-				exempt = true
-				break
+				return nil
 			}
-		}
-		if exempt {
-			return nil
 		}
 		file, parseErr := parser.ParseFile(fileSet, path, nil, 0)
 		if parseErr != nil {
@@ -198,7 +190,7 @@ func assertExportedStructsHaveNoProtocolTags(t *testing.T, root string) {
 						return unquoteErr
 					}
 					if strings.Contains(tag, "json:") || strings.Contains(tag, "form:") || strings.Contains(tag, "header:") || strings.Contains(tag, "query:") {
-						t.Fatalf("%s exports protocol tag %q on application type %s", path, tag, typeSpec.Name.Name)
+						violations = append(violations, fmt.Sprintf("%s exports protocol tag %q on application type %s", path, tag, typeSpec.Name.Name))
 					}
 				}
 			}
@@ -207,5 +199,8 @@ func assertExportedStructsHaveNoProtocolTags(t *testing.T, root string) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(violations) > 0 {
+		t.Fatalf("application protocol tag violations:\n%s", strings.Join(violations, "\n"))
 	}
 }

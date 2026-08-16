@@ -3098,7 +3098,7 @@ definitions:
     properties:
       results:
         items:
-          $ref: '#/definitions/View'
+          $ref: '#/definitions/CredentialResponseItem'
         type: array
     required:
     - results
@@ -3116,7 +3116,7 @@ definitions:
   CredentialResponse:
     properties:
       credential:
-        $ref: '#/definitions/View'
+        $ref: '#/definitions/CredentialResponseItem'
     required:
     - credential
     type: object
@@ -3129,6 +3129,32 @@ definitions:
     required:
     - data
     - errorMsg
+    type: object
+  CredentialResponseItem:
+    properties:
+      created_at:
+        type: string
+      description:
+        type: string
+      meta:
+        additionalProperties:
+          type: string
+        type: object
+      name:
+        type: string
+      public_id:
+        type: string
+      type:
+        type: string
+      updated_at:
+        type: string
+    required:
+    - created_at
+    - description
+    - name
+    - public_id
+    - type
+    - updated_at
     type: object
   CredentialsErrorDoc:
     properties:
@@ -5804,6 +5830,10 @@ definitions:
       startedAt:
         type: string
       status:
+        type: string
+      thinkMarkdown:
+        type: string
+      toolCallsJSON:
         type: string
       updatedAt:
         type: string
@@ -9233,32 +9263,6 @@ definitions:
     required:
     - data
     - errorMsg
-    type: object
-  View:
-    properties:
-      created_at:
-        type: string
-      description:
-        type: string
-      meta:
-        additionalProperties:
-          type: string
-        type: object
-      name:
-        type: string
-      public_id:
-        type: string
-      type:
-        type: string
-      updated_at:
-        type: string
-    required:
-    - created_at
-    - description
-    - name
-    - public_id
-    - type
-    - updated_at
     type: object
   WritePromptPresetRequest:
     properties:

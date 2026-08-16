@@ -40,13 +40,13 @@ type UpsertInput struct {
 
 // View 凭据对外视图（永不含密钥）。
 type View struct {
-	PublicID    string            `json:"public_id"`
-	Name        string            `json:"name"`
-	Type        string            `json:"type"`
-	Description string            `json:"description"`
-	Meta        map[string]string `json:"meta,omitempty"`
-	CreatedAt   string            `json:"created_at"`
-	UpdatedAt   string            `json:"updated_at"`
+	PublicID    string
+	Name        string
+	Type        string
+	Description string
+	Meta        map[string]string
+	CreatedAt   string
+	UpdatedAt   string
 }
 
 // Service 封装凭据业务能力。

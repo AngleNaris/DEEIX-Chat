@@ -236,6 +236,8 @@ export interface AgentGroupStepAttemptResponse {
   resolvedModel: string;
   startedAt: string;
   status: string;
+  thinkMarkdown: string;
+  toolCallsJSON: string;
 }
 
 export interface AgentGroupStepResponse {
@@ -1350,7 +1352,7 @@ export interface CreateUserResponseDoc {
 }
 
 export interface CredentialListResponse {
-  results: View[];
+  results: CredentialResponseItem[];
 }
 
 export interface CredentialListResponseDoc {
@@ -1359,12 +1361,22 @@ export interface CredentialListResponseDoc {
 }
 
 export interface CredentialResponse {
-  credential: View;
+  credential: CredentialResponseItem;
 }
 
 export interface CredentialResponseDoc {
   data: CredentialResponse;
   errorMsg: string;
+}
+
+export interface CredentialResponseItem {
+  created_at: string;
+  description: string;
+  meta?: Record<string, string>;
+  name: string;
+  public_id: string;
+  type: string;
+  updated_at: string;
 }
 
 export interface CredentialsErrorDoc {
@@ -2578,6 +2590,8 @@ export interface PublicGroupRunAttemptResponse {
   output: string;
   startedAt: string;
   status: string;
+  thinkMarkdown?: string;
+  toolCallsJSON?: string;
   updatedAt: string;
 }
 
@@ -4073,16 +4087,6 @@ export interface UserSettingsResponse {
 export interface UserSettingsResponseDoc {
   data: UserSettingsResponse;
   errorMsg: string;
-}
-
-export interface View {
-  created_at: string;
-  description: string;
-  meta?: Record<string, string>;
-  name: string;
-  public_id: string;
-  type: string;
-  updated_at: string;
 }
 
 export interface WritePromptPresetRequest {

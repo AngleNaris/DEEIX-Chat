@@ -416,33 +416,33 @@ type PublicSharedConversationResponse struct {
 	DefaultMessagePublicIDs []string                      `json:"defaultMessagePublicIDs"`
 	Messages                []PublicSharedMessageResponse `json:"messages"`
 	// GroupRuns 群组会话中间过程时间线（key: 消息 RunID），非群组会话为空。
-	GroupRuns               map[string]PublicGroupRunTimelineResponse `json:"groupRuns,omitempty"`
+	GroupRuns map[string]PublicGroupRunTimelineResponse `json:"groupRuns,omitempty"`
 }
 
 // PublicGroupRunTimelineResponse 公开分享页群组运行中间过程。
 type PublicGroupRunTimelineResponse struct {
-	GroupRunID       string                         `json:"groupRunID"`
-	Status           string                         `json:"status"`
-	Steps            []PublicGroupRunStepResponse   `json:"steps"`
-	CurrentStepID    string                         `json:"currentStepID"`
-	CurrentAttemptID string                         `json:"currentAttemptID"`
-	ErrorCode        string                         `json:"errorCode,omitempty"`
-	StartedAt        time.Time                      `json:"startedAt"`
-	EndedAt          *time.Time                     `json:"endedAt" extensions:"x-nullable,!x-omitempty"`
-	UpdatedAt        time.Time                      `json:"updatedAt"`
+	GroupRunID       string                       `json:"groupRunID"`
+	Status           string                       `json:"status"`
+	Steps            []PublicGroupRunStepResponse `json:"steps"`
+	CurrentStepID    string                       `json:"currentStepID"`
+	CurrentAttemptID string                       `json:"currentAttemptID"`
+	ErrorCode        string                       `json:"errorCode,omitempty"`
+	StartedAt        time.Time                    `json:"startedAt"`
+	EndedAt          *time.Time                   `json:"endedAt" extensions:"x-nullable,!x-omitempty"`
+	UpdatedAt        time.Time                    `json:"updatedAt"`
 }
 
 // PublicGroupRunStepResponse 群组中间过程单个逻辑步骤。
 type PublicGroupRunStepResponse struct {
-	StepID    string                        `json:"stepID"`
-	Sequence  int                           `json:"sequence"`
-	StepType  string                        `json:"stepType"`
-	Actor     PublicGroupRunActorResponse   `json:"actor"`
-	Status    string                        `json:"status"`
+	StepID    string                          `json:"stepID"`
+	Sequence  int                             `json:"sequence"`
+	StepType  string                          `json:"stepType"`
+	Actor     PublicGroupRunActorResponse     `json:"actor"`
+	Status    string                          `json:"status"`
 	Attempts  []PublicGroupRunAttemptResponse `json:"attempts"`
-	StartedAt time.Time                     `json:"startedAt"`
-	EndedAt   *time.Time                    `json:"endedAt" extensions:"x-nullable,!x-omitempty"`
-	UpdatedAt time.Time                     `json:"updatedAt"`
+	StartedAt time.Time                       `json:"startedAt"`
+	EndedAt   *time.Time                      `json:"endedAt" extensions:"x-nullable,!x-omitempty"`
+	UpdatedAt time.Time                       `json:"updatedAt"`
 }
 
 // PublicGroupRunActorResponse 步骤执行者公开展示信息。
@@ -461,6 +461,8 @@ type PublicGroupRunAttemptResponse struct {
 	AttemptNumber int        `json:"attemptNumber"`
 	Status        string     `json:"status"`
 	Output        string     `json:"output"`
+	ThinkMarkdown string     `json:"thinkMarkdown,omitempty"`
+	ToolCallsJSON string     `json:"toolCallsJSON,omitempty"`
 	ErrorCode     string     `json:"errorCode,omitempty"`
 	StartedAt     time.Time  `json:"startedAt"`
 	EndedAt       *time.Time `json:"endedAt" extensions:"x-nullable,!x-omitempty"`
@@ -502,9 +504,9 @@ func toPublicGroupRunTimelineResponse(item appconversation.PublicGroupRunTimelin
 	}
 	for _, step := range item.Steps {
 		response.Steps = append(response.Steps, PublicGroupRunStepResponse{
-			StepID:    step.StepID,
-			Sequence:  step.Sequence,
-			StepType:  step.StepType,
+			StepID:   step.StepID,
+			Sequence: step.Sequence,
+			StepType: step.StepType,
 			Actor: PublicGroupRunActorResponse{
 				MemberID: step.Actor.MemberID,
 				Name:     step.Actor.Name,
@@ -526,6 +528,8 @@ func toPublicGroupRunTimelineResponse(item appconversation.PublicGroupRunTimelin
 				AttemptNumber: attempt.AttemptNumber,
 				Status:        attempt.Status,
 				Output:        attempt.Output,
+				ThinkMarkdown: attempt.ThinkMarkdown,
+				ToolCallsJSON: attempt.ToolCallsJSON,
 				ErrorCode:     attempt.ErrorCode,
 				StartedAt:     attempt.StartedAt,
 				EndedAt:       attempt.EndedAt,
