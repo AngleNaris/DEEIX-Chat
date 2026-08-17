@@ -440,7 +440,8 @@ func (s *Service) sendMessageInternal(
 	currentAttachments := filterCurrentAttachments(conversationAttachments)
 	userMessage.Attachments = marshalAttachmentSnapshots(currentAttachments)
 
-	toolRuntime, err := s.resolveSelectedToolRuntimeForModel(ctx, input.SelectedToolIDs, modelSupportsVision(route.PlatformModelName, route.ModelCapabilitiesJSON))
+	supportsVision := modelSupportsVision(route.PlatformModelName, route.ModelCapabilitiesJSON)
+	toolRuntime, err := s.resolveSelectedToolRuntimeForModel(ctx, input.SelectedToolIDs, supportsVision)
 	if err != nil {
 		retErr = err
 		return nil, err
@@ -470,15 +471,17 @@ func (s *Service) sendMessageInternal(
 	}
 	imageAttachmentRoutingActive := toolRuntime.attachmentProcessor != nil
 	imageProcessing, err := s.processImageAttachments(ctx, imageAttachmentProcessingInput{
-		UserID:         input.UserID,
-		ConversationID: input.ConversationID,
-		MessageID:      assistantMessage.ID,
-		RequestID:      input.RequestID,
-		RunID:          runID,
-		UserPrompt:     input.Content,
-		Attachments:    currentAttachments,
-		Runtime:        toolRuntime,
-		TraceRecorder:  traceRecorder,
+		UserID:                 input.UserID,
+		ConversationID:         input.ConversationID,
+		MessageID:              assistantMessage.ID,
+		RequestID:              input.RequestID,
+		RunID:                  runID,
+		UserPrompt:             input.Content,
+		Attachments:            currentAttachments,
+		AttachmentImports:      attachmentImports,
+		Runtime:                toolRuntime,
+		TraceRecorder:          traceRecorder,
+		AllowInactiveProcessor: !supportsVision,
 	})
 	toolCallRows = append(toolCallRows, imageProcessing.Rows...)
 	mergeToolCallPersistenceKeys(&persistedToolCallKeys, imageProcessing.PersistedToolCallKeys)
@@ -500,9 +503,9 @@ func (s *Service) sendMessageInternal(
 
 	contextAssembler := NewContextAssembler(int64(cfg.ContextMaxInputTokens))
 	userCtx := userContextInput{
-		ImageAnalyses:         imageProcessing.Analyses,
-		SupportsVision:        modelSupportsVision(route.PlatformModelName, route.ModelCapabilitiesJSON),
-		UserID:                input.UserID,
+		ImageAnalyses:          imageProcessing.Analyses,
+		SupportsVision:         supportsVision,
+		UserID:                 input.UserID,
 		NonVisionExtractReader: s.nonVisionImageExtractText,
 	}
 	var prefixMemories []domainmemory.UserMemory
@@ -1437,16 +1440,17 @@ func (s *Service) sendMessageInternal(
 				if toolRuntime.attachmentProcessorActive() {
 					attachmentToolCallLimit := remainingToolCalls
 					activatedProcessing, processingErr := s.processImageAttachments(toolCtx, imageAttachmentProcessingInput{
-						UserID:         input.UserID,
-						ConversationID: input.ConversationID,
-						MessageID:      assistantMessage.ID,
-						RequestID:      input.RequestID,
-						RunID:          runID,
-						UserPrompt:     input.Content,
-						Attachments:    currentAttachments,
-						Runtime:        toolRuntime,
-						TraceRecorder:  traceRecorder,
-						ToolCallLimit:  &attachmentToolCallLimit,
+						UserID:            input.UserID,
+						ConversationID:    input.ConversationID,
+						MessageID:         assistantMessage.ID,
+						RequestID:         input.RequestID,
+						RunID:             runID,
+						UserPrompt:        input.Content,
+						Attachments:       currentAttachments,
+						AttachmentImports: attachmentImports,
+						Runtime:           toolRuntime,
+						TraceRecorder:     traceRecorder,
+						ToolCallLimit:     &attachmentToolCallLimit,
 					})
 					if processingErr != nil {
 						retErr = processingErr

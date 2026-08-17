@@ -13,6 +13,7 @@ const (
 
 	AttachmentEncodingBase64  = "base64"
 	AttachmentEncodingDataURL = "data_url"
+	AttachmentEncodingPath    = "path"
 )
 
 // IsValidAttachmentMode 判断是否为可用的附件注入模式（none 之外）。

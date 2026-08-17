@@ -28,6 +28,25 @@ func TestValidateToolAttachmentConfigAcceptsDeterministicImageBinding(t *testing
 	}
 }
 
+func TestValidateToolAttachmentConfigAcceptsScopedPathBinding(t *testing.T) {
+	err := validateToolAttachmentConfig(toolAttachmentConfig{
+		Mode:           domainmcp.AttachmentInputModeImage,
+		Argument:       "image_path",
+		Encoding:       domainmcp.AttachmentEncodingPath,
+		PromptArgument: "prompt",
+	}, `{
+		"type":"object",
+		"properties":{
+			"image_path":{"type":"string"},
+			"prompt":{"type":"string"}
+		},
+		"required":["image_path"]
+	}`)
+	if err != nil {
+		t.Fatalf("expected valid scoped path attachment binding, got %v", err)
+	}
+}
+
 func TestValidateToolAttachmentConfigAcceptsLocalReferencesAndUnions(t *testing.T) {
 	schema := `{
 		"type":"object",

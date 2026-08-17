@@ -381,6 +381,8 @@
     "modelOptions": "Parameters",
     "mcpTools": "MCP tools",
     "mcpToolsSelected": "{count} tools enabled",
+    "mcpToolsLoadFailed": "MCP tools could not be loaded.",
+    "mcpToolsRetry": "Retry loading MCP tools",
     "clear": "Clear",
     "default": "Default",
     "jsonConfig": "JSON config",

@@ -28,7 +28,7 @@ export type MCPToolEditFormState = {
   description: string;
   attachmentInputMode: "none" | "image" | "audio" | "file";
   attachmentArgument: string;
-  attachmentEncoding: "base64" | "data_url";
+  attachmentEncoding: "base64" | "data_url" | "path";
   attachmentPromptArgument: string;
   passUserPrompt: boolean;
   schemaStringArguments: MCPToolSchemaStringArgument[];
@@ -228,7 +228,7 @@ export function MCPToolEditDialog({
                           </div>
                           <Select
                             value={stableForm.attachmentEncoding}
-                            onValueChange={(value: "base64" | "data_url") => onFormChange((prev) => (
+                            onValueChange={(value: "base64" | "data_url" | "path") => onFormChange((prev) => (
                               prev ? { ...prev, attachmentEncoding: value } : prev
                             ))}
                           >
@@ -238,6 +238,7 @@ export function MCPToolEditDialog({
                             <SelectContent>
                               <SelectItem value="data_url">{t("imageEncodingDataURL")}</SelectItem>
                               <SelectItem value="base64">{t("imageEncodingBase64")}</SelectItem>
+                              <SelectItem value="path">{t("imageEncodingPath")}</SelectItem>
                             </SelectContent>
                           </Select>
                         </div>

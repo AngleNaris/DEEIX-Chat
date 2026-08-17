@@ -148,6 +148,7 @@ func defaultMCPToolGuidancePrompt() string {
 	builder.WriteString("- Use tools only for external, realtime, private, or explicitly requested data.\n")
 	builder.WriteString("- Use the fewest useful calls; each call must add new information.\n")
 	builder.WriteString("- Do not repeat an identical failed call. Adjust arguments, use another tool, or answer from available evidence.\n")
+	builder.WriteString("- MCP server activation is an intermediate step. Continue the original task in the automatic same-run follow-up; never ask the user to send another message just to use activated tools.\n")
 	builder.WriteString("- If tools fail or lack enough data, state the gap in the final answer.\n")
 	builder.WriteString("- Do not expose raw tool JSON, internal fields, or tool logs unless the user asks.\n")
 	return strings.TrimSpace(builder.String())
@@ -451,7 +452,7 @@ func (r selectedToolRuntime) mcpActivationDescription() string {
 	}
 	sort.Slice(serverIDs, func(i, j int) bool { return serverIDs[i] < serverIDs[j] })
 	var builder strings.Builder
-	builder.WriteString("Activate one MCP server authorized for this run. Its selected tool schemas become available on the next model request. Authorized servers:\n")
+	builder.WriteString("Activate one MCP server authorized for this run. The backend immediately starts another model step in this same run with its selected tool schemas. Authorized servers:\n")
 	for _, serverID := range serverIDs {
 		server := r.authorizedMCPServers[serverID]
 		description := server.description
@@ -460,7 +461,7 @@ func (r selectedToolRuntime) mcpActivationDescription() string {
 		}
 		fmt.Fprintf(&builder, "- server_id=%d; name=%s; description=%s\n", server.id, server.name, description)
 	}
-	builder.WriteString("Only activate a server when its described capability is needed. Do not guess or invoke undisclosed MCP tool names.")
+	builder.WriteString("Only activate a server when its described capability is needed. After activation, continue the user's original task in the automatic same-run follow-up and call the newly visible tools when needed. Never ask the user to send another message or merely report that activation succeeded. Do not guess or invoke undisclosed MCP tool names.")
 	if !r.supportsVision {
 		builder.WriteString(appendTextOnlyModelToolWarning(""))
 	}

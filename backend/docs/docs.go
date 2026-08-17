@@ -24355,7 +24355,8 @@ const docTemplate = `{
                     "enum": [
                         "",
                         "base64",
-                        "data_url"
+                        "data_url",
+                        "path"
                     ]
                 },
                 "attachmentInputMode": {
@@ -24990,7 +24991,8 @@ const docTemplate = `{
                     "type": "string",
                     "enum": [
                         "base64",
-                        "data_url"
+                        "data_url",
+                        "path"
                     ]
                 },
                 "attachmentInputMode": {

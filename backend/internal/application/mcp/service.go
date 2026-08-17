@@ -500,7 +500,10 @@ func normalizeToolInput(input ToolInput) (repository.UpdateMCPToolInput, error) 
 	if input.AttachmentEncoding != nil {
 		encoding := strings.ToLower(strings.TrimSpace(*input.AttachmentEncoding))
 		switch encoding {
-		case "", domainmcp.AttachmentEncodingBase64, domainmcp.AttachmentEncodingDataURL:
+		case "",
+			domainmcp.AttachmentEncodingBase64,
+			domainmcp.AttachmentEncodingDataURL,
+			domainmcp.AttachmentEncodingPath:
 			update.AttachmentEncoding = &encoding
 		default:
 			return update, ErrInvalidToolAttachmentConfig
@@ -578,7 +581,9 @@ func validateToolAttachmentConfig(config toolAttachmentConfig, schemaJSON string
 		return ErrInvalidToolAttachmentConfig
 	}
 	switch config.Encoding {
-	case domainmcp.AttachmentEncodingBase64, domainmcp.AttachmentEncodingDataURL:
+	case domainmcp.AttachmentEncodingBase64,
+		domainmcp.AttachmentEncodingDataURL,
+		domainmcp.AttachmentEncodingPath:
 	default:
 		return ErrInvalidToolAttachmentConfig
 	}

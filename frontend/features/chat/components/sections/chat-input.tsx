@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import dynamic from "next/dynamic";
-import { Box, CornerDownRight, Eye, EyeOff, Film, Image, ImageOff, ImagePlus, LoaderCircle, PencilLine, ScrollText, Trash2, WandSparkles } from "lucide-react";
+import { Box, CornerDownRight, Eye, EyeOff, Film, Image, ImageOff, ImagePlus, LoaderCircle, PencilLine, RefreshCw, ScrollText, Trash2, WandSparkles } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
@@ -173,6 +173,7 @@ type ChatInputProps = {
   htmlVisualPromptEnabled: boolean;
   maxSelectedSkills: number;
   toolsLoading: boolean;
+  toolsErrorMsg?: string;
   options: ConversationOptions;
   defaultOptions: ConversationOptions;
   modelOptionPolicy: ModelOptionPolicy | null;
@@ -185,6 +186,7 @@ type ChatInputProps = {
   onDraftChange: (value: string) => void;
   onModelChange: (platformModelName: string) => void;
   onModelCatalogRefresh?: () => void | Promise<void>;
+  onToolsRetry?: () => void;
   onSelectedToolsChange: (toolIDs: number[]) => void;
   onSelectedPromptsChange: (prompts: PromptPresetDTO[]) => void;
   onSelectedSkillsChange: (skills: SkillSummaryDTO[]) => void;
@@ -356,6 +358,7 @@ function ChatInputComponent({
   htmlVisualPromptEnabled,
   maxSelectedSkills,
   toolsLoading,
+  toolsErrorMsg = "",
   options,
   defaultOptions,
   modelOptionPolicy,
@@ -367,6 +370,7 @@ function ChatInputComponent({
   onDraftChange,
   onModelChange,
   onModelCatalogRefresh,
+  onToolsRetry,
   onSelectedToolsChange,
   onSelectedPromptsChange,
   onSelectedSkillsChange,
@@ -576,7 +580,7 @@ function ChatInputComponent({
   const composerModeIndicator = resolveComposerModeIndicator(submitDecision, tComposer);
   const ComposerModeIcon = composerModeIndicator?.icon;
   const modelOptionPolicyDisabled = modelOptionPolicy?.mode?.trim() === "disabled";
-  const showMCPToolsButton = availableTools.length > 0 && !isMediaMode;
+  const showMCPToolsButton = (availableTools.length > 0 || toolsErrorMsg !== "") && !isMediaMode;
   const showHTMLVisualPromptButton = !isMediaMode;
   const hasComposerAttachments = attachments.length > 0 || uploadingAttachments.length > 0;
   const sortableFileIDs = React.useMemo(
@@ -1206,7 +1210,29 @@ function ChatInputComponent({
                 />
               ) : null}
 
-              {showMCPToolsButton ? (
+              {showMCPToolsButton && toolsErrorMsg ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <InputGroupButton
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      className="size-7 rounded-md text-destructive hover:text-destructive sm:size-8"
+                      disabled={loading || uploading || toolsLoading || !onToolsRetry}
+                      aria-label={tComposer("mcpToolsRetry")}
+                      onClick={onToolsRetry}
+                    >
+                      <RefreshCw className={cn("size-4", toolsLoading && "animate-spin")} />
+                    </InputGroupButton>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="max-w-72 text-xs leading-5">
+                    <p>{tComposer("mcpToolsLoadFailed")}</p>
+                    {toolsErrorMsg !== tComposer("mcpToolsLoadFailed") ? (
+                      <p className="text-muted-foreground">{toolsErrorMsg}</p>
+                    ) : null}
+                  </TooltipContent>
+                </Tooltip>
+              ) : showMCPToolsButton ? (
                 <ChatMCP
                   availableTools={availableTools}
                   selectedToolIDs={selectedToolIDs}

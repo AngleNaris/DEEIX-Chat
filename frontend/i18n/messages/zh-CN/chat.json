@@ -381,6 +381,8 @@
     "modelOptions": "模型配置",
     "mcpTools": "MCP 工具",
     "mcpToolsSelected": "已启用 {count} 个工具",
+    "mcpToolsLoadFailed": "MCP 工具加载失败。",
+    "mcpToolsRetry": "重新加载 MCP 工具",
     "clear": "清空",
     "default": "默认",
     "jsonConfig": "JSON 配置",

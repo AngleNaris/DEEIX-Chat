@@ -547,6 +547,8 @@ export function AppChatArea() {
   const [options, setOptions] = React.useState<ConversationOptions>({});
   const [availableTools, setAvailableTools] = React.useState<MCPToolDTO[]>([]);
   const [toolsLoading, setToolsLoading] = React.useState(true);
+  const [toolsErrorMsg, setToolsErrorMsg] = React.useState("");
+  const [toolsReloadRevision, setToolsReloadRevision] = React.useState(0);
   const {
     selectedToolIDs,
     selectedSkills,
@@ -712,11 +714,7 @@ export function AppChatArea() {
       try {
         const token = await resolveAccessToken();
         if (!token) {
-          if (!cancelled) {
-            setAvailableTools([]);
-            setSelectedToolIDs([]);
-          }
-          return;
+          throw new Error(t("composer.sessionExpired"));
         }
         const [toolsResult, settings] = await Promise.all([
           listAvailableMCPTools(token),
@@ -739,10 +737,12 @@ export function AppChatArea() {
           filterAvailableMCPToolIDs(previous, tools),
           tools,
         ));
-      } catch {
+        setToolsErrorMsg("");
+      } catch (error) {
         if (!cancelled) {
-          setAvailableTools([]);
-          setSelectedToolIDs([]);
+          setToolsErrorMsg(error instanceof Error && error.message.trim()
+            ? error.message
+            : t("composer.mcpToolsLoadFailed"));
         }
       } finally {
         if (!cancelled) {
@@ -755,7 +755,11 @@ export function AppChatArea() {
     return () => {
       cancelled = true;
     };
-  }, [conversationID, setSelectedToolIDs]);
+  }, [conversationID, setSelectedToolIDs, t, toolsReloadRevision]);
+
+  const retryLoadTools = React.useCallback(() => {
+    setToolsReloadRevision((revision) => revision + 1);
+  }, []);
 
   const onDefaultToolIDsChange = React.useCallback(async (nextToolIDs: number[]) => {
     const nextDefaults = filterAvailableMCPToolIDs(nextToolIDs, availableTools);
@@ -1423,6 +1427,7 @@ export function AppChatArea() {
     queuedMessages,
     htmlVisualPromptEnabled: htmlVisualPrompt.enabled,
     toolsLoading,
+    toolsErrorMsg,
     options: effectiveOptions,
     defaultOptions: selectedModelDefaultOptions,
     modelOptionPolicy,
@@ -1433,6 +1438,7 @@ export function AppChatArea() {
     onDraftChange: setDraft,
     onModelChange: setSelectedPlatformModelName,
     onModelCatalogRefresh: refreshModelCatalogForComposer,
+    onToolsRetry: retryLoadTools,
     onSelectedToolsChange,
     onSelectedPromptsChange: setSelectedPrompts,
     maxSelectedSkills: MAX_SELECTED_SKILLS_PER_MESSAGE,

@@ -90,6 +90,10 @@ func TestSelectedToolRuntimeDisclosesMCPToolsAfterActivation(t *testing.T) {
 	if !strings.Contains(initial.definitions[0].Description, "server_id=7; name=Web") {
 		t.Fatalf("activation directory missing stable server id and name: %q", initial.definitions[0].Description)
 	}
+	if !strings.Contains(initial.definitions[0].Description, "automatic same-run follow-up") ||
+		!strings.Contains(initial.definitions[0].Description, "Never ask the user to send another message") {
+		t.Fatalf("activation directory missing same-run continuation guidance: %q", initial.definitions[0].Description)
+	}
 
 	changed, err := runtime.activateMCPServer(t.Context(), 7)
 	if err != nil || !changed {

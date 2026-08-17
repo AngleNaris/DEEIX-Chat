@@ -33,17 +33,19 @@ type imageAttachmentAnalysis struct {
 }
 
 type imageAttachmentProcessingInput struct {
-	UserID          uint
-	ConversationID  uint
-	MessageID       uint
-	RequestID       string
-	RunID           string
-	UserPrompt      string
-	Attachments     []AttachmentInput
-	Runtime         selectedToolRuntime
-	TraceRecorder   *messageTraceRecorder
-	ToolCallLimit   *int
-	SkipPersistence bool
+	UserID                 uint
+	ConversationID         uint
+	MessageID              uint
+	RequestID              string
+	RunID                  string
+	UserPrompt             string
+	Attachments            []AttachmentInput
+	AttachmentImports      []attachmentImportPath
+	Runtime                selectedToolRuntime
+	TraceRecorder          *messageTraceRecorder
+	ToolCallLimit          *int
+	SkipPersistence        bool
+	AllowInactiveProcessor bool
 }
 
 type imageAttachmentProcessingResult struct {
@@ -61,7 +63,10 @@ func (s *Service) processImageAttachments(
 	input imageAttachmentProcessingInput,
 ) (imageAttachmentProcessingResult, error) {
 	processor := input.Runtime.attachmentProcessor
-	if processor == nil || !input.Runtime.attachmentProcessorActive() {
+	if processor == nil {
+		return imageAttachmentProcessingResult{}, nil
+	}
+	if !input.AllowInactiveProcessor && !input.Runtime.attachmentProcessorActive() {
 		return imageAttachmentProcessingResult{}, nil
 	}
 	// mode 为空时回退 image 行为（兼容存量工具与旧测试构造）。
@@ -86,41 +91,67 @@ func (s *Service) processImageAttachments(
 	if len(attachments) > toolCallLimit {
 		return result, fmt.Errorf("%w: attachment count exceeds the tool call limit", ErrImageAttachmentProcessingFailed)
 	}
-	if processor.argument == "" ||
-		(processor.encoding != domainmcp.AttachmentEncodingBase64 && processor.encoding != domainmcp.AttachmentEncodingDataURL) {
+	if processor.argument == "" {
+		return result, fmt.Errorf("%w: processor configuration is invalid", ErrImageAttachmentProcessingFailed)
+	}
+	switch processor.encoding {
+	case domainmcp.AttachmentEncodingBase64,
+		domainmcp.AttachmentEncodingDataURL,
+		domainmcp.AttachmentEncodingPath:
+	default:
 		return result, fmt.Errorf("%w: processor configuration is invalid", ErrImageAttachmentProcessingFailed)
 	}
 
 	cfg := s.cfg.Snapshot()
-	storeProvider := s.storeProvider
-	if storeProvider == nil {
-		storeProvider = appstorage.NewRuntimeProvider(config.NewRuntime(cfg), nil)
-	}
-	store, err := storeProvider.Open(ctx)
-	if err != nil {
-		return result, fmt.Errorf("%w: open object storage: %v", ErrImageAttachmentProcessingFailed, err)
+	var store objectstore.Store
+	if processor.encoding != domainmcp.AttachmentEncodingPath {
+		storeProvider := s.storeProvider
+		if storeProvider == nil {
+			storeProvider = appstorage.NewRuntimeProvider(config.NewRuntime(cfg), nil)
+		}
+		var err error
+		store, err = storeProvider.Open(ctx)
+		if err != nil {
+			return result, fmt.Errorf("%w: open object storage: %v", ErrImageAttachmentProcessingFailed, err)
+		}
 	}
 
 	totalImageBytes := 0
 	analysisCharLimit := min(maxImageAttachmentAnalysisChars, maxImageAttachmentAnalysisTotalChars/len(attachments))
 	for index, attachment := range attachments {
-		prepared, prepareErr := prepareAttachmentForProcessor(ctx, store, attachment, cfg.ImageMaxDimension, processor.mode)
-		if prepareErr != nil {
-			return result, prepareErr
+		mimeType := firstNonEmptyString(attachment.DetectedMIME, attachment.MimeType)
+		encodedAttachment := ""
+		byteSize := max(attachment.FileSize, 0)
+		if processor.encoding == domainmcp.AttachmentEncodingPath {
+			importPath := attachmentProcessorImportPath(input.AttachmentImports, attachment.FileID)
+			if importPath == "" {
+				return result, fmt.Errorf(
+					"%w: attachment import path is unavailable for %s",
+					ErrImageAttachmentProcessingFailed,
+					firstNonEmptyString(attachment.FileName, attachment.FileID),
+				)
+			}
+			encodedAttachment = importPath
+		} else {
+			prepared, prepareErr := prepareAttachmentForProcessor(ctx, store, attachment, cfg.ImageMaxDimension, processor.mode)
+			if prepareErr != nil {
+				return result, prepareErr
+			}
+			totalImageBytes += len(prepared.data)
+			if processor.mode == domainmcp.AttachmentInputModeImage && totalImageBytes > maxConversationImageContextBytes {
+				return result, fmt.Errorf("%w: image attachment context exceeds %d bytes", ErrFileTooLarge, maxConversationImageContextBytes)
+			}
+			if processor.mode != domainmcp.AttachmentInputModeImage && len(prepared.data) > maxProcessorBinaryBytes {
+				return result, fmt.Errorf("%w: attachment exceeds %d bytes and cannot be injected into the tool", ErrFileTooLarge, maxProcessorBinaryBytes)
+			}
+			mimeType = prepared.mimeType
+			byteSize = int64(len(prepared.data))
+			encodedAttachment = base64.StdEncoding.EncodeToString(prepared.data)
+			if processor.encoding == domainmcp.AttachmentEncodingDataURL {
+				encodedAttachment = "data:" + prepared.mimeType + ";base64," + encodedAttachment
+			}
 		}
-		totalImageBytes += len(prepared.data)
-		if processor.mode == domainmcp.AttachmentInputModeImage && totalImageBytes > maxConversationImageContextBytes {
-			return result, fmt.Errorf("%w: image attachment context exceeds %d bytes", ErrFileTooLarge, maxConversationImageContextBytes)
-		}
-		if processor.mode != domainmcp.AttachmentInputModeImage && len(prepared.data) > maxProcessorBinaryBytes {
-			return result, fmt.Errorf("%w: attachment exceeds %d bytes and cannot be injected into the tool", ErrFileTooLarge, maxProcessorBinaryBytes)
-		}
-
-		encodedImage := base64.StdEncoding.EncodeToString(prepared.data)
-		if processor.encoding == domainmcp.AttachmentEncodingDataURL {
-			encodedImage = "data:" + prepared.mimeType + ";base64," + encodedImage
-		}
-		arguments := map[string]interface{}{processor.argument: encodedImage}
+		arguments := map[string]interface{}{processor.argument: encodedAttachment}
 		if processor.promptArgument != "" {
 			arguments[processor.promptArgument] = strings.TrimSpace(input.UserPrompt)
 		}
@@ -142,7 +173,7 @@ func (s *Service) processImageAttachments(
 			ToolType:       "mcp_attachment",
 			ToolName:       processor.toolName,
 			Status:         "requested",
-			InputJSON:      imageAttachmentAuditInput(attachment, prepared.mimeType, processor.encoding, len(prepared.data)),
+			InputJSON:      imageAttachmentAuditInput(attachment, mimeType, processor.encoding, int(byteSize)),
 		}
 		if validationErr != nil {
 			row.Status = "error"
@@ -226,6 +257,16 @@ func (s *Service) processImageAttachments(
 		)
 	}
 	return result, nil
+}
+
+func attachmentProcessorImportPath(paths []attachmentImportPath, fileID string) string {
+	fileID = strings.TrimSpace(fileID)
+	for _, item := range paths {
+		if strings.TrimSpace(item.FileID) == fileID {
+			return strings.TrimSpace(item.MMPath)
+		}
+	}
+	return ""
 }
 
 type preparedImageAttachment struct {

@@ -7399,6 +7399,7 @@ definitions:
         - ""
         - base64
         - data_url
+        - path
         type: string
       attachmentInputMode:
         enum:
@@ -7864,6 +7865,7 @@ definitions:
         enum:
         - base64
         - data_url
+        - path
         type: string
       attachmentInputMode:
         enum:

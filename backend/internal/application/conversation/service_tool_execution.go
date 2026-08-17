@@ -143,7 +143,7 @@ func (s *Service) executeAssistantToolCalls(ctx context.Context, input executeAs
 					row.ErrorJSON = err.Error()
 				} else {
 					row.Status = "success"
-					row.OutputJSON = fmt.Sprintf(`{"status":"activated","server_id":%d,"message":"MCP server activated; its selected tools are available on the next model request"}`, arguments.ServerID)
+					row.OutputJSON = fmt.Sprintf(`{"status":"activated","server_id":%d,"message":"MCP server activated for this run. Continue the user's original task now in the automatic same-run follow-up; call the newly available tools when needed. Do not ask the user to send another message or merely report activation."}`, arguments.ServerID)
 					mcpActivationChanged = mcpActivationChanged || changed
 				}
 			}

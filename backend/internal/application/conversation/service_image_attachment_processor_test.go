@@ -159,6 +159,96 @@ func TestProcessImageAttachmentsRoutesOnlyTextToMainModelContext(t *testing.T) {
 	}
 }
 
+func TestProcessImageAttachmentsRoutesScopedPathWithoutModelActivation(t *testing.T) {
+	var receivedPath string
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		defer request.Body.Close()
+		var rpcRequest struct {
+			ID     interface{} `json:"id"`
+			Method string      `json:"method"`
+			Params struct {
+				Arguments map[string]interface{} `json:"arguments"`
+			} `json:"params"`
+		}
+		if err := json.NewDecoder(request.Body).Decode(&rpcRequest); err != nil {
+			t.Errorf("decode MCP request: %v", err)
+			writer.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		switch rpcRequest.Method {
+		case "initialize":
+			_ = json.NewEncoder(writer).Encode(map[string]interface{}{
+				"jsonrpc": "2.0",
+				"id":      rpcRequest.ID,
+				"result":  map[string]interface{}{"protocolVersion": "2025-06-18", "capabilities": map[string]interface{}{}},
+			})
+		case "notifications/initialized":
+			writer.WriteHeader(http.StatusAccepted)
+		case "tools/call":
+			receivedPath, _ = rpcRequest.Params.Arguments["image_path"].(string)
+			_ = json.NewEncoder(writer).Encode(map[string]interface{}{
+				"jsonrpc": "2.0",
+				"id":      rpcRequest.ID,
+				"result": map[string]interface{}{
+					"content": []map[string]interface{}{{"type": "text", "text": "OCR: SSH connection details"}},
+				},
+			})
+		default:
+			writer.WriteHeader(http.StatusBadRequest)
+		}
+	}))
+	defer server.Close()
+
+	service := &Service{
+		cfg:       config.NewRuntime(config.Config{MCPMaxToolCallsPerRun: 8, MCPMaxConcurrentCalls: 8}),
+		mcpClient: mcp.NewClient(security.OutboundPolicy{}, ""),
+	}
+	runtime := selectedToolRuntime{
+		attachmentProcessor: &selectedAttachmentProcessor{
+			toolID:         89,
+			serverID:       9,
+			modelName:      "ocr",
+			toolName:       "ocr",
+			displayName:    "OCR",
+			mode:           domainmcp.AttachmentInputModeImage,
+			argument:       "image_path",
+			encoding:       domainmcp.AttachmentEncodingPath,
+			promptArgument: "prompt",
+			config:         mcp.CallConfig{BaseURL: server.URL, TimeoutMS: 5000},
+			schema:         json.RawMessage(`{"type":"object","properties":{"image_path":{"type":"string"},"prompt":{"type":"string"}},"required":["image_path"]}`),
+		},
+		mcpActivation: newMCPActivationState(nil),
+	}
+	result, err := service.processImageAttachments(t.Context(), imageAttachmentProcessingInput{
+		UserID: 1, ConversationID: 5516, MessageID: 3, RequestID: "request-path", RunID: "run-path",
+		UserPrompt: "读取图片",
+		Attachments: []AttachmentInput{{
+			FileID: "file-1", FileName: "ssh.png", Kind: "image", MimeType: "image/png",
+			FileSize: 5260, Current: true,
+		}},
+		AttachmentImports: []attachmentImportPath{{
+			FileID: "file-1",
+			MMPath: "/imports/deeix-1-5516/run-test/file-1_ssh.png",
+		}},
+		Runtime:                runtime,
+		AllowInactiveProcessor: true,
+	})
+	if err != nil {
+		t.Fatalf("process path attachment: %v", err)
+	}
+	if !result.Routed || len(result.Analyses) != 1 || result.Analyses[0].Content != "OCR: SSH connection details" {
+		t.Fatalf("unexpected path processing result: %#v", result)
+	}
+	if receivedPath != "/imports/deeix-1-5516/run-test/file-1_ssh.png" {
+		t.Fatalf("processor path = %q", receivedPath)
+	}
+	if len(result.Rows) != 1 || !strings.Contains(result.Rows[0].InputJSON, `"encoding":"path"`) ||
+		strings.Contains(result.Rows[0].InputJSON, receivedPath) {
+		t.Fatalf("unexpected path audit input: %#v", result.Rows)
+	}
+}
+
 type selectedToolRuntimeMCPRepositoryStub struct {
 	repository.MCPRepository
 	listToolsByIDs func(context.Context, []uint) ([]domainmcp.Tool, error)
@@ -228,13 +318,13 @@ func TestResolveSelectedToolRuntimeKeepsAttachmentProcessorBackendOnly(t *testin
 				return []domainmcp.Tool{{
 					ID:                       1,
 					ServerID:                 2,
-					Name:                     "analyze_image",
-					Description:              "Analyze an attached image",
-					InputSchemaJSON:          `{"type":"object","properties":{"image":{"type":"string"}},"required":["image"]}`,
+					Name:                     "ocr",
+					Description:              "Read text from an attached image",
+					InputSchemaJSON:          `{"type":"object","properties":{"image_path":{"type":"string"},"prompt":{"type":"string"}},"required":["image_path"]}`,
 					Status:                   "active",
 					AttachmentInputMode:      domainmcp.AttachmentInputModeImage,
-					AttachmentArgument:       "image",
-					AttachmentEncoding:       domainmcp.AttachmentEncodingDataURL,
+					AttachmentArgument:       "image_path",
+					AttachmentEncoding:       domainmcp.AttachmentEncodingPath,
 					AttachmentPromptArgument: "prompt",
 				}}, nil
 			},
@@ -258,6 +348,13 @@ func TestResolveSelectedToolRuntimeKeepsAttachmentProcessorBackendOnly(t *testin
 	if runtime.attachmentProcessor == nil || runtime.attachmentProcessor.config.BaseURL == "" || len(runtime.attachmentProcessor.schema) == 0 {
 		t.Fatalf("attachment processor lost private execution config: %#v", runtime.attachmentProcessor)
 	}
+	if runtime.attachmentProcessor.encoding != domainmcp.AttachmentEncodingPath ||
+		runtime.attachmentProcessor.argument != "image_path" {
+		t.Fatalf("attachment processor lost scoped path binding: %#v", runtime.attachmentProcessor)
+	}
+	if runtime.attachmentProcessorActive() {
+		t.Fatalf("attachment processor should remain inactive until model activation")
+	}
 	if len(runtime.authorizedMCPTools) != 0 {
 		t.Fatalf("attachment processor entered the model tool authorization directory: %#v", runtime.authorizedMCPTools)
 	}
@@ -268,7 +365,7 @@ func TestResolveSelectedToolRuntimeKeepsAttachmentProcessorBackendOnly(t *testin
 		t.Fatalf("unexpected initial model-visible definitions: %#v", runtime.definitions)
 	}
 	for _, definition := range runtime.definitions {
-		if definition.Name == "analyze_image" {
+		if definition.Name == "ocr" {
 			t.Fatalf("attachment processor schema leaked before activation: %#v", runtime.definitions)
 		}
 	}

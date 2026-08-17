@@ -145,7 +145,8 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 
 	// 2. 工具运行时：Actor 共享群组 MCP 激活状态，附件处理器仍保持后端私有。
 	// 文本模型（无 vision）的激活披露与工具描述附带"无法查看图片"警告。
-	toolRuntime, err := s.resolveSelectedToolRuntimeWithActivation(ctx, input.SelectedToolIDs, input.MCPActivation, input.OnMCPActivation, modelSupportsVision(route.PlatformModelName, route.ModelCapabilitiesJSON))
+	supportsVision := modelSupportsVision(route.PlatformModelName, route.ModelCapabilitiesJSON)
+	toolRuntime, err := s.resolveSelectedToolRuntimeWithActivation(ctx, input.SelectedToolIDs, input.MCPActivation, input.OnMCPActivation, supportsVision)
 	if err != nil {
 		return nil, err
 	}
@@ -167,24 +168,6 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 	})
 	if err != nil {
 		return nil, err
-	}
-	imageAttachmentRoutingActive := toolRuntime.attachmentProcessor != nil
-	imageProcessing, err := s.processImageAttachments(ctx, imageAttachmentProcessingInput{
-		UserID:          input.UserID,
-		ConversationID:  input.ConversationID,
-		MessageID:       input.ToolMessageID,
-		RequestID:       input.RequestID,
-		RunID:           input.ClientRunID,
-		UserPrompt:      input.UserContent,
-		Attachments:     conversationAttachments,
-		Runtime:         toolRuntime,
-		SkipPersistence: !input.PersistToolCalls,
-	})
-	if err != nil {
-		return nil, err
-	}
-	if imageProcessing.Routed {
-		toolRuntime = toolRuntime.withoutAttachmentProcessor()
 	}
 	var attachmentImports []attachmentImportPath
 	if len(toolRuntime.authorizedMCPServers) > 0 {
@@ -208,6 +191,26 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 			}
 			attachmentImports = nil
 		}
+	}
+	imageAttachmentRoutingActive := toolRuntime.attachmentProcessor != nil
+	imageProcessing, err := s.processImageAttachments(ctx, imageAttachmentProcessingInput{
+		UserID:                 input.UserID,
+		ConversationID:         input.ConversationID,
+		MessageID:              input.ToolMessageID,
+		RequestID:              input.RequestID,
+		RunID:                  input.ClientRunID,
+		UserPrompt:             input.UserContent,
+		Attachments:            conversationAttachments,
+		AttachmentImports:      attachmentImports,
+		Runtime:                toolRuntime,
+		SkipPersistence:        !input.PersistToolCalls,
+		AllowInactiveProcessor: !supportsVision,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if imageProcessing.Routed {
+		toolRuntime = toolRuntime.withoutAttachmentProcessor()
 	}
 	fileContextPlan := buildConversationFileContextPlan(conversationAttachments, fileMode, cfg, route.UpstreamModel, route.ModelCapabilitiesJSON, capability.RAGAvailable)
 	if imageProcessing.Routed {
@@ -781,16 +784,17 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 				if toolRuntime.attachmentProcessorActive() {
 					attachmentToolCallLimit := remainingToolCalls
 					activatedProcessing, processingErr := s.processImageAttachments(toolCtx, imageAttachmentProcessingInput{
-						UserID:          input.UserID,
-						ConversationID:  input.ConversationID,
-						MessageID:       input.ToolMessageID,
-						RequestID:       input.RequestID,
-						RunID:           input.ClientRunID,
-						UserPrompt:      input.UserContent,
-						Attachments:     conversationAttachments,
-						Runtime:         toolRuntime,
-						ToolCallLimit:   &attachmentToolCallLimit,
-						SkipPersistence: !input.PersistToolCalls,
+						UserID:            input.UserID,
+						ConversationID:    input.ConversationID,
+						MessageID:         input.ToolMessageID,
+						RequestID:         input.RequestID,
+						RunID:             input.ClientRunID,
+						UserPrompt:        input.UserContent,
+						Attachments:       conversationAttachments,
+						AttachmentImports: attachmentImports,
+						Runtime:           toolRuntime,
+						ToolCallLimit:     &attachmentToolCallLimit,
+						SkipPersistence:   !input.PersistToolCalls,
 					})
 					if processingErr != nil {
 						return nil, processingErr

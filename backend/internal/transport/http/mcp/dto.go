@@ -29,7 +29,7 @@ type ToolResponse struct {
 	InputSchemaJSON          string    `json:"inputSchemaJSON"`
 	AttachmentInputMode      string    `json:"attachmentInputMode" enums:"none,image,audio,file"`
 	AttachmentArgument       string    `json:"attachmentArgument"`
-	AttachmentEncoding       string    `json:"attachmentEncoding" enums:",base64,data_url"`
+	AttachmentEncoding       string    `json:"attachmentEncoding" enums:",base64,data_url,path"`
 	AttachmentPromptArgument string    `json:"attachmentPromptArgument"`
 	Status                   string    `json:"status"`
 	SortOrder                int       `json:"sortOrder"`
@@ -51,7 +51,7 @@ type UpdateToolRequest struct {
 	Description              *string `json:"description,omitempty"`
 	AttachmentInputMode      *string `json:"attachmentInputMode,omitempty" enums:"none,image,audio,file"`
 	AttachmentArgument       *string `json:"attachmentArgument,omitempty"`
-	AttachmentEncoding       *string `json:"attachmentEncoding,omitempty" enums:"base64,data_url"`
+	AttachmentEncoding       *string `json:"attachmentEncoding,omitempty" enums:"base64,data_url,path"`
 	AttachmentPromptArgument *string `json:"attachmentPromptArgument,omitempty"`
 	Status                   *string `json:"status,omitempty"`
 }

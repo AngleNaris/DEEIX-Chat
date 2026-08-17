@@ -3260,7 +3260,7 @@ export interface ToolListResponseDoc {
 
 export interface ToolResponse {
   attachmentArgument: string;
-  attachmentEncoding: "" | "base64" | "data_url";
+  attachmentEncoding: "" | "base64" | "data_url" | "path";
   attachmentInputMode: "none" | "image" | "audio" | "file";
   attachmentPromptArgument: string;
   createdAt: string;
@@ -3505,7 +3505,7 @@ export interface UpdateServerToolsStatusRequest {
 
 export interface UpdateToolRequest {
   attachmentArgument?: string;
-  attachmentEncoding?: "base64" | "data_url";
+  attachmentEncoding?: "base64" | "data_url" | "path";
   attachmentInputMode?: "none" | "image" | "audio" | "file";
   attachmentPromptArgument?: string;
   description?: string;
