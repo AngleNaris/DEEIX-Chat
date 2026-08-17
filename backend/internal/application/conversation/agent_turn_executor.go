@@ -144,7 +144,8 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 	reasoningContentPassback := s.reasoningContentPassbackEnabled(ctx, input.UserID, route)
 
 	// 2. 工具运行时：Actor 共享群组 MCP 激活状态，附件处理器仍保持后端私有。
-	toolRuntime, err := s.resolveSelectedToolRuntimeWithActivation(ctx, input.SelectedToolIDs, input.MCPActivation, input.OnMCPActivation)
+	// 文本模型（无 vision）的激活披露与工具描述附带"无法查看图片"警告。
+	toolRuntime, err := s.resolveSelectedToolRuntimeWithActivation(ctx, input.SelectedToolIDs, input.MCPActivation, input.OnMCPActivation, modelSupportsVision(route.PlatformModelName, route.ModelCapabilitiesJSON))
 	if err != nil {
 		return nil, err
 	}
@@ -278,10 +279,12 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 	stableFullContextAttachments := append([]AttachmentInput{}, fileContextPlan.FullAttachments...)
 	stableFullContextAttachments = append(stableFullContextAttachments, ragFallbackEvidenceAttachments(retrievalRAGFallbacks)...)
 	userCtx := userContextInput{
-		Attachments:    imageAttachmentsForCurrentUser(stableFullContextAttachments),
-		ImageAnalyses:  imageProcessing.Analyses,
-		RAGChunks:      ragContextChunks,
-		SupportsVision: modelSupportsVision(route.PlatformModelName, route.ModelCapabilitiesJSON),
+		Attachments:            imageAttachmentsForCurrentUser(stableFullContextAttachments),
+		ImageAnalyses:          imageProcessing.Analyses,
+		RAGChunks:              ragContextChunks,
+		SupportsVision:         modelSupportsVision(route.PlatformModelName, route.ModelCapabilitiesJSON),
+		UserID:                 input.UserID,
+		NonVisionExtractReader: s.nonVisionImageExtractText,
 	}
 
 	// 4. Skill：与普通消息同口径（按用户级最大可选数收敛）。

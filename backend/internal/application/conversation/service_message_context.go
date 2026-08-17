@@ -719,6 +719,10 @@ type userContextInput struct {
 	// SupportsVision 主模型是否原生支持图片输入：
 	// false 时图片降级为路径标记（Hermes text 模式），不注入像素避免上游 400。
 	SupportsVision bool
+	// UserID 与 NonVisionExtractReader 供文本模型读取图片的 OCR/提取文本：
+	// 非 vision 模型看不到像素，hint 会附加提取出的文字内容（若已就绪）。
+	UserID               uint
+	NonVisionExtractReader func(ctx context.Context, userID uint, fileID string) string
 }
 
 type snapshotContext struct {
@@ -1051,7 +1055,15 @@ func injectUserContext(
 		kind := normalizeAttachmentKind(att.Kind, att.MimeType)
 		if kind == "image" {
 			if !input.SupportsVision {
-				imageHints = append(imageHints, buildImageAttachmentHint(att.FileName, att.FileID))
+				hint := buildImageAttachmentHint(att.FileName, att.FileID)
+				if input.NonVisionExtractReader != nil {
+					if text := input.NonVisionExtractReader(ctx, input.UserID, att.FileID); text != "" {
+						hint += "\n[图片内容文字识别]：" + text
+					} else {
+						hint += "\n（图片文字尚未提取；如需其中的文字，请直接请求用户提供）"
+					}
+				}
+				imageHints = append(imageHints, hint)
 				continue
 			}
 			// 图片：读取文件字节并缩放
@@ -1504,4 +1516,33 @@ func buildPreferencePrompt(memories []domainmemory.UserMemory, maxTokens int) st
 		tokenCount += lineTokens
 	}
 	return strings.TrimRight(sb.String(), "\n")
+}
+
+// nonVisionImageExtractText 读取图片文件的 OCR/提取文本，供文本模型（无 vision）
+// "阅读"图片内容。提取未就绪、缺失或读取失败时静默返回空串，不改变既有降级提示。
+func (s *Service) nonVisionImageExtractText(ctx context.Context, userID uint, fileID string) string {
+	if s == nil || s.repo == nil || s.extractSvc == nil || strings.TrimSpace(fileID) == "" {
+		return ""
+	}
+	fileObj, err := s.repo.GetActiveFileObjectByID(ctx, userID, strings.TrimSpace(fileID))
+	if err != nil || fileObj == nil || strings.TrimSpace(fileObj.ExtractStatus) != "ready" {
+		return ""
+	}
+	result, err := s.repo.GetFileObjectProcessingByObjectID(ctx, fileObj.ID)
+	if err != nil || result == nil || strings.TrimSpace(result.ExtractStoragePath) == "" {
+		return ""
+	}
+	text, err := s.extractSvc.ReadExtractedText(ctx, result.ExtractStoragePath)
+	if err != nil {
+		return ""
+	}
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+	const maxNonVisionImageHintChars = 1500
+	if len(text) > maxNonVisionImageHintChars {
+		text = text[:maxNonVisionImageHintChars] + "…"
+	}
+	return text
 }

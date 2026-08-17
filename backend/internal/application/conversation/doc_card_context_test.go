@@ -1,10 +1,13 @@
 package conversation
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	appdoccard "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/doccard"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/llm"
 )
 
 func docCard(title string, enabled bool, keywords ...string) appdoccard.CardView {
@@ -121,5 +124,55 @@ func TestFormatDocCardsContext(t *testing.T) {
 	}, 0)
 	if !strings.Contains(out, `k="a&#34;b"`) || !strings.Contains(out, "x&lt;y&amp;z") {
 		t.Fatalf("xml escaping missing: %q", out)
+	}
+}
+
+func TestInjectUserContextNonVisionHintAppendsExtractedText(t *testing.T) {
+	messages := []llm.Message{{Role: "user", Content: "看看这张图"}}
+	input := userContextInput{
+		Attachments: []AttachmentInput{{
+			FileID:   "file_vision_hint",
+			FileName: "ssh.png",
+			Kind:     "image",
+			MimeType: "image/png",
+			Current:  true,
+		}},
+		SupportsVision: false,
+		UserID:         7,
+		NonVisionExtractReader: func(ctx context.Context, userID uint, fileID string) string {
+			if userID != 7 || fileID != "file_vision_hint" {
+				return ""
+			}
+			return "root@203.0.113.10:22 password: s3cr3t"
+		},
+	}
+	out := injectUserContext(context.Background(), messages, input, config.Config{}, nil)
+	content := userMessageText(out[len(out)-1])
+	if !strings.Contains(content, "[Image attachment: ssh.png (fileID: file_vision_hint)]") {
+		t.Fatalf("hint missing: %s", content)
+	}
+	if !strings.Contains(content, "root@203.0.113.10:22") {
+		t.Fatalf("extracted text not appended to hint: %s", content)
+	}
+}
+
+func TestInjectUserContextNonVisionHintWithoutExtractGuidesUser(t *testing.T) {
+	messages := []llm.Message{{Role: "user", Content: "看看这张图"}}
+	input := userContextInput{
+		Attachments: []AttachmentInput{{
+			FileID:   "file_vision_no_extract",
+			FileName: "scan.png",
+			Kind:     "image",
+			MimeType: "image/png",
+			Current:  true,
+		}},
+		SupportsVision:         false,
+		UserID:                 7,
+		NonVisionExtractReader: func(ctx context.Context, userID uint, fileID string) string { return "" },
+	}
+	out := injectUserContext(context.Background(), messages, input, config.Config{}, nil)
+	content := userMessageText(out[len(out)-1])
+	if !strings.Contains(content, "图片文字尚未提取") {
+		t.Fatalf("missing extraction-pending guidance: %s", content)
 	}
 }

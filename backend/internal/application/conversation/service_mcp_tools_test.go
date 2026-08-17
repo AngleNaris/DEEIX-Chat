@@ -158,3 +158,19 @@ func toolDefinitionNames(definitions []llm.ToolDefinition) []string {
 	}
 	return result
 }
+
+func TestAppendTextOnlyModelToolWarning(t *testing.T) {
+	warned := appendTextOnlyModelToolWarning("Read an image file and return its visual content.")
+	if !strings.Contains(warned, "text-only model") || !strings.Contains(warned, "cannot view image content") {
+		t.Fatalf("warning missing text-only guidance: %s", warned)
+	}
+	if !strings.HasPrefix(warned, "Read an image file") {
+		t.Fatalf("warning must preserve original description: %s", warned)
+	}
+	if strings.Contains(appendTextOnlyModelToolWarning(""), "Read") {
+		t.Fatalf("empty description must produce only the warning")
+	}
+	if !strings.Contains(appendTextOnlyModelToolWarning(""), "ask the user") {
+		t.Fatalf("warning must guide asking the user for text: %s", warned)
+	}
+}

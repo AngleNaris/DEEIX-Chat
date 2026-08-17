@@ -440,7 +440,7 @@ func (s *Service) sendMessageInternal(
 	currentAttachments := filterCurrentAttachments(conversationAttachments)
 	userMessage.Attachments = marshalAttachmentSnapshots(currentAttachments)
 
-	toolRuntime, err := s.resolveSelectedToolRuntime(ctx, input.SelectedToolIDs)
+	toolRuntime, err := s.resolveSelectedToolRuntimeForModel(ctx, input.SelectedToolIDs, modelSupportsVision(route.PlatformModelName, route.ModelCapabilitiesJSON))
 	if err != nil {
 		retErr = err
 		return nil, err
@@ -500,8 +500,10 @@ func (s *Service) sendMessageInternal(
 
 	contextAssembler := NewContextAssembler(int64(cfg.ContextMaxInputTokens))
 	userCtx := userContextInput{
-		ImageAnalyses:  imageProcessing.Analyses,
-		SupportsVision: modelSupportsVision(route.PlatformModelName, route.ModelCapabilitiesJSON),
+		ImageAnalyses:         imageProcessing.Analyses,
+		SupportsVision:        modelSupportsVision(route.PlatformModelName, route.ModelCapabilitiesJSON),
+		UserID:                input.UserID,
+		NonVisionExtractReader: s.nonVisionImageExtractText,
 	}
 	var prefixMemories []domainmemory.UserMemory
 	preferencePrompt := ""

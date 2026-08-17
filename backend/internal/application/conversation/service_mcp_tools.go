@@ -30,6 +30,9 @@ type selectedToolRuntime struct {
 	authorizedMCPServers map[uint]authorizedMCPServer
 	mcpActivation        *mcpActivationState
 	onMCPActivation      func(context.Context, []uint) error
+	// supportsVision 标记当前模型是否原生支持图片输入。文本模型（无 vision）拿不到
+	// 视觉工具返回的图片像素，激活披露与工具描述需明确警告，避免无效工具循环。
+	supportsVision bool
 }
 
 const mcpActivateServerToolName = "mcp_activate_server"
@@ -221,7 +224,13 @@ func schemaFieldType(prop map[string]interface{}) string {
 }
 
 func (s *Service) resolveSelectedToolRuntime(ctx context.Context, toolIDs []uint) (selectedToolRuntime, error) {
-	return s.resolveSelectedToolRuntimeWithActivation(ctx, toolIDs, nil, nil)
+	return s.resolveSelectedToolRuntimeForModel(ctx, toolIDs, true)
+}
+
+// resolveSelectedToolRuntimeForModel 按模型 vision 能力解析工具运行时：文本模型（无 vision）
+// 的激活披露与工具描述会附带"无法查看图片"警告。
+func (s *Service) resolveSelectedToolRuntimeForModel(ctx context.Context, toolIDs []uint, supportsVision bool) (selectedToolRuntime, error) {
+	return s.resolveSelectedToolRuntimeWithActivation(ctx, toolIDs, nil, nil, supportsVision)
 }
 
 func (s *Service) resolveSelectedToolRuntimeWithActivation(
@@ -229,6 +238,7 @@ func (s *Service) resolveSelectedToolRuntimeWithActivation(
 	toolIDs []uint,
 	activation *mcpActivationState,
 	onActivation func(context.Context, []uint) error,
+	supportsVision bool,
 ) (selectedToolRuntime, error) {
 	if activation == nil {
 		activation = newMCPActivationState(nil)
@@ -242,6 +252,7 @@ func (s *Service) resolveSelectedToolRuntimeWithActivation(
 		authorizedMCPServers: map[uint]authorizedMCPServer{},
 		mcpActivation:        activation,
 		onMCPActivation:      onActivation,
+		supportsVision:       supportsVision,
 	}
 	if len(toolIDs) > 0 && s.cfg.Snapshot().MCPEnable {
 		if s.mcpRepo == nil {
@@ -407,12 +418,30 @@ func (r selectedToolRuntime) visibleRuntime() selectedToolRuntime {
 		if _, ok := active[tool.serverID]; !ok {
 			continue
 		}
-		r.definitions = append(r.definitions, tool.definition)
+		definition := tool.definition
+		if !r.supportsVision {
+			definition.Description = appendTextOnlyModelToolWarning(definition.Description)
+		}
+		r.definitions = append(r.definitions, definition)
 		r.nameMap[modelName] = tool.toolName
 		r.schemas[modelName] = tool.schema
 		r.mcpConfigs[modelName] = tool.config
 	}
 	return r
+}
+
+// appendTextOnlyModelToolWarning 为文本模型（无 vision）的工具描述附加警告：
+// 视觉类工具返回的图片像素对它不可见，应优先使用返回文字的工具或请求用户提供文字。
+func appendTextOnlyModelToolWarning(description string) string {
+	const warning = "\n\nIMPORTANT: You are a text-only model and cannot view image content returned by tools. " +
+		"Tools that return images (for example image viewing or visualization tools) will not help you " +
+		"because the pixels are invisible to you. If you need text inside an image, use a tool that " +
+		"returns text (such as OCR), or ask the user to provide the text directly."
+	trimmed := strings.TrimSpace(description)
+	if trimmed == "" {
+		return strings.TrimSpace(warning)
+	}
+	return trimmed + warning
 }
 
 func (r selectedToolRuntime) mcpActivationDescription() string {
@@ -432,6 +461,9 @@ func (r selectedToolRuntime) mcpActivationDescription() string {
 		fmt.Fprintf(&builder, "- server_id=%d; name=%s; description=%s\n", server.id, server.name, description)
 	}
 	builder.WriteString("Only activate a server when its described capability is needed. Do not guess or invoke undisclosed MCP tool names.")
+	if !r.supportsVision {
+		builder.WriteString(appendTextOnlyModelToolWarning(""))
+	}
 	return strings.TrimSpace(builder.String())
 }
 
