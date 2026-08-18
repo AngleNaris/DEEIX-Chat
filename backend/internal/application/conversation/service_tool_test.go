@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/llm"
 )
@@ -293,5 +294,15 @@ func TestBuildToolStageInstructionsCoverFinalizePath(t *testing.T) {
 	}
 	if !strings.Contains(finalize, "missing") || !strings.Contains(finalize, "user") {
 		t.Fatalf("finalize instruction must guide the model to state missing info and request from user: %s", finalize)
+	}
+}
+
+func TestCountBudgetedToolCallsExcludesProgressiveActivation(t *testing.T) {
+	rows := []model.ToolCall{
+		{ToolName: mcpActivateServerToolName},
+		{ToolName: "credential_create"},
+	}
+	if got := countBudgetedToolCalls(rows); got != 1 {
+		t.Fatalf("countBudgetedToolCalls() = %d, want 1", got)
 	}
 }

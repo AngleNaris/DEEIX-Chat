@@ -11,6 +11,9 @@
   "taskModel": {
     "follow": "跟随当前模型"
   },
+  "multimodalModel": {
+    "unconfigured": "请选择多模态模型"
+  },
   "policy": {
     "allowlist": "白名单",
     "denylist": "黑名单",
@@ -24,6 +27,22 @@
     "taskModel": {
       "label": "任务执行模型",
       "description": "生成会话标题和标签时使用的聊天模型。"
+    },
+    "multimodalDelegationEnabled": {
+      "label": "系统级多模态委派",
+      "description": "当主模型不支持图片、音频或视频输入时，自动交由指定的多模态聊天模型分析，并把结果回灌后继续原任务。此功能不依赖 OCR。"
+    },
+    "multimodalDelegationModel": {
+      "label": "多模态委派模型",
+      "description": "用于系统内部媒体理解的聊天模型。模型能力中必须声明对应的 vision、audio 或 video 输入能力。"
+    },
+    "multimodalDelegationModalities": {
+      "label": "允许委派的媒体类型",
+      "description": "使用英文逗号分隔，可选 image、audio、video。"
+    },
+    "multimodalDelegationTimeout": {
+      "label": "多模态分析超时",
+      "description": "系统等待多模态模型完成媒体分析的最长秒数。"
     },
     "defaultSystemPrompt": {
       "label": "全局默认系统提示词",

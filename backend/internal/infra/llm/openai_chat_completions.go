@@ -216,6 +216,36 @@ func buildChatCompletionsContent(msg Message, promptCache *openAIPromptCacheConf
 			}
 			appendOpenAIPromptCacheBreakpoint(block, part.CacheControl, promptCache)
 			parts = append(parts, block)
+		case ContentPartAudio:
+			if len(part.Data) == 0 {
+				continue
+			}
+			format := mediaFormatFromMIME(part.MimeType, "wav")
+			block := map[string]interface{}{
+				"type": "input_audio",
+				"input_audio": map[string]string{
+					"data":   base64.StdEncoding.EncodeToString(part.Data),
+					"format": format,
+				},
+			}
+			appendOpenAIPromptCacheBreakpoint(block, part.CacheControl, promptCache)
+			parts = append(parts, block)
+		case ContentPartVideo:
+			if len(part.Data) == 0 {
+				continue
+			}
+			mime := strings.TrimSpace(part.MimeType)
+			if mime == "" {
+				mime = "video/mp4"
+			}
+			block := map[string]interface{}{
+				"type": "video_url",
+				"video_url": map[string]string{
+					"url": "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(part.Data),
+				},
+			}
+			appendOpenAIPromptCacheBreakpoint(block, part.CacheControl, promptCache)
+			parts = append(parts, block)
 		default: // text, file — treated as plain text
 			text := part.Text
 			if strings.TrimSpace(text) == "" {
@@ -240,6 +270,25 @@ func buildChatCompletionsContent(msg Message, promptCache *openAIPromptCacheConf
 		}
 	}
 	return parts
+}
+
+func mediaFormatFromMIME(mimeType string, fallback string) string {
+	switch strings.ToLower(strings.TrimSpace(mimeType)) {
+	case "audio/mpeg", "audio/mp3":
+		return "mp3"
+	case "audio/mp4", "audio/x-m4a":
+		return "m4a"
+	case "audio/ogg":
+		return "ogg"
+	case "audio/flac":
+		return "flac"
+	case "audio/webm":
+		return "webm"
+	case "audio/wav", "audio/x-wav":
+		return "wav"
+	default:
+		return fallback
+	}
 }
 
 func applyChatStreamEvent(

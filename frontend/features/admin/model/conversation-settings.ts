@@ -17,6 +17,10 @@ export type ConversationSettingsField = {
     | "default_system_prompt"
     | "conversation_title_prompt"
     | "conversation_labels_prompt"
+    | "multimodal_delegation_enabled"
+    | "multimodal_delegation_model"
+    | "multimodal_delegation_modalities"
+    | "multimodal_delegation_timeout_seconds"
     | "context_compact_enabled"
     | "context_token_budget_enabled"
     | "context_max_turns"
@@ -45,6 +49,12 @@ export type ConversationSettingsField = {
 
 export const CONVERSATION_TASK_MODEL_FOLLOW = "follow";
 export const CONVERSATION_DEFAULT_MODEL_SYSTEM = "";
+export const MULTIMODAL_DELEGATION_MODEL_UNCONFIGURED = "";
+
+export const MULTIMODAL_DELEGATION_ENABLED_RULE: ConversationVisibilityRule = {
+  field: "chat.multimodal_delegation_enabled",
+  equals: "true",
+};
 
 export const CONTEXT_COMPACT_ENABLED_RULE: ConversationVisibilityRule = {
   field: "chat.context_compact_enabled",
@@ -220,6 +230,43 @@ export function buildConversationSettingsFields(t: ConversationSettingsTranslato
       description: t("fields.taskModel.description"),
       type: "select",
       options: [{ label: t("taskModel.follow"), value: CONVERSATION_TASK_MODEL_FOLLOW }],
+    },
+    {
+      section: "conversation",
+      namespace: "chat",
+      key: "multimodal_delegation_enabled",
+      label: t("fields.multimodalDelegationEnabled.label"),
+      description: t("fields.multimodalDelegationEnabled.description"),
+      type: "bool",
+    },
+    {
+      section: "conversation",
+      namespace: "chat",
+      key: "multimodal_delegation_model",
+      label: t("fields.multimodalDelegationModel.label"),
+      description: t("fields.multimodalDelegationModel.description"),
+      type: "select",
+      visibleWhen: MULTIMODAL_DELEGATION_ENABLED_RULE,
+    },
+    {
+      section: "conversation",
+      namespace: "chat",
+      key: "multimodal_delegation_modalities",
+      label: t("fields.multimodalDelegationModalities.label"),
+      description: t("fields.multimodalDelegationModalities.description"),
+      type: "string",
+      placeholder: "image,audio,video",
+      visibleWhen: MULTIMODAL_DELEGATION_ENABLED_RULE,
+    },
+    {
+      section: "conversation",
+      namespace: "chat",
+      key: "multimodal_delegation_timeout_seconds",
+      label: t("fields.multimodalDelegationTimeout.label"),
+      description: t("fields.multimodalDelegationTimeout.description"),
+      type: "int",
+      placeholder: "120",
+      visibleWhen: MULTIMODAL_DELEGATION_ENABLED_RULE,
     },
     {
       section: "optionPassthrough",
@@ -452,6 +499,12 @@ export function applyConversationDefaults(settings: Record<string, string>): Rec
   }
   if (!(result["chat.context_artifact_retention_days"] ?? "").trim()) {
     result["chat.context_artifact_retention_days"] = "90";
+  }
+  if (!(result["chat.multimodal_delegation_modalities"] ?? "").trim()) {
+    result["chat.multimodal_delegation_modalities"] = "image,audio,video";
+  }
+  if (!(result["chat.multimodal_delegation_timeout_seconds"] ?? "").trim()) {
+    result["chat.multimodal_delegation_timeout_seconds"] = "120";
   }
   result["chat.conversation_title_prompt"] = normalizeConversationPromptValue(result["chat.conversation_title_prompt"] ?? "");
   result["chat.conversation_labels_prompt"] = normalizeConversationPromptValue(result["chat.conversation_labels_prompt"] ?? "");

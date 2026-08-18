@@ -155,6 +155,14 @@ func (r *RuntimeSettings) applyItem(cfg *config.Config, item domainsettings.Syst
 		cfg.DefaultSystemPrompt = item.Value
 	case "chat:skills_prompt":
 		cfg.SkillsPrompt = item.Value
+	case "chat:multimodal_delegation_enabled":
+		cfg.MultimodalDelegationEnabled = toBool(item.Value, cfg.MultimodalDelegationEnabled)
+	case "chat:multimodal_delegation_model":
+		cfg.MultimodalDelegationModel = strings.TrimSpace(item.Value)
+	case "chat:multimodal_delegation_modalities":
+		cfg.MultimodalDelegationModalities = strings.TrimSpace(item.Value)
+	case "chat:multimodal_delegation_timeout_seconds":
+		cfg.MultimodalDelegationTimeoutSeconds = toInt(item.Value, cfg.MultimodalDelegationTimeoutSeconds)
 	case "chat:model_option_policy_mode":
 		cfg.ModelOptionPolicyMode = strings.TrimSpace(item.Value)
 	case "chat:model_option_allowed_paths":

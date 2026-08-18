@@ -11,6 +11,9 @@
   "taskModel": {
     "follow": "Follow current model"
   },
+  "multimodalModel": {
+    "unconfigured": "Select a multimodal model"
+  },
   "policy": {
     "allowlist": "Allowlist",
     "denylist": "Denylist",
@@ -24,6 +27,22 @@
     "taskModel": {
       "label": "Task model",
       "description": "Chat model used to generate conversation titles and labels."
+    },
+    "multimodalDelegationEnabled": {
+      "label": "System multimodal delegation",
+      "description": "When the primary model cannot accept image, audio, or video input, analyze it with the selected multimodal chat model, feed the result back, and continue the original task. This is independent from OCR."
+    },
+    "multimodalDelegationModel": {
+      "label": "Multimodal delegation model",
+      "description": "Chat model used for internal media understanding. Its capabilities must declare the required vision, audio, or video input support."
+    },
+    "multimodalDelegationModalities": {
+      "label": "Delegated media types",
+      "description": "Comma-separated list using image, audio, and video."
+    },
+    "multimodalDelegationTimeout": {
+      "label": "Multimodal analysis timeout",
+      "description": "Maximum seconds to wait for the multimodal model to finish media analysis."
     },
     "defaultSystemPrompt": {
       "label": "Global default system prompt",

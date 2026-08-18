@@ -26,6 +26,7 @@ const (
 )
 
 type imageAttachmentAnalysis struct {
+	Kind     string
 	FileID   string
 	FileName string
 	ToolName string
@@ -224,6 +225,7 @@ func (s *Service) processImageAttachments(
 		s.persistImageAttachmentToolRow(ctx, &row, &result, input.SkipPersistence)
 		analysis = contextArtifactExcerpt(analysis, analysisCharLimit)
 		result.Analyses = append(result.Analyses, imageAttachmentAnalysis{
+			Kind:     attachmentMediaModality(attachment),
 			FileID:   strings.TrimSpace(attachment.FileID),
 			FileName: firstNonEmptyString(attachment.FileName, attachment.FileID),
 			ToolName: processor.displayName,

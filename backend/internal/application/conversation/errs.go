@@ -85,6 +85,8 @@ var (
 	ErrMultipleImageAttachmentProcessors = errors.New("multiple image attachment processors selected")
 	// ErrImageAttachmentProcessingFailed 图片附件处理器调用失败。
 	ErrImageAttachmentProcessingFailed = errors.New("image attachment processing failed")
+	// ErrMultimodalDelegationFailed 系统级多模态模型委派失败。
+	ErrMultimodalDelegationFailed = errors.New("multimodal delegation failed")
 	// ErrTooManySelectedSkills 单条消息选择的 Skill 数超限。
 	ErrTooManySelectedSkills = errors.New("too many selected skills")
 	// ErrPlatformApprovalNotFound 平台工具写操作批准记录不存在或不属于当前用户。

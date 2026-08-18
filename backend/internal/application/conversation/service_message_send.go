@@ -441,6 +441,23 @@ func (s *Service) sendMessageInternal(
 	userMessage.Attachments = marshalAttachmentSnapshots(currentAttachments)
 
 	supportsVision := modelSupportsVision(route.PlatformModelName, route.ModelCapabilitiesJSON)
+	multimodalDelegation, err := s.delegateUnsupportedMedia(ctx, multimodalDelegationInput{
+		UserID:         input.UserID,
+		ConversationID: input.ConversationID,
+		MessageID:      assistantMessage.ID,
+		RequestID:      input.RequestID,
+		RunID:          runID,
+		UserPrompt:     input.Content,
+		Attachments:    currentAttachments,
+		MainRoute:      route,
+		TraceRecorder:  traceRecorder,
+	})
+	toolCallRows = append(toolCallRows, multimodalDelegation.Rows...)
+	mergeToolCallPersistenceKeys(&persistedToolCallKeys, multimodalDelegation.PersistedToolCallKeys)
+	if err != nil {
+		retErr = err
+		return nil, err
+	}
 	toolRuntime, err := s.resolveSelectedToolRuntimeForModel(ctx, input.SelectedToolIDs, supportsVision)
 	if err != nil {
 		retErr = err
@@ -469,7 +486,8 @@ func (s *Service) sendMessageInternal(
 			attachmentImports = nil
 		}
 	}
-	imageAttachmentRoutingActive := toolRuntime.attachmentProcessor != nil
+	imageAttachmentRoutingActive := multimodalDelegation.RoutedImage
+	processorAttachments := withoutHandledAttachments(currentAttachments, multimodalDelegation.HandledFileIDs)
 	imageProcessing, err := s.processImageAttachments(ctx, imageAttachmentProcessingInput{
 		UserID:                 input.UserID,
 		ConversationID:         input.ConversationID,
@@ -477,7 +495,7 @@ func (s *Service) sendMessageInternal(
 		RequestID:              input.RequestID,
 		RunID:                  runID,
 		UserPrompt:             input.Content,
-		Attachments:            currentAttachments,
+		Attachments:            processorAttachments,
 		AttachmentImports:      attachmentImports,
 		Runtime:                toolRuntime,
 		TraceRecorder:          traceRecorder,
@@ -490,20 +508,19 @@ func (s *Service) sendMessageInternal(
 		return nil, err
 	}
 	if imageProcessing.Routed {
+		imageAttachmentRoutingActive = true
 		toolRuntime = toolRuntime.withoutAttachmentProcessor()
-		if len(toolCallRows) >= s.resolveMaxToolCallsPerRun() {
-			toolRuntime = toolRuntime.withoutDefinitions()
-		}
 	}
 
 	fileContextPlan := buildConversationFileContextPlan(conversationAttachments, fileMode, cfg, route.UpstreamModel, route.ModelCapabilitiesJSON, capability.RAGAvailable)
+	fileContextPlan = withoutHandledMediaAttachments(fileContextPlan, multimodalDelegation.HandledFileIDs)
 	if imageProcessing.Routed {
 		fileContextPlan = withoutCurrentImageAttachments(fileContextPlan)
 	}
 
 	contextAssembler := NewContextAssembler(int64(cfg.ContextMaxInputTokens))
 	userCtx := userContextInput{
-		ImageAnalyses:          imageProcessing.Analyses,
+		ImageAnalyses:          append(append([]imageAttachmentAnalysis{}, multimodalDelegation.Analyses...), imageProcessing.Analyses...),
 		SupportsVision:         supportsVision,
 		UserID:                 input.UserID,
 		NonVisionExtractReader: s.nonVisionImageExtractText,
@@ -1330,7 +1347,7 @@ func (s *Service) sendMessageInternal(
 		usageAccumulator.setObservedUsage(totalUsage)
 	}
 	totalServerSideToolUsage = addServerSideToolUsage(nil, upstreamOutput.ServerSideToolUsage)
-	remainingToolCalls := max(s.resolveMaxToolCallsPerRun()-len(imageProcessing.Rows), 0)
+	remainingToolCalls := s.resolveMaxToolCallsPerRun()
 	// windowCallCount 统计当前阶段窗口内已发生的 LLM 调用次数；阶段合并后重置，
 	// 保证"不扩大连续轮"：每个窗口的调用数仍受 maxLLMCalls 约束。
 	windowBaseCalls := 0
@@ -1406,7 +1423,7 @@ func (s *Service) sendMessageInternal(
 			toolSpan.End()
 			toolCallRows = append(toolCallRows, toolResult.Rows...)
 			mergeToolCallPersistenceKeys(&persistedToolCallKeys, toolResult.PersistedToolCallKeys)
-			remainingToolCalls -= len(toolResult.Rows)
+			remainingToolCalls = max(remainingToolCalls-countBudgetedToolCalls(toolResult.Rows), 0)
 			credentialAttempted := len(toolResult.CredentialAttempts) > 0
 			credentialStateChanged := len(toolResult.CredentialWrites) > 0
 			if credentialAttempted {
@@ -1438,7 +1455,8 @@ func (s *Service) sendMessageInternal(
 			if toolResult.MCPActivationChanged {
 				toolRuntime = toolRuntime.visibleRuntime()
 				if toolRuntime.attachmentProcessorActive() {
-					attachmentToolCallLimit := remainingToolCalls
+					// 激活后的自动附件处理属于系统配套动作，不消耗模型显式工具调用预算。
+					attachmentToolCallLimit := len(processorAttachments)
 					activatedProcessing, processingErr := s.processImageAttachments(toolCtx, imageAttachmentProcessingInput{
 						UserID:            input.UserID,
 						ConversationID:    input.ConversationID,
@@ -1446,7 +1464,7 @@ func (s *Service) sendMessageInternal(
 						RequestID:         input.RequestID,
 						RunID:             runID,
 						UserPrompt:        input.Content,
-						Attachments:       currentAttachments,
+						Attachments:       processorAttachments,
 						AttachmentImports: attachmentImports,
 						Runtime:           toolRuntime,
 						TraceRecorder:     traceRecorder,
@@ -1460,7 +1478,6 @@ func (s *Service) sendMessageInternal(
 						mergeImageAttachmentProcessingResult(&imageProcessing, activatedProcessing)
 						toolCallRows = append(toolCallRows, activatedProcessing.Rows...)
 						mergeToolCallPersistenceKeys(&persistedToolCallKeys, activatedProcessing.PersistedToolCallKeys)
-						remainingToolCalls -= len(activatedProcessing.Rows)
 						appendAttachmentAnalysesToActivationResult(toolResult.ToolResults, activatedProcessing.Analyses, toolResultTokenBudget)
 						toolRuntime = toolRuntime.withoutAttachmentProcessor()
 					}
@@ -1766,7 +1783,7 @@ func (s *Service) sendMessageInternal(
 		// 开启新窗口：重置窗口内调用计数与工具额度，随后发起一次普通调用让模型继续工作。
 		windowBaseCalls = llmRequestCount
 		windowCallCount = 0
-		remainingToolCalls = max(s.resolveMaxToolCallsPerRun()-len(imageProcessing.Rows), 0)
+		remainingToolCalls = s.resolveMaxToolCallsPerRun()
 		continueInput := generateInput
 		continueInput.Messages = llmMessages
 		continueInput.PreviousResponseID = ""

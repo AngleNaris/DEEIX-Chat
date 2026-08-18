@@ -18,12 +18,18 @@ func (a *openRouterResponsesAdapter) Name() string { return AdapterOpenRouterRes
 
 // Generate 调用 OpenRouter Responses 非流式接口。
 func (a *openRouterResponsesAdapter) Generate(ctx context.Context, route RouteConfig, input GenerateInput) (*GenerateOutput, error) {
+	if err := validateResponsesMediaParts(input.Messages); err != nil {
+		return nil, err
+	}
 	route = normalizeOpenRouterResponsesRoute(route)
 	return a.client.generateOpenAICompatible(ctx, route, input)
 }
 
 // GenerateStream 调用 OpenRouter Responses 流式接口。
 func (a *openRouterResponsesAdapter) GenerateStream(ctx context.Context, route RouteConfig, input GenerateInput, onEvent func(GenerateStreamEvent) error) (*GenerateOutput, error) {
+	if err := validateResponsesMediaParts(input.Messages); err != nil {
+		return nil, err
+	}
 	route = normalizeOpenRouterResponsesRoute(route)
 	return a.client.generateStreamOpenAICompatible(ctx, route, input, onEvent)
 }

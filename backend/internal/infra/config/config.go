@@ -414,9 +414,15 @@ type Config struct {
 	ConversationLabelsPrompt string
 	DefaultSystemPrompt      string
 	SkillsPrompt             string
-	ModelOptionPolicyMode    string
-	ModelOptionAllowedPaths  string
-	ModelOptionDeniedPaths   string
+
+	MultimodalDelegationEnabled        bool
+	MultimodalDelegationModel          string
+	MultimodalDelegationModalities     string
+	MultimodalDelegationTimeoutSeconds int
+
+	ModelOptionPolicyMode   string
+	ModelOptionAllowedPaths string
+	ModelOptionDeniedPaths  string
 	// 存储配置
 	UserStorageQuotaBytes int64
 	MaxUploadFileBytes    int64
@@ -624,37 +630,43 @@ func Load() Config {
 		OTelSamplingRate:             envOrFloat("OTEL_TRACES_SAMPLER_ARG", envOrFloat("OTEL_SAMPLING_RATE", yc.Observability.Tracing.SamplingRate, 1), 1),
 
 		// 动态配置默认值（会被 DB 覆盖）
-		TokenTTLHours:                     24,
-		RefreshTokenTTLHours:              720,
-		LoginMaxFailures:                  5,
-		LoginLockMinutes:                  15,
-		RateLimitEnabled:                  false,
-		RateLimitRPM:                      60,
-		PublicAuthRateLimitRPM:            30,
-		UsernameLoginEnabled:              true,
-		EmailLoginEnabled:                 true,
-		ThirdPartyLoginEnabled:            true,
-		EmailRegistrationEnabled:          true,
-		EmailVerificationEnabled:          false,
-		PasswordResetEnabled:              false,
-		EmailRegistrationDomains:          "",
-		EmailRegistrationNoAlias:          false,
-		AutoLinkVerifiedEmail:             true,
-		TurnstileRegistrationEnabled:      false,
-		TurnstileSiteKey:                  "",
-		TurnstileSecretKey:                "",
-		MaxContextMessages:                20,
-		ContextMaxTurns:                   48,
-		ContextMaxInputTokens:             32000,
-		ContextCompactEnabled:             false,
-		ContextCompactTrigger:             65536,
-		ContextCompactPreserve:            8,
-		ConversationDefaultModel:          "",
-		ConversationTaskModel:             "follow",
-		ConversationTitlePrompt:           "",
-		ConversationLabelsPrompt:          "",
-		DefaultSystemPrompt:               "",
-		SkillsPrompt:                      "",
+		TokenTTLHours:                24,
+		RefreshTokenTTLHours:         720,
+		LoginMaxFailures:             5,
+		LoginLockMinutes:             15,
+		RateLimitEnabled:             false,
+		RateLimitRPM:                 60,
+		PublicAuthRateLimitRPM:       30,
+		UsernameLoginEnabled:         true,
+		EmailLoginEnabled:            true,
+		ThirdPartyLoginEnabled:       true,
+		EmailRegistrationEnabled:     true,
+		EmailVerificationEnabled:     false,
+		PasswordResetEnabled:         false,
+		EmailRegistrationDomains:     "",
+		EmailRegistrationNoAlias:     false,
+		AutoLinkVerifiedEmail:        true,
+		TurnstileRegistrationEnabled: false,
+		TurnstileSiteKey:             "",
+		TurnstileSecretKey:           "",
+		MaxContextMessages:           20,
+		ContextMaxTurns:              48,
+		ContextMaxInputTokens:        32000,
+		ContextCompactEnabled:        false,
+		ContextCompactTrigger:        65536,
+		ContextCompactPreserve:       8,
+		ConversationDefaultModel:     "",
+		ConversationTaskModel:        "follow",
+		ConversationTitlePrompt:      "",
+		ConversationLabelsPrompt:     "",
+		DefaultSystemPrompt:          "",
+		SkillsPrompt:                 "",
+
+		MultimodalDelegationEnabled:        false,
+		MultimodalDelegationModel:          "",
+		MultimodalDelegationModalities:     "image,audio,video",
+		MultimodalDelegationTimeoutSeconds: 120,
+
 		ModelOptionPolicyMode:             "allowlist",
 		ModelOptionAllowedPaths:           DefaultModelOptionAllowedPathsJSON(),
 		ModelOptionDeniedPaths:            DefaultModelOptionDeniedPathsJSON(),

@@ -36,6 +36,7 @@ import {
   buildConversationSettingsFields,
   CONVERSATION_DEFAULT_MODEL_SYSTEM,
   CONVERSATION_TASK_MODEL_FOLLOW,
+  MULTIMODAL_DELEGATION_MODEL_UNCONFIGURED,
   fieldID,
   flattenConversationSettings,
   resolveVisibleConversationFields,
@@ -384,6 +385,13 @@ export function AdminConversationSettingsPage() {
       followValue: CONVERSATION_DEFAULT_MODEL_SYSTEM,
     }),
   );
+  const [multimodalModelOptions, setMultimodalModelOptions] = React.useState<ModelOption[]>(() =>
+    buildTaskModelOptions({
+      models: [],
+      followLabel: t("multimodalModel.unconfigured"),
+      followValue: MULTIMODAL_DELEGATION_MODEL_UNCONFIGURED,
+    }),
+  );
   const [exporting, setExporting] = React.useState(false);
 
   const handleExportConversations = React.useCallback(async () => {
@@ -428,9 +436,15 @@ export function AdminConversationSettingsPage() {
         followLabel: t("defaultModel.systemRecommended"),
         followValue: CONVERSATION_DEFAULT_MODEL_SYSTEM,
       });
+      const nextMultimodalModelOptions = buildTaskModelOptions({
+        models: referenceData?.models ?? [],
+        followLabel: t("multimodalModel.unconfigured"),
+        followValue: MULTIMODAL_DELEGATION_MODEL_UNCONFIGURED,
+      });
       const flattened = flattenConversationSettings(grouped);
       setTaskModelOptions(nextModelOptions);
       setDefaultModelOptions(nextDefaultModelOptions);
+      setMultimodalModelOptions(nextMultimodalModelOptions);
       setSettingsMap(flattened);
       setSavedMap(flattened);
     } catch (error) {
@@ -569,6 +583,18 @@ export function AdminConversationSettingsPage() {
         dirty={(settingsMap[id] ?? "") !== (savedMap[id] ?? "")}
         disabled={loading || saving}
         modelOptions={defaultModelOptions}
+        onChange={(value) => setSettingsMap((prev) => ({ ...prev, [id]: value }))}
+      />
+    ) : id === "chat.multimodal_delegation_model" ? (
+      <TaskModelField
+        id={id}
+        label={field.label}
+        description={field.description}
+        value={settingsMap[id] ?? ""}
+        fallbackValue={MULTIMODAL_DELEGATION_MODEL_UNCONFIGURED}
+        dirty={(settingsMap[id] ?? "") !== (savedMap[id] ?? "")}
+        disabled={loading || saving}
+        modelOptions={multimodalModelOptions}
         onChange={(value) => setSettingsMap((prev) => ({ ...prev, [id]: value }))}
       />
     ) : id === "chat.conversation_task_model" || id === "chat.compact_task_model" ? (

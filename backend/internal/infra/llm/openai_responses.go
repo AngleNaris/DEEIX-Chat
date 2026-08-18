@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/base64"
+	"fmt"
 	"strings"
 )
 
@@ -14,11 +15,17 @@ type openAIResponsesAdapter struct {
 func (a *openAIResponsesAdapter) Name() string { return AdapterOpenAIResponses }
 
 func (a *openAIResponsesAdapter) Generate(ctx context.Context, route RouteConfig, input GenerateInput) (*GenerateOutput, error) {
+	if err := validateResponsesMediaParts(input.Messages); err != nil {
+		return nil, err
+	}
 	route.Endpoint = EndpointResponses
 	return a.client.generateOpenAICompatible(ctx, route, input)
 }
 
 func (a *openAIResponsesAdapter) GenerateStream(ctx context.Context, route RouteConfig, input GenerateInput, onEvent func(GenerateStreamEvent) error) (*GenerateOutput, error) {
+	if err := validateResponsesMediaParts(input.Messages); err != nil {
+		return nil, err
+	}
 	route.Endpoint = EndpointResponses
 	return a.client.generateStreamOpenAICompatible(ctx, route, input, onEvent)
 }
@@ -242,6 +249,18 @@ func buildResponsesAPIInput(messages []Message, promptCache *openAIPromptCacheCo
 		})
 	}
 	return items
+}
+
+func validateResponsesMediaParts(messages []Message) error {
+	for _, message := range messages {
+		for _, part := range message.Parts {
+			switch part.Kind {
+			case ContentPartAudio, ContentPartVideo:
+				return fmt.Errorf("responses_api_unsupported_media: %s input is not supported", part.Kind)
+			}
+		}
+	}
+	return nil
 }
 
 // buildResponsesAPIContent 将消息内容序列化为 Responses API 格式（content 数组）。

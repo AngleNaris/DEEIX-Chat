@@ -192,7 +192,22 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 			attachmentImports = nil
 		}
 	}
-	imageAttachmentRoutingActive := toolRuntime.attachmentProcessor != nil
+	multimodalDelegation, err := s.delegateUnsupportedMedia(ctx, multimodalDelegationInput{
+		UserID:          input.UserID,
+		ConversationID:  input.ConversationID,
+		MessageID:       input.ToolMessageID,
+		RequestID:       input.RequestID,
+		RunID:           input.ClientRunID,
+		UserPrompt:      input.UserContent,
+		Attachments:     conversationAttachments,
+		MainRoute:       route,
+		SkipPersistence: !input.PersistToolCalls,
+	})
+	if err != nil {
+		return nil, err
+	}
+	imageAttachmentRoutingActive := multimodalDelegation.RoutedImage
+	processorAttachments := withoutHandledAttachments(conversationAttachments, multimodalDelegation.HandledFileIDs)
 	imageProcessing, err := s.processImageAttachments(ctx, imageAttachmentProcessingInput{
 		UserID:                 input.UserID,
 		ConversationID:         input.ConversationID,
@@ -200,7 +215,7 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 		RequestID:              input.RequestID,
 		RunID:                  input.ClientRunID,
 		UserPrompt:             input.UserContent,
-		Attachments:            conversationAttachments,
+		Attachments:            processorAttachments,
 		AttachmentImports:      attachmentImports,
 		Runtime:                toolRuntime,
 		SkipPersistence:        !input.PersistToolCalls,
@@ -210,9 +225,11 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 		return nil, err
 	}
 	if imageProcessing.Routed {
+		imageAttachmentRoutingActive = true
 		toolRuntime = toolRuntime.withoutAttachmentProcessor()
 	}
 	fileContextPlan := buildConversationFileContextPlan(conversationAttachments, fileMode, cfg, route.UpstreamModel, route.ModelCapabilitiesJSON, capability.RAGAvailable)
+	fileContextPlan = withoutHandledMediaAttachments(fileContextPlan, multimodalDelegation.HandledFileIDs)
 	if imageProcessing.Routed {
 		fileContextPlan = withoutCurrentImageAttachments(fileContextPlan)
 	}
@@ -283,7 +300,7 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 	stableFullContextAttachments = append(stableFullContextAttachments, ragFallbackEvidenceAttachments(retrievalRAGFallbacks)...)
 	userCtx := userContextInput{
 		Attachments:            imageAttachmentsForCurrentUser(stableFullContextAttachments),
-		ImageAnalyses:          imageProcessing.Analyses,
+		ImageAnalyses:          append(append([]imageAttachmentAnalysis{}, multimodalDelegation.Analyses...), imageProcessing.Analyses...),
 		RAGChunks:              ragContextChunks,
 		SupportsVision:         modelSupportsVision(route.PlatformModelName, route.ModelCapabilitiesJSON),
 		UserID:                 input.UserID,
@@ -395,7 +412,8 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 	if toolLedger == nil {
 		toolLedger = newToolExecutionLedger()
 	}
-	toolCallRows := append([]model.ToolCall(nil), imageProcessing.Rows...)
+	toolCallRows := append([]model.ToolCall(nil), multimodalDelegation.Rows...)
+	toolCallRows = append(toolCallRows, imageProcessing.Rows...)
 	credentialAttemptedForTurn := false
 	var credentialAttemptsForTurn []credentialWrite
 	var credentialWritesForTurn []credentialWrite
@@ -699,7 +717,7 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 		usageAccumulator.setObservedUsage(totalUsage)
 	}
 	totalServerSideToolUsage := addServerSideToolUsage(nil, upstreamOutput.ServerSideToolUsage)
-	remainingToolCalls := max(s.resolveMaxToolCallsPerRun()-len(imageProcessing.Rows), 0)
+	remainingToolCalls := s.resolveMaxToolCallsPerRun()
 	windowBaseCalls := 0
 	llmCallCount := llmRequestCount - windowBaseCalls
 	toolStageMerges := 0
@@ -768,7 +786,7 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 			}
 			toolSpan.End()
 			toolCallRows = append(toolCallRows, toolResult.Rows...)
-			remainingToolCalls -= len(toolResult.Rows)
+			remainingToolCalls = max(remainingToolCalls-countBudgetedToolCalls(toolResult.Rows), 0)
 			credentialAttempted := len(toolResult.CredentialAttempts) > 0
 			if credentialAttempted {
 				credentialAttemptedForTurn = true
@@ -782,7 +800,8 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 			if toolResult.MCPActivationChanged {
 				toolRuntime = toolRuntime.visibleRuntime()
 				if toolRuntime.attachmentProcessorActive() {
-					attachmentToolCallLimit := remainingToolCalls
+					// 激活后的自动附件处理属于系统配套动作，不消耗模型显式工具调用预算。
+					attachmentToolCallLimit := len(processorAttachments)
 					activatedProcessing, processingErr := s.processImageAttachments(toolCtx, imageAttachmentProcessingInput{
 						UserID:            input.UserID,
 						ConversationID:    input.ConversationID,
@@ -790,7 +809,7 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 						RequestID:         input.RequestID,
 						RunID:             input.ClientRunID,
 						UserPrompt:        input.UserContent,
-						Attachments:       conversationAttachments,
+						Attachments:       processorAttachments,
 						AttachmentImports: attachmentImports,
 						Runtime:           toolRuntime,
 						ToolCallLimit:     &attachmentToolCallLimit,
@@ -802,7 +821,6 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 					if activatedProcessing.Routed {
 						mergeImageAttachmentProcessingResult(&imageProcessing, activatedProcessing)
 						toolCallRows = append(toolCallRows, activatedProcessing.Rows...)
-						remainingToolCalls -= len(activatedProcessing.Rows)
 						appendAttachmentAnalysesToActivationResult(toolResult.ToolResults, activatedProcessing.Analyses, toolResultTokenBudget)
 						toolRuntime = toolRuntime.withoutAttachmentProcessor()
 					}
@@ -961,7 +979,7 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 		// 开启新窗口：重置窗口内调用计数与工具额度，随后发起一次普通调用让模型继续工作。
 		windowBaseCalls = llmRequestCount
 		llmCallCount = 0
-		remainingToolCalls = max(s.resolveMaxToolCallsPerRun()-len(imageProcessing.Rows), 0)
+		remainingToolCalls = s.resolveMaxToolCallsPerRun()
 		continueInput := generateInput
 		continueInput.Messages = llmMessages
 		continueInput.Tools = toolRuntime.definitions

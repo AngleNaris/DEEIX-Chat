@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	appembedding "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/embedding"
@@ -71,6 +72,7 @@ type Service struct {
 	embeddingSvc     *appembedding.Service
 	logger           *zap.Logger
 	extractorVersion string
+	reprocessLocks   sync.Map
 }
 
 // NewService 创建文件处理服务。
@@ -460,6 +462,9 @@ func (s *Service) WaitUntilReady(
 	fileID string,
 	onProgress func(fileObj *domainconversation.FileObject),
 ) (*ReadyFileResult, error) {
+	if err := s.ensureImageOCRProcessing(ctx, userID, fileID); err != nil {
+		return nil, err
+	}
 	for {
 		fileObj, err := s.repo.GetActiveFileObjectByID(ctx, userID, fileID)
 		if err != nil || fileObj == nil {
@@ -500,6 +505,32 @@ func (s *Service) WaitUntilReady(
 		case <-time.After(400 * time.Millisecond):
 		}
 	}
+}
+
+func (s *Service) ensureImageOCRProcessing(ctx context.Context, userID uint, fileID string) error {
+	if !s.snapshot().ExtractImageOCREnabled {
+		return nil
+	}
+	key := fmt.Sprintf("%d:%s", userID, strings.TrimSpace(fileID))
+	if strings.HasSuffix(key, ":") {
+		return nil
+	}
+	lockValue, _ := s.reprocessLocks.LoadOrStore(key, &sync.Mutex{})
+	lock := lockValue.(*sync.Mutex)
+	lock.Lock()
+	defer lock.Unlock()
+	defer s.reprocessLocks.Delete(key)
+
+	fileObj, err := s.repo.GetActiveFileObjectByID(ctx, userID, fileID)
+	if err != nil || fileObj == nil {
+		return err
+	}
+	if fileObj.FileCategory != "image" ||
+		!fileObj.ProcessingReady ||
+		!strings.EqualFold(strings.TrimSpace(fileObj.ExtractStatus), "none") {
+		return nil
+	}
+	return s.InitializeUploadedFile(ctx, fileObj)
 }
 
 func (s *Service) runFileProcessingWorker(ctx context.Context, consumerName string) {

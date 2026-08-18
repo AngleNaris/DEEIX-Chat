@@ -589,13 +589,20 @@ func buildGeminiParts(msg Message) []map[string]interface{} {
 	}
 	for _, part := range msg.Parts {
 		switch part.Kind {
-		case ContentPartImage:
+		case ContentPartImage, ContentPartAudio, ContentPartVideo:
 			if len(part.Data) == 0 {
 				continue
 			}
 			mime := strings.TrimSpace(part.MimeType)
 			if mime == "" {
-				mime = "image/jpeg"
+				switch part.Kind {
+				case ContentPartAudio:
+					mime = "audio/wav"
+				case ContentPartVideo:
+					mime = "video/mp4"
+				default:
+					mime = "image/jpeg"
+				}
 			}
 			parts = append(parts, map[string]interface{}{
 				"inlineData": map[string]interface{}{

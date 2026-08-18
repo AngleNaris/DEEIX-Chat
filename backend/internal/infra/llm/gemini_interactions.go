@@ -228,16 +228,23 @@ func buildGeminiInteractionContent(message Message) interface{} {
 				continue
 			}
 			items = append(items, map[string]interface{}{"type": "text", "text": text})
-		case ContentPartImage:
+		case ContentPartImage, ContentPartAudio, ContentPartVideo:
 			if len(part.Data) == 0 {
 				continue
 			}
 			mimeType := strings.TrimSpace(part.MimeType)
 			if mimeType == "" {
-				mimeType = "image/png"
+				switch part.Kind {
+				case ContentPartAudio:
+					mimeType = "audio/wav"
+				case ContentPartVideo:
+					mimeType = "video/mp4"
+				default:
+					mimeType = "image/png"
+				}
 			}
 			items = append(items, map[string]interface{}{
-				"type":      "image",
+				"type":      part.Kind,
 				"mime_type": mimeType,
 				"data":      base64.StdEncoding.EncodeToString(part.Data),
 			})

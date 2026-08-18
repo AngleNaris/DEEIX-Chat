@@ -96,15 +96,17 @@ func resolveStreamIdleTimeout(ms int) time.Duration {
 const (
 	ContentPartText  = "text"  // 纯文本
 	ContentPartImage = "image" // 图片（原始字节，序列化时 base64 编码）
+	ContentPartAudio = "audio" // 音频（原始字节，序列化时 base64 编码）
+	ContentPartVideo = "video" // 视频（原始字节，序列化时 base64 编码）
 	ContentPartFile  = "file"  // 文件提取文本（前端解析后注入）
 )
 
 // ContentPart 表示多模态消息中的一个内容片段。
 type ContentPart struct {
-	Kind         string        // text | image | file
+	Kind         string        // text | image | audio | video | file
 	Text         string        // Kind=text 或 Kind=file 时的文本内容
-	MimeType     string        // Kind=image 时的 MIME 类型（如 "image/jpeg"）
-	Data         []byte        // Kind=image 时的原始字节（发送时 base64 编码）
+	MimeType     string        // 媒体 MIME 类型（如 "image/jpeg"）
+	Data         []byte        // 媒体原始字节（发送时 base64 编码）
 	FileName     string        // Kind=file 时的文件显示名
 	CacheControl *CacheControl // 支持块级缓存的 adapter 可读取该提示
 }

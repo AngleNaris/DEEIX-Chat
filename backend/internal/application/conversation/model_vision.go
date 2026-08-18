@@ -48,6 +48,28 @@ func modelSupportsVision(platformModelName string, capabilitiesJSON string) bool
 	return false
 }
 
+func modelSupportsMedia(platformModelName string, capabilitiesJSON string, modality string) bool {
+	modality = strings.ToLower(strings.TrimSpace(modality))
+	if modality == "image" {
+		return modelSupportsVision(platformModelName, capabilitiesJSON)
+	}
+	if trimmed := strings.TrimSpace(capabilitiesJSON); trimmed != "" {
+		var caps struct {
+			Audio *bool `json:"audio"`
+			Video *bool `json:"video"`
+		}
+		if err := json.Unmarshal([]byte(trimmed), &caps); err == nil {
+			switch modality {
+			case "audio":
+				return caps.Audio != nil && *caps.Audio
+			case "video":
+				return caps.Video != nil && *caps.Video
+			}
+		}
+	}
+	return false
+}
+
 // buildImageAttachmentHint 构造图片路径标记（Hermes text 模式同款）：
 // 模型看不到像素，只看到引用；fileID 保留供模型后续调用工具时引用。
 func buildImageAttachmentHint(fileName string, fileID string) string {

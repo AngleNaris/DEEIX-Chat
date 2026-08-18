@@ -8,6 +8,17 @@ import (
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/llm"
 )
 
+func countBudgetedToolCalls(rows []model.ToolCall) int {
+	count := 0
+	for _, row := range rows {
+		if strings.TrimSpace(row.ToolName) == mcpActivateServerToolName {
+			continue
+		}
+		count++
+	}
+	return count
+}
+
 func syncUpstreamOutputThinking(traceRecorder *messageTraceRecorder, output *llm.GenerateOutput) string {
 	if output == nil {
 		return ""

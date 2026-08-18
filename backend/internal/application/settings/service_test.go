@@ -308,6 +308,40 @@ func TestRuntimeSettingsAppliesConversationDefaultModel(t *testing.T) {
 	}
 }
 
+func TestRuntimeSettingsAppliesMultimodalDelegation(t *testing.T) {
+	runtimeSettings := NewRuntimeSettings(nil, nil, "test-data-encryption-key")
+	cfg := config.Config{}
+
+	runtimeSettings.applyItem(&cfg, domainsettings.SystemSetting{Namespace: "chat", Key: "multimodal_delegation_enabled", Value: "true"})
+	runtimeSettings.applyItem(&cfg, domainsettings.SystemSetting{Namespace: "chat", Key: "multimodal_delegation_model", Value: " grok-4.6 "})
+	runtimeSettings.applyItem(&cfg, domainsettings.SystemSetting{Namespace: "chat", Key: "multimodal_delegation_modalities", Value: "image,audio,video"})
+	runtimeSettings.applyItem(&cfg, domainsettings.SystemSetting{Namespace: "chat", Key: "multimodal_delegation_timeout_seconds", Value: "180"})
+
+	if !cfg.MultimodalDelegationEnabled || cfg.MultimodalDelegationModel != "grok-4.6" {
+		t.Fatalf("unexpected multimodal delegation config: %#v", cfg)
+	}
+	if cfg.MultimodalDelegationModalities != "image,audio,video" || cfg.MultimodalDelegationTimeoutSeconds != 180 {
+		t.Fatalf("unexpected multimodal delegation limits: %#v", cfg)
+	}
+}
+
+func TestValidateMultimodalDelegationSettings(t *testing.T) {
+	valid := []PatchItem{
+		{Namespace: "chat", Key: "multimodal_delegation_enabled", Value: "true"},
+		{Namespace: "chat", Key: "multimodal_delegation_model", Value: "grok-4.6"},
+		{Namespace: "chat", Key: "multimodal_delegation_modalities", Value: "image,audio,video"},
+		{Namespace: "chat", Key: "multimodal_delegation_timeout_seconds", Value: "120"},
+	}
+	for _, item := range valid {
+		if err := validatePatchItem(item); err != nil {
+			t.Fatalf("expected %s:%s to pass, got %v", item.Namespace, item.Key, err)
+		}
+	}
+	if err := validatePatchItem(PatchItem{Namespace: "chat", Key: "multimodal_delegation_modalities", Value: "image,document"}); err == nil {
+		t.Fatal("expected unsupported modality to fail")
+	}
+}
+
 func TestValidateMinerUFileTypesSetting(t *testing.T) {
 	if err := validatePatchItem(PatchItem{Namespace: "extract", Key: "mineru_file_types", Value: "pdf,word,presentation,excel"}); err != nil {
 		t.Fatalf("expected mineru file types to pass, got %v", err)

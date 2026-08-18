@@ -721,7 +721,7 @@ type userContextInput struct {
 	SupportsVision bool
 	// UserID 与 NonVisionExtractReader 供文本模型读取图片的 OCR/提取文本：
 	// 非 vision 模型看不到像素，hint 会附加提取出的文字内容（若已就绪）。
-	UserID               uint
+	UserID                 uint
 	NonVisionExtractReader func(ctx context.Context, userID uint, fileID string) string
 }
 
@@ -1207,7 +1207,8 @@ func formatImageAnalysisContext(analyses []imageAttachmentAnalysis) []string {
 		}
 		name := firstNonEmptyString(analysis.FileName, analysis.FileID, "unknown")
 		toolName := firstNonEmptyString(analysis.ToolName, "MCP")
-		items = append(items, `<img name="`+xmlEscapeAttr(name)+`" via="`+xmlEscapeAttr(toolName)+`">`+xmlEscapeText(content)+`</img>`)
+		kind := firstNonEmptyString(analysis.Kind, "image")
+		items = append(items, `<media kind="`+xmlEscapeAttr(kind)+`" name="`+xmlEscapeAttr(name)+`" via="`+xmlEscapeAttr(toolName)+`">`+xmlEscapeText(content)+`</media>`)
 	}
 	return items
 }

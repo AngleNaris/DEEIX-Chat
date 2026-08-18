@@ -420,6 +420,12 @@ func validatePatchItem(item PatchItem) error {
 		return validateStringMax(value, 512, key)
 	case "chat:conversation_default_model":
 		return validateStringMax(value, 255, key)
+	case "chat:multimodal_delegation_model":
+		return validateStringMax(value, 255, key)
+	case "chat:multimodal_delegation_modalities":
+		return validateMultimodalDelegationModalities(value, key)
+	case "chat:multimodal_delegation_timeout_seconds":
+		return validateIntMinMax(value, 1, 600, key)
 	case "chat:default_system_prompt", "chat:skills_prompt":
 		return validateStringMax(value, 20000, key)
 	case "auth:smtp_port":
@@ -530,7 +536,7 @@ func validatePatchItem(item PatchItem) error {
 		return validateStringMax(value, 255, key)
 	case "extract:tencent_ocr_secret_id", "extract:tencent_ocr_secret_key", "extract:aliyun_ocr_access_key_id", "extract:aliyun_ocr_access_key_secret":
 		return validateStringMax(value, 512, key)
-	case "auth:username_login_enabled", "auth:email_login_enabled", "auth:third_party_login_enabled", "auth:email_registration_enabled", "auth:email_verification_enabled", "auth:password_reset_enabled", "auth:email_registration_block_plus_alias", "auth:auto_link_verified_email", "auth:turnstile_registration_enabled", "auth:rate_limit_enabled", "billing:native_tool_billing_enabled", "chat:rag_enabled", "chat:message_embedding_enabled", "chat:semantic_context_enabled", "file:full_context_limit_enabled", "file:embedding_enabled", "file:embed_trigger_on_upload", "file:embedding_normalize", "extract:image_ocr_enabled", "extract:pdf_ocr_fallback_enabled", "mcp:mcp_enable":
+	case "auth:username_login_enabled", "auth:email_login_enabled", "auth:third_party_login_enabled", "auth:email_registration_enabled", "auth:email_verification_enabled", "auth:password_reset_enabled", "auth:email_registration_block_plus_alias", "auth:auto_link_verified_email", "auth:turnstile_registration_enabled", "auth:rate_limit_enabled", "billing:native_tool_billing_enabled", "chat:multimodal_delegation_enabled", "chat:rag_enabled", "chat:message_embedding_enabled", "chat:semantic_context_enabled", "file:full_context_limit_enabled", "file:embedding_enabled", "file:embed_trigger_on_upload", "file:embedding_normalize", "extract:image_ocr_enabled", "extract:pdf_ocr_fallback_enabled", "mcp:mcp_enable":
 		if _, err := strconv.ParseBool(value); err != nil {
 			return fmt.Errorf("%s must be bool", key)
 		}
@@ -556,6 +562,26 @@ func validatePatchItem(item PatchItem) error {
 		}
 	case "platform_tools:image_gen_channels":
 		return validateImageGenChannelsJSON(value, key)
+	}
+	return nil
+}
+
+func validateMultimodalDelegationModalities(value string, key string) error {
+	seen := make(map[string]struct{}, 3)
+	for _, raw := range strings.Split(value, ",") {
+		modality := strings.ToLower(strings.TrimSpace(raw))
+		if modality == "" {
+			continue
+		}
+		switch modality {
+		case "image", "audio", "video":
+			seen[modality] = struct{}{}
+		default:
+			return fmt.Errorf("%s must contain only: image, audio, video", key)
+		}
+	}
+	if len(seen) == 0 {
+		return fmt.Errorf("%s must enable at least one modality", key)
 	}
 	return nil
 }
