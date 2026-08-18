@@ -137,7 +137,7 @@ func defaultSettings() []domainsettings.SystemSetting {
 		{Namespace: "extract", Key: "llm_ocr_base_url", Value: "", ValueType: "string", Description: "LLM OCR 服务地址（OpenAI 兼容 chat/completions 视觉模型）"},
 		{Namespace: "extract", Key: "llm_ocr_model", Value: "", ValueType: "string", Description: "LLM OCR 请求模型"},
 		{Namespace: "extract", Key: "llm_ocr_auth_token", Value: "", ValueType: "string", Description: "LLM OCR 鉴权 Token / API Key"},
-		{Namespace: "extract", Key: "llm_ocr_timeout_seconds", Value: "60", ValueType: "int", Description: "LLM OCR 请求超时(秒)，默认 60s"},
+		{Namespace: "extract", Key: "llm_ocr_timeout_seconds", Value: "180", ValueType: "int", Description: "LLM OCR 请求超时(秒)，默认 180s"},
 		{Namespace: "extract", Key: "llm_ocr_prompt", Value: "", ValueType: "string", Description: "LLM OCR 系统提示词"},
 		{Namespace: "file", Key: "embedding_enabled", Value: "false", ValueType: "bool", Description: "是否启用 Embedding 服务"},
 		{Namespace: "file", Key: "embedding_host", Value: "", ValueType: "string", Description: "Embedding HTTP 服务地址，本地或远程均可"},

@@ -725,7 +725,7 @@ func Load() Config {
 		ExtractMinerUAuthToken:            "",
 		ExtractLLMOCRBaseURL:              "",
 		ExtractLLMOCRModel:                "",
-		ExtractLLMOCRTimeoutSeconds:       60,
+		ExtractLLMOCRTimeoutSeconds:       180,
 		ExtractLLMOCRAuthToken:            "",
 		ExtractLLMOCRPrompt:               "",
 		EmbeddingEnabled:                  false,

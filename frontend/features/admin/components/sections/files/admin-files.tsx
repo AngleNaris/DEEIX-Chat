@@ -490,7 +490,7 @@ export function AdminFilesSettingsPage() {
             : ocrEngine === OCR_ENGINES.LLM
               ? [
                   { namespace: "extract", key: "llm_ocr_model", value: nextSettingsMap["extract.llm_ocr_model"] ?? "" },
-                  { namespace: "extract", key: "llm_ocr_timeout_seconds", value: nextSettingsMap["extract.llm_ocr_timeout_seconds"] ?? "60" },
+                  { namespace: "extract", key: "llm_ocr_timeout_seconds", value: nextSettingsMap["extract.llm_ocr_timeout_seconds"] ?? "180" },
                 ]
               : [];
         for (const item of providerDefaults) {

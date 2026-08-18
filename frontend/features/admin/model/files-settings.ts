@@ -1190,7 +1190,7 @@ export function applySettingsDefaults(next: Record<string, string>): Record<stri
   }
   if (ocrEngine === OCR_ENGINES.LLM) {
     if (!(result["extract.llm_ocr_timeout_seconds"] ?? "").trim()) {
-      result["extract.llm_ocr_timeout_seconds"] = "60";
+      result["extract.llm_ocr_timeout_seconds"] = "180";
     }
   }
   if (result["file.embedding_enabled"] === EMBEDDING_MODES.ON) {

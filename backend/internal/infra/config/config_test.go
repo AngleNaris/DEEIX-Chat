@@ -26,6 +26,9 @@ func TestLoadDefaultsUseBootstrapAdmin(t *testing.T) {
 	if cfg.FileFullContextMaxBytes != DefaultFileFullContextMaxBytes {
 		t.Fatalf("expected default full-context size %d, got %d", DefaultFileFullContextMaxBytes, cfg.FileFullContextMaxBytes)
 	}
+	if cfg.ExtractLLMOCRTimeoutSeconds != 180 {
+		t.Fatalf("expected default LLM OCR timeout 180s, got %d", cfg.ExtractLLMOCRTimeoutSeconds)
+	}
 	if cfg.SSRFAllowedHosts != "" || cfg.SSRFAllowedCIDRs != "" {
 		t.Fatalf("expected SSRF allowlist to be empty by default, hosts=%q CIDRs=%q", cfg.SSRFAllowedHosts, cfg.SSRFAllowedCIDRs)
 	}
