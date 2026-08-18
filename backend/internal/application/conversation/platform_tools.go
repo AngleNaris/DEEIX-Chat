@@ -90,7 +90,7 @@ func platformToolRegistry() map[string]platformToolEntry {
 						"type":{"type":"string","enum":["ssh","api_key","generic"],"description":"Credential kind (default generic)"},
 						"description":{"type":"string","description":"When/how to use this credential (visible to AI), e.g. SSH to production server root@10.0.0.5"},
 						"value":{"type":"string","description":"The secret value (SSH private key, API key, password, etc.)"},
-						"meta":{"type":"object","description":"Optional non-secret metadata, e.g. SSH host/port/username"}
+						"meta":{"type":"object","description":"Optional non-secret metadata, e.g. SSH host/port/username. Values may be strings, numbers, or booleans.","additionalProperties":{"anyOf":[{"type":"string"},{"type":"number"},{"type":"boolean"}]}}
 					},"required":["name","value"]
 				}`),
 			},
@@ -109,7 +109,7 @@ func platformToolRegistry() map[string]platformToolEntry {
 						"type":{"type":"string","enum":["ssh","api_key","generic"],"description":"New credential kind"},
 						"description":{"type":"string","description":"New description"},
 						"value":{"type":"string","description":"New secret value; omit to keep the current value"},
-						"meta":{"type":"object","description":"New non-secret metadata"}
+						"meta":{"type":"object","description":"New non-secret metadata. Values may be strings, numbers, or booleans.","additionalProperties":{"anyOf":[{"type":"string"},{"type":"number"},{"type":"boolean"}]}}
 					},"required":["name"]
 				}`),
 			},

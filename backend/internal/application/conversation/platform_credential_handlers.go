@@ -1,8 +1,11 @@
 package conversation
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	appcredentials "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/credentials"
@@ -18,8 +21,48 @@ func platformCredentialUnavailableError() error {
 	return fmt.Errorf("credential service is unavailable")
 }
 
+// platformCredentialMeta accepts natural scalar JSON values from tool calls
+// while keeping the credential service's persisted metadata string-based.
+type platformCredentialMeta map[string]string
+
+func (m *platformCredentialMeta) UnmarshalJSON(data []byte) error {
+	data = bytes.TrimSpace(data)
+	if bytes.Equal(data, []byte("null")) {
+		*m = nil
+		return nil
+	}
+
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return fmt.Errorf("credential meta must be an object: %w", err)
+	}
+
+	normalized := make(map[string]string, len(raw))
+	for key, value := range raw {
+		decoder := json.NewDecoder(bytes.NewReader(value))
+		decoder.UseNumber()
+		var scalar interface{}
+		if err := decoder.Decode(&scalar); err != nil {
+			return fmt.Errorf("credential meta field %q is invalid: %w", key, err)
+		}
+		switch typed := scalar.(type) {
+		case string:
+			normalized[key] = typed
+		case json.Number:
+			normalized[key] = typed.String()
+		case bool:
+			normalized[key] = strconv.FormatBool(typed)
+		default:
+			return fmt.Errorf("credential meta field %q must be a string, number, or boolean", key)
+		}
+	}
+	*m = normalized
+	return nil
+}
+
 // platformListCredentials 列出用户凭据描述（不含密钥）。
-func (s *Service) platformListCredentials(ctx context.Context, call platformToolCallContext) (string, error) {	if s.credentials == nil {
+func (s *Service) platformListCredentials(ctx context.Context, call platformToolCallContext) (string, error) {
+	if s.credentials == nil {
 		return "", platformCredentialUnavailableError()
 	}
 	views, err := s.credentials.ListCredentials(ctx, call.UserID)
@@ -52,11 +95,11 @@ func (s *Service) platformCreateCredential(ctx context.Context, call platformToo
 		return "", platformCredentialUnavailableError()
 	}
 	var args struct {
-		Name        string            `json:"name"`
-		Type        string            `json:"type"`
-		Description string            `json:"description"`
-		Value       string            `json:"value"`
-		Meta        map[string]string `json:"meta"`
+		Name        string                 `json:"name"`
+		Type        string                 `json:"type"`
+		Description string                 `json:"description"`
+		Value       string                 `json:"value"`
+		Meta        platformCredentialMeta `json:"meta"`
 	}
 	if err := decodePlatformArgs(call.Arguments, &args); err != nil {
 		return "", err
@@ -72,7 +115,7 @@ func (s *Service) platformCreateCredential(ctx context.Context, call platformToo
 		Type:        args.Type,
 		Description: args.Description,
 		Value:       args.Value,
-		Meta:        args.Meta,
+		Meta:        map[string]string(args.Meta),
 	})
 	if err != nil {
 		return "", err
@@ -94,11 +137,11 @@ func (s *Service) platformUpdateCredential(ctx context.Context, call platformToo
 		return "", platformCredentialUnavailableError()
 	}
 	var args struct {
-		Name        string            `json:"name"`
-		Type        string            `json:"type"`
-		Description string            `json:"description"`
-		Value       string            `json:"value"`
-		Meta        map[string]string `json:"meta"`
+		Name        string                 `json:"name"`
+		Type        string                 `json:"type"`
+		Description string                 `json:"description"`
+		Value       string                 `json:"value"`
+		Meta        platformCredentialMeta `json:"meta"`
 	}
 	if err := decodePlatformArgs(call.Arguments, &args); err != nil {
 		return "", err
@@ -111,7 +154,7 @@ func (s *Service) platformUpdateCredential(ctx context.Context, call platformToo
 		Type:        args.Type,
 		Description: args.Description,
 		Value:       args.Value,
-		Meta:        args.Meta,
+		Meta:        map[string]string(args.Meta),
 	})
 	if err != nil {
 		return "", err
