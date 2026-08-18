@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono, JetBrains_Mono } from "next/font/google";
+import localFont from "next/font/local";
 
 import { AppVersionGuard } from "@/features/layouts";
 import { AppearancePreferencesProvider } from "@/features/settings";
@@ -14,19 +14,22 @@ import "./globals.css";
 import "katex/dist/katex.min.css";
 import "streamdown/styles.css";
 
-const geistSans = Geist({
+const geistSans = localFont({
+  src: "./fonts/geist-latin.woff2",
   variable: "--font-sans",
-  subsets: ["latin"],
+  weight: "100 900",
 });
 
-const geistMono = Geist_Mono({
+const geistMono = localFont({
+  src: "./fonts/geist-mono-latin.woff2",
   variable: "--font-mono",
-  subsets: ["latin"],
+  weight: "100 900",
 });
 
-const jetBrainsMono = JetBrains_Mono({
+const jetBrainsMono = localFont({
+  src: "./fonts/geist-mono-latin.woff2",
   variable: "--font-jetbrains-mono",
-  subsets: ["latin"],
+  weight: "100 900",
 });
 
 export const metadata: Metadata = {
