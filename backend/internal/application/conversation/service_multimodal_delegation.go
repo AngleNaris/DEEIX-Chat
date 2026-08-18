@@ -38,6 +38,38 @@ var multimodalDelegationJSONSchema = map[string]interface{}{
 	"additionalProperties": false,
 }
 
+var systemMultimodalAnalyzeInputSchema = json.RawMessage(`{
+	"type":"object",
+	"properties":{
+		"file_ids":{
+			"type":"array",
+			"items":{"type":"string","minLength":1},
+			"minItems":1,
+			"uniqueItems":true,
+			"description":"One or more file IDs from the current attachment list"
+		},
+		"prompt":{
+			"type":"string",
+			"minLength":1,
+			"description":"Your precise analysis request. State what facts, text, layout, objects, speech, sounds, motion, or relationships you need from the selected attachments."
+		}
+	},
+	"required":["file_ids","prompt"],
+	"additionalProperties":false
+}`)
+
+type selectedMultimodalAnalyzer struct {
+	mainRoute      *channel.ResolvedRoute
+	attachments    map[string]AttachmentInput
+	orderedFileIDs []string
+	auditFiles     []multimodalDelegationAuditFile
+}
+
+type systemMultimodalAnalyzeArguments struct {
+	FileIDs []string `json:"file_ids"`
+	Prompt  string   `json:"prompt"`
+}
+
 type multimodalDelegationInput struct {
 	UserID          uint
 	ConversationID  uint
@@ -78,6 +110,168 @@ type multimodalDelegationGroup struct {
 	Attachments []AttachmentInput
 	AuditFiles  []multimodalDelegationAuditFile
 	Route       *channel.ResolvedRoute
+}
+
+func (r *selectedToolRuntime) bindMultimodalAnalyzer(
+	cfg config.Config,
+	mainRoute *channel.ResolvedRoute,
+	attachments []AttachmentInput,
+) bool {
+	if r == nil || !cfg.MultimodalDelegationEnabled || mainRoute == nil {
+		return false
+	}
+	groups := selectMultimodalDelegationGroups(cfg, mainRoute, attachments)
+	analyzer := &selectedMultimodalAnalyzer{
+		mainRoute:   mainRoute,
+		attachments: make(map[string]AttachmentInput),
+	}
+	for _, group := range groups {
+		for index, attachment := range group.Attachments {
+			fileID := strings.TrimSpace(attachment.FileID)
+			if fileID == "" {
+				continue
+			}
+			if _, exists := analyzer.attachments[fileID]; exists {
+				continue
+			}
+			analyzer.attachments[fileID] = attachment
+			analyzer.orderedFileIDs = append(analyzer.orderedFileIDs, fileID)
+			if index < len(group.AuditFiles) {
+				analyzer.auditFiles = append(analyzer.auditFiles, group.AuditFiles[index])
+			}
+		}
+	}
+	if len(analyzer.attachments) == 0 {
+		return false
+	}
+	r.multimodalAnalyzer = analyzer
+	return true
+}
+
+func (a *selectedMultimodalAnalyzer) toolDefinition() llm.ToolDefinition {
+	return llm.ToolDefinition{
+		Name: systemMultimodalAnalyzeToolName,
+		Description: "Analyze selected current image, audio, or video attachments through the system multimodal route. " +
+			"The attachments have not been pre-analyzed. Choose only the file IDs needed for the current task and write a precise prompt describing what information you need. " +
+			"Use the returned factual analysis to continue the user's original task; do not guess attachment contents from filenames or metadata.",
+		InputSchema: systemMultimodalAnalyzeInputSchema,
+	}
+}
+
+func (r selectedToolRuntime) multimodalAnalyzerGuidance() string {
+	if r.multimodalAnalyzer == nil || len(r.multimodalAnalyzer.auditFiles) == 0 {
+		return ""
+	}
+	var builder strings.Builder
+	builder.WriteString("# media_attachments\n")
+	builder.WriteString("- The current model cannot directly inspect the attachments listed below. They are marked but have not been pre-analyzed.\n")
+	builder.WriteString("- When attachment contents are needed, call system_multimodal_analyze with only the relevant file_ids and write the prompt yourself for the exact facts needed in the current context.\n")
+	builder.WriteString("- A prompt may request OCR/text, visual layout, objects, spatial relationships, speech, sounds, actions, motion, or another focused analysis. Do not infer contents from filenames or metadata.\n")
+	builder.WriteString("- Available current attachments:\n")
+	for _, item := range r.multimodalAnalyzer.auditFiles {
+		fmt.Fprintf(
+			&builder,
+			"  - file_id=%s; modality=%s; name=%s; mime_type=%s\n",
+			item.FileID,
+			item.Modality,
+			firstNonEmptyString(item.FileName, "unnamed"),
+			firstNonEmptyString(item.MIMEType, "unknown"),
+		)
+	}
+	return strings.TrimSpace(builder.String())
+}
+
+func (a *selectedMultimodalAnalyzer) resolveAttachments(fileIDs []string) ([]AttachmentInput, error) {
+	if a == nil || len(a.attachments) == 0 {
+		return nil, errors.New("multimodal analysis is not available for this run")
+	}
+	seen := make(map[string]struct{}, len(fileIDs))
+	result := make([]AttachmentInput, 0, len(fileIDs))
+	for _, raw := range fileIDs {
+		fileID := strings.TrimSpace(raw)
+		if fileID == "" {
+			return nil, errors.New("file_ids must not contain empty values")
+		}
+		if _, duplicate := seen[fileID]; duplicate {
+			return nil, fmt.Errorf("duplicate file_id %q", fileID)
+		}
+		attachment, ok := a.attachments[fileID]
+		if !ok {
+			return nil, fmt.Errorf("file_id %q is not an authorized current attachment for this run", fileID)
+		}
+		seen[fileID] = struct{}{}
+		result = append(result, attachment)
+	}
+	if len(result) == 0 {
+		return nil, errors.New("file_ids must contain at least one authorized current attachment")
+	}
+	return result, nil
+}
+
+func (s *Service) executeSystemMultimodalAnalyze(
+	ctx context.Context,
+	input executeAssistantToolCallsInput,
+	argumentsJSON string,
+) (string, error) {
+	if input.ToolRuntime == nil || input.ToolRuntime.multimodalAnalyzer == nil {
+		return "", errors.New("multimodal analysis is not available for this run")
+	}
+	var arguments systemMultimodalAnalyzeArguments
+	if err := json.Unmarshal([]byte(argumentsJSON), &arguments); err != nil {
+		return "", fmt.Errorf("decode multimodal analysis arguments: %w", err)
+	}
+	arguments.Prompt = strings.TrimSpace(arguments.Prompt)
+	if arguments.Prompt == "" {
+		return "", errors.New("prompt must not be empty")
+	}
+	attachments, err := input.ToolRuntime.multimodalAnalyzer.resolveAttachments(arguments.FileIDs)
+	if err != nil {
+		return "", err
+	}
+	delegation, err := s.delegateUnsupportedMedia(ctx, multimodalDelegationInput{
+		UserID:          input.UserID,
+		ConversationID:  input.ConversationID,
+		MessageID:       input.MessageID,
+		RequestID:       input.RequestID,
+		RunID:           input.RunID,
+		UserPrompt:      arguments.Prompt,
+		Attachments:     attachments,
+		MainRoute:       input.ToolRuntime.multimodalAnalyzer.mainRoute,
+		TraceRecorder:   input.TraceRecorder,
+		SkipPersistence: true,
+	})
+	if err != nil {
+		return "", err
+	}
+	if !delegation.Routed || len(delegation.Analyses) == 0 {
+		return "", errors.New("no selected attachment could be analyzed")
+	}
+	analyses := make([]map[string]interface{}, 0, len(delegation.Analyses))
+	for _, item := range delegation.Analyses {
+		analyses = append(analyses, map[string]interface{}{
+			"file_ids":   splitNonEmptyCSV(item.FileID),
+			"file_names": splitNonEmptyCSV(item.FileName),
+			"analysis":   strings.TrimSpace(item.Content),
+		})
+	}
+	output, err := json.Marshal(map[string]interface{}{
+		"status":   "success",
+		"analyses": analyses,
+	})
+	if err != nil {
+		return "", fmt.Errorf("encode multimodal analysis result: %w", err)
+	}
+	return string(output), nil
+}
+
+func splitNonEmptyCSV(value string) []string {
+	result := make([]string, 0)
+	for _, item := range strings.Split(value, ",") {
+		if item = strings.TrimSpace(item); item != "" {
+			result = append(result, item)
+		}
+	}
+	return result
 }
 
 func (s *Service) delegateUnsupportedMedia(

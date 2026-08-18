@@ -168,6 +168,88 @@ func TestSelectMultimodalDelegationGroupsSkipsSupportedAndKeepsMissingConfig(t *
 	}
 }
 
+func TestBindMultimodalAnalyzerDisclosesCurrentUnsupportedAttachmentWithoutConfiguredModel(t *testing.T) {
+	cfg := config.Config{
+		MultimodalDelegationEnabled:    true,
+		MultimodalDelegationModalities: "image,audio,video",
+	}
+	route := &channel.ResolvedRoute{
+		PlatformModelName:     "text-model",
+		ModelCapabilitiesJSON: `{}`,
+	}
+	runtime := selectedToolRuntime{}
+	if !runtime.bindMultimodalAnalyzer(cfg, route, []AttachmentInput{{
+		FileID:       "audio-1",
+		FileName:     "meeting.mp3",
+		DetectedMIME: "audio/mpeg",
+		Current:      true,
+	}}) {
+		t.Fatal("expected unsupported current audio to be owned by the system multimodal tool")
+	}
+
+	visible := runtime.visibleRuntime()
+	if len(visible.definitions) != 1 || visible.definitions[0].Name != systemMultimodalAnalyzeToolName {
+		t.Fatalf("unexpected visible definitions: %#v", visible.definitions)
+	}
+	guidance := visible.multimodalAnalyzerGuidance()
+	for _, required := range []string{
+		"have not been pre-analyzed",
+		"write the prompt yourself",
+		"file_id=audio-1",
+		"modality=audio",
+		"name=meeting.mp3",
+	} {
+		if !strings.Contains(guidance, required) {
+			t.Fatalf("guidance missing %q: %s", required, guidance)
+		}
+	}
+}
+
+func TestSelectedMultimodalAnalyzerRejectsInvalidAttachmentSelections(t *testing.T) {
+	analyzer := &selectedMultimodalAnalyzer{
+		attachments: map[string]AttachmentInput{
+			"image-1": {FileID: "image-1", Current: true},
+		},
+	}
+	tests := []struct {
+		name    string
+		fileIDs []string
+		wantErr string
+	}{
+		{name: "empty list", wantErr: "at least one"},
+		{name: "empty value", fileIDs: []string{" "}, wantErr: "empty values"},
+		{name: "duplicate", fileIDs: []string{"image-1", " image-1 "}, wantErr: "duplicate"},
+		{name: "not current", fileIDs: []string{"history-1"}, wantErr: "not an authorized current attachment"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := analyzer.resolveAttachments(tt.fileIDs)
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("resolveAttachments() error = %v, want containing %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestSelectedMultimodalAnalyzerToolSchemaRequiresFileIDsAndModelPrompt(t *testing.T) {
+	definition := (&selectedMultimodalAnalyzer{}).toolDefinition()
+	schema := string(definition.InputSchema)
+	for _, required := range []string{
+		`"required":["file_ids","prompt"]`,
+		`"minItems":1`,
+		`"uniqueItems":true`,
+		`"minLength":1`,
+		"Your precise analysis request",
+	} {
+		if !strings.Contains(schema, required) {
+			t.Fatalf("tool schema missing %q: %s", required, schema)
+		}
+	}
+	if !strings.Contains(definition.Description, "have not been pre-analyzed") {
+		t.Fatalf("tool description must disclose that no automatic analysis occurred: %s", definition.Description)
+	}
+}
+
 func TestMultimodalDelegationOptionsDoesNotMutateBase(t *testing.T) {
 	base := map[string]interface{}{"temperature": 0.2}
 	options := multimodalDelegationOptions(base)

@@ -627,6 +627,7 @@ func (r *messageTraceRecorder) scrubCredentialAttempts(ctx context.Context, atte
 		r.events[index].Summary, _ = applyCredentialReplacements(r.events[index].Summary, attempts, successful)
 		r.events[index].ContentMarkdown, _ = applyCredentialReplacements(r.events[index].ContentMarkdown, attempts, successful)
 		r.events[index].PayloadJSON, _ = applyCredentialReplacementsToJSON(r.events[index].PayloadJSON, attempts, successful)
+		r.persistTraceEventSnapshotRow(ctx, r.events[index])
 	}
 	r.upstreamThinkPendingReplace, _ = applyCredentialReplacements(r.upstreamThinkPendingReplace, attempts, successful)
 	if pending, changed := applyCredentialReplacements(r.upstreamThinkPendingText.String(), attempts, successful); changed {
@@ -961,6 +962,39 @@ func (r *messageTraceRecorder) persistTraceEventRow(ctx context.Context, draft *
 		r.service.logger.Warn("upsert_conversation_message_trace_event_failed",
 			zap.Uint("assistant_message_id", r.assistant.ID),
 			zap.String("event_id", draft.eventID),
+			zap.Error(err),
+		)
+	}
+}
+
+func (r *messageTraceRecorder) persistTraceEventSnapshotRow(ctx context.Context, event model.MessageTraceEvent) {
+	if !r.enabled() || r.service == nil || r.service.repo == nil {
+		return
+	}
+	item := &model.MessageTraceEventRow{
+		MessageID:       r.assistant.ID,
+		ConversationID:  r.assistant.ConversationID,
+		UserID:          r.assistant.UserID,
+		RunID:           r.assistant.RunID,
+		EventID:         event.EventID,
+		EventType:       event.EventType,
+		Phase:           event.Phase,
+		Stage:           event.Stage,
+		RoundID:         event.RoundID,
+		ParentEventID:   event.ParentEventID,
+		Status:          event.Status,
+		Title:           event.Title,
+		Summary:         truncateError(strings.TrimSpace(event.Summary), 255),
+		ContentMarkdown: event.ContentMarkdown,
+		PayloadJSON:     event.PayloadJSON,
+		Seq:             event.Seq,
+		StartedAt:       event.StartedAt,
+		EndedAt:         event.EndedAt,
+	}
+	if err := r.service.repo.UpsertConversationMessageTraceEvent(ctx, item); err != nil && r.service.logger != nil {
+		r.service.logger.Warn("scrub_conversation_message_trace_event_failed",
+			zap.Uint("assistant_message_id", r.assistant.ID),
+			zap.String("event_id", event.EventID),
 			zap.Error(err),
 		)
 	}

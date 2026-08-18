@@ -2,6 +2,7 @@ package conversation
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -153,6 +154,167 @@ func TestExecuteAssistantToolCallsMasksAndReusesCredentialWrites(t *testing.T) {
 	}
 	if second.Rows[0].Status != "reused" {
 		t.Fatalf("expected second credential call to be marked reused, got %q", second.Rows[0].Status)
+	}
+}
+
+func TestExecuteAssistantToolCallsRetriesSecretRefAfterFailureAndDestroysItAfterSuccess(t *testing.T) {
+	const secret = "credential-secret-ref-value"
+	runtime := selectedToolRuntime{}
+	runtime.bindCredentialSecretRefs(7, 11, "run-secret-ref")
+	ref := runtime.credentialSecrets.protect(secret)
+	if ref == "" || strings.Contains(ref, secret) {
+		t.Fatalf("unexpected secret reference: %q", ref)
+	}
+
+	callCount := 0
+	var handlerValues []string
+	entry := platformToolEntry{
+		definition: llm.ToolDefinition{
+			Name:        "credential_create",
+			InputSchema: []byte(`{"type":"object","properties":{"name":{"type":"string"},"value":{"type":"string"}},"required":["name","value"]}`),
+		},
+		kind: platformToolWrite,
+		handler: func(_ *Service, _ context.Context, call platformToolCallContext) (string, error) {
+			callCount++
+			var arguments struct {
+				Value string `json:"value"`
+			}
+			if err := json.Unmarshal(call.Arguments, &arguments); err != nil {
+				return "", err
+			}
+			handlerValues = append(handlerValues, arguments.Value)
+			if callCount == 1 {
+				return "", errors.New("temporary credential store failure")
+			}
+			return `{"status":"created"}`, nil
+		},
+	}
+	service := &Service{cfg: config.NewRuntime(config.Config{})}
+	ledger := newToolExecutionLedger()
+	execute := func(toolCallID string) executeAssistantToolCallsResult {
+		return service.executeAssistantToolCalls(t.Context(), executeAssistantToolCallsInput{
+			UserID:         7,
+			ConversationID: 11,
+			RunID:          "run-secret-ref",
+			ToolCalls: []llm.ToolCall{{
+				ToolCallID:    toolCallID,
+				ToolType:      "function",
+				ToolName:      "credential_create_model",
+				ArgumentsJSON: `{"name":"deploy-key","value":"` + ref + `"}`,
+			}},
+			ToolRuntime: &runtime,
+			ToolNameMap: map[string]string{"credential_create_model": "credential_create"},
+			PlatformTools: map[string]platformToolEntry{
+				"credential_create_model": entry,
+			},
+			Ledger:          ledger,
+			SkipPersistence: true,
+		})
+	}
+
+	first := execute("call-1")
+	if len(first.Rows) != 1 || first.Rows[0].Status != "error" {
+		t.Fatalf("expected first credential write to fail, got %#v", first)
+	}
+	if _, ok := runtime.credentialSecrets.resolve(ref); !ok {
+		t.Fatal("failed credential write destroyed its secret_ref")
+	}
+	if !strings.Contains(first.ExecutedToolCalls[0].ArgumentsJSON, ref) {
+		t.Fatalf("failed credential write did not keep the model-visible secret_ref: %s", first.ExecutedToolCalls[0].ArgumentsJSON)
+	}
+
+	second := execute("call-2")
+	if callCount != 2 {
+		t.Fatalf("expected failed credential write to execute again, handler calls=%d", callCount)
+	}
+	if len(handlerValues) != 2 || handlerValues[0] != secret || handlerValues[1] != secret {
+		t.Fatalf("credential handler did not receive the original plaintext on both attempts: %#v", handlerValues)
+	}
+	if len(second.Rows) != 1 || second.Rows[0].Status != "success" || len(second.CredentialWrites) != 1 {
+		t.Fatalf("expected retry to succeed, got %#v", second)
+	}
+	if _, ok := runtime.credentialSecrets.resolve(ref); ok {
+		t.Fatal("successful credential write did not destroy its secret_ref")
+	}
+	if !strings.Contains(second.ExecutedToolCalls[0].ArgumentsJSON, "{{credential: deploy-key}}") {
+		t.Fatalf("successful credential write did not replace the ref with a durable credential placeholder: %s", second.ExecutedToolCalls[0].ArgumentsJSON)
+	}
+	for label, result := range map[string]executeAssistantToolCallsResult{"first": first, "second": second} {
+		serialized := result.Rows[0].InputJSON + result.Rows[0].OutputJSON + result.Rows[0].ErrorJSON +
+			result.ToolResults[0].OutputJSON + result.ToolResults[0].Error
+		if strings.Contains(serialized, secret) || strings.Contains(serialized, ref) {
+			t.Fatalf("%s persisted/model result leaked secret material: %s", label, serialized)
+		}
+	}
+}
+
+func TestExecuteAssistantToolCallsRejectsSecretRefOutsideCredentialValue(t *testing.T) {
+	runtime := selectedToolRuntime{}
+	runtime.bindCredentialSecretRefs(7, 11, "run-secret-ref-fields")
+	ref := runtime.credentialSecrets.protect("credential-secret")
+	handlerCalls := 0
+	entry := platformToolEntry{
+		definition: llm.ToolDefinition{Name: "credential_create"},
+		kind:       platformToolWrite,
+		handler: func(_ *Service, _ context.Context, _ platformToolCallContext) (string, error) {
+			handlerCalls++
+			return `{"status":"created"}`, nil
+		},
+	}
+	result := (&Service{cfg: config.NewRuntime(config.Config{})}).executeAssistantToolCalls(
+		t.Context(),
+		executeAssistantToolCallsInput{
+			UserID:         7,
+			ConversationID: 11,
+			RunID:          "run-secret-ref-fields",
+			ToolCalls: []llm.ToolCall{{
+				ToolCallID:    "call-invalid-field",
+				ToolType:      "function",
+				ToolName:      "credential_create_model",
+				ArgumentsJSON: `{"name":"deploy-key","value":"safe","description":"` + ref + `"}`,
+			}},
+			ToolRuntime: &runtime,
+			ToolNameMap: map[string]string{"credential_create_model": "credential_create"},
+			PlatformTools: map[string]platformToolEntry{
+				"credential_create_model": entry,
+			},
+			SkipPersistence: true,
+		},
+	)
+	if handlerCalls != 0 {
+		t.Fatalf("credential handler received a secret_ref from a non-value field: calls=%d", handlerCalls)
+	}
+	if len(result.Rows) != 1 || result.Rows[0].Status != "error" {
+		t.Fatalf("expected invalid secret_ref field to fail, got %#v", result)
+	}
+}
+
+func TestExecuteAssistantToolCallsRejectsUndisclosedSystemMultimodalTool(t *testing.T) {
+	runtime := selectedToolRuntime{
+		multimodalAnalyzer: &selectedMultimodalAnalyzer{
+			attachments: map[string]AttachmentInput{
+				"image-1": {FileID: "image-1", Current: true},
+			},
+		},
+	}
+	result := (&Service{}).executeAssistantToolCalls(t.Context(), executeAssistantToolCallsInput{
+		RunID: "run-undisclosed-multimodal",
+		ToolCalls: []llm.ToolCall{{
+			ToolCallID:    "call-undisclosed",
+			ToolType:      "function",
+			ToolName:      systemMultimodalAnalyzeToolName,
+			ArgumentsJSON: `{"file_ids":["image-1"],"prompt":"Read the visible title"}`,
+		}},
+		ToolRuntime:     &runtime,
+		ToolNameMap:     map[string]string{},
+		ToolSchemas:     map[string]json.RawMessage{},
+		SkipPersistence: true,
+	})
+	if result.FatalErr == nil || !strings.Contains(result.FatalErr.Error(), "not enabled for this run") {
+		t.Fatalf("expected undisclosed system tool to be rejected, got %#v", result)
+	}
+	if len(result.Rows) != 1 || result.Rows[0].Status != "error" {
+		t.Fatalf("expected one failed undisclosed tool row, got %#v", result.Rows)
 	}
 }
 

@@ -22,6 +22,8 @@ type selectedToolRuntime struct {
 	mcpConfigs           map[string]mcp.CallConfig
 	schemas              map[string]json.RawMessage
 	attachmentProcessor  *selectedAttachmentProcessor
+	multimodalAnalyzer   *selectedMultimodalAnalyzer
+	credentialSecrets    *credentialSecretRefStore
 	platformEntries      map[string]platformToolEntry // 平台内置工具（本地执行，无 MCP 配置）
 	platformDefinitions  []llm.ToolDefinition
 	platformNameMap      map[string]string
@@ -128,6 +130,9 @@ func injectMCPToolGuidance(messages []llm.Message, runtime selectedToolRuntime, 
 	}
 	if len(runtime.platformEntries) > 0 {
 		content = content + "\n\n" + platformToolGuidancePrompt()
+	}
+	if guidance := runtime.multimodalAnalyzerGuidance(); guidance != "" {
+		content = content + "\n\n" + guidance
 	}
 
 	insertAt := 0
@@ -283,7 +288,10 @@ func (s *Service) resolveMCPToolRuntime(ctx context.Context, toolIDs []uint, res
 
 	cfg := s.cfg.Snapshot()
 	outboundPolicy := cfg.TrustedOutboundPolicy()
-	usedNames := map[string]int{mcpActivateServerToolName: 1}
+	usedNames := map[string]int{
+		mcpActivateServerToolName:       1,
+		systemMultimodalAnalyzeToolName: 1,
+	}
 	serverCache := map[uint]*domainmcp.Server{}
 	for _, tool := range tools {
 		if tool.Status != "active" {
@@ -384,8 +392,8 @@ func (s *Service) resolveMCPToolRuntime(ctx context.Context, toolIDs []uint, res
 
 func (r selectedToolRuntime) visibleRuntime() selectedToolRuntime {
 	r.definitions = append([]llm.ToolDefinition(nil), r.platformDefinitions...)
-	r.nameMap = make(map[string]string, len(r.platformEntries)+len(r.authorizedMCPTools)+1)
-	r.schemas = make(map[string]json.RawMessage, len(r.platformEntries)+len(r.authorizedMCPTools)+1)
+	r.nameMap = make(map[string]string, len(r.platformEntries)+len(r.authorizedMCPTools)+2)
+	r.schemas = make(map[string]json.RawMessage, len(r.platformEntries)+len(r.authorizedMCPTools)+2)
 	r.mcpConfigs = make(map[string]mcp.CallConfig, len(r.authorizedMCPTools))
 	for modelName, entry := range r.platformEntries {
 		executionName := strings.TrimSpace(r.platformNameMap[modelName])
@@ -394,6 +402,12 @@ func (r selectedToolRuntime) visibleRuntime() selectedToolRuntime {
 		}
 		r.nameMap[modelName] = executionName
 		r.schemas[modelName] = entry.definition.InputSchema
+	}
+	if r.multimodalAnalyzer != nil {
+		definition := r.multimodalAnalyzer.toolDefinition()
+		r.definitions = append(r.definitions, definition)
+		r.nameMap[definition.Name] = systemMultimodalAnalyzeToolName
+		r.schemas[definition.Name] = definition.InputSchema
 	}
 	if len(r.authorizedMCPServers) == 0 {
 		return r
@@ -529,6 +543,8 @@ func (r selectedToolRuntime) withoutDefinitions() selectedToolRuntime {
 	r.mcpConfigs = nil
 	r.schemas = nil
 	r.attachmentProcessor = nil
+	r.multimodalAnalyzer = nil
+	r.credentialSecrets = nil
 	r.platformEntries = nil
 	r.platformDefinitions = nil
 	r.platformNameMap = nil

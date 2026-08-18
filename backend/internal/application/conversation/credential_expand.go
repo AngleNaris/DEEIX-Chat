@@ -96,8 +96,17 @@ func maskCredentialToolInput(executionToolName string, isPlatformTool bool, inpu
 	return string(data)
 }
 
-func credentialWriteFromSuccessfulCall(executionToolName string, isPlatformTool bool, inputJSON string) (credentialWrite, bool) {
-	return credentialWriteFromToolCall(executionToolName, isPlatformTool, inputJSON)
+func credentialWriteFromSuccessfulCall(
+	executionToolName string,
+	isPlatformTool bool,
+	inputJSON string,
+	runtime *selectedToolRuntime,
+) (credentialWrite, bool) {
+	write, ok := credentialWriteFromToolCall(executionToolName, isPlatformTool, inputJSON)
+	if !ok {
+		return credentialWrite{}, false
+	}
+	return runtime.resolveCredentialSecretWrite(write)
 }
 
 func credentialWriteFromToolCall(executionToolName string, isPlatformTool bool, inputJSON string) (credentialWrite, bool) {
@@ -122,13 +131,14 @@ func credentialAttemptsFromGenerateOutput(output *llm.GenerateOutput, runtime *s
 	if output == nil || runtime == nil {
 		return nil
 	}
-	return credentialAttemptsFromToolCalls(output.ToolCalls, runtime.nameMap, runtime.platformEntries)
+	return credentialAttemptsFromToolCalls(output.ToolCalls, runtime.nameMap, runtime.platformEntries, runtime)
 }
 
 func credentialAttemptsFromToolCalls(
 	toolCalls []llm.ToolCall,
 	toolNameMap map[string]string,
 	platformTools map[string]platformToolEntry,
+	runtime *selectedToolRuntime,
 ) []credentialWrite {
 	attempts := make([]credentialWrite, 0)
 	for _, call := range toolCalls {
@@ -140,6 +150,7 @@ func credentialAttemptsFromToolCalls(
 			call.ArgumentsJSON,
 		)
 		if ok {
+			write = runtime.protectCredentialWrite(write)
 			attempts = mergeCredentialWrites(attempts, []credentialWrite{write})
 		}
 	}
@@ -152,8 +163,16 @@ func mergeCredentialWrites(target []credentialWrite, source []credentialWrite) [
 			continue
 		}
 		found := false
-		for _, existing := range target {
-			if existing.Name == candidate.Name && existing.Value == candidate.Value {
+		for index := range target {
+			existing := target[index]
+			sameRef := existing.Ref != "" && candidate.Ref != "" && existing.Ref == candidate.Ref
+			if sameRef || (existing.Name == candidate.Name && existing.Value == candidate.Value) {
+				if target[index].Ref == "" {
+					target[index].Ref = candidate.Ref
+				}
+				if target[index].Value == "" {
+					target[index].Value = candidate.Value
+				}
 				found = true
 				break
 			}
@@ -167,7 +186,8 @@ func mergeCredentialWrites(target []credentialWrite, source []credentialWrite) [
 
 func isSuccessfulCredentialWrite(candidate credentialWrite, successful []credentialWrite) bool {
 	for _, write := range successful {
-		if write.Name == candidate.Name && write.Value == candidate.Value {
+		sameRef := write.Ref != "" && candidate.Ref != "" && write.Ref == candidate.Ref
+		if sameRef || (write.Name == candidate.Name && write.Value == candidate.Value) {
 			return true
 		}
 	}
@@ -177,12 +197,76 @@ func isSuccessfulCredentialWrite(candidate credentialWrite, successful []credent
 func applyCredentialReplacements(text string, attempts []credentialWrite, successful []credentialWrite) (string, bool) {
 	result, _ := applyCredentialWrites(text, successful)
 	for _, attempt := range attempts {
-		if attempt.Value == "" || isSuccessfulCredentialWrite(attempt, successful) || !strings.Contains(result, attempt.Value) {
+		if isSuccessfulCredentialWrite(attempt, successful) {
 			continue
 		}
-		result = strings.ReplaceAll(result, attempt.Value, "[REDACTED]")
+		for _, protected := range []string{attempt.Value, attempt.Ref} {
+			if protected != "" && strings.Contains(result, protected) {
+				result = strings.ReplaceAll(result, protected, "[REDACTED]")
+			}
+		}
 	}
 	return result, result != text
+}
+
+func applyCredentialModelReplacements(text string, attempts []credentialWrite, successful []credentialWrite) (string, bool) {
+	result, _ := applyCredentialWrites(text, successful)
+	for _, attempt := range attempts {
+		if isSuccessfulCredentialWrite(attempt, successful) || attempt.Value == "" || !strings.Contains(result, attempt.Value) {
+			continue
+		}
+		replacement := firstNonEmptyString(attempt.Ref, "[REDACTED]")
+		result = strings.ReplaceAll(result, attempt.Value, replacement)
+	}
+	return result, result != text
+}
+
+func applyCredentialModelReplacementsToJSON(raw string, attempts []credentialWrite, successful []credentialWrite) (string, bool) {
+	var payload interface{}
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return applyCredentialModelReplacements(raw, attempts, successful)
+	}
+	if !applyCredentialModelReplacementsToJSONValue(&payload, attempts, successful) {
+		return raw, false
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return raw, false
+	}
+	return string(encoded), true
+}
+
+func applyCredentialModelReplacementsToJSONValue(value *interface{}, attempts []credentialWrite, successful []credentialWrite) bool {
+	if value == nil {
+		return false
+	}
+	switch typed := (*value).(type) {
+	case string:
+		next, changed := applyCredentialModelReplacements(typed, attempts, successful)
+		if changed {
+			*value = next
+		}
+		return changed
+	case map[string]interface{}:
+		changed := false
+		for key, child := range typed {
+			if applyCredentialModelReplacementsToJSONValue(&child, attempts, successful) {
+				typed[key] = child
+				changed = true
+			}
+		}
+		return changed
+	case []interface{}:
+		changed := false
+		for index := range typed {
+			if applyCredentialModelReplacementsToJSONValue(&typed[index], attempts, successful) {
+				changed = true
+			}
+		}
+		return changed
+	default:
+		return false
+	}
 }
 
 func applyCredentialReplacementsToJSON(raw string, attempts []credentialWrite, successful []credentialWrite) (string, bool) {
@@ -254,6 +338,27 @@ func applyCredentialReplacementsToLLMMessages(messages []llm.Message, attempts [
 	return changed
 }
 
+func applyCredentialModelReplacementsToLLMMessages(messages []llm.Message, attempts []credentialWrite, successful []credentialWrite) bool {
+	changed := false
+	for index := range messages {
+		if content, contentChanged := applyCredentialModelReplacements(messages[index].Content, attempts, successful); contentChanged {
+			messages[index].Content = content
+			changed = true
+		}
+		if reasoning, reasoningChanged := applyCredentialModelReplacements(messages[index].ReasoningContent, attempts, successful); reasoningChanged {
+			messages[index].ReasoningContent = reasoning
+			changed = true
+		}
+		for toolIndex := range messages[index].ToolCalls {
+			if arguments, argumentsChanged := applyCredentialModelReplacementsToJSON(messages[index].ToolCalls[toolIndex].ArgumentsJSON, attempts, successful); argumentsChanged {
+				messages[index].ToolCalls[toolIndex].ArgumentsJSON = arguments
+				changed = true
+			}
+		}
+	}
+	return changed
+}
+
 func applyCredentialReplacementsToToolCallRows(rows []model.ToolCall, attempts []credentialWrite, successful []credentialWrite) {
 	for index := range rows {
 		rows[index].InputJSON, _ = applyCredentialReplacementsToJSON(rows[index].InputJSON, attempts, successful)
@@ -303,8 +408,10 @@ func (s *Service) scrubPersistedToolCalls(
 
 func credentialAttemptValueRemains(text string, attempts []credentialWrite) bool {
 	for _, attempt := range attempts {
-		if attempt.Value != "" && strings.Contains(text, attempt.Value) {
-			return true
+		for _, protected := range []string{attempt.Value, attempt.Ref} {
+			if protected != "" && strings.Contains(text, protected) {
+				return true
+			}
 		}
 	}
 	return false
@@ -331,6 +438,9 @@ func sanitizeGenerateOutputCredentialAttempts(output *llm.GenerateOutput, attemp
 		return
 	}
 	output.Text, _ = applyCredentialReplacements(output.Text, attempts, nil)
+	for index := range output.ToolCalls {
+		output.ToolCalls[index].ArgumentsJSON, _ = applyCredentialModelReplacementsToJSON(output.ToolCalls[index].ArgumentsJSON, attempts, nil)
+	}
 	if output.Reasoning != nil {
 		output.Reasoning.Text, _ = applyCredentialReplacements(output.Reasoning.Text, attempts, nil)
 		output.Reasoning.Summary, _ = applyCredentialReplacements(output.Reasoning.Summary, attempts, nil)
@@ -387,10 +497,15 @@ func sanitizeGenerateStreamEventCredentialAttempts(event llm.GenerateStreamEvent
 func applyCredentialWrites(text string, writes []credentialWrite) (string, bool) {
 	result := text
 	for _, write := range writes {
-		if write.Value == "" || write.Name == "" || !strings.Contains(result, write.Value) {
+		if write.Name == "" {
 			continue
 		}
-		result = strings.ReplaceAll(result, write.Value, "{{credential: "+write.Name+"}}")
+		placeholder := "{{credential: " + write.Name + "}}"
+		for _, protected := range []string{write.Value, write.Ref} {
+			if protected != "" && strings.Contains(result, protected) {
+				result = strings.ReplaceAll(result, protected, placeholder)
+			}
+		}
 	}
 	return result, result != text
 }

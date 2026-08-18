@@ -83,7 +83,8 @@ func platformToolRegistry() map[string]platformToolEntry {
 				Name: "credential_create",
 				Description: "Save a new named credential for the user (SSH connection info, API key, or generic secret). " +
 					"Provide a clear description of when/how to use it. The value is stored encrypted and never echoed back; " +
-					"reference it later with {{credential: name}} in tool parameters.",
+					"reference it later with {{credential: name}} in tool parameters. If the runtime replaces a secret with " +
+					"{{secret_ref:...}}, pass that exact reference unchanged as value; it is equivalent to the original secret for this run.",
 				InputSchema: json.RawMessage(`{
 					"type":"object","properties":{
 						"name":{"type":"string","description":"Unique credential name (used as {{credential: name}} placeholder), e.g. vpsssh"},
@@ -102,7 +103,8 @@ func platformToolRegistry() map[string]platformToolEntry {
 			definition: llm.ToolDefinition{
 				Name: "credential_update",
 				Description: "Update an existing credential by name: change its description/type/meta, or rotate its value " +
-					"(omit value to keep the current secret unchanged).",
+					"(omit value to keep the current secret unchanged). If the runtime replaces a secret with {{secret_ref:...}}, " +
+					"pass that exact reference unchanged as value; it is equivalent to the original secret for this run.",
 				InputSchema: json.RawMessage(`{
 					"type":"object","properties":{
 						"name":{"type":"string","description":"Existing credential name to update"},
@@ -979,8 +981,9 @@ func (s *Service) appendPlatformToolRuntime(ctx context.Context, result *selecte
 	toolsEnabled := strings.TrimSpace(values[platformToolsKeyEnabled]) == "true"
 	writeEnabled := strings.TrimSpace(values[platformToolsKeyWriteEnabled]) == "true"
 
-	usedNames := make(map[string]int, len(result.authorizedMCPTools)+len(result.definitions)+1)
+	usedNames := make(map[string]int, len(result.authorizedMCPTools)+len(result.definitions)+2)
 	usedNames[mcpActivateServerToolName] = 1
+	usedNames[systemMultimodalAnalyzeToolName] = 1
 	for name := range result.authorizedMCPTools {
 		if value := strings.TrimSpace(name); value != "" {
 			usedNames[value]++
@@ -1116,6 +1119,7 @@ func platformToolGuidancePrompt() string {
 - Memory scopes: "preference" is injected into every message (use sparingly, high-value always-on preferences only); "profile" and "custom" are recalled by relevance. When the user asks to forget or change something remembered, use delete_memory / save_memory accordingly.
 - JS execution: use execute_js to compute values on demand (random numbers, math, data transforms). The sandbox has no filesystem/network/process access; print results with console.log and rely on the returned stdout/result. For a script bundled in a skill, use execute_skill_script with the path from list_skills.
 - Credentials: the user may save named credentials (SSH connections, API keys). Call credential_list to see them (descriptions only). When a command/parameter needs a secret, reference it with the placeholder {{credential: name}} (e.g. sshpass -p '{{credential: vpsssh}}') — it is expanded to the real value at execution time and never appears in the conversation record, trace, or share snapshots. Never output secret values in your replies; if the user needs the raw value, point them to Settings → Credentials.
+- Secret references: during credential_create or credential_update, the runtime may replace a newly supplied secret with {{secret_ref:...}}. Treat that opaque reference as the exact original secret for the current run and pass it unchanged in the value field. Do not reveal, rewrite, parse, or use it outside credential_create/credential_update.
 - Artifacts: when you produce a polished user-facing HTML/JS piece, offer save_artifact so the user can keep and share it; use list_artifacts to find saved items and share_artifact to create a public link when the user asks to share.`)
 }
 

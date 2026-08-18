@@ -169,6 +169,9 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 	if err != nil {
 		return nil, err
 	}
+	toolRuntime.bindMultimodalAnalyzer(cfg, route, conversationAttachments)
+	toolRuntime.bindCredentialSecretRefs(input.UserID, input.ConversationID, input.ClientRunID)
+	toolRuntime = toolRuntime.visibleRuntime()
 	var attachmentImports []attachmentImportPath
 	if len(toolRuntime.authorizedMCPServers) > 0 {
 		var cleanupAttachmentImports func()
@@ -192,44 +195,32 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 			attachmentImports = nil
 		}
 	}
-	multimodalDelegation, err := s.delegateUnsupportedMedia(ctx, multimodalDelegationInput{
-		UserID:          input.UserID,
-		ConversationID:  input.ConversationID,
-		MessageID:       input.ToolMessageID,
-		RequestID:       input.RequestID,
-		RunID:           input.ClientRunID,
-		UserPrompt:      input.UserContent,
-		Attachments:     conversationAttachments,
-		MainRoute:       route,
-		SkipPersistence: !input.PersistToolCalls,
-	})
-	if err != nil {
-		return nil, err
-	}
-	imageAttachmentRoutingActive := multimodalDelegation.RoutedImage
-	processorAttachments := withoutHandledAttachments(conversationAttachments, multimodalDelegation.HandledFileIDs)
-	imageProcessing, err := s.processImageAttachments(ctx, imageAttachmentProcessingInput{
-		UserID:                 input.UserID,
-		ConversationID:         input.ConversationID,
-		MessageID:              input.ToolMessageID,
-		RequestID:              input.RequestID,
-		RunID:                  input.ClientRunID,
-		UserPrompt:             input.UserContent,
-		Attachments:            processorAttachments,
-		AttachmentImports:      attachmentImports,
-		Runtime:                toolRuntime,
-		SkipPersistence:        !input.PersistToolCalls,
-		AllowInactiveProcessor: !supportsVision,
-	})
-	if err != nil {
-		return nil, err
+	imageAttachmentRoutingActive := false
+	processorAttachments := conversationAttachments
+	imageProcessing := imageAttachmentProcessingResult{}
+	if toolRuntime.multimodalAnalyzer == nil {
+		imageProcessing, err = s.processImageAttachments(ctx, imageAttachmentProcessingInput{
+			UserID:                 input.UserID,
+			ConversationID:         input.ConversationID,
+			MessageID:              input.ToolMessageID,
+			RequestID:              input.RequestID,
+			RunID:                  input.ClientRunID,
+			UserPrompt:             input.UserContent,
+			Attachments:            processorAttachments,
+			AttachmentImports:      attachmentImports,
+			Runtime:                toolRuntime,
+			SkipPersistence:        !input.PersistToolCalls,
+			AllowInactiveProcessor: !supportsVision,
+		})
+		if err != nil {
+			return nil, err
+		}
 	}
 	if imageProcessing.Routed {
 		imageAttachmentRoutingActive = true
 		toolRuntime = toolRuntime.withoutAttachmentProcessor()
 	}
 	fileContextPlan := buildConversationFileContextPlan(conversationAttachments, fileMode, cfg, route.UpstreamModel, route.ModelCapabilitiesJSON, capability.RAGAvailable)
-	fileContextPlan = withoutHandledMediaAttachments(fileContextPlan, multimodalDelegation.HandledFileIDs)
 	if imageProcessing.Routed {
 		fileContextPlan = withoutCurrentImageAttachments(fileContextPlan)
 	}
@@ -298,13 +289,17 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 	}
 	stableFullContextAttachments := append([]AttachmentInput{}, fileContextPlan.FullAttachments...)
 	stableFullContextAttachments = append(stableFullContextAttachments, ragFallbackEvidenceAttachments(retrievalRAGFallbacks)...)
+	var nonVisionExtractReader func(context.Context, uint, string) string
+	if toolRuntime.multimodalAnalyzer == nil {
+		nonVisionExtractReader = s.nonVisionImageExtractText
+	}
 	userCtx := userContextInput{
 		Attachments:            imageAttachmentsForCurrentUser(stableFullContextAttachments),
-		ImageAnalyses:          append(append([]imageAttachmentAnalysis{}, multimodalDelegation.Analyses...), imageProcessing.Analyses...),
+		ImageAnalyses:          append([]imageAttachmentAnalysis{}, imageProcessing.Analyses...),
 		RAGChunks:              ragContextChunks,
-		SupportsVision:         modelSupportsVision(route.PlatformModelName, route.ModelCapabilitiesJSON),
+		SupportsVision:         supportsVision,
 		UserID:                 input.UserID,
-		NonVisionExtractReader: s.nonVisionImageExtractText,
+		NonVisionExtractReader: nonVisionExtractReader,
 	}
 
 	// 4. Skill：与普通消息同口径（按用户级最大可选数收敛）。
@@ -412,8 +407,7 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 	if toolLedger == nil {
 		toolLedger = newToolExecutionLedger()
 	}
-	toolCallRows := append([]model.ToolCall(nil), multimodalDelegation.Rows...)
-	toolCallRows = append(toolCallRows, imageProcessing.Rows...)
+	toolCallRows := append([]model.ToolCall(nil), imageProcessing.Rows...)
 	credentialAttemptedForTurn := false
 	var credentialAttemptsForTurn []credentialWrite
 	var credentialWritesForTurn []credentialWrite
@@ -793,13 +787,13 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 				credentialAttemptsForTurn = mergeCredentialWrites(credentialAttemptsForTurn, toolResult.CredentialAttempts)
 				credentialWritesForTurn = mergeCredentialWrites(credentialWritesForTurn, toolResult.CredentialWrites)
 				assistantText, _ = applyCredentialReplacements(assistantText, toolResult.CredentialAttempts, toolResult.CredentialWrites)
-				assistantToolMessage.Content, _ = applyCredentialReplacements(assistantToolMessage.Content, toolResult.CredentialAttempts, toolResult.CredentialWrites)
-				assistantToolMessage.ReasoningContent, _ = applyCredentialReplacements(assistantToolMessage.ReasoningContent, toolResult.CredentialAttempts, toolResult.CredentialWrites)
-				applyCredentialReplacementsToLLMMessages(llmMessages, toolResult.CredentialAttempts, toolResult.CredentialWrites)
+				assistantToolMessage.Content, _ = applyCredentialModelReplacements(assistantToolMessage.Content, toolResult.CredentialAttempts, toolResult.CredentialWrites)
+				assistantToolMessage.ReasoningContent, _ = applyCredentialModelReplacements(assistantToolMessage.ReasoningContent, toolResult.CredentialAttempts, toolResult.CredentialWrites)
+				applyCredentialModelReplacementsToLLMMessages(llmMessages, toolResult.CredentialAttempts, toolResult.CredentialWrites)
 			}
 			if toolResult.MCPActivationChanged {
 				toolRuntime = toolRuntime.visibleRuntime()
-				if toolRuntime.attachmentProcessorActive() {
+				if toolRuntime.multimodalAnalyzer == nil && toolRuntime.attachmentProcessorActive() {
 					// 激活后的自动附件处理属于系统配套动作，不消耗模型显式工具调用预算。
 					attachmentToolCallLimit := len(processorAttachments)
 					activatedProcessing, processingErr := s.processImageAttachments(toolCtx, imageAttachmentProcessingInput{
@@ -1223,9 +1217,9 @@ func (s *Service) executeAgentTurnToolCalls(ctx context.Context, turn AgentTurnI
 	}
 	attempts := mergeCredentialWrites(
 		append([]credentialWrite(nil), input.PriorCredentialAttempts...),
-		credentialAttemptsFromToolCalls(toolCalls, input.ToolNameMap, input.PlatformTools),
+		credentialAttemptsFromToolCalls(toolCalls, input.ToolNameMap, input.PlatformTools, input.ToolRuntime),
 	)
-	currentAttempts := credentialAttemptsFromToolCalls(toolCalls, input.ToolNameMap, input.PlatformTools)
+	currentAttempts := credentialAttemptsFromToolCalls(toolCalls, input.ToolNameMap, input.PlatformTools, input.ToolRuntime)
 	if len(currentAttempts) > 0 && turn.OnCredentialAttemptsDetected != nil {
 		if err := turn.OnCredentialAttemptsDetected(ctx, currentAttempts); err != nil {
 			return executeAssistantToolCallsResult{CredentialAttempts: currentAttempts, FatalErr: err}

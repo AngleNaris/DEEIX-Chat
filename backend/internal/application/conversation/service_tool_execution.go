@@ -51,6 +51,7 @@ type executeAssistantToolCallsResult struct {
 type credentialWrite struct {
 	Name  string
 	Value string
+	Ref   string
 }
 
 type toolExecutionRecord struct {
@@ -81,7 +82,7 @@ func (s *Service) executeAssistantToolCalls(ctx context.Context, input executeAs
 		return executeAssistantToolCallsResult{}
 	}
 	executedToolCalls := append([]llm.ToolCall(nil), toolCalls...)
-	credentialAttempts := credentialAttemptsFromToolCalls(toolCalls, input.ToolNameMap, input.PlatformTools)
+	credentialAttempts := credentialAttemptsFromToolCalls(toolCalls, input.ToolNameMap, input.PlatformTools, input.ToolRuntime)
 	allCredentialAttempts := mergeCredentialWrites(append([]credentialWrite(nil), input.PriorCredentialAttempts...), credentialAttempts)
 	input.PriorCredentialAttempts = allCredentialAttempts
 	if input.TraceRecorder != nil {
@@ -127,6 +128,56 @@ func (s *Service) executeAssistantToolCalls(ctx context.Context, input executeAs
 		}
 
 		mcpConfig := resolveMCPConfig(modelToolName, input.MCPConfigs)
+		if modelToolName == systemMultimodalAnalyzeToolName {
+			mappedName, disclosed := input.ToolNameMap[modelToolName]
+			_, hasSchema := input.ToolSchemas[modelToolName]
+			if !disclosed || strings.TrimSpace(mappedName) != systemMultimodalAnalyzeToolName || !hasSchema ||
+				input.ToolRuntime == nil || input.ToolRuntime.multimodalAnalyzer == nil {
+				row.Status = "error"
+				row.ErrorJSON = toolNotEnabledForRunMessage(modelToolName)
+				slots[i] = toolExecutionSlot{
+					row:    row,
+					result: buildToolResultForModel(row, modelToolName),
+				}
+				if fatalErr == nil {
+					fatalErr = fmt.Errorf("model requested tool %q, but it is not enabled for this run", modelToolName)
+				}
+				continue
+			}
+			normalizedInput, validationErr := normalizeToolArguments(row.InputJSON, input.ToolSchemas[modelToolName])
+			if validationErr != nil {
+				row.Status = "error"
+				row.ErrorJSON = validationErr.Error()
+			} else {
+				row.InputJSON = normalizedInput
+				if input.Ledger != nil {
+					if previous, found := input.Ledger.lookup(row.ToolName, row.InputJSON); found {
+						slot := buildRepeatedToolSlot(row, modelToolName, previous)
+						slot.persisted = s.persistToolCallForInput(ctx, input, &slot.row)
+						slot.result = buildToolResultForModel(slot.row, modelToolName)
+						slots[i] = slot
+						continue
+					}
+				}
+				toolStartedAt := time.Now()
+				outputJSON, executeErr := s.executeSystemMultimodalAnalyze(ctx, input, row.InputJSON)
+				row.LatencyMS = max(time.Since(toolStartedAt).Milliseconds(), 0)
+				if executeErr != nil {
+					row.Status = "error"
+					row.ErrorJSON = sanitizeOpaqueToolOutput(executeErr.Error())
+				} else {
+					row.Status = "success"
+					row.OutputJSON = strings.TrimSpace(outputJSON)
+				}
+			}
+			persisted := s.persistToolCallForInput(ctx, input, &row)
+			result := buildToolResultForModel(row, modelToolName)
+			slots[i] = toolExecutionSlot{row: row, result: result, persisted: persisted}
+			if input.Ledger != nil {
+				input.Ledger.store(row.ToolName, row.InputJSON, toolExecutionRecord{row: row, result: result})
+			}
+			continue
+		}
 		if modelToolName == mcpActivateServerToolName {
 			if input.ToolRuntime == nil {
 				row.Status = "error"
@@ -166,7 +217,7 @@ func (s *Service) executeAssistantToolCalls(ctx context.Context, input executeAs
 						slot.persisted = persisted
 						slots[i] = slot
 						if slot.row.Status == "reused" {
-							if write, ok := credentialWriteFromSuccessfulCall(row.ToolName, isPlatformTool, row.InputJSON); ok {
+							if write, ok := credentialWriteFromSuccessfulCall(row.ToolName, isPlatformTool, row.InputJSON, input.ToolRuntime); ok {
 								credentialWrites = append(credentialWrites, write)
 							}
 						}
@@ -176,13 +227,31 @@ func (s *Service) executeAssistantToolCalls(ctx context.Context, input executeAs
 				// 平台内置工具（本地执行）：走同一结果/持久化/预算/去重通道。
 				// 执行参数在发送前展开 {{credential: name}} 占位符（落库保持占位符原文）。
 				toolStartedAt := time.Now()
-				outputJSON, executeErr := s.executePlatformToolCall(ctx, entry, ExecuteToolInput{
-					UserID:         input.UserID,
-					ConversationID: input.ConversationID,
-					RequestID:      strings.TrimSpace(input.RequestID),
-					ToolName:       row.ToolName,
-					ArgumentsJSON:  row.InputJSON,
-				})
+				executionArguments := row.InputJSON
+				var secretRefErr error
+				if isCredentialWritePlatformTool(row.ToolName) {
+					executionArguments, secretRefErr = input.ToolRuntime.expandCredentialSecretValueInJSON(
+						input.UserID,
+						input.ConversationID,
+						input.RunID,
+						row.InputJSON,
+					)
+				}
+				var (
+					outputJSON string
+					executeErr error
+				)
+				if secretRefErr != nil {
+					executeErr = secretRefErr
+				} else {
+					outputJSON, executeErr = s.executePlatformToolCall(ctx, entry, ExecuteToolInput{
+						UserID:         input.UserID,
+						ConversationID: input.ConversationID,
+						RequestID:      strings.TrimSpace(input.RequestID),
+						ToolName:       row.ToolName,
+						ArgumentsJSON:  executionArguments,
+					})
+				}
 				row.LatencyMS = time.Since(toolStartedAt).Milliseconds()
 				if row.LatencyMS < 0 {
 					row.LatencyMS = 0
@@ -196,7 +265,7 @@ func (s *Service) executeAssistantToolCalls(ctx context.Context, input executeAs
 					if row.OutputJSON == "" {
 						row.OutputJSON = "{}"
 					}
-					if write, ok := credentialWriteFromSuccessfulCall(row.ToolName, isPlatformTool, row.InputJSON); ok {
+					if write, ok := credentialWriteFromSuccessfulCall(row.ToolName, isPlatformTool, row.InputJSON, input.ToolRuntime); ok {
 						credentialWrites = append(credentialWrites, write)
 					}
 					// 平台内置工具产物（图片等）同样附件化落库。
@@ -218,7 +287,7 @@ func (s *Service) executeAssistantToolCalls(ctx context.Context, input executeAs
 					result:    result,
 					persisted: persisted,
 				}
-				if input.Ledger != nil {
+				if input.Ledger != nil && !(isCredentialWritePlatformTool(row.ToolName) && row.Status == "error") {
 					input.Ledger.store(row.ToolName, row.InputJSON, toolExecutionRecord{row: persistedRow, result: result})
 				}
 				continue
@@ -347,9 +416,12 @@ func (s *Service) executeAssistantToolCalls(ctx context.Context, input executeAs
 		input.TraceRecorder.completeTools()
 	}
 	for index := range executedToolCalls {
-		if arguments, changed := applyCredentialReplacementsToJSON(executedToolCalls[index].ArgumentsJSON, allCredentialAttempts, credentialWritesForScrub()); changed {
+		if arguments, changed := applyCredentialModelReplacementsToJSON(executedToolCalls[index].ArgumentsJSON, allCredentialAttempts, credentialWritesForScrub()); changed {
 			executedToolCalls[index].ArgumentsJSON = arguments
 		}
+	}
+	if input.ToolRuntime != nil {
+		input.ToolRuntime.destroyCredentialSecretWrites(credentialWrites)
 	}
 	return executeAssistantToolCallsResult{
 		Rows:                  rows,
