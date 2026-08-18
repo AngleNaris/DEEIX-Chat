@@ -585,7 +585,9 @@ export function AdminConversationSettingsPage() {
         modelOptions={defaultModelOptions}
         onChange={(value) => setSettingsMap((prev) => ({ ...prev, [id]: value }))}
       />
-    ) : id === "chat.multimodal_delegation_model" ? (
+    ) : field.key === "multimodal_delegation_image_model"
+      || field.key === "multimodal_delegation_audio_model"
+      || field.key === "multimodal_delegation_video_model" ? (
       <TaskModelField
         id={id}
         label={field.label}

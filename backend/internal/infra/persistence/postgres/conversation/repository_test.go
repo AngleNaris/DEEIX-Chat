@@ -2,6 +2,7 @@ package conversation
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -1929,6 +1930,152 @@ func openConversationRepositoryTestDB(t *testing.T) *gorm.DB {
 		t.Fatalf("migrate models: %v", err)
 	}
 	return db
+}
+
+func TestConversationToolCallPersistenceRedactsCredentialValues(t *testing.T) {
+	db := openConversationRepositoryTestDB(t)
+	repo := NewRepo(db)
+	ctx := context.Background()
+
+	create := domainconversation.ToolCall{
+		UserID:         1,
+		ConversationID: 2,
+		RunID:          "run_redact_create",
+		ToolCallID:     "call_redact_create",
+		ToolType:       "platform",
+		ToolName:       "credential_create",
+		Status:         "success",
+		InputJSON:      `{"name":"tokyo-vps","type":"ssh","value":"secret-create","options":{"password":"nested-secret"}}`,
+		OutputJSON:     `{"status":"created","echo":"secret-create","token":"output-token"}`,
+		ErrorJSON:      `failed to persist secret-create`,
+	}
+	if err := repo.CreateConversationToolCall(ctx, &create); err != nil {
+		t.Fatalf("CreateConversationToolCall() error = %v", err)
+	}
+	assertPersistedCredentialValueRedacted(t, db, create.ID)
+	assertPersistedCredentialPayloadsRedacted(t, db, create.ID, "secret-create", "nested-secret", "output-token")
+
+	batch := []domainconversation.ToolCall{{
+		UserID:         1,
+		ConversationID: 2,
+		RunID:          "run_redact_batch",
+		ToolCallID:     "call_redact_batch",
+		ToolType:       "platform",
+		ToolName:       "credential_update",
+		Status:         "success",
+		InputJSON:      `{"name":"tokyo-vps","value":"secret-batch"}`,
+	}}
+	if err := repo.CreateConversationToolCalls(ctx, batch); err != nil {
+		t.Fatalf("CreateConversationToolCalls() error = %v", err)
+	}
+	assertPersistedCredentialValueRedacted(t, db, batch[0].ID)
+
+	update := domainconversation.ToolCall{
+		ID:        create.ID,
+		ToolName:  "credential_update",
+		InputJSON: `{"name":"tokyo-vps","value":"secret-update"}`,
+	}
+	if err := repo.UpdateConversationToolCallPayload(ctx, create.UserID, create.ConversationID, create.RunID, update); err != nil {
+		t.Fatalf("UpdateConversationToolCallPayload() error = %v", err)
+	}
+	assertPersistedCredentialValueRedacted(t, db, create.ID)
+}
+
+func TestConversationToolCallPersistencePreservesNonCredentialValue(t *testing.T) {
+	db := openConversationRepositoryTestDB(t)
+	repo := NewRepo(db)
+	ctx := context.Background()
+	row := domainconversation.ToolCall{
+		UserID:         1,
+		ConversationID: 2,
+		RunID:          "run_preserve_value",
+		ToolCallID:     "call_preserve_value",
+		ToolType:       "mcp",
+		ToolName:       "custom_tool",
+		Status:         "success",
+		InputJSON:      `{"value":"keep-me"}`,
+	}
+	if err := repo.CreateConversationToolCall(ctx, &row); err != nil {
+		t.Fatalf("CreateConversationToolCall() error = %v", err)
+	}
+	var persisted model.ChatRunEvent
+	if err := db.First(&persisted, row.ID).Error; err != nil {
+		t.Fatalf("load persisted tool call: %v", err)
+	}
+	if persisted.InputJSON != row.InputJSON {
+		t.Fatalf("non-credential input changed: got %q want %q", persisted.InputJSON, row.InputJSON)
+	}
+}
+
+func assertPersistedCredentialValueRedacted(t *testing.T, db *gorm.DB, id uint) {
+	t.Helper()
+	var persisted model.ChatRunEvent
+	if err := db.First(&persisted, id).Error; err != nil {
+		t.Fatalf("load persisted credential tool call: %v", err)
+	}
+	var payload map[string]interface{}
+	if err := json.Unmarshal([]byte(persisted.InputJSON), &payload); err != nil {
+		t.Fatalf("decode persisted input: %v", err)
+	}
+	if got := payload["value"]; got != "[REDACTED]" {
+		t.Fatalf("persisted credential value = %#v, want [REDACTED]", got)
+	}
+	if strings.Contains(persisted.InputJSON, "secret-") {
+		t.Fatalf("persisted credential input still contains a raw secret: %s", persisted.InputJSON)
+	}
+}
+
+func assertPersistedCredentialPayloadsRedacted(t *testing.T, db *gorm.DB, id uint, secrets ...string) {
+	t.Helper()
+	var persisted model.ChatRunEvent
+	if err := db.First(&persisted, id).Error; err != nil {
+		t.Fatalf("load persisted credential tool call: %v", err)
+	}
+	serialized := persisted.InputJSON + persisted.OutputJSON + persisted.ErrorJSON
+	for _, secret := range secrets {
+		if strings.Contains(serialized, secret) {
+			t.Fatalf("persisted credential payload still contains %q: %s", secret, serialized)
+		}
+	}
+	if !strings.Contains(persisted.InputJSON, `"password":"[REDACTED]"`) {
+		t.Fatalf("nested password was not redacted: %s", persisted.InputJSON)
+	}
+	if !strings.Contains(persisted.OutputJSON, `"token":"[REDACTED]"`) {
+		t.Fatalf("output token was not redacted: %s", persisted.OutputJSON)
+	}
+}
+
+func TestConversationToolCallReadRedactsHistoricalCredentialPayloads(t *testing.T) {
+	db := openConversationRepositoryTestDB(t)
+	repo := NewRepo(db)
+	ctx := context.Background()
+	historical := model.ChatRunEvent{
+		UserID:         1,
+		ConversationID: 2,
+		RunID:          "run_historical_secret",
+		EventScope:     chatRunEventScopeToolCall,
+		EventID:        "call_historical_secret",
+		ToolCallID:     "call_historical_secret",
+		EventType:      "platform",
+		ToolName:       "credential_create",
+		Status:         "success",
+		InputJSON:      `{"name":"legacy","value":"historical-secret"}`,
+		OutputJSON:     `{"message":"stored historical-secret"}`,
+	}
+	if err := db.Create(&historical).Error; err != nil {
+		t.Fatalf("create historical tool call: %v", err)
+	}
+	rows, err := repo.ListConversationToolCallsByRunID(ctx, 1, 2, historical.RunID)
+	if err != nil {
+		t.Fatalf("ListConversationToolCallsByRunID() error = %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("len(rows) = %d, want 1", len(rows))
+	}
+	serialized := rows[0].InputJSON + rows[0].OutputJSON + rows[0].ErrorJSON
+	if strings.Contains(serialized, "historical-secret") {
+		t.Fatalf("historical credential payload leaked on read: %s", serialized)
+	}
 }
 
 // parent_message_id 上没有外键，「父消息同会话」只靠应用层保证。这里绕过应用层直接写入

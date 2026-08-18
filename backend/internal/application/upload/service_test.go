@@ -50,6 +50,62 @@ func TestUploadFileReturnsExistingActiveDuplicate(t *testing.T) {
 	}
 }
 
+func TestUploadFileRequeuesReusedLegacyImageWhenOCREnabled(t *testing.T) {
+	ctx := context.Background()
+	repo := newUploadTestRepo()
+	store := newUploadTestStore()
+	service := newUploadTestService(repo, store)
+	imageData := []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n', 0, 0, 0, 0, 'I', 'H', 'D', 'R'}
+	imageInput := func(fileName string) UploadFileInput {
+		return UploadFileInput{
+			UserID:       1,
+			Purpose:      "chat",
+			FileName:     fileName,
+			MimeType:     "image/png",
+			DeclaredSize: int64(len(imageData)),
+			Reader:       bytes.NewReader(imageData),
+		}
+	}
+
+	first, err := service.UploadFile(ctx, imageInput("legacy.png"))
+	if err != nil {
+		t.Fatalf("first image upload failed: %v", err)
+	}
+	if !first.File.ProcessingReady || first.File.ExtractStatus != "none" {
+		t.Fatalf("expected legacy image to start ready without OCR, got %#v", first.File)
+	}
+
+	cfg := service.cfg.Snapshot()
+	cfg.ExtractImageOCREnabled = true
+	service.cfg.Store(cfg)
+	requeueCalls := 0
+	service.hooks.EnsureImageOCRProcessing = func(_ context.Context, userID uint, fileID string) error {
+		requeueCalls++
+		if userID != first.File.UserID || fileID != first.File.FileID {
+			t.Fatalf("requeued file = %d/%q, want %d/%q", userID, fileID, first.File.UserID, first.File.FileID)
+		}
+		for index := range repo.files {
+			if repo.files[index].UserID == userID && repo.files[index].FileID == fileID {
+				repo.files[index].ProcessingStatus = "queued"
+				repo.files[index].ProcessingReady = false
+				repo.files[index].ExtractStatus = "none"
+			}
+		}
+		return nil
+	}
+
+	second, err := service.UploadFile(ctx, imageInput("legacy-copy.png"))
+	if err != nil {
+		t.Fatalf("reused image upload failed: %v", err)
+	}
+	if !second.Reused || requeueCalls != 1 {
+		t.Fatalf("expected reused image to requeue once, reused=%v calls=%d", second.Reused, requeueCalls)
+	}
+	if second.File.ProcessingReady || second.File.ProcessingStatus != "queued" || second.File.ExtractStatus != "none" {
+		t.Fatalf("expected reused image to return queued OCR state, got %#v", second.File)
+	}
+}
+
 func TestUploadFileAllowsReuploadAfterDelete(t *testing.T) {
 	ctx := context.Background()
 	repo := newUploadTestRepo()
@@ -269,6 +325,22 @@ func TestNormalizeDetectedMIMERecognizesVideoExtensions(t *testing.T) {
 	}{
 		{detected: "application/octet-stream", fileName: "clip.mp4", want: "video/mp4"},
 		{detected: "application/octet-stream", fileName: "clip.webm", want: "video/webm"},
+	}
+	for _, tt := range tests {
+		if got := normalizeDetectedMIME(tt.detected, tt.fileName); got != tt.want {
+			t.Fatalf("normalizeDetectedMIME(%q, %q) = %q, want %q", tt.detected, tt.fileName, got, tt.want)
+		}
+	}
+}
+
+func TestNormalizeDetectedMIMERecognizesAudioExtensions(t *testing.T) {
+	tests := []struct {
+		detected string
+		fileName string
+		want     string
+	}{
+		{detected: "application/octet-stream", fileName: "speech.mp3", want: "audio/mpeg"},
+		{detected: "application/octet-stream", fileName: "speech.wav", want: "audio/wav"},
 	}
 	for _, tt := range tests {
 		if got := normalizeDetectedMIME(tt.detected, tt.fileName); got != tt.want {

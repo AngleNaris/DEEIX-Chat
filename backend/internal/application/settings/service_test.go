@@ -314,6 +314,9 @@ func TestRuntimeSettingsAppliesMultimodalDelegation(t *testing.T) {
 
 	runtimeSettings.applyItem(&cfg, domainsettings.SystemSetting{Namespace: "chat", Key: "multimodal_delegation_enabled", Value: "true"})
 	runtimeSettings.applyItem(&cfg, domainsettings.SystemSetting{Namespace: "chat", Key: "multimodal_delegation_model", Value: " grok-4.6 "})
+	runtimeSettings.applyItem(&cfg, domainsettings.SystemSetting{Namespace: "chat", Key: "multimodal_delegation_image_model", Value: " gpt-5.6-luna "})
+	runtimeSettings.applyItem(&cfg, domainsettings.SystemSetting{Namespace: "chat", Key: "multimodal_delegation_audio_model", Value: " gpt-audio "})
+	runtimeSettings.applyItem(&cfg, domainsettings.SystemSetting{Namespace: "chat", Key: "multimodal_delegation_video_model", Value: " gemini-video "})
 	runtimeSettings.applyItem(&cfg, domainsettings.SystemSetting{Namespace: "chat", Key: "multimodal_delegation_modalities", Value: "image,audio,video"})
 	runtimeSettings.applyItem(&cfg, domainsettings.SystemSetting{Namespace: "chat", Key: "multimodal_delegation_timeout_seconds", Value: "180"})
 
@@ -323,12 +326,20 @@ func TestRuntimeSettingsAppliesMultimodalDelegation(t *testing.T) {
 	if cfg.MultimodalDelegationModalities != "image,audio,video" || cfg.MultimodalDelegationTimeoutSeconds != 180 {
 		t.Fatalf("unexpected multimodal delegation limits: %#v", cfg)
 	}
+	if cfg.MultimodalDelegationImageModel != "gpt-5.6-luna" ||
+		cfg.MultimodalDelegationAudioModel != "gpt-audio" ||
+		cfg.MultimodalDelegationVideoModel != "gemini-video" {
+		t.Fatalf("unexpected per-modality delegation models: %#v", cfg)
+	}
 }
 
 func TestValidateMultimodalDelegationSettings(t *testing.T) {
 	valid := []PatchItem{
 		{Namespace: "chat", Key: "multimodal_delegation_enabled", Value: "true"},
 		{Namespace: "chat", Key: "multimodal_delegation_model", Value: "grok-4.6"},
+		{Namespace: "chat", Key: "multimodal_delegation_image_model", Value: "gpt-5.6-luna"},
+		{Namespace: "chat", Key: "multimodal_delegation_audio_model", Value: "gpt-audio"},
+		{Namespace: "chat", Key: "multimodal_delegation_video_model", Value: "gemini-video"},
 		{Namespace: "chat", Key: "multimodal_delegation_modalities", Value: "image,audio,video"},
 		{Namespace: "chat", Key: "multimodal_delegation_timeout_seconds", Value: "120"},
 	}

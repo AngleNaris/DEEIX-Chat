@@ -417,6 +417,9 @@ type Config struct {
 
 	MultimodalDelegationEnabled        bool
 	MultimodalDelegationModel          string
+	MultimodalDelegationImageModel     string
+	MultimodalDelegationAudioModel     string
+	MultimodalDelegationVideoModel     string
 	MultimodalDelegationModalities     string
 	MultimodalDelegationTimeoutSeconds int
 
@@ -664,6 +667,9 @@ func Load() Config {
 
 		MultimodalDelegationEnabled:        false,
 		MultimodalDelegationModel:          "",
+		MultimodalDelegationImageModel:     "",
+		MultimodalDelegationAudioModel:     "",
+		MultimodalDelegationVideoModel:     "",
 		MultimodalDelegationModalities:     "image,audio,video",
 		MultimodalDelegationTimeoutSeconds: 120,
 

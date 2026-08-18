@@ -447,7 +447,8 @@ func NewServiceWithRuntime(
 					EffectiveDocMaxBytes: capability.EffectiveDocMaxBytes,
 				}
 			},
-			InitializeUploadedFile: processingSvc.InitializeUploadedFile,
+			InitializeUploadedFile:   processingSvc.InitializeUploadedFile,
+			EnsureImageOCRProcessing: processingSvc.EnsureImageOCRProcessing,
 		}, appupload.ErrorSet{
 			InvalidFileReference: ErrInvalidFileReference,
 			InvalidFileName:      ErrInvalidFileName,

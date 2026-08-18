@@ -363,6 +363,9 @@ func (c *Client) extractImageTextWithLLM(ctx context.Context, imageData []byte, 
 	if err != nil {
 		return "", mapLLMOCRError(err)
 	}
+	if output == nil {
+		return "", fmt.Errorf(errOCREmptyContent)
+	}
 	return normalizeOCRText(output.Text), nil
 }
 

@@ -2049,13 +2049,19 @@ func (r *Repo) UpdateConversationToolCallPayload(
 	if item.ID == 0 || userID == 0 || conversationID == 0 || strings.TrimSpace(runID) == "" {
 		return nil
 	}
+	inputJSON, outputJSON, errorJSON := sanitizePersistedCredentialToolPayloads(
+		item.ToolName,
+		item.InputJSON,
+		item.OutputJSON,
+		item.ErrorJSON,
+	)
 	result := r.db.WithContext(ctx).Model(&models.ChatRunEvent{}).
 		Where("id = ? AND user_id = ? AND conversation_id = ? AND run_id = ? AND event_scope = ?",
 			item.ID, userID, conversationID, strings.TrimSpace(runID), chatRunEventScopeToolCall).
 		Updates(map[string]interface{}{
-			"input_json":  item.InputJSON,
-			"output_json": item.OutputJSON,
-			"error_json":  item.ErrorJSON,
+			"input_json":  inputJSON,
+			"output_json": outputJSON,
+			"error_json":  errorJSON,
 		})
 	if result.Error != nil {
 		return translateError(result.Error)
@@ -4414,6 +4420,12 @@ func toConversationToolCallModel(item *domainconversation.ToolCall) models.ChatR
 	if eventID == "" {
 		eventID = fmt.Sprintf("tool:%s:%d", strings.TrimSpace(item.ToolName), time.Now().UnixNano())
 	}
+	inputJSON, outputJSON, errorJSON := sanitizePersistedCredentialToolPayloads(
+		item.ToolName,
+		item.InputJSON,
+		item.OutputJSON,
+		item.ErrorJSON,
+	)
 	return models.ChatRunEvent{
 		MessageID:      item.MessageID,
 		ConversationID: item.ConversationID,
@@ -4426,14 +4438,103 @@ func toConversationToolCallModel(item *domainconversation.ToolCall) models.ChatR
 		ToolName:       item.ToolName,
 		Status:         item.Status,
 		LatencyMS:      item.LatencyMS,
-		InputJSON:      item.InputJSON,
-		OutputJSON:     item.OutputJSON,
-		ErrorJSON:      item.ErrorJSON,
+		InputJSON:      inputJSON,
+		OutputJSON:     outputJSON,
+		ErrorJSON:      errorJSON,
 		StartedAt:      startedAt,
 	}
 }
 
+func sanitizePersistedCredentialToolPayloads(
+	toolName string,
+	inputJSON string,
+	outputJSON string,
+	errorJSON string,
+) (string, string, string) {
+	switch strings.ToLower(strings.TrimSpace(toolName)) {
+	case "credential_create", "credential_update":
+	default:
+		return inputJSON, outputJSON, errorJSON
+	}
+
+	secrets := make([]string, 0, 4)
+	sanitizedInput, ok := sanitizeCredentialJSON(inputJSON, &secrets)
+	if !ok {
+		sanitizedInput = "[REDACTED]"
+	}
+	sanitizedOutput, _ := sanitizeCredentialJSON(outputJSON, nil)
+	sanitizedError, _ := sanitizeCredentialJSON(errorJSON, nil)
+	for _, secret := range secrets {
+		if secret == "" {
+			continue
+		}
+		sanitizedOutput = strings.ReplaceAll(sanitizedOutput, secret, "[REDACTED]")
+		sanitizedError = strings.ReplaceAll(sanitizedError, secret, "[REDACTED]")
+	}
+	return sanitizedInput, sanitizedOutput, sanitizedError
+}
+
+func sanitizeCredentialJSON(raw string, secrets *[]string) (string, bool) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return raw, true
+	}
+	var payload interface{}
+	if err := json.Unmarshal([]byte(value), &payload); err != nil {
+		return raw, false
+	}
+	sanitized := sanitizeCredentialJSONValue(payload, secrets)
+	encoded, err := json.Marshal(sanitized)
+	if err != nil {
+		return raw, false
+	}
+	return string(encoded), true
+}
+
+func sanitizeCredentialJSONValue(value interface{}, secrets *[]string) interface{} {
+	switch typed := value.(type) {
+	case map[string]interface{}:
+		result := make(map[string]interface{}, len(typed))
+		for key, child := range typed {
+			if isCredentialSecretField(key) {
+				if secrets != nil {
+					if text, ok := child.(string); ok && text != "" {
+						*secrets = append(*secrets, text)
+					}
+				}
+				result[key] = "[REDACTED]"
+				continue
+			}
+			result[key] = sanitizeCredentialJSONValue(child, secrets)
+		}
+		return result
+	case []interface{}:
+		result := make([]interface{}, len(typed))
+		for index, child := range typed {
+			result[index] = sanitizeCredentialJSONValue(child, secrets)
+		}
+		return result
+	default:
+		return value
+	}
+}
+
+func isCredentialSecretField(key string) bool {
+	switch strings.ToLower(strings.TrimSpace(key)) {
+	case "value", "password", "passphrase", "private_key", "privatekey", "secret", "token":
+		return true
+	default:
+		return false
+	}
+}
+
 func toConversationToolCallDomain(item models.ChatRunEvent) domainconversation.ToolCall {
+	inputJSON, outputJSON, errorJSON := sanitizePersistedCredentialToolPayloads(
+		item.ToolName,
+		item.InputJSON,
+		item.OutputJSON,
+		item.ErrorJSON,
+	)
 	return domainconversation.ToolCall{
 		ID:             item.ID,
 		MessageID:      item.MessageID,
@@ -4445,9 +4546,9 @@ func toConversationToolCallDomain(item models.ChatRunEvent) domainconversation.T
 		ToolName:       item.ToolName,
 		Status:         item.Status,
 		LatencyMS:      item.LatencyMS,
-		InputJSON:      item.InputJSON,
-		OutputJSON:     item.OutputJSON,
-		ErrorJSON:      item.ErrorJSON,
+		InputJSON:      inputJSON,
+		OutputJSON:     outputJSON,
+		ErrorJSON:      errorJSON,
 		CreatedAt:      item.StartedAt,
 		UpdatedAt:      item.UpdatedAt,
 	}

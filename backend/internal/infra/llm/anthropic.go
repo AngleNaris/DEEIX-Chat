@@ -45,6 +45,9 @@ func (a *anthropicMessagesAdapter) Generate(
 	route RouteConfig,
 	input GenerateInput,
 ) (*GenerateOutput, error) {
+	if err := validateAnthropicMediaParts(input.Messages); err != nil {
+		return nil, err
+	}
 	return a.client.generateAnthropic(ctx, route, input, false)
 }
 
@@ -54,6 +57,9 @@ func (a *anthropicMessagesAdapter) GenerateStream(
 	input GenerateInput,
 	onEvent func(GenerateStreamEvent) error,
 ) (*GenerateOutput, error) {
+	if err := validateAnthropicMediaParts(input.Messages); err != nil {
+		return nil, err
+	}
 	return a.client.generateAnthropicStream(ctx, route, input, onEvent)
 }
 
@@ -638,6 +644,18 @@ func buildAnthropicContent(msg Message) interface{} {
 		return msg.Content
 	}
 	return blocks
+}
+
+func validateAnthropicMediaParts(messages []Message) error {
+	for _, message := range messages {
+		for _, part := range message.Parts {
+			switch part.Kind {
+			case ContentPartAudio, ContentPartVideo:
+				return fmt.Errorf("anthropic_unsupported_media: %s input is not supported", part.Kind)
+			}
+		}
+	}
+	return nil
 }
 
 // ── HTTP 请求辅助 ──────────────────────────────────────────────────────────────

@@ -420,7 +420,10 @@ func validatePatchItem(item PatchItem) error {
 		return validateStringMax(value, 512, key)
 	case "chat:conversation_default_model":
 		return validateStringMax(value, 255, key)
-	case "chat:multimodal_delegation_model":
+	case "chat:multimodal_delegation_model",
+		"chat:multimodal_delegation_image_model",
+		"chat:multimodal_delegation_audio_model",
+		"chat:multimodal_delegation_video_model":
 		return validateStringMax(value, 255, key)
 	case "chat:multimodal_delegation_modalities":
 		return validateMultimodalDelegationModalities(value, key)

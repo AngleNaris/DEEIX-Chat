@@ -32,9 +32,17 @@
       "label": "System multimodal delegation",
       "description": "When the primary model cannot accept image, audio, or video input, analyze it with the selected multimodal chat model, feed the result back, and continue the original task. This is independent from OCR."
     },
-    "multimodalDelegationModel": {
-      "label": "Multimodal delegation model",
-      "description": "Chat model used for internal media understanding. Its capabilities must declare the required vision, audio, or video input support."
+    "multimodalDelegationImageModel": {
+      "label": "Image understanding model",
+      "description": "Used when the primary model cannot accept images. The selected model must declare vision input support."
+    },
+    "multimodalDelegationAudioModel": {
+      "label": "Audio understanding model",
+      "description": "Used when the primary model cannot accept audio. The selected model must declare audio input support; leaving it empty makes this modality fail explicitly."
+    },
+    "multimodalDelegationVideoModel": {
+      "label": "Video understanding model",
+      "description": "Used when the primary model cannot accept video. The selected model must declare video input support; leaving it empty makes this modality fail explicitly."
     },
     "multimodalDelegationModalities": {
       "label": "Delegated media types",

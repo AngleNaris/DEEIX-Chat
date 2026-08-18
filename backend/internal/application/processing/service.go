@@ -462,7 +462,7 @@ func (s *Service) WaitUntilReady(
 	fileID string,
 	onProgress func(fileObj *domainconversation.FileObject),
 ) (*ReadyFileResult, error) {
-	if err := s.ensureImageOCRProcessing(ctx, userID, fileID); err != nil {
+	if err := s.EnsureImageOCRProcessing(ctx, userID, fileID); err != nil {
 		return nil, err
 	}
 	for {
@@ -505,6 +505,11 @@ func (s *Service) WaitUntilReady(
 		case <-time.After(400 * time.Millisecond):
 		}
 	}
+}
+
+// EnsureImageOCRProcessing 为启用 OCR 后仍处于旧 ready/none 状态的图片安全地重新入队。
+func (s *Service) EnsureImageOCRProcessing(ctx context.Context, userID uint, fileID string) error {
+	return s.ensureImageOCRProcessing(ctx, userID, fileID)
 }
 
 func (s *Service) ensureImageOCRProcessing(ctx context.Context, userID uint, fileID string) error {

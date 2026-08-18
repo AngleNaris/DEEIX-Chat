@@ -159,6 +159,12 @@ func (r *RuntimeSettings) applyItem(cfg *config.Config, item domainsettings.Syst
 		cfg.MultimodalDelegationEnabled = toBool(item.Value, cfg.MultimodalDelegationEnabled)
 	case "chat:multimodal_delegation_model":
 		cfg.MultimodalDelegationModel = strings.TrimSpace(item.Value)
+	case "chat:multimodal_delegation_image_model":
+		cfg.MultimodalDelegationImageModel = strings.TrimSpace(item.Value)
+	case "chat:multimodal_delegation_audio_model":
+		cfg.MultimodalDelegationAudioModel = strings.TrimSpace(item.Value)
+	case "chat:multimodal_delegation_video_model":
+		cfg.MultimodalDelegationVideoModel = strings.TrimSpace(item.Value)
 	case "chat:multimodal_delegation_modalities":
 		cfg.MultimodalDelegationModalities = strings.TrimSpace(item.Value)
 	case "chat:multimodal_delegation_timeout_seconds":

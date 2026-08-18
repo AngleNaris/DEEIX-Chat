@@ -32,9 +32,17 @@
       "label": "系统级多模态委派",
       "description": "当主模型不支持图片、音频或视频输入时，自动交由指定的多模态聊天模型分析，并把结果回灌后继续原任务。此功能不依赖 OCR。"
     },
-    "multimodalDelegationModel": {
-      "label": "多模态委派模型",
-      "description": "用于系统内部媒体理解的聊天模型。模型能力中必须声明对应的 vision、audio 或 video 输入能力。"
+    "multimodalDelegationImageModel": {
+      "label": "图片理解模型",
+      "description": "主模型不支持图片输入时使用。模型能力必须声明 vision 输入支持。"
+    },
+    "multimodalDelegationAudioModel": {
+      "label": "音频理解模型",
+      "description": "主模型不支持音频输入时使用。模型能力必须声明 audio 输入支持；留空时该模态会明确失败。"
+    },
+    "multimodalDelegationVideoModel": {
+      "label": "视频理解模型",
+      "description": "主模型不支持视频输入时使用。模型能力必须声明 video 输入支持；留空时该模态会明确失败。"
     },
     "multimodalDelegationModalities": {
       "label": "允许委派的媒体类型",

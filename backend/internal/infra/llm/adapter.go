@@ -102,6 +102,40 @@ func SupportsStreamingAdapter(raw string) bool {
 	}
 }
 
+// SupportsMediaInputAdapter reports whether an adapter can serialize the
+// requested media kind into a chat request without dropping it.
+func SupportsMediaInputAdapter(raw string, modality string) bool {
+	modality = strings.ToLower(strings.TrimSpace(modality))
+	switch modality {
+	case "image":
+		switch NormalizeAdapter(raw) {
+		case AdapterOpenAIResponses,
+			AdapterOpenRouterChat,
+			AdapterOpenRouterResponses,
+			AdapterOpenAIChatCompletions,
+			AdapterAnthropicMessages,
+			AdapterGoogleGenerateContent,
+			AdapterGeminiInteractions,
+			AdapterXAIResponses:
+			return true
+		default:
+			return false
+		}
+	case "audio", "video":
+		switch NormalizeAdapter(raw) {
+		case AdapterOpenRouterChat,
+			AdapterOpenAIChatCompletions,
+			AdapterGoogleGenerateContent,
+			AdapterGeminiInteractions:
+			return true
+		default:
+			return false
+		}
+	default:
+		return false
+	}
+}
+
 // SupportsImageGenerationStream 返回图片媒体协议和模型是否支持真实上游流式。
 func SupportsImageGenerationStream(protocol string, model string) bool {
 	switch NormalizeAdapter(protocol) {

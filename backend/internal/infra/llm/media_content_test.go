@@ -66,3 +66,21 @@ func TestValidateResponsesMediaPartsRejectsAudioAndVideo(t *testing.T) {
 		t.Fatalf("expected image input to remain supported, got %v", err)
 	}
 }
+
+func TestValidateAnthropicMediaPartsRejectsAudioAndVideo(t *testing.T) {
+	for _, kind := range []string{ContentPartAudio, ContentPartVideo} {
+		err := validateAnthropicMediaParts([]Message{{
+			Role:  "user",
+			Parts: []ContentPart{{Kind: kind, Data: []byte("media")}},
+		}})
+		if err == nil || !strings.Contains(err.Error(), "anthropic_unsupported_media") {
+			t.Fatalf("expected explicit unsupported media error for %s, got %v", kind, err)
+		}
+	}
+	if err := validateAnthropicMediaParts([]Message{{
+		Role:  "user",
+		Parts: []ContentPart{{Kind: ContentPartImage, Data: []byte("image")}},
+	}}); err != nil {
+		t.Fatalf("expected image input to remain supported, got %v", err)
+	}
+}

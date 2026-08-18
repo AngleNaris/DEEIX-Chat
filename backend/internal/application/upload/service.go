@@ -36,8 +36,9 @@ type FileCapability struct {
 
 // Hooks 封装上传后续编排动作。
 type Hooks struct {
-	ResolveCapability      func(ctx context.Context) FileCapability
-	InitializeUploadedFile func(ctx context.Context, file *domainconversation.FileObject) error
+	ResolveCapability        func(ctx context.Context) FileCapability
+	InitializeUploadedFile   func(ctx context.Context, file *domainconversation.FileObject) error
+	EnsureImageOCRProcessing func(ctx context.Context, userID uint, fileID string) error
 }
 
 // ErrorSet 允许上层注入统一错误语义。
@@ -393,6 +394,7 @@ func (s *Service) tryReuseExistingFile(
 		} else if touchErr == nil {
 			existingFile.LastAccessedAt = &accessedAt
 		}
+		s.requeueReusedImageForOCR(ctx, existingFile)
 		quota, quotaErr := s.repo.GetOrInitUserStorageQuota(ctx, userID, quotaBytes)
 		if quotaErr != nil {
 			return nil, false, quotaErr
@@ -402,6 +404,34 @@ func (s *Service) tryReuseExistingFile(
 			Quota:  *quota,
 			Reused: true,
 		}, true, nil
+	}
+}
+
+func (s *Service) requeueReusedImageForOCR(ctx context.Context, file *domainconversation.FileObject) {
+	if file == nil ||
+		file.FileCategory != fileCategoryImage ||
+		!s.snapshot().ExtractImageOCREnabled ||
+		!file.ProcessingReady ||
+		!strings.EqualFold(strings.TrimSpace(file.ExtractStatus), "none") ||
+		s.hooks.EnsureImageOCRProcessing == nil {
+		return
+	}
+	ensureErr := s.hooks.EnsureImageOCRProcessing(ctx, file.UserID, file.FileID)
+	latest, refreshErr := s.repo.GetActiveFileObjectByID(ctx, file.UserID, file.FileID)
+	if refreshErr == nil && latest != nil {
+		*file = *latest
+	}
+	if ensureErr != nil && s.logger != nil {
+		s.logger.Warn("initialize_reused_image_ocr_failed",
+			zap.String("file_id", file.FileID),
+			zap.Error(ensureErr),
+		)
+	}
+	if refreshErr != nil && s.logger != nil {
+		s.logger.Warn("refresh_reused_image_ocr_state_failed",
+			zap.String("file_id", file.FileID),
+			zap.Error(refreshErr),
+		)
 	}
 }
 
@@ -723,6 +753,10 @@ func normalizeDetectedMIME(detected string, fileName string) string {
 		return "text/yaml"
 	case "toml":
 		return "application/toml"
+	case "mp3":
+		return "audio/mpeg"
+	case "wav":
+		return "audio/wav"
 	case "mp4":
 		return "video/mp4"
 	case "webm":

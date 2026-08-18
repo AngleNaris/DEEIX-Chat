@@ -19,6 +19,9 @@ export type ConversationSettingsField = {
     | "conversation_labels_prompt"
     | "multimodal_delegation_enabled"
     | "multimodal_delegation_model"
+    | "multimodal_delegation_image_model"
+    | "multimodal_delegation_audio_model"
+    | "multimodal_delegation_video_model"
     | "multimodal_delegation_modalities"
     | "multimodal_delegation_timeout_seconds"
     | "context_compact_enabled"
@@ -242,9 +245,27 @@ export function buildConversationSettingsFields(t: ConversationSettingsTranslato
     {
       section: "conversation",
       namespace: "chat",
-      key: "multimodal_delegation_model",
-      label: t("fields.multimodalDelegationModel.label"),
-      description: t("fields.multimodalDelegationModel.description"),
+      key: "multimodal_delegation_image_model",
+      label: t("fields.multimodalDelegationImageModel.label"),
+      description: t("fields.multimodalDelegationImageModel.description"),
+      type: "select",
+      visibleWhen: MULTIMODAL_DELEGATION_ENABLED_RULE,
+    },
+    {
+      section: "conversation",
+      namespace: "chat",
+      key: "multimodal_delegation_audio_model",
+      label: t("fields.multimodalDelegationAudioModel.label"),
+      description: t("fields.multimodalDelegationAudioModel.description"),
+      type: "select",
+      visibleWhen: MULTIMODAL_DELEGATION_ENABLED_RULE,
+    },
+    {
+      section: "conversation",
+      namespace: "chat",
+      key: "multimodal_delegation_video_model",
+      label: t("fields.multimodalDelegationVideoModel.label"),
+      description: t("fields.multimodalDelegationVideoModel.description"),
       type: "select",
       visibleWhen: MULTIMODAL_DELEGATION_ENABLED_RULE,
     },
