@@ -38,6 +38,7 @@ export function useChatSubmitStream({
   autoGenerateLabels,
   prependNewConversation,
   onConversationCreated,
+  onConversationForked,
   touchByPublicID,
   reload,
   replaceMessage,
@@ -56,7 +57,8 @@ export function useChatSubmitStream({
   combinedMessages,
   serverMessagePublicIDs,
   activeGenerationRunsRef,
-  failedGenerationRunsRef,
+  activeGenerationRunsRevision,
+  onActiveGenerationRunsChange,
   resumeGenerationActive,
   autoEditDismissed = false,
 }: {
@@ -79,6 +81,7 @@ export function useChatSubmitStream({
   autoGenerateLabels: boolean;
   prependNewConversation: (platformModelName: string) => Promise<ConversationDTO | null | undefined>;
   onConversationCreated?: (conversationPublicID: string) => void;
+  onConversationForked?: (conversation: ConversationDTO) => Promise<void> | void;
   touchByPublicID: (publicID: string, patch?: Partial<ConversationDTO>) => void;
   reload: () => void;
   replaceMessage: (message: MessageDTO) => void;
@@ -97,7 +100,8 @@ export function useChatSubmitStream({
   combinedMessages: ChatAreaMessage[];
   serverMessagePublicIDs: Set<string>;
   activeGenerationRunsRef?: React.RefObject<Set<string>>;
-  failedGenerationRunsRef?: React.RefObject<Set<string>>;
+  activeGenerationRunsRevision: number;
+  onActiveGenerationRunsChange?: () => void;
   resumeGenerationActive?: boolean;
   autoEditDismissed?: boolean;
 }) {
@@ -125,6 +129,7 @@ export function useChatSubmitStream({
     autoGenerateLabels,
     prependNewConversation,
     onConversationCreated,
+    onConversationForked,
     touchByPublicID,
     reload,
     replaceMessage,
@@ -149,7 +154,8 @@ export function useChatSubmitStream({
     resetStreamBuffer: streamBuffer.resetStreamBuffer,
     startStream: streamBuffer.startStream,
     activeGenerationRunsRef,
-    failedGenerationRunsRef,
+    activeGenerationRunsRevision,
+    onActiveGenerationRunsChange,
     resumeGenerationActive,
     autoEditDismissed,
   });

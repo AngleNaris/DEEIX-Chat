@@ -16,7 +16,8 @@ import (
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/billing"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/channel"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/compact"
-	conversation "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/conversation"
+	appcontentmoderation "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/contentmoderation"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/conversation"
 	appembedding "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/embedding"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/extraction"
 	applogcleanup "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/logcleanup"
@@ -39,6 +40,7 @@ import (
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/user"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/usersettings"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
+	moderationclient "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/contentmoderation"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/embedding"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/geoip"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/identityprovider"
@@ -49,6 +51,7 @@ import (
 	platformlogger "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/observability/logger"
 	platformtracing "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/observability/tracing"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/openwebui"
+	epaypayment "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/payment/epay"
 	stripepayment "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/payment/stripe"
 	filecache "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/filecache"
 	announcementrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/announcement"
@@ -56,6 +59,7 @@ import (
 	auditrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/audit"
 	billingrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/billing"
 	channelrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/channel"
+	contentmoderationrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/contentmoderation"
 	conversationrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/conversation"
 	logcleanuprepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/logcleanup"
 	mcprepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/mcp"
@@ -77,6 +81,7 @@ import (
 	authhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/auth"
 	billinghttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/billing"
 	channelhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/channel"
+	contentmoderationhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/contentmoderation"
 	conversationhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/conversation"
 	agentgrouphttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/agentgroup"
 	mcphttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/mcp"
@@ -174,6 +179,7 @@ type App struct {
 	mcpClient              *mcp.Client
 	embeddingClient        *embedding.Client
 	mediaArtifactClient    *mediaartifact.Client
+	moderationClient       *moderationclient.Client
 	backgroundCancel       context.CancelFunc
 }
 
@@ -289,8 +295,8 @@ func NewApp() (*App, error) {
 		openrouterpricing.New(cfg.StrictOutboundPolicy()),
 		filecache.NewOpenRouterPricingCache(runtimeCfg.Snapshot().StorageRootDir),
 	)
-	paymentCheckoutService := billing.NewPaymentCheckoutService(stripepayment.New(cfg.StrictOutboundPolicy()))
-	billingHandler := billinghttp.NewHandler(billingService, settingsService, runtimeCfg, officialPricingService, paymentCheckoutService)
+	paymentCheckoutService := billing.NewPaymentCheckoutService(stripepayment.New(cfg.StrictOutboundPolicy()), epaypayment.New())
+	billingHandler := billinghttp.NewHandler(billingService, settingsService, runtimeCfg, officialPricingService, paymentCheckoutService, log)
 	billingModule := billinghttp.NewModule(billingHandler)
 	objectStoreProvider := appstorage.NewRuntimeProvider(runtimeCfg, nil)
 	geoResolver := geoip.New(runtimeCfg.Snapshot())
@@ -327,6 +333,8 @@ func NewApp() (*App, error) {
 	mediaArtifactClient := mediaartifact.New(strictOutboundPolicy)
 	channelService := channel.NewServiceWithRuntime(runtimeCfg, channelRepo, channelRepo, channelCache, llmClient)
 	channelService.SetLogger(log)
+	channelService.SetObjectStoreProvider(objectStoreProvider)
+	channelService.SetModelIconAssetRepository(channelRepo)
 	channelService.SetBillingModelPricingFilter(billingService)
 	channelService.SetPermissionGroupRepo(channelRepo)
 	channelService.SetSubscriptionGroupResolver(&subscriptionGroupAdapter{billing: billingService})
@@ -379,6 +387,14 @@ func NewApp() (*App, error) {
 	conversationService.SetAgentGroupRunStore(agentGroupRepo)
 	conversationService.SetAgentGroupSettings(settingsService)
 	conversationService.SetPlatformToolsSettings(settingsService)
+	contentModerationRepo := contentmoderationrepo.NewRepo(db)
+	contentModerationService := appcontentmoderation.NewService(settingsRepo, contentModerationRepo, cfg.DataEncryptionKey, log)
+	moderationClient := moderationclient.New(trustedOutboundPolicy)
+	contentModerationService.SetProvider(moderationClient)
+	contentModerationService.SetAuditWriter(auditService)
+	conversationService.SetModerationService(contentModerationService)
+	contentModerationHandler := contentmoderationhttp.NewHandler(contentModerationService)
+	contentModerationModule := contentmoderationhttp.NewModule(contentModerationHandler)
 	userService.SetAvatarContentOpener(avatarContentOpener{conversationService: conversationService})
 	userService.SetAvatarFileValidator(conversationService)
 	authService.SetAvatarFileValidator(conversationService)
@@ -413,10 +429,12 @@ func NewApp() (*App, error) {
 	adminHandler := adminhttp.NewHandler(adminService)
 	adminHandler.SetConversationExporter(conversationService)
 	adminModule := adminhttp.NewModule(adminHandler)
+	contentModerationHandler.SetUserLabelResolver(adminService)
 	userSettingsRepo := usersettingsrepo.NewRepo(db)
 	userSettingsService := usersettings.NewService(userSettingsRepo)
 	conversationService.SetUserSettingsService(userSettingsService)
 	conversationService.SetUserProfileReader(userProfileReaderAdapter{inner: userService})
+	userSettingsService.SetCacheRefresher(conversationService.RefreshUserSettingCache)
 	userSettingsHandler := usersettingshttp.NewHandler(userSettingsService)
 	userSettingsModule := usersettingshttp.NewModule(userSettingsHandler)
 	platformToolsHandler := platformtoolshttp.NewHandler(conversationService)
@@ -464,26 +482,27 @@ func NewApp() (*App, error) {
 	hc := newHealthChecker(db, cfg.CacheDriver, redisClient)
 	rateLimiter := buildRateLimiter(cfg, redisClient, memoryCache)
 	engine, err := platformhttp.NewEngine(runtimeCfg, log, platformhttp.Modules{
-		Auth:         authModule,
-		AuthService:  authService,
-		Channel:      channelModule,
-		Conversation: conversationModule,
-		AgentGroup:   agentGroupModule,
-		MCP:          mcpModule,
-		Memory:       memoryModule,
-		Billing:      billingModule,
-		Admin:        adminModule,
-		Announcement: announcementModule,
-		PromptPreset: promptPresetModule,
-		Skill:        skillModule,
-		Settings:     settingsModule,
-		UserSettings: userSettingsModule,
-		PlatformTools: platformToolsModule,
-		Artifact:      artifactModule,
-		DocCard:       docCardModule,
-		DynamicPrompt: dynamicPromptModule,
-		Credentials:   credentialModule,
-		User:          userModule,
+		Auth:              authModule,
+		AuthService:       authService,
+		Channel:           channelModule,
+		Conversation:      conversationModule,
+		AgentGroup:        agentGroupModule,
+		MCP:               mcpModule,
+		Memory:            memoryModule,
+		Billing:           billingModule,
+		Admin:             adminModule,
+		ContentModeration: contentModerationModule,
+		Announcement:      announcementModule,
+		PromptPreset:      promptPresetModule,
+		Skill:             skillModule,
+		Settings:          settingsModule,
+		UserSettings:      userSettingsModule,
+		PlatformTools:     platformToolsModule,
+		Artifact:          artifactModule,
+		DocCard:           docCardModule,
+		DynamicPrompt:     dynamicPromptModule,
+		Credentials:       credentialModule,
+		User:              userModule,
 		StartupLog: func(log *zap.Logger) {
 			if log == nil || bootstrapSuperAdmin == nil {
 				return
@@ -500,6 +519,8 @@ func NewApp() (*App, error) {
 
 	backgroundCtx, backgroundCancel := context.WithCancel(context.Background())
 	conversationService.StartBackgroundWorkers(backgroundCtx)
+	contentModerationService.StartBackgroundWorkers(backgroundCtx)
+	channelService.StartModelIconAssetCleanup(backgroundCtx)
 
 	return &App{
 		cfg:                    runtimeCfg.Snapshot(),
@@ -513,6 +534,7 @@ func NewApp() (*App, error) {
 		mcpClient:              mcpClient,
 		embeddingClient:        embedClient,
 		mediaArtifactClient:    mediaArtifactClient,
+		moderationClient:       moderationClient,
 		backgroundCancel:       backgroundCancel,
 	}, nil
 }
@@ -600,6 +622,9 @@ func (a *App) Close() {
 	}
 	if a.mediaArtifactClient != nil {
 		a.mediaArtifactClient.CloseIdleConnections()
+	}
+	if a.moderationClient != nil {
+		a.moderationClient.CloseIdleConnections()
 	}
 	if a.db != nil {
 		if sqlDB, err := a.db.DB(); err == nil {

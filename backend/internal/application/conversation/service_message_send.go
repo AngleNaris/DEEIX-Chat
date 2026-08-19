@@ -9,6 +9,7 @@ import (
 
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/channel"
 	appcompact "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/compact"
+	appcm "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/contentmoderation"
 	apprag "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/rag"
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 	domainmemory "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/memory"
@@ -182,11 +183,17 @@ func (s *Service) sendMessageInternal(
 		sendSpan.End()
 	}()
 
+	// application 层保留兜底校验，保证非 HTTP 调用路径也遵守同一 MCP 工具数量策略。
+	if err := s.ValidateSelectedToolIDs(input.SelectedToolIDs); err != nil {
+		return nil, err
+	}
+
 	startedAt := time.Now()
 	runID := normalizeRunID(input.ClientRunID)
 	if runID == "" {
 		runID = "run_" + normalizePublicID(uuid.NewString())
 	}
+	var moderationCoord *appcm.RunCoordinator
 
 	conversation, err := s.repo.GetConversationByUser(ctx, input.ConversationID, input.UserID)
 	if err != nil {
@@ -244,6 +251,7 @@ func (s *Service) sendMessageInternal(
 	runState.bind(&userMessage, &assistantMessage, &traceRecorder, &result, ctx)
 	defer func() {
 		if retErr != nil {
+			retainedOutput := false
 			if errors.Is(retErr, ErrMessageGenerationCanceled) || llm.RequestWasAccepted(retErr) {
 				if usage, ok := s.recoverOpenAIResponsesBackgroundUsage(responsesBackgroundRouteConfig, responsesBackgroundRecovery); ok {
 					responsesBackgroundUsageRecovered = true
@@ -274,7 +282,30 @@ func (s *Service) sendMessageInternal(
 				ReuseUserMessage:       reuseUserMessage,
 			}); retained != nil {
 				result = retained
+				retainedOutput = true
 				applyRetainedGenerationRunUsage(run, retained, len(toolCallRows), startedAt)
+			}
+			// Input checks and any retained visible output continue after
+			// cancel/interrupt/error; either surface may still block the turn.
+			if moderationCoord != nil {
+				if result == nil && userMessage != nil && assistantMessage != nil {
+					result = &SendMessageResult{
+						UserMessage:      *userMessage,
+						AssistantMessage: *assistantMessage,
+						Billable:         false,
+						StartedAt:        startedAt,
+					}
+				}
+				if result != nil && retainedOutput {
+					s.completeModerationAfterInterruption(
+						context.Background(),
+						moderationCoord,
+						result,
+						moderationOutputText(streamedText.String(), traceRecorder.upstreamThinkContent()),
+					)
+				} else {
+					s.completeModerationAfterFailure(context.Background(), moderationCoord, result)
+				}
 			}
 		}
 		runState.finalize(ctx, retErr)
@@ -315,6 +346,7 @@ func (s *Service) sendMessageInternal(
 	userMessage = pair.user
 	assistantMessage = pair.assistant
 	traceRecorder = newMessageTraceRecorder(s, ctx, assistantMessage, input.OnEvent)
+	moderationCoord = s.startModerationRun(ctx, input, runID, userMessage, assistantMessage, run)
 
 	if s.routeResolver == nil || s.llmClient == nil {
 		retErr = ErrModelRouteNotConfigured
@@ -375,7 +407,7 @@ func (s *Service) sendMessageInternal(
 	}
 
 	// 构建完整活跃分支路径；压缩裁剪先于模型预算截断，避免摘要和全量历史重复发送。
-	contextMessages := buildBranchMessagePath(branchState, userMessage)
+	contextMessages := filterBlockedMessages(buildBranchMessagePath(branchState, userMessage))
 	cfg := s.cfg.Snapshot()
 	compactPolicy := s.resolveContextCompactionPolicy(ctx, cfg, input.UserID)
 
@@ -867,6 +899,9 @@ func (s *Service) sendMessageInternal(
 	var credentialAttemptsForRun []credentialWrite
 	var credentialWritesForRun []credentialWrite
 	runGenerate := func(currentInput llm.GenerateInput) (*llm.GenerateOutput, error) {
+		if traceRecorder != nil {
+			traceRecorder.beginGenerationCall()
+		}
 		attemptObservation := &generationAttemptObservation{}
 		lastGenerationAttemptObservation = attemptObservation
 		tagScanner := newReadFileTagScanner()
@@ -1921,6 +1956,7 @@ func (s *Service) sendMessageInternal(
 		Route:                     resolvedRoute,
 		ReuseUserMessage:          reuseUserMessage,
 		SkipUserMessageEmbedding:  credentialAttemptedForRun,
+		SkipEmbed:                 moderationCoord != nil,
 	})
 	platformtracing.RecordError(persistSpan, err)
 	persistSpan.End()
@@ -1990,7 +2026,7 @@ func (s *Service) sendMessageInternal(
 		metadataRefreshHint = s.resolveConversationMetadataRefreshHint(ctx, *conversation, *userMessage)
 	}
 
-	return &SendMessageResult{
+	result = &SendMessageResult{
 		UserMessage:           *userMessage,
 		AssistantMessage:      *assistantMessage,
 		MetadataRefreshHint:   metadataRefreshHint,
@@ -2011,5 +2047,19 @@ func (s *Service) sendMessageInternal(
 		LatencyMS:             time.Since(startedAt).Milliseconds(),
 		StartedAt:             startedAt,
 		postBillingCompaction: postBillingCompaction,
-	}, nil
+	}
+	// Soft moderation barrier: show checking, then block or pass.
+	if moderationCoord != nil {
+		outputImages := s.loadOutputImagesForModeration(ctx, moderationCoord, input.UserID, assistantMessage.Attachments)
+		s.completeModerationAfterSuccess(
+			ctx,
+			moderationCoord,
+			result,
+			moderationOutputText(assistantText, assistantReasoningContent, traceRecorder.upstreamThinkContent()),
+			outputImages,
+			input,
+			reuseUserMessage,
+		)
+	}
+	return result, nil
 }

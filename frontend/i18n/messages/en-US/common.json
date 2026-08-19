@@ -113,6 +113,7 @@
   },
   "runtime": {
     "status": {
+      "available": "Available",
       "running": "Running",
       "restarting": "Restarting",
       "created": "Created",

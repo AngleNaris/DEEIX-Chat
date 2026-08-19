@@ -14,6 +14,7 @@ import (
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/embedding"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/embeddingutil"
 )
 
 // Service 封装 RAG 检索能力。
@@ -123,13 +124,14 @@ func (s *Service) RetrieveWithStatus(ctx context.Context, input RetrieveInput) (
 		fetchMultiplier = 3
 	}
 	fetchK := topK * fetchMultiplier
+	embeddingSignature := embeddingutil.ModelSignature(cfg.RAGModel, cfg.EmbeddingOutputDimensions)
 
 	var chunks []domainconversation.FileChunkSearchResult
 	var searchErr error
 	if cfg.RAGHybridEnabled {
-		chunks, searchErr = s.hybridRetrieve(ctx, input.UserID, fileObjIDs, input.Query, embeddings[0], fetchK)
+		chunks, searchErr = s.hybridRetrieve(ctx, input.UserID, fileObjIDs, input.Query, embeddings[0], embeddingSignature, fetchK)
 	} else {
-		chunks, searchErr = s.repo.SearchFileChunks(ctx, input.UserID, fileObjIDs, embeddings[0], fetchK)
+		chunks, searchErr = s.repo.SearchFileChunks(ctx, input.UserID, fileObjIDs, embeddings[0], embeddingSignature, fetchK)
 	}
 	if searchErr != nil {
 		return ragErrorResult(ctx, searchErr), fmt.Errorf("search file chunks: %w", searchErr)
@@ -408,7 +410,7 @@ func isCJKRune(r rune) bool {
 
 // hybridRetrieve 并行执行向量检索与 BM25 全文检索，使用 RRF（Reciprocal Rank Fusion）合并结果。
 // k=60 为 RRF 平滑系数，参考 Cormack et al. 2009 推荐值。
-func (s *Service) hybridRetrieve(ctx context.Context, userID uint, fileObjIDs []uint, query string, embedding []float32, topK int) ([]domainconversation.FileChunkSearchResult, error) {
+func (s *Service) hybridRetrieve(ctx context.Context, userID uint, fileObjIDs []uint, query string, embedding []float32, embeddingSignature string, topK int) ([]domainconversation.FileChunkSearchResult, error) {
 	type result struct {
 		chunks []domainconversation.FileChunkSearchResult
 		err    error
@@ -417,7 +419,7 @@ func (s *Service) hybridRetrieve(ctx context.Context, userID uint, fileObjIDs []
 	bm25Ch := make(chan result, 1)
 
 	go func() {
-		chunks, err := s.repo.SearchFileChunks(ctx, userID, fileObjIDs, embedding, topK)
+		chunks, err := s.repo.SearchFileChunks(ctx, userID, fileObjIDs, embedding, embeddingSignature, topK)
 		vecCh <- result{chunks, err}
 	}()
 	go func() {

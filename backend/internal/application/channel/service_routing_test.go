@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"testing"
+	"time"
 
 	domainchannel "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/channel"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/cache/memory"
@@ -23,6 +24,9 @@ type routeResolutionRepositoryStub struct {
 	models        map[string]domainchannel.PlatformModel
 	routesByModel map[string][]repository.ChannelUpstreamRouteRow
 	modelRows     []repository.ChannelModelListRow
+	breakerDefaults domainchannel.BreakerDefaults
+	breakerErr      error
+	breakerLoads    int
 }
 
 func (r *routeResolutionRepositoryStub) GetActiveModelByName(_ context.Context, name string) (*domainchannel.PlatformModel, error) {
@@ -129,6 +133,50 @@ func TestResolveDefaultModelSkipsStructurallyUnusableCandidate(t *testing.T) {
 	}
 }
 
+func (r *routeResolutionRepositoryStub) GetBreakerDefaults(context.Context) (domainchannel.BreakerDefaults, error) {
+	r.breakerLoads++
+	return r.breakerDefaults, r.breakerErr
+}
+
+func TestLoadBreakerDefaultsPreservesLastKnownGoodValueOnRefreshFailure(t *testing.T) {
+	repo := &routeResolutionRepositoryStub{breakerDefaults: domainchannel.BreakerDefaults{Enabled: true}}
+	service := &Service{repo: repo}
+
+	if !service.loadBreakerDefaults(t.Context()).Enabled {
+		t.Fatal("expected initial enabled breaker defaults")
+	}
+	repo.breakerErr = errors.New("database unavailable")
+	expireBreakerDefaultsCache(service)
+	if !service.loadBreakerDefaults(t.Context()).Enabled {
+		t.Fatal("expected refresh failure to preserve last known good breaker defaults")
+	}
+	if repo.breakerLoads != 2 {
+		t.Fatalf("breaker defaults loaded %d times, want 2", repo.breakerLoads)
+	}
+}
+
+func TestLoadBreakerDefaultsUsesShortLivedCache(t *testing.T) {
+	repo := &routeResolutionRepositoryStub{breakerDefaults: domainchannel.BreakerDefaults{Enabled: true}}
+	service := &Service{repo: repo}
+
+	if !service.loadBreakerDefaults(t.Context()).Enabled || !service.loadBreakerDefaults(t.Context()).Enabled {
+		t.Fatal("expected enabled breaker defaults")
+	}
+	if repo.breakerLoads != 1 {
+		t.Fatalf("breaker defaults loaded %d times, want 1", repo.breakerLoads)
+	}
+	expireBreakerDefaultsCache(service)
+	if !service.loadBreakerDefaults(t.Context()).Enabled || repo.breakerLoads != 2 {
+		t.Fatalf("expected invalidation to reload defaults, loads=%d", repo.breakerLoads)
+	}
+}
+
+func expireBreakerDefaultsCache(service *Service) {
+	service.breakerDefaultsMu.Lock()
+	service.breakerDefaultsValidUntil = time.Time{}
+	service.breakerDefaultsMu.Unlock()
+}
+
 func TestResolveRouteExcludesPreviouslyAttemptedRoutes(t *testing.T) {
 	const encryptionKey = "test-data-encryption-key-32-bytes"
 	apiKeysEnc, err := encryptAPIKeys(encryptionKey, `{"strategy":"failover","keys":[{"key":"sk-test","status":"active"}]}`)
@@ -194,6 +242,63 @@ func TestResolveRouteExcludesPreviouslyAttemptedRoutes(t *testing.T) {
 	}
 	if route.RouteID != 2 {
 		t.Fatalf("ResolveRoute() route ID = %d, want 2", route.RouteID)
+	}
+}
+
+func TestResolveRouteIgnoresCircuitStateWhenBreakerDisabled(t *testing.T) {
+	const encryptionKey = "test-data-encryption-key-32-bytes"
+	apiKeysEnc, err := encryptAPIKeys(encryptionKey, `{"strategy":"failover","keys":[{"key":"sk-test","status":"active"}]}`)
+	if err != nil {
+		t.Fatalf("encryptAPIKeys() error = %v", err)
+	}
+
+	repo := &routeResolutionRepositoryStub{
+		model: domainchannel.PlatformModel{ID: 10, PlatformModelName: "test-model", AccessScope: ModelAccessScopePublic},
+		routes: []repository.ChannelUpstreamRouteRow{{
+			RouteID: 1, UpstreamModelID: 101, UpstreamID: 201, PlatformModelID: 10,
+			PlatformModelName: "test-model", ModelKindsJSON: `["chat"]`, Protocol: llm.AdapterOpenAIChatCompletions,
+			BaseURL: "https://example.com/v1", APIKeysEnc: apiKeysEnc, BindingCode: "binding", UpstreamModelName: "model", Weight: 1, RoutePriority: 1,
+		}},
+		breakerDefaults: domainchannel.BreakerDefaults{Enabled: false},
+	}
+	cache := memory.NewChannelCache(memory.New())
+	if err := cache.OpenUpstreamCircuit(t.Context(), 201); err != nil {
+		t.Fatalf("OpenUpstreamCircuit() error = %v", err)
+	}
+	service := NewService(config.Config{DataEncryptionKey: encryptionKey}, repo, nil, cache, nil)
+
+	route, err := service.ResolveRoute(t.Context(), ResolveRouteInput{PlatformModelName: "test-model", TaskType: TaskTypeChat})
+	if err != nil {
+		t.Fatalf("ResolveRoute() error = %v", err)
+	}
+	if route.RouteID != 1 {
+		t.Fatalf("ResolveRoute() route ID = %d, want 1", route.RouteID)
+	}
+}
+
+func TestResolveRouteHonorsCircuitStateWhenBreakerEnabled(t *testing.T) {
+	const encryptionKey = "test-data-encryption-key-32-bytes"
+	apiKeysEnc, err := encryptAPIKeys(encryptionKey, `{"strategy":"failover","keys":[{"key":"sk-test","status":"active"}]}`)
+	if err != nil {
+		t.Fatalf("encryptAPIKeys() error = %v", err)
+	}
+	repo := &routeResolutionRepositoryStub{
+		model: domainchannel.PlatformModel{ID: 10, PlatformModelName: "test-model", AccessScope: ModelAccessScopePublic},
+		routes: []repository.ChannelUpstreamRouteRow{{
+			RouteID: 1, UpstreamModelID: 101, UpstreamID: 201, PlatformModelID: 10,
+			PlatformModelName: "test-model", ModelKindsJSON: `["chat"]`, Protocol: llm.AdapterOpenAIChatCompletions,
+			BaseURL: "https://example.com/v1", APIKeysEnc: apiKeysEnc, BindingCode: "binding", UpstreamModelName: "model", Weight: 1, RoutePriority: 1,
+		}},
+		breakerDefaults: domainchannel.BreakerDefaults{Enabled: true},
+	}
+	cache := memory.NewChannelCache(memory.New())
+	if err := cache.OpenUpstreamCircuit(t.Context(), 201); err != nil {
+		t.Fatalf("OpenUpstreamCircuit() error = %v", err)
+	}
+	service := NewService(config.Config{DataEncryptionKey: encryptionKey}, repo, nil, cache, nil)
+
+	if _, err := service.ResolveRoute(t.Context(), ResolveRouteInput{PlatformModelName: "test-model", TaskType: TaskTypeChat}); !errors.Is(err, ErrAllRoutesUnavailable) {
+		t.Fatalf("ResolveRoute() error = %v, want ErrAllRoutesUnavailable", err)
 	}
 }
 
@@ -389,6 +494,24 @@ func TestRecordCircuitFailurePlatformModelPolicyEnforcedBeatsRouteOverride(t *te
 	}
 }
 
+func TestMarkRouteFailureDoesNotTripDisabledBreaker(t *testing.T) {
+	cache := memory.NewChannelCache(memory.New())
+	repo := &modelUpdateRepo{breakerDefaults: domainchannel.BreakerDefaults{
+		Enabled:               false,
+		ModelFailureThreshold: 1,
+		ModelDurationMin:      1,
+		ModelWindowMin:        1,
+	}}
+	service := &Service{repo: repo, cache: cache}
+	route := &ResolvedRoute{UpstreamID: 1, BindingCode: "upm_abc"}
+
+	service.MarkRouteFailure(t.Context(), route, &llm.UpstreamError{StatusCode: http.StatusBadGateway})
+
+	if open, _ := cache.QueryModelCircuitStatus(t.Context(), 1, bindingCircuitKey("upm_abc")); open {
+		t.Fatal("expected disabled breaker not to open")
+	}
+}
+
 func TestReleaseGrantedRouteProbesOnlyReleasesGrantedScopes(t *testing.T) {
 	cache := &releaseProbeCache{}
 	service := &Service{cache: cache}
@@ -443,7 +566,10 @@ func TestRouteScopeAllowsInternalModelForInternalScope(t *testing.T) {
 
 func TestApplyModelSourceCircuitStatusPrefersUpstreamCircuit(t *testing.T) {
 	cache := memory.NewChannelCache(memory.New())
-	service := &Service{cache: cache}
+	service := &Service{
+		repo:  &modelUpdateRepo{breakerDefaults: domainchannel.BreakerDefaults{Enabled: true}},
+		cache: cache,
+	}
 	ctx := context.Background()
 
 	if err := cache.OpenModelCircuit(ctx, 1, "upstream-model-upm_abc"); err != nil {

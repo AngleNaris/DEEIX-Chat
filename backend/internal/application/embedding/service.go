@@ -2,12 +2,9 @@ package embedding
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"math"
-	"strconv"
 	"strings"
 	"time"
 
@@ -16,6 +13,7 @@ import (
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
 	infraembedding "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/embedding"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/embeddingutil"
 	"go.uber.org/zap"
 )
 
@@ -138,6 +136,7 @@ func (s *Service) Trigger(fileObj domainconversation.FileObject) {
 // ProcessFile 执行 embedding 完整流程。
 func (s *Service) ProcessFile(ctx context.Context, fileObj domainconversation.FileObject) error {
 	cfg := s.snapshot()
+	embeddingSignature := ComputeModelSignature(cfg.RAGModel, cfg.EmbeddingOutputDimensions)
 	if !cfg.EmbeddingEnabled || strings.TrimSpace(cfg.RAGModel) == "" || strings.TrimSpace(cfg.EmbeddingHost) == "" {
 		return nil
 	}
@@ -168,7 +167,7 @@ func (s *Service) ProcessFile(ctx context.Context, fileObj domainconversation.Fi
 		return nil
 	}
 
-	embeddings, err := s.embedTexts(ctx, chunks)
+	embeddings, err := s.embedTextsWithConfig(ctx, chunks, cfg)
 	if err != nil {
 		_ = s.updateFileObjectEmbedStatus(ctx, fileObj, "failed", truncateError(err.Error(), 255))
 		return err
@@ -178,12 +177,13 @@ func (s *Service) ProcessFile(ctx context.Context, fileObj domainconversation.Fi
 	fileChunks := make([]domainconversation.FileChunk, 0, len(chunks))
 	for i, chunk := range chunks {
 		fileChunks = append(fileChunks, domainconversation.FileChunk{
-			FileObjID:  fileObj.ID,
-			UserID:     fileObj.UserID,
-			ChunkIndex: i,
-			Content:    chunk,
-			TokenCount: int(estimateTokens(chunk)),
-			CreatedAt:  now,
+			FileObjID:          fileObj.ID,
+			UserID:             fileObj.UserID,
+			ChunkIndex:         i,
+			Content:            chunk,
+			TokenCount:         int(estimateTokens(chunk)),
+			EmbeddingSignature: embeddingSignature,
+			CreatedAt:          now,
 		})
 	}
 	if err = s.repo.ReplaceFileChunks(ctx, fileObj.ID, fileObj.StoragePath, fileChunks, embeddings); err != nil {
@@ -192,7 +192,29 @@ func (s *Service) ProcessFile(ctx context.Context, fileObj domainconversation.Fi
 	}
 
 	_ = s.repo.UpdateFileObjectChunkCount(ctx, fileObj.ID, fileObj.StoragePath, len(fileChunks))
-	return s.repo.UpdateFileObjectEmbedStatus(ctx, fileObj.UserID, fileObj.FileID, fileObj.StoragePath, "ready", "")
+	return s.completeFileEmbedding(ctx, fileObj, embeddingSignature)
+}
+
+func (s *Service) completeFileEmbedding(ctx context.Context, fileObj domainconversation.FileObject, expectedSignature string) error {
+	const configurationChanged = "embedding configuration changed during processing"
+	if !s.embeddingSignatureCurrent(expectedSignature) {
+		return s.repo.UpdateFileObjectEmbedStatus(ctx, fileObj.UserID, fileObj.FileID, fileObj.StoragePath, "stale", configurationChanged)
+	}
+	if err := s.repo.UpdateFileObjectEmbedStatus(ctx, fileObj.UserID, fileObj.FileID, fileObj.StoragePath, "ready", ""); err != nil {
+		return err
+	}
+	// The second check closes the window where configuration changes between
+	// the first check and publishing the ready state. A later change observes
+	// a ready file and is handled by the normal global invalidation path.
+	if !s.embeddingSignatureCurrent(expectedSignature) {
+		return s.repo.UpdateFileObjectEmbedStatus(ctx, fileObj.UserID, fileObj.FileID, fileObj.StoragePath, "stale", configurationChanged)
+	}
+	return nil
+}
+
+func (s *Service) embeddingSignatureCurrent(expected string) bool {
+	cfg := s.snapshot()
+	return ComputeModelSignature(cfg.RAGModel, cfg.EmbeddingOutputDimensions) == expected
 }
 
 func (s *Service) updateFileObjectEmbedStatus(ctx context.Context, fileObj domainconversation.FileObject, status string, embedErr string) error {
@@ -266,14 +288,24 @@ func (s *Service) loadSourceText(ctx context.Context, fileObj domainconversation
 // EmbedTexts 对外暴露向量化能力，供消息历史 embedding 等场景复用。
 // 参数与返回值与内部 embedTexts 相同，失败时返回 error 而非 panic。
 func (s *Service) EmbedTexts(ctx context.Context, texts []string) ([][]float32, error) {
-	return s.embedTexts(ctx, texts)
+	embeddings, _, err := s.EmbedTextsWithSignature(ctx, texts)
+	return embeddings, err
 }
 
-func (s *Service) embedTexts(ctx context.Context, texts []string) ([][]float32, error) {
+// EmbedTextsWithSignature 使用同一份配置快照生成向量和签名，避免配置切换期间错标向量空间。
+func (s *Service) EmbedTextsWithSignature(ctx context.Context, texts []string) ([][]float32, string, error) {
+	cfg := s.snapshot()
+	embeddings, err := s.embedTextsWithConfig(ctx, texts, cfg)
+	if err != nil {
+		return nil, "", err
+	}
+	return embeddings, ComputeModelSignature(cfg.RAGModel, cfg.EmbeddingOutputDimensions), nil
+}
+
+func (s *Service) embedTextsWithConfig(ctx context.Context, texts []string, cfg config.Config) ([][]float32, error) {
 	if len(texts) == 0 {
 		return nil, nil
 	}
-	cfg := s.snapshot()
 	model := strings.TrimSpace(cfg.RAGModel)
 	host := strings.TrimSpace(cfg.EmbeddingHost)
 	if !cfg.EmbeddingEnabled {
@@ -331,9 +363,7 @@ type EmbeddingIndexStatus struct {
 // ComputeModelSignature 根据模型名和输出维度计算模型签名（格式: hex8@dims）。
 // 相同模型/维度组合始终产生相同签名，用于检测配置变更。
 func ComputeModelSignature(model string, outputDimensions int) string {
-	raw := model + "@" + strconv.Itoa(outputDimensions)
-	sum := sha256.Sum256([]byte(raw))
-	return hex.EncodeToString(sum[:4]) + "@" + strconv.Itoa(outputDimensions)
+	return embeddingutil.ModelSignature(model, outputDimensions)
 }
 
 // GetIndexStatus 返回向量索引的健康状态快照。

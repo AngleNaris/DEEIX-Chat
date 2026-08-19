@@ -251,6 +251,17 @@ export function AdminFilesSettingsPage() {
       if (fieldID === "extract.mineru_file_types") {
         next["extract.mineru_file_types"] = normalizeMinerUFileTypes(value);
       }
+      if (fieldID === "extract.ocr_engine" && value === OCR_ENGINES.MISTRAL) {
+        if (!(next["extract.mistral_ocr_base_url"] ?? "").trim()) {
+          next["extract.mistral_ocr_base_url"] = "https://api.mistral.ai/v1/ocr";
+        }
+        if (!(next["extract.mistral_ocr_model"] ?? "").trim()) {
+          next["extract.mistral_ocr_model"] = "mistral-ocr-latest";
+        }
+        if (!(next["extract.mistral_ocr_timeout_seconds"] ?? "").trim()) {
+          next["extract.mistral_ocr_timeout_seconds"] = "60";
+        }
+      }
       if ((fieldID === "file.embedding_enabled" || fieldID === "file.embedding_host" || fieldID === "file.rag_model") && !isEmbeddingServiceConfigured(next)) {
         next = {
           ...next,
@@ -374,6 +385,18 @@ export function AdminFilesSettingsPage() {
         toast.error(t("toast.saveFailed"), { description: t("validation.aliyunOCRRequired") });
         return;
       }
+      if (ocrEnabled && ocrEngine === OCR_ENGINES.MISTRAL && !draftSettingsMap["extract.mistral_ocr_base_url"]?.trim()) {
+        toast.error(t("toast.saveFailed"), { description: t("validation.mistralOCRBaseURLRequired") });
+        return;
+      }
+      if (ocrEnabled && ocrEngine === OCR_ENGINES.MISTRAL && !settingHasValue(draftSettingsMap, configuredMap, "extract.mistral_ocr_auth_token")) {
+        toast.error(t("toast.saveFailed"), { description: t("validation.mistralOCRAPIKeyRequired") });
+        return;
+      }
+      if (ocrEnabled && ocrEngine === OCR_ENGINES.MISTRAL && !draftSettingsMap["extract.mistral_ocr_model"]?.trim()) {
+        toast.error(t("toast.saveFailed"), { description: t("validation.mistralOCRModelRequired") });
+        return;
+      }
       if (ocrEnabled && ocrEngine === OCR_ENGINES.LLM && !draftSettingsMap["extract.llm_ocr_base_url"]?.trim()) {
         toast.error(t("toast.saveFailed"), { description: t("validation.llmOCRBaseURLRequired") });
         return;
@@ -486,6 +509,12 @@ export function AdminFilesSettingsPage() {
                   { namespace: "extract", key: "aliyun_ocr_region", value: nextSettingsMap["extract.aliyun_ocr_region"] ?? "cn-hangzhou" },
                   { namespace: "extract", key: "aliyun_ocr_endpoint", value: nextSettingsMap["extract.aliyun_ocr_endpoint"] ?? "ocr-api.cn-hangzhou.aliyuncs.com" },
                   { namespace: "extract", key: "aliyun_ocr_timeout_seconds", value: nextSettingsMap["extract.aliyun_ocr_timeout_seconds"] ?? "60" },
+                ]
+            : ocrEngine === OCR_ENGINES.MISTRAL
+              ? [
+                  { namespace: "extract", key: "mistral_ocr_base_url", value: nextSettingsMap["extract.mistral_ocr_base_url"] ?? "https://api.mistral.ai/v1/ocr" },
+                  { namespace: "extract", key: "mistral_ocr_model", value: nextSettingsMap["extract.mistral_ocr_model"] ?? "mistral-ocr-latest" },
+                  { namespace: "extract", key: "mistral_ocr_timeout_seconds", value: nextSettingsMap["extract.mistral_ocr_timeout_seconds"] ?? "60" },
                 ]
             : ocrEngine === OCR_ENGINES.LLM
               ? [

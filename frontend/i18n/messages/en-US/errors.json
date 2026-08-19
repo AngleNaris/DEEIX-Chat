@@ -146,6 +146,8 @@
     "agentGroupProjectImmutable": "The project of an agent group conversation cannot be changed.",
     "invalidId": "Invalid conversation ID.",
     "invalidTitle": "Invalid conversation title.",
+    "messageForkHistoryIncomplete": "This conversation is too deep or its message history is incomplete, so it cannot be forked here.",
+    "messageForkStateInvalid": "Wait for this message to finish generating before forking the conversation.",
     "noTitleableContent": "This conversation has no content that can be used to generate a title.",
     "notFound": "Conversation not found."
   },
@@ -190,6 +192,7 @@
   },
   "llm": {
     "apiKeysRequired": "API keys are required.",
+    "circuitBreakerDisabled": "Model circuit breaking is disabled. Enable it before performing this action.",
     "emptyResponse": "The model returned an empty response.",
     "invalidAdapter": "This interface protocol is not supported. Choose another protocol.",
     "invalidApiKeysConfig": "Invalid API keys configuration.",
@@ -202,6 +205,13 @@
     "invalidProtocolDefaultsConfig": "Invalid protocol defaults configuration.",
     "modelAccessDenied": "You do not have access to this model.",
     "modelRouteNotConfigured": "Model route is not configured.",
+    "modelIconInvalid": "Invalid model icon. Use a built-in icon name, an uploaded icon, or an http(s) image URL.",
+    "modelIconFileInvalid": "Invalid icon file. Only PNG, JPEG, and WebP are supported.",
+    "modelIconFileTooLarge": "The icon file cannot exceed 1 MiB.",
+    "modelIconAssetNotFound": "The icon asset no longer exists. Upload it again.",
+    "modelIconAssetInUse": "This icon is still in use. Remove its references first.",
+    "modelVendorBuiltin": "Built-in vendors cannot be deleted.",
+    "modelVendorInUse": "This vendor still has associated models. Move them first.",
     "noActiveApiKey": "No active API key is available.",
     "platformModelNameExists": "Platform model name already exists.",
     "platformModelNameRequired": "Platform model name is required.",
@@ -254,6 +264,7 @@
   },
   "payment": {
     "checkoutFailed": "Failed to create checkout.",
+    "epayGatewayInvalid": "The EPay redirect gateway URL is invalid.",
     "epayTypeUnsupported": "This EPay payment type is not supported.",
     "invalidEvent": "Invalid payment event.",
     "invalidSignature": "Invalid payment signature.",
@@ -348,5 +359,12 @@
   "userSettings": {
     "invalidValue": "Invalid user setting value.",
     "unknownKey": "Unknown user setting key."
+  },
+  "content_moderation": {
+    "blocked": "This content was blocked by safety checks.",
+    "invalid_config": "Invalid content moderation configuration.",
+    "config_required": "A complete service configuration and at least one policy category are required when content moderation is enabled.",
+    "probe_failed": "Content moderation connection test failed.",
+    "event_not_found": "Content moderation event not found."
   }
 }

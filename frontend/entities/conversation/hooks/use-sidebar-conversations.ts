@@ -476,6 +476,10 @@ export function useSidebarConversationsController({
     await loadMore();
   }, [loadMore]);
 
+  const upsertConversation = React.useCallback((incoming: ConversationDTO) => {
+    return applyConversationUpdate(incoming.publicID, incoming);
+  }, [applyConversationUpdate]);
+
   const prependNewConversation = React.useCallback(
     async (
       platformModelName?: string,
@@ -514,11 +518,9 @@ export function useSidebarConversationsController({
         roleID: roleID?.trim() || "",
         agentGroupID: groupID || undefined,
       });
-      setRecentItems((prev) => mergeUniqueByPublicID([item], prev, sortByUpdatedAtDesc));
-      publishChange({ type: "upsert", publicID: item.publicID, item });
-      return item;
+      return upsertConversation(item);
     },
-    [newConversationTitle, publishChange],
+    [newConversationTitle, upsertConversation],
   );
 
   const renameByPublicID = React.useCallback(
@@ -939,6 +941,7 @@ export function useSidebarConversationsController({
       loadMore,
       retryLoadMore,
       prependNewConversation,
+      upsertConversation,
       touchByPublicID,
       renameByPublicID,
       regenerateTitleByPublicID,
@@ -972,6 +975,7 @@ export function useSidebarConversationsController({
       projects,
       regenerateTitleByPublicID,
       updateLabelsByPublicID,
+      upsertConversation,
       recentItems,
       reorderProjects,
       retryLoadMore,

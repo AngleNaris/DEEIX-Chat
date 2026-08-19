@@ -9,14 +9,14 @@ import {
 import type { ChatModelOption, PendingAttachment } from "@/features/chat/types/chat-runtime";
 import { listAgentGroups } from "@/shared/api/agent-groups";
 import type { AgentGroupDTO } from "@/shared/api/agent-groups.types";
+import type { DynamicPromptDTO } from "@/shared/api/dynamic-prompts";
+import { listDynamicPrompts } from "@/shared/api/dynamic-prompts";
 import type { FileObjectDTO } from "@/shared/api/file.types";
 import type { MCPToolDTO } from "@/shared/api/mcp.types";
 import { listVisiblePromptPresets } from "@/shared/api/prompt-presets";
 import type { PromptPresetDTO } from "@/shared/api/prompt-presets.types";
 import { listVisibleSkills } from "@/shared/api/skills";
 import type { SkillSummaryDTO } from "@/shared/api/skills.types";
-import { listDynamicPrompts } from "@/shared/api/dynamic-prompts";
-import type { DynamicPromptDTO } from "@/shared/api/dynamic-prompts";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 import { readSessionRevision } from "@/shared/auth/session";
 
@@ -138,6 +138,7 @@ type ChatMentionMenuControllerArgs = {
   defaultFileLabel: string;
   disabled: boolean;
   draft: string;
+  maxSelectedTools: number;
   maxSelectedSkills: number;
   modelOptions: ChatModelOption[];
   selectedPrompts?: PromptPresetDTO[];
@@ -159,6 +160,7 @@ type ChatMentionMenuControllerArgs = {
   onModelCatalogRefresh?: () => void | Promise<void>;
   onSelectedToolsChange: (toolIDs: number[]) => void;
   onSkillLimitReached?: () => void;
+  onToolLimitReached?: () => void;
 };
 
 type ChatMentionTriggerQuery = {
@@ -640,6 +642,7 @@ export function useChatMentionMenu({
   defaultFileLabel,
   disabled,
   draft,
+  maxSelectedTools,
   maxSelectedSkills,
   modelOptions,
   selectedPrompts = [],
@@ -661,6 +664,7 @@ export function useChatMentionMenu({
   onModelCatalogRefresh,
   onSelectedToolsChange,
   onSkillLimitReached,
+  onToolLimitReached,
 }: ChatMentionMenuControllerArgs) {
   const menuRef = React.useRef<HTMLDivElement | null>(null);
   const menuID = React.useId();
@@ -1111,6 +1115,10 @@ export function useChatMentionMenu({
 
       if (item.kind === "tool") {
         const alreadySelected = selectedToolIDs.includes(item.tool.id);
+        if (!alreadySelected && selectedToolIDs.length >= maxSelectedTools) {
+          onToolLimitReached?.();
+          return;
+        }
         onSelectedToolsChange(
           alreadySelected
             ? selectedToolIDs.filter((toolID) => toolID !== item.tool.id)
@@ -1133,6 +1141,7 @@ export function useChatMentionMenu({
     [
       finishSelection,
       maxSelectedSkills,
+      maxSelectedTools,
       onFileSelect,
       onGroupSelect,
       onDraftChange,
@@ -1141,6 +1150,7 @@ export function useChatMentionMenu({
       onSelectedSkillsChange,
       onSkillLimitReached,
       onSelectedToolsChange,
+      onToolLimitReached,
       selectedPrompts,
       selectedSkills,
       selectedToolIDs,

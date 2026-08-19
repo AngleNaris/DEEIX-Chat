@@ -1,10 +1,7 @@
 "use client";
 
-import * as React from "react";
 import { useTranslations } from "next-intl";
-
-import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
-import { cancelMessageGeneration, listMessagesPage, resumeMessageGenerationStream } from "@/shared/api/conversation";
+import * as React from "react";
 import {
   ensureLiveGroupRunPlaceholder,
   upsertGroupRunEvent,
@@ -12,13 +9,13 @@ import {
   upsertLiveGroupRunTool,
 } from "@/features/agent-groups/model/group-run-store";
 import { buildMediaImagePreviewMarkdown } from "@/features/chat/model/media-image-preview";
-import { shouldStartGenerationResume } from "@/features/chat/model/generation-stream-recovery";
 import {
   clearLiveUpstreamThinkTrace,
   upsertLiveUpstreamThinkTrace,
 } from "@/features/chat/model/upstream-think-store";
-import { isGroupStreamAwareEvent } from "@/shared/api/conversation";
+import { cancelMessageGeneration, isGroupStreamAwareEvent, listMessagesPage, resumeMessageGenerationStream } from "@/shared/api/conversation";
 import type { MessageDTO } from "@/shared/api/conversation.types";
+import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 
 const MESSAGE_PAGE_SIZE = 100;
 
@@ -37,59 +34,15 @@ type ActiveResumeStream = {
   accessToken: string | null;
 };
 
-type ResumeTextReplayState = {
-  baseContent: string;
-  replayedContent: string;
-  visibleContent: string;
-};
-
-function appendResumedTextDelta(state: ResumeTextReplayState, delta: string): string {
-  if (!delta) {
-    return state.visibleContent;
-  }
-
-  state.replayedContent += delta;
-  const { baseContent, replayedContent } = state;
-  if (!baseContent) {
-    state.visibleContent = replayedContent;
-    return state.visibleContent;
-  }
-
-  if (
-    replayedContent === baseContent ||
-    baseContent.startsWith(replayedContent) ||
-    baseContent.includes(replayedContent)
-  ) {
-    state.visibleContent = baseContent;
-    return state.visibleContent;
-  }
-
-  if (replayedContent.startsWith(baseContent)) {
-    state.visibleContent = replayedContent;
-    return state.visibleContent;
-  }
-
-  const maxOverlapLength = Math.min(baseContent.length, replayedContent.length);
-  for (let length = maxOverlapLength; length > 0; length -= 1) {
-    if (baseContent.endsWith(replayedContent.slice(0, length))) {
-      state.visibleContent = `${baseContent}${replayedContent.slice(length)}`;
-      return state.visibleContent;
-    }
-  }
-
-  state.visibleContent = `${state.visibleContent}${delta}`;
-  return state.visibleContent;
-}
-
 export function useChatData(
   conversationID: string | null,
   {
     activeGenerationRunsRef,
-    failedGenerationRunsRef,
     isGroupConversation,
+    activeGenerationRunsRevision = 0,
   }: {
     activeGenerationRunsRef?: React.RefObject<Set<string>>;
-    failedGenerationRunsRef?: React.RefObject<Set<string>>;
+    activeGenerationRunsRevision?: number;
     // 群组会话：刷新恢复时重建群组运行占位（§16.8 正在恢复运行）。
     isGroupConversation?: boolean;
   } = {},
@@ -106,12 +59,13 @@ export function useChatData(
   });
   const [reloadToken, setReloadToken] = React.useState(0);
   const [resumingRunID, setResumingRunID] = React.useState("");
+  const [resumingActivityLabel, setResumingActivityLabel] = React.useState("");
   const stateRef = React.useRef(state);
   stateRef.current = state;
   const previousConversationIDRef = React.useRef<string | null>(conversationID);
   const resumeSeqByRunRef = React.useRef<Record<string, number>>({});
   const pendingAssistantContentRef = React.useRef("");
-  const resumeTextReplayByRunRef = React.useRef<Record<string, ResumeTextReplayState>>({});
+  const resumedTextByRunRef = React.useRef<Record<string, string>>({});
   const activeResumeStreamRef = React.useRef<ActiveResumeStream | null>(null);
   const resumedRunIDsRef = React.useRef(new Set<string>());
   const isGroupConversationRef = React.useRef(Boolean(isGroupConversation));
@@ -125,7 +79,7 @@ export function useChatData(
       return;
     }
     delete resumeSeqByRunRef.current[normalizedRunID];
-    delete resumeTextReplayByRunRef.current[normalizedRunID];
+    delete resumedTextByRunRef.current[normalizedRunID];
   }, []);
 
   React.useEffect(() => {
@@ -339,6 +293,11 @@ export function useChatData(
   }, [state.messages]);
 
   const pendingRunID = pendingAssistant?.runID?.trim() || "";
+  // revision 仅用于重新读取可变 Set；effect 只依赖当前 pending run 的实际活动状态。
+  const pendingRunIsActive = React.useMemo(
+    () => Boolean(pendingRunID && activeGenerationRunsRef?.current.has(pendingRunID)),
+    [activeGenerationRunsRef, activeGenerationRunsRevision, pendingRunID],
+  );
 
   React.useEffect(
     () => () => {
@@ -355,14 +314,13 @@ export function useChatData(
   }, [pendingAssistant?.content]);
 
   React.useEffect(() => {
-    const shouldResume = shouldStartGenerationResume({
-      conversationID,
-      pendingRunID,
-      generationActive: Boolean(activeGenerationRunsRef?.current.has(pendingRunID)),
-      generationFailed: Boolean(failedGenerationRunsRef?.current.has(pendingRunID)),
-    });
-    if (!shouldResume) {
+    if (
+      !conversationID ||
+      !pendingRunID ||
+      pendingRunIsActive
+    ) {
       setResumingRunID("");
+      setResumingActivityLabel("");
       return;
     }
 
@@ -370,19 +328,15 @@ export function useChatData(
     let closed = false;
     const afterSeq = resumeSeqByRunRef.current[pendingRunID] ?? 0;
     const baseContent = pendingAssistantContentRef.current;
-    const resumeTextReplayByRun = resumeTextReplayByRunRef.current;
-    const clearResumeTextReplay = () => {
-      delete resumeTextReplayByRun[pendingRunID];
+    const resumedTextByRun = resumedTextByRunRef.current;
+    const clearResumedText = () => {
+      delete resumedTextByRun[pendingRunID];
     };
     const isResumeInactive = () => closed || controller.signal.aborted;
     const updateResumeState = (update: (current: ChatDataState) => ChatDataState) => {
       setState((current) => isResumeInactive() ? current : update(current));
     };
-    resumeTextReplayByRun[pendingRunID] = {
-      baseContent,
-      replayedContent: afterSeq > 0 ? baseContent : "",
-      visibleContent: baseContent,
-    };
+    resumedTextByRun[pendingRunID] = baseContent;
     activeResumeStreamRef.current = {
       controller,
       runID: pendingRunID,
@@ -390,6 +344,7 @@ export function useChatData(
     };
     resumedRunIDsRef.current.add(pendingRunID);
     setResumingRunID(pendingRunID);
+    setResumingActivityLabel("");
 
     async function resume() {
       try {
@@ -410,6 +365,9 @@ export function useChatData(
             resumeSeqByRunRef.current[pendingRunID] = Math.max(resumeSeqByRunRef.current[pendingRunID] ?? 0, seq);
           },
           onMediaStatus: (event) => {
+            if (isResumeInactive()) {
+              return;
+            }
             const status = event.status.trim();
             const contentType = event.content_type === "video" ? "video" : "image";
             const activityLabel =
@@ -422,11 +380,12 @@ export function useChatData(
                         contentType === "video" ? "mediaStatus.videoSavingArtifact" : "mediaStatus.savingArtifact",
                       )
                     : event.message.trim() || status;
+            setResumingActivityLabel(activityLabel);
             updateResumeState((prev) => ({
               ...prev,
               messages: prev.messages.map((message) =>
                 message.runID === pendingRunID && message.role === "assistant" && message.status === "pending"
-                  ? { ...message, activityLabel, contentType }
+                  ? { ...message, contentType }
                   : message,
               ),
             }));
@@ -435,16 +394,32 @@ export function useChatData(
             if (isResumeInactive()) {
               return;
             }
-            clearResumeTextReplay();
+            clearResumedText();
             const previewMarkdown = buildMediaImagePreviewMarkdown(event, tSubmitRef.current("imagePreviewAlt"));
             if (!previewMarkdown) {
               return;
             }
+            setResumingActivityLabel("");
             updateResumeState((prev) => ({
               ...prev,
               messages: prev.messages.map((message) =>
                 message.runID === pendingRunID && message.role === "assistant" && message.status === "pending"
-                  ? { ...message, content: previewMarkdown, contentType: "image", activityLabel: "" }
+                  ? { ...message, content: previewMarkdown, contentType: "image" }
+                  : message,
+              ),
+            }));
+          },
+          onTextSnapshot: (content) => {
+            if (isResumeInactive()) {
+              return;
+            }
+            setResumingActivityLabel("");
+            resumedTextByRun[pendingRunID] = content;
+            updateResumeState((prev) => ({
+              ...prev,
+              messages: prev.messages.map((message) =>
+                message.runID === pendingRunID && message.role === "assistant" && message.status === "pending"
+                  ? { ...message, content, contentType: "text" }
                   : message,
               ),
             }));
@@ -453,16 +428,9 @@ export function useChatData(
             if (isResumeInactive()) {
               return;
             }
-            let replayState = resumeTextReplayByRun[pendingRunID];
-            if (!replayState) {
-              replayState = {
-                baseContent: "",
-                replayedContent: "",
-                visibleContent: "",
-              };
-              resumeTextReplayByRun[pendingRunID] = replayState;
-            }
-            const nextContent = appendResumedTextDelta(replayState, delta);
+            setResumingActivityLabel("");
+            const nextContent = `${resumedTextByRun[pendingRunID] ?? ""}${delta}`;
+            resumedTextByRun[pendingRunID] = nextContent;
             updateResumeState((prev) => ({
               ...prev,
               messages: prev.messages.map((message) =>
@@ -527,17 +495,57 @@ export function useChatData(
               ),
             }));
           },
+          onModerationChecking: () => {
+            if (!isResumeInactive()) {
+              setResumingActivityLabel(tSubmitRef.current("moderationChecking"));
+            }
+          },
+          onModerationBlocked: (event) => {
+            if (isResumeInactive()) {
+              return;
+            }
+            clearResumedText();
+            setResumingActivityLabel("");
+            const categories = Array.isArray(event.categories) ? event.categories : [];
+            updateResumeState((prev) => ({
+              ...prev,
+              messages: prev.messages.map((message) =>
+                message.runID === pendingRunID && message.role === "assistant"
+                  ? {
+                      ...message,
+                      status: "blocked",
+                      content: "",
+                      contentType: "text",
+                      attachments: "[]",
+                      processTrace: undefined,
+                      errorCode: "content_moderation.blocked",
+                      errorMessage: tSubmitRef.current("moderationBlockedDescription"),
+                      moderation: {
+                        state: "blocked",
+                        direction: event.direction,
+                        eventID: event.eventID,
+                        categories,
+                      },
+                    }
+                  : message,
+              ),
+            }));
+          },
         });
-        if (!controller.signal.aborted && completed === null) {
-          reload();
-        }
-        if (!controller.signal.aborted && completed) {
-          clearResumeCheckpoint(pendingRunID);
+        if (!controller.signal.aborted) {
+          setResumingActivityLabel("");
+          if (completed) {
+            clearResumeCheckpoint(pendingRunID);
+          }
           reload();
         }
       } catch (error) {
         if (!controller.signal.aborted && error instanceof Error && error.name !== "AbortError") {
+          if ("errorCode" in error && error.errorCode === "content_moderation.blocked") {
+            clearResumeCheckpoint(pendingRunID);
+          }
           setResumingRunID("");
+          setResumingActivityLabel("");
           reload();
         }
       } finally {
@@ -546,6 +554,7 @@ export function useChatData(
         }
         if (!controller.signal.aborted && !closed) {
           setResumingRunID("");
+          setResumingActivityLabel("");
         }
       }
     }
@@ -558,16 +567,16 @@ export function useChatData(
     return () => {
       closed = true;
       controller.abort();
+      setResumingActivityLabel("");
       if (activeResumeStreamRef.current?.controller === controller) {
         activeResumeStreamRef.current = null;
       }
     };
   }, [
-    activeGenerationRunsRef,
     clearResumeCheckpoint,
     conversationID,
-    failedGenerationRunsRef,
     pendingRunID,
+    pendingRunIsActive,
     reload,
   ]);
 
@@ -575,8 +584,7 @@ export function useChatData(
     if (
       !conversationID ||
       !pendingAssistant ||
-      activeGenerationRunsRef?.current.has(pendingRunID) ||
-      failedGenerationRunsRef?.current.has(pendingRunID) ||
+      pendingRunIsActive ||
       (pendingRunID && pendingRunID === resumingRunID)
     ) {
       return;
@@ -587,7 +595,7 @@ export function useChatData(
     return () => {
       window.clearTimeout(timer);
     };
-  }, [activeGenerationRunsRef, conversationID, failedGenerationRunsRef, pendingAssistant, pendingRunID, reload, resumingRunID]);
+  }, [conversationID, pendingAssistant, pendingRunID, pendingRunIsActive, reload, resumingRunID]);
 
   return {
     ...state,
@@ -596,6 +604,7 @@ export function useChatData(
     loadAllOlderMessages,
     reload,
     replaceMessage,
+    resumingActivityLabel,
     resumingRunID,
   };
 }

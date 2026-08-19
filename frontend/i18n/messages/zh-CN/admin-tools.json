@@ -15,6 +15,10 @@
       "description": "控制模型何时以及如何调用 MCP 工具。留空使用内置默认提示词。"
     },
     "defaultPromptPlaceholder": "留空使用内置默认提示词",
+    "maxSelectedTools": {
+      "label": "单消息可选工具数量",
+      "description": "单次消息最多可选择的 MCP 工具数量。默认 32，最大 128。"
+    },
     "maxLLMCalls": {
       "label": "最大 LLM 请求次数",
       "description": "单次消息内允许的 LLM 请求总数，包含首次请求和最终总结。默认 5，最小 2。"

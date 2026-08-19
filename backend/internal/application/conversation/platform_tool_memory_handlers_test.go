@@ -35,11 +35,11 @@ func (f *fakeMemoryRecorder) ListUserMemories(ctx context.Context, userID uint) 
 	return f.items, nil
 }
 
-func (f *fakeMemoryRecorder) SearchUserMemoriesByEmbedding(ctx context.Context, userID uint, queryEmbedding []float32, topK int, minSimilarity float64) ([]domainmemory.UserMemory, error) {
+func (f *fakeMemoryRecorder) SearchUserMemoriesByEmbedding(ctx context.Context, userID uint, queryEmbedding []float32, embeddingSignature string, topK int, minSimilarity float64) ([]domainmemory.UserMemory, error) {
 	return nil, nil
 }
 
-func (f *fakeMemoryRecorder) UpsertUserMemoryEmbedding(ctx context.Context, userID uint, memoryKey string, expectedValue string, embedding []float32) error {
+func (f *fakeMemoryRecorder) UpsertUserMemoryEmbedding(ctx context.Context, userID uint, memoryKey string, expectedValue string, embedding []float32, embeddingSignature string) error {
 	return nil
 }
 

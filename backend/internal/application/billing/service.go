@@ -22,6 +22,10 @@ import (
 const (
 	defaultPageSize            = 20
 	maxPageSize                = 1000
+	defaultMonthlyUsageMonths  = 12
+	maxMonthlyUsageMonths      = 24
+	defaultDailyUsageDays      = 30
+	maxDailyUsageDays          = 90
 	publicModelPricingCacheTTL = 30 * time.Second
 	nativeToolPricingSource    = "provider_official_defaults"
 )
@@ -2444,10 +2448,10 @@ func normalizePage(page int, pageSize int) (int, int) {
 // ListMonthlyUsage 查询用户月度用量聚合。
 func (s *Service) ListMonthlyUsage(ctx context.Context, userID uint, months int) ([]domainbilling.UsageMonthlySummary, error) {
 	if months <= 0 {
-		months = 12
+		months = defaultMonthlyUsageMonths
 	}
-	if months > 24 {
-		months = 24
+	if months > maxMonthlyUsageMonths {
+		months = maxMonthlyUsageMonths
 	}
 	items, err := s.repo.ListMonthlyUsageByUser(ctx, userID, months)
 	if err != nil {
@@ -2458,7 +2462,10 @@ func (s *Service) ListMonthlyUsage(ctx context.Context, userID uint, months int)
 
 func fillMonthlyUsageSummaries(items []domainbilling.UsageMonthlySummary, months int, now time.Time) []domainbilling.UsageMonthlySummary {
 	if months <= 0 {
-		months = 12
+		months = defaultMonthlyUsageMonths
+	}
+	if months > maxMonthlyUsageMonths {
+		months = maxMonthlyUsageMonths
 	}
 	if now.IsZero() {
 		now = time.Now()
@@ -2475,7 +2482,7 @@ func fillMonthlyUsageSummaries(items []domainbilling.UsageMonthlySummary, months
 		byMonth[month.Format("2006-01")] = item
 	}
 
-	results := make([]domainbilling.UsageMonthlySummary, 0, months)
+	results := make([]domainbilling.UsageMonthlySummary, 0)
 	for month := startMonth; !month.After(currentMonth); month = month.AddDate(0, 1, 0) {
 		if item, ok := byMonth[month.Format("2006-01")]; ok {
 			results = append(results, item)
@@ -2489,10 +2496,10 @@ func fillMonthlyUsageSummaries(items []domainbilling.UsageMonthlySummary, months
 // ListDailyUsage 查询用户每日用量聚合。
 func (s *Service) ListDailyUsage(ctx context.Context, userID uint, days int, now time.Time) ([]domainbilling.UsageDailySummary, error) {
 	if days <= 0 {
-		days = 30
+		days = defaultDailyUsageDays
 	}
-	if days > 90 {
-		days = 90
+	if days > maxDailyUsageDays {
+		days = maxDailyUsageDays
 	}
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 	startDate := today.AddDate(0, 0, -(days - 1))
@@ -2507,7 +2514,7 @@ func (s *Service) ListDailyUsage(ctx context.Context, userID uint, days int, now
 	for _, item := range items {
 		byDate[item.UsageDate.Format("2006-01-02")] = item
 	}
-	results := make([]domainbilling.UsageDailySummary, 0, days)
+	results := make([]domainbilling.UsageDailySummary, 0)
 	for day := startDate; day.Before(endDate); day = day.AddDate(0, 0, 1) {
 		if item, ok := byDate[day.Format("2006-01-02")]; ok {
 			results = append(results, item)
@@ -2551,8 +2558,7 @@ func (s *Service) listDailyUsageBetween(ctx context.Context, userID uint, start 
 	for _, item := range items {
 		byDate[item.UsageDate.Format("2006-01-02")] = item
 	}
-	days := int(end.Sub(start).Hours() / 24)
-	results := make([]domainbilling.UsageDailySummary, 0, days)
+	results := make([]domainbilling.UsageDailySummary, 0)
 	for day := start; day.Before(end); day = day.AddDate(0, 0, 1) {
 		if item, ok := byDate[day.Format("2006-01-02")]; ok {
 			results = append(results, item)

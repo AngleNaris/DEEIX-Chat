@@ -756,6 +756,164 @@ export interface CleanupLogsResponseDoc {
   errorMsg: string;
 }
 
+export interface ContentModerationCategoryCatalogResponse {
+  image: string[];
+  text: string[];
+}
+
+export interface ContentModerationConfigDataResponse {
+  categories: ContentModerationCategoryCatalogResponse;
+  config: ContentModerationServiceConfigResponse;
+}
+
+export interface ContentModerationConfigResponseDoc {
+  data: ContentModerationConfigDataResponse;
+  errorMsg: string;
+}
+
+export interface ContentModerationConfigUpdateDataResponse {
+  config: ContentModerationServiceConfigResponse;
+}
+
+export interface ContentModerationConfigUpdateResponseDoc {
+  data: ContentModerationConfigUpdateDataResponse;
+  errorMsg: string;
+}
+
+export interface ContentModerationDailyStatResponse {
+  category: string;
+  checkCount: number;
+  contentItems: number;
+  direction: string;
+  failureCount: number;
+  hitCount: number;
+  latencyCount: number;
+  latencySumMS: number;
+  modality: string;
+  result: string;
+  statDate: string;
+}
+
+export interface ContentModerationEventDetailResponse {
+  categoryScores: Record<string, number>;
+  decryptedText?: string;
+  event: ContentModerationEventResponse;
+  images: ContentModerationIsolatedImageResponse[];
+  imagesAvailable: boolean;
+  textAvailable: boolean;
+}
+
+export interface ContentModerationEventDetailResponseDoc {
+  data: ContentModerationEventDetailResponse;
+  errorMsg: string;
+}
+
+export interface ContentModerationEventListDataResponse {
+  items: ContentModerationEventResponse[];
+  page: number;
+  pageSize: number;
+  total: number;
+}
+
+export interface ContentModerationEventListResponseDoc {
+  data: ContentModerationEventListDataResponse;
+  errorMsg: string;
+}
+
+export interface ContentModerationEventResponse {
+  categories: string[];
+  contentSummary: string;
+  conversationID: number;
+  createdAt: string;
+  direction: string;
+  errorCode: string;
+  errorMessage: string;
+  latencyMS: number;
+  messagePublicID: string;
+  modality: string;
+  model: string;
+  policyVersion: number;
+  publicID: string;
+  result: string;
+  runID: string;
+  userID: number;
+  userLabel?: string;
+  username?: string;
+}
+
+export interface ContentModerationIsolatedImageResponse {
+  sha256: string;
+  index: number;
+  mimeType: string;
+  sizeBytes: number;
+  sourceFileID?: string;
+}
+
+export interface ContentModerationPolicyRequest {
+  inputImageCategories: string[];
+  inputTextCategories: string[];
+  outputImageCategories: string[];
+  outputTextCategories: string[];
+}
+
+export interface ContentModerationPolicyResponse {
+  inputImageCategories: string[];
+  inputTextCategories: string[];
+  outputImageCategories: string[];
+  outputTextCategories: string[];
+  version: number;
+}
+
+export interface ContentModerationProbeResponse {
+  image: ContentModerationProbeResultResponse;
+  text: ContentModerationProbeResultResponse;
+}
+
+export interface ContentModerationProbeResponseDoc {
+  data: ContentModerationProbeResponse;
+  errorMsg: string;
+}
+
+export interface ContentModerationProbeResultResponse {
+  error?: string;
+  latencyMS: number;
+  model?: string;
+  valid: boolean;
+}
+
+export interface ContentModerationServiceConfigResponse {
+  apiKeyMasked?: string;
+  baseUrl: string;
+  enabled: boolean;
+  hasAPIKey: boolean;
+  maxConcurrency: number;
+  model: string;
+  policy: ContentModerationPolicyResponse;
+  queueCapacity: number;
+  timeoutSeconds: number;
+}
+
+export interface ContentModerationStatsDataResponse {
+  items: ContentModerationDailyStatResponse[];
+}
+
+export interface ContentModerationStatsResponseDoc {
+  data: ContentModerationStatsDataResponse;
+  errorMsg: string;
+}
+
+export interface ContentModerationUpdateConfigRequest {
+  apiKey?: string;
+  baseUrl?: string;
+  clearAPIKey?: boolean;
+  enabled?: boolean;
+  maxConcurrency?: number;
+  model?: string;
+  policy?: ContentModerationPolicyRequest;
+  queueCapacity?: number;
+  timeoutSeconds?: number;
+}
+
 export interface ContextArtifactResponse {
   content: string;
   createdAt: string;
@@ -1191,7 +1349,7 @@ export interface CreateModelRequest {
   /** @maxLength 10000 */
   description?: string;
   displayGroupID?: number;
-  /** @maxLength 128 */
+  /** @maxLength 2048 */
   icon?: string;
   /** @maxLength 1000 */
   kindsJSON?: string;
@@ -1798,6 +1956,13 @@ export interface MessageListResponseDoc {
   errorMsg: string;
 }
 
+export interface MessageModerationResponse {
+  categories?: string[];
+  direction?: string;
+  eventID?: string;
+  state?: string;
+}
+
 export interface MessageProcessTraceResponse {
   enabled: boolean;
   events?: MessageTraceEventResponse[];
@@ -1856,6 +2021,7 @@ export interface MessageResponse {
   latencyMS: number;
   modelIcon: string;
   modelVendor: string;
+  moderation?: MessageModerationResponse;
   myFeedback: string;
   outputTokens: number;
   parentMessageID: number | null;
@@ -1940,6 +2106,55 @@ export interface ModelDisplayGroupResponse {
   name: string;
   sortOrder: number;
   updatedAt: string;
+}
+
+export interface ModelIconAssetDeleteConflictDetails {
+  conversationRuns: number;
+  displayGroups: number;
+  models: number;
+  referenceCount: number;
+  vendors: number;
+}
+
+export interface ModelIconAssetDeleteConflictDoc {
+  data: any;
+  details: ModelIconAssetDeleteConflictDetails;
+  errorCode: string;
+  errorMsg: string;
+  requestId?: string;
+}
+
+export interface ModelIconAssetListItemResponse {
+  contentType: string;
+  createdAt: string;
+  height: number;
+  publicID: string;
+  ref: string;
+  sizeBytes: number;
+  width: number;
+}
+
+export interface ModelIconAssetListResponseDoc {
+  data: {
+    results: ModelIconAssetListItemResponse[];
+    total: number;
+  };
+  errorMsg: string;
+}
+
+export interface ModelIconAssetResponse {
+  contentType: string;
+  height: number;
+  publicID: string;
+  ref: string;
+  reused: boolean;
+  sizeBytes: number;
+  width: number;
+}
+
+export interface ModelIconAssetResponseDoc {
+  data: ModelIconAssetResponse;
+  errorMsg: string;
 }
 
 export interface ModelListResponseDoc {
@@ -2138,12 +2353,31 @@ export interface ModelVendorDataResponseDoc {
   errorMsg: string;
 }
 
+export interface ModelVendorDeleteConflictDetails {
+  models: ModelVendorReferenceResponse[];
+  reason: "built_in" | "referenced_models";
+  referenceCount: number;
+}
+
+export interface ModelVendorDeleteConflictDoc {
+  data: any;
+  details: ModelVendorDeleteConflictDetails;
+  errorCode: string;
+  errorMsg: string;
+  requestId?: string;
+}
+
 export interface ModelVendorListResponseDoc {
   data: {
     results: ModelVendorResponse[];
     total: number;
   };
   errorMsg: string;
+}
+
+export interface ModelVendorReferenceResponse {
+  id: number;
+  platformModelName: string;
 }
 
 export interface ModelVendorResponse {
@@ -3042,6 +3276,25 @@ export interface SetModelPermissionGroupsRequest {
   groupIDs?: number[];
 }
 
+export interface SetModelProtocolsRequest {
+  /**
+   * @minLength 2
+   * @maxLength 1000
+   */
+  kindsJSON: string;
+  /**
+   * @maxItems 2
+   * @minItems 1
+   * @uniqueItems true
+   */
+  protocols: string[];
+}
+
+export interface SetModelProtocolsResponseDoc {
+  data: ModelDataResponse;
+  errorMsg: string;
+}
+
 export interface SetModelsDisplayGroupRequest {
   displayGroupID: number;
   /**
@@ -3439,7 +3692,7 @@ export interface UpdateModelRequest {
   /** @maxLength 10000 */
   description?: string;
   displayGroupID?: number;
-  /** @maxLength 128 */
+  /** @maxLength 2048 */
   icon?: string;
   /** @maxLength 1000 */
   kindsJSON?: string;
@@ -3645,8 +3898,11 @@ export interface UpsertModelPricingRequest {
 }
 
 export interface UpsertUpstreamModelRequest {
+  /** @min 0 */
   cbDurationMin?: number;
+  /** @min 0 */
   cbFailureThreshold?: number;
+  /** @min 0 */
   cbWindowMin?: number;
   /** @maxLength 10000 */
   headersJSON?: string;
@@ -3658,11 +3914,20 @@ export interface UpsertUpstreamModelRequest {
    */
   platformModelName: string;
   priority?: number;
-  /** @maxLength 64 */
-  protocol?: string;
-  routeID?: number;
+  /**
+   * Protocols 为空数组时根据模型能力和上游默认配置自动推断完整协议集合。
+   * @maxItems 2
+   * @uniqueItems true
+   */
+  protocols: string[];
+  /**
+   * @maxItems 2
+   * @uniqueItems true
+   */
+  routeIDs?: number[];
   /** @maxLength 64 */
   source?: string;
+  /** 路由配置字段省略时保留已有协议各自的配置；新增协议使用服务端默认值或现有绑定模板。 */
   status?: "active" | "inactive";
   /**
    * @minLength 1
@@ -4605,6 +4870,154 @@ export namespace Admin {
   }
 
   /**
+   * No description
+   * @tags admin-content-moderation
+   * @name ContentModerationConfigList
+   * @summary Get content moderation config
+   * @request GET:/admin/content-moderation/config
+   * @secure
+   */
+  export namespace ContentModerationConfigList {
+    export type RequestParams = {};
+    export type RequestQuery = {};
+    export type RequestBody = never;
+    export type RequestHeaders = {};
+    export type ResponseBody = ContentModerationConfigResponseDoc;
+  }
+
+  /**
+   * No description
+   * @tags admin-content-moderation
+   * @name ContentModerationConfigUpdate
+   * @summary Update content moderation config
+   * @request PUT:/admin/content-moderation/config
+   * @secure
+   */
+  export namespace ContentModerationConfigUpdate {
+    export type RequestParams = {};
+    export type RequestQuery = {};
+    export type RequestBody = ContentModerationUpdateConfigRequest;
+    export type RequestHeaders = {};
+    export type ResponseBody = ContentModerationConfigUpdateResponseDoc;
+  }
+
+  /**
+   * No description
+   * @tags admin-content-moderation
+   * @name ContentModerationEventsList
+   * @summary List content moderation events
+   * @request GET:/admin/content-moderation/events
+   * @secure
+   */
+  export namespace ContentModerationEventsList {
+    export type RequestParams = {};
+    export type RequestQuery = {
+      /** Category filter */
+      category?: string;
+      /** Direction filter */
+      direction?: string;
+      /** Start time (RFC3339) */
+      from?: string;
+      /** Modality filter */
+      modality?: string;
+      /** Page number */
+      page?: number;
+      /** Page size */
+      pageSize?: number;
+      /** Exact event, user, run, model, result, or summary search */
+      query?: string;
+      /** Result filter */
+      result?: string;
+      /** Run ID */
+      runId?: string;
+      /** End time (RFC3339) */
+      to?: string;
+      /** User ID */
+      userId?: number;
+    };
+    export type RequestBody = never;
+    export type RequestHeaders = {};
+    export type ResponseBody = ContentModerationEventListResponseDoc;
+  }
+
+  /**
+   * No description
+   * @tags admin-content-moderation
+   * @name ContentModerationEventsDetail
+   * @summary Get content moderation event detail
+   * @request GET:/admin/content-moderation/events/{eventID}
+   * @secure
+   */
+  export namespace ContentModerationEventsDetail {
+    export type RequestParams = {
+      /** Moderation event ID */
+      eventId: string;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = never;
+    export type RequestHeaders = {};
+    export type ResponseBody = ContentModerationEventDetailResponseDoc;
+  }
+
+  /**
+   * No description
+   * @tags admin-content-moderation
+   * @name ContentModerationEventsImagesDetail
+   * @summary Stream a isolated moderation image
+   * @request GET:/admin/content-moderation/events/{eventID}/images/{index}
+   * @secure
+   */
+  export namespace ContentModerationEventsImagesDetail {
+    export type RequestParams = {
+      /** Moderation event ID */
+      eventId: string;
+      /** Image index */
+      index: number;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = never;
+    export type RequestHeaders = {};
+    export type ResponseBody = Blob;
+  }
+
+  /**
+   * No description
+   * @tags admin-content-moderation
+   * @name ContentModerationProbeCreate
+   * @summary Probe content moderation service
+   * @request POST:/admin/content-moderation/probe
+   * @secure
+   */
+  export namespace ContentModerationProbeCreate {
+    export type RequestParams = {};
+    export type RequestQuery = {};
+    export type RequestBody = never;
+    export type RequestHeaders = {};
+    export type ResponseBody = ContentModerationProbeResponseDoc;
+  }
+
+  /**
+   * No description
+   * @tags admin-content-moderation
+   * @name ContentModerationStatsList
+   * @summary Get content moderation daily stats
+   * @request GET:/admin/content-moderation/stats
+   * @secure
+   */
+  export namespace ContentModerationStatsList {
+    export type RequestParams = {};
+    export type RequestQuery = {
+      /** Start time (RFC3339) */
+      from?: string;
+      /** End time (RFC3339) */
+      to?: string;
+    };
+    export type RequestBody = never;
+    export type RequestHeaders = {};
+    export type ResponseBody = ContentModerationStatsResponseDoc;
+  }
+
+  /**
    * @description 管理员分页查看对话运行轨迹、工具、MCP 与处理事件
    * @tags admin
    * @name ConversationEventsList
@@ -4692,6 +5105,68 @@ export namespace Admin {
     export type RequestBody = never;
     export type RequestHeaders = {};
     export type ResponseBody = string;
+  }
+
+  /**
+   * @description 分页查询仍在图标库中的已上传图标，按上传时间倒序返回
+   * @tags llm
+   * @name LlmIconAssetsList
+   * @summary 管理员查询已上传的模型展示图标
+   * @request GET:/admin/llm/icon-assets
+   * @secure
+   */
+  export namespace LlmIconAssetsList {
+    export type RequestParams = {};
+    export type RequestQuery = {
+      /** 页码 */
+      page?: number;
+      /** 每页数量 */
+      page_size?: number;
+    };
+    export type RequestBody = never;
+    export type RequestHeaders = {};
+    export type ResponseBody = ModelIconAssetListResponseDoc;
+  }
+
+  /**
+   * @description 上传 PNG、JPEG 或 WebP 图标；后端校验内容、尺寸并按 SHA-256 去重
+   * @tags llm
+   * @name LlmIconAssetsCreate
+   * @summary 管理员上传模型展示图标
+   * @request POST:/admin/llm/icon-assets
+   * @secure
+   */
+  export namespace LlmIconAssetsCreate {
+    export type RequestParams = {};
+    export type RequestQuery = {};
+    export type RequestBody = {
+      /**
+       * 图标文件，最大 1 MiB
+       * @format binary
+       */
+      file: File;
+    };
+    export type RequestHeaders = {};
+    export type ResponseBody = ModelIconAssetResponseDoc;
+  }
+
+  /**
+   * @description 仅允许移除无引用图标；立即从图标库隐藏，持续 24 小时无引用后物理清理
+   * @tags llm
+   * @name LlmIconAssetsDelete
+   * @summary 管理员从图标库移除已上传图标
+   * @request DELETE:/admin/llm/icon-assets/{public_id}
+   * @secure
+   */
+  export namespace LlmIconAssetsDelete {
+    export type RequestParams = {
+      /** 图标公开 ID */
+      publicId: string;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = never;
+    export type RequestHeaders = {};
+    export type ResponseBody = SuccessDoc;
   }
 
   /**
@@ -4808,6 +5283,25 @@ export namespace Admin {
     export type RequestBody = CreateModelVendorRequest;
     export type RequestHeaders = {};
     export type ResponseBody = ModelVendorDataResponseDoc;
+  }
+
+  /**
+   * @description 仅允许删除未被平台模型引用的非内置厂商；冲突响应包含关联模型预览
+   * @tags llm
+   * @name LlmModelVendorsDelete
+   * @summary 管理员删除自定义模型技术厂商
+   * @request DELETE:/admin/llm/model-vendors/{key}
+   * @secure
+   */
+  export namespace LlmModelVendorsDelete {
+    export type RequestParams = {
+      /** 技术厂商 key */
+      key: string;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = never;
+    export type RequestHeaders = {};
+    export type ResponseBody = SuccessDoc;
   }
 
   /**
@@ -4966,6 +5460,25 @@ export namespace Admin {
     export type RequestBody = UpdateModelRequest;
     export type RequestHeaders = {};
     export type ResponseBody = UpdateModelResponseDoc;
+  }
+
+  /**
+   * @description 在单个数据库事务中更新平台模型能力类型，并将该模型全部上游绑定替换为指定的完整协议集合
+   * @tags llm
+   * @name LlmModelsProtocolsPartialUpdate
+   * @summary 管理员替换模型全部来源的协议集合
+   * @request PATCH:/admin/llm/models/{id}/protocols
+   * @secure
+   */
+  export namespace LlmModelsProtocolsPartialUpdate {
+    export type RequestParams = {
+      /** 模型ID */
+      id: number;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = SetModelProtocolsRequest;
+    export type RequestHeaders = {};
+    export type ResponseBody = SetModelProtocolsResponseDoc;
   }
 
   /**
@@ -7732,6 +8245,8 @@ export namespace ConversationRuns {
     export type RequestQuery = {
       /** 已接收的最后事件序号 */
       after?: number;
+      /** 是否返回可替换当前正文的权威文本快照 */
+      snapshot?: boolean;
     };
     export type RequestBody = never;
     export type RequestHeaders = {};
@@ -8053,6 +8568,27 @@ export namespace Conversations {
     export type RequestBody = SendMessageRequest;
     export type RequestHeaders = {};
     export type ResponseBody = string;
+  }
+
+  /**
+   * @description 将会话从开头到指定消息（含）的祖先链复制为一个新会话；不携带原会话的运行记录与计费，附件以引用方式复用
+   * @tags chat
+   * @name MessagesForkCreate
+   * @summary 从指定消息 fork 新会话
+   * @request POST:/conversations/{id}/messages/{message_id}/fork
+   * @secure
+   */
+  export namespace MessagesForkCreate {
+    export type RequestParams = {
+      /** 会话 public_id */
+      id: string;
+      /** 消息 public_id */
+      messageId: string;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = never;
+    export type RequestHeaders = {};
+    export type ResponseBody = ConversationUpdateResponseDoc;
   }
 
   /**
@@ -8406,6 +8942,26 @@ export namespace Files {
     export type RequestParams = {
       /** 文件ID */
       fileId: string;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = never;
+    export type RequestHeaders = {};
+    export type ResponseBody = Blob;
+  }
+}
+
+export namespace Llm {
+  /**
+   * @description 公开读取经过后端校验的不可变模型展示图标
+   * @tags llm
+   * @name IconAssetsDetail
+   * @summary 读取模型展示图标
+   * @request GET:/llm/icon-assets/{public_id}
+   */
+  export namespace IconAssetsDetail {
+    export type RequestParams = {
+      /** 图标公开 ID */
+      publicId: string;
     };
     export type RequestQuery = {};
     export type RequestBody = never;

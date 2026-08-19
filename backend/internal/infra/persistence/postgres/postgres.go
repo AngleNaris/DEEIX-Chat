@@ -9,6 +9,7 @@ import (
 
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/schema"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/vectorutil"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
@@ -456,56 +457,163 @@ func vectorBaselineRequired(cfg config.Config) bool {
 	return cfg.EmbeddingEnabled || cfg.RAGEnabled || cfg.MessageEmbeddingEnabled || cfg.SemanticContextEnabled
 }
 
-// applyVectorBaseline 确保 pgvector 扩展、向量列和检索索引存在。
+// applyVectorBaseline 确保 pgvector 扩展、统一维度的向量列和候选索引存在。
+// 物理列使用 4096 维以覆盖全部受支持的 embedding 输出；低维向量写入前补零，
+// 余弦相似度保持不变。检索先使用 4000 维 halfvec HNSW 召回候选，再按完整向量精排。
 func applyVectorBaseline(db *gorm.DB, required bool) error {
 	if err := db.Exec(`CREATE EXTENSION IF NOT EXISTS vector`).Error; err != nil {
 		return handleOptionalVectorBaselineError(required, "create pgvector extension", err)
 	}
-
-	statements := []struct {
-		name string
-		sql  string
-	}{
-		{
-			name: "add file_chunks embedding column",
-			sql:  `ALTER TABLE "file_chunks" ADD COLUMN IF NOT EXISTS embedding vector(1536)`,
-		},
-		{
-			name: "index file_chunks embedding",
-			sql: `CREATE INDEX IF NOT EXISTS idx_file_chunks_embedding
-				ON "file_chunks" USING ivfflat (embedding vector_cosine_ops)
-				WITH (lists = 100)`,
-		},
-		{
-			name: "add chat_message_chunks embedding column",
-			sql:  `ALTER TABLE "chat_message_chunks" ADD COLUMN IF NOT EXISTS embedding vector(1536)`,
-		},
-		{
-			name: "index chat_message_chunks embedding",
-			sql: `CREATE INDEX IF NOT EXISTS idx_chat_message_chunks_embedding
-				ON "chat_message_chunks" USING ivfflat (embedding vector_cosine_ops)
-				WITH (lists = 100)`,
-		},
-		{
-			name: "add user_memories embedding column",
-			sql:  `ALTER TABLE "user_memories" ADD COLUMN IF NOT EXISTS embedding vector(1536)`,
-		},
-		{
-			name: "index user_memories embedding",
-			sql: `CREATE INDEX IF NOT EXISTS idx_user_memories_embedding
-				ON "user_memories" USING ivfflat (embedding vector_cosine_ops)
-				WITH (lists = 50)`,
-		},
+	if err := requirePostgresVectorCapabilities(db); err != nil {
+		return handleOptionalVectorBaselineError(required, "validate pgvector capabilities", err)
 	}
 
-	for _, statement := range statements {
-		if err := db.Exec(statement.sql).Error; err != nil {
-			if baselineErr := handleOptionalVectorBaselineError(required, statement.name, err); baselineErr != nil {
+	specs := []struct {
+		table     string
+		column    string
+		indexName string
+	}{
+		{table: "file_chunks", column: "embedding", indexName: "idx_file_chunks_embedding"},
+		{table: "chat_message_chunks", column: "embedding", indexName: "idx_chat_message_chunks_embedding"},
+		{table: "user_memories", column: "embedding", indexName: "idx_user_memories_embedding"},
+	}
+
+	for _, spec := range specs {
+		if err := ensurePostgresVectorColumn(db, spec.table, spec.column, spec.indexName); err != nil {
+			if baselineErr := handleOptionalVectorBaselineError(required, "migrate "+spec.table+" vector storage", err); baselineErr != nil {
 				return baselineErr
 			}
 		}
 	}
 	return nil
+}
+
+func requirePostgresVectorCapabilities(db *gorm.DB) error {
+	var version string
+	if err := db.Raw(`SELECT extversion FROM pg_extension WHERE extname = 'vector'`).Scan(&version).Error; err != nil {
+		return err
+	}
+	if !postgresExtensionVersionAtLeast(version, 0, 8) {
+		return fmt.Errorf("pgvector 0.8.0 or newer is required, found %q", strings.TrimSpace(version))
+	}
+	return nil
+}
+
+func postgresExtensionVersionAtLeast(version string, requiredMajor int, requiredMinor int) bool {
+	var major, minor int
+	if matched, _ := fmt.Sscanf(strings.TrimSpace(version), "%d.%d", &major, &minor); matched != 2 {
+		return false
+	}
+	return major > requiredMajor || (major == requiredMajor && minor >= requiredMinor)
+}
+
+func ensurePostgresVectorColumn(db *gorm.DB, table string, column string, legacyIndex string) error {
+	expectedType := fmt.Sprintf("vector(%d)", vectorutil.StorageDimensions)
+	return db.Transaction(func(tx *gorm.DB) error {
+		var currentSchema string
+		if err := tx.Raw(`SELECT current_schema()`).Scan(&currentSchema).Error; err != nil {
+			return err
+		}
+		if strings.TrimSpace(currentSchema) == "" {
+			return fmt.Errorf("current PostgreSQL schema is unavailable")
+		}
+		var currentType string
+		result := tx.Raw(`
+			SELECT format_type(attribute.atttypid, attribute.atttypmod)
+			FROM pg_attribute AS attribute
+			JOIN pg_class AS relation ON relation.oid = attribute.attrelid
+			JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+			WHERE namespace.nspname = current_schema()
+			  AND relation.relname = ?
+			  AND attribute.attname = ?
+			  AND attribute.attnum > 0
+			  AND NOT attribute.attisdropped`, table, column).Scan(&currentType)
+		if result.Error != nil {
+			return result.Error
+		}
+		var indexDefinition string
+		if err := tx.Raw(`SELECT indexdef FROM pg_indexes WHERE schemaname = current_schema() AND indexname = ?`, legacyIndex).
+			Scan(&indexDefinition).Error; err != nil {
+			return err
+		}
+		indexCurrent := postgresVectorIndexMatches(indexDefinition)
+		if currentType == expectedType && indexCurrent {
+			return nil
+		}
+		if strings.TrimSpace(indexDefinition) != "" {
+			if err := tx.Exec("DROP INDEX " + postgresQualifiedIdentifier(currentSchema, legacyIndex)).Error; err != nil {
+				return err
+			}
+		}
+		if strings.TrimSpace(currentType) == "" {
+			if err := tx.Exec(fmt.Sprintf(
+				`ALTER TABLE %s ADD COLUMN %s vector(%d)`,
+				postgresQualifiedIdentifier(currentSchema, table), postgresIdentifier(column), vectorutil.StorageDimensions,
+			)).Error; err != nil {
+				return err
+			}
+		} else if currentType != expectedType {
+			if currentType != "vector" && !strings.HasPrefix(currentType, "vector(") {
+				return fmt.Errorf("%s.%s has incompatible type %s", table, column, currentType)
+			}
+			if err := tx.Exec(postgresVectorColumnMigrationSQL(currentSchema, table, column)).Error; err != nil {
+				return err
+			}
+		}
+		return tx.Exec(postgresVectorIndexSQL(currentSchema, table, column, legacyIndex)).Error
+	})
+}
+
+func postgresVectorIndexMatches(definition string) bool {
+	normalized := strings.ToLower(strings.Join(strings.Fields(definition), " "))
+	return strings.Contains(normalized, " using hnsw ") &&
+		strings.Contains(normalized, "subvector(") &&
+		strings.Contains(normalized, fmt.Sprintf("::halfvec(%d)", vectorutil.IndexDimensions)) &&
+		strings.Contains(normalized, "halfvec_cosine_ops")
+}
+
+func postgresVectorIndexSQL(schemaName string, table string, column string, indexName string) string {
+	return fmt.Sprintf(
+		`CREATE INDEX %s ON %s USING hnsw ((subvector(%s, 1, %d)::halfvec(%d)) halfvec_cosine_ops) WHERE %s IS NOT NULL`,
+		postgresIdentifier(indexName),
+		postgresQualifiedIdentifier(schemaName, table),
+		postgresIdentifier(column),
+		vectorutil.IndexDimensions,
+		vectorutil.IndexDimensions,
+		postgresIdentifier(column),
+	)
+}
+
+func postgresVectorColumnMigrationSQL(schemaName string, table string, column string) string {
+	qualifiedTable := postgresQualifiedIdentifier(schemaName, table)
+	quotedColumn := postgresIdentifier(column)
+	return fmt.Sprintf(`
+			ALTER TABLE %s
+			ALTER COLUMN %s TYPE vector(%d)
+			USING CASE
+				WHEN %s IS NULL THEN NULL
+				WHEN vector_dims(%s) = %d THEN %s::vector(%d)
+				WHEN vector_dims(%s) < %d THEN (
+					%s::real[] || array_fill(0::real, ARRAY[%d - vector_dims(%s)])
+				)::vector(%d)
+				ELSE %s::vector(%d)
+			END`,
+		qualifiedTable, quotedColumn, vectorutil.StorageDimensions,
+		quotedColumn,
+		quotedColumn, vectorutil.StorageDimensions, quotedColumn, vectorutil.StorageDimensions,
+		quotedColumn, vectorutil.StorageDimensions,
+		quotedColumn, vectorutil.StorageDimensions, quotedColumn,
+		vectorutil.StorageDimensions,
+		quotedColumn, vectorutil.StorageDimensions,
+	)
+}
+
+func postgresQualifiedIdentifier(schemaName string, name string) string {
+	return postgresIdentifier(schemaName) + "." + postgresIdentifier(name)
+}
+
+func postgresIdentifier(value string) string {
+	return `"` + strings.ReplaceAll(value, `"`, `""`) + `"`
 }
 
 func handleOptionalVectorBaselineError(required bool, operation string, err error) error {

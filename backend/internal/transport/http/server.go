@@ -21,6 +21,7 @@ import (
 	authhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/auth"
 	billinghttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/billing"
 	channelhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/channel"
+	contentmoderationhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/contentmoderation"
 	conversationhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/conversation"
 	doccardhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/doccard"
 	dynamicprompthttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/dynamicprompt"
@@ -56,27 +57,28 @@ type HealthChecker interface {
 
 // Modules 聚合可注册的业务模块。
 type Modules struct {
-	Auth          *authhttp.Module
-	AuthService   middleware.SessionValidator
-	Channel       *channelhttp.Module
-	Conversation  *conversationhttp.Module
-	AgentGroup    *agentgrouphttp.Module
-	MCP           *mcphttp.Module
-	Memory        *memoryhttp.Module
-	Billing       *billinghttp.Module
-	Admin         *adminhttp.Module
-	Announcement  *announcementhttp.Module
-	PromptPreset  *promptpresethttp.Module
-	Skill         *skillhttp.Module
-	Settings      *settingshttp.Module
-	User          *userhttp.Module
-	UserSettings  *usersettingshttp.Module
-	PlatformTools *platformtoolshttp.Module
-	Artifact      *artifacthttp.Module
-	DocCard       *doccardhttp.Module
-	DynamicPrompt *dynamicprompthttp.Module
-	Credentials   *credentialshttp.Module
-	StartupLog    func(*zap.Logger)
+	Auth              *authhttp.Module
+	AuthService       middleware.SessionValidator
+	Channel           *channelhttp.Module
+	Conversation      *conversationhttp.Module
+	AgentGroup        *agentgrouphttp.Module
+	MCP               *mcphttp.Module
+	Memory            *memoryhttp.Module
+	Billing           *billinghttp.Module
+	Admin             *adminhttp.Module
+	ContentModeration *contentmoderationhttp.Module
+	Announcement      *announcementhttp.Module
+	PromptPreset      *promptpresethttp.Module
+	Skill             *skillhttp.Module
+	Settings          *settingshttp.Module
+	User              *userhttp.Module
+	UserSettings      *usersettingshttp.Module
+	PlatformTools     *platformtoolshttp.Module
+	Artifact          *artifacthttp.Module
+	DocCard           *doccardhttp.Module
+	DynamicPrompt     *dynamicprompthttp.Module
+	Credentials       *credentialshttp.Module
+	StartupLog        func(*zap.Logger)
 }
 
 // NewEngine 创建并注册 API 路由。
@@ -124,7 +126,7 @@ func NewEngine(cfg *config.Runtime, log *zap.Logger, modules Modules, hc HealthC
 		c.Header("Pragma", "no-cache")
 		c.JSON(http.StatusOK, buildinfo.Snapshot())
 	})
-	if modules.Auth != nil || modules.Settings != nil || modules.Billing != nil || modules.Conversation != nil || modules.User != nil {
+	if modules.Auth != nil || modules.Settings != nil || modules.Billing != nil || modules.Conversation != nil || modules.User != nil || modules.Channel != nil {
 		publicAuth := api.Group("")
 		publicAuth.Use(middleware.PublicAuthRateLimit(limiter, cfg))
 		if modules.Auth != nil {
@@ -132,6 +134,9 @@ func NewEngine(cfg *config.Runtime, log *zap.Logger, modules Modules, hc HealthC
 		}
 		if modules.User != nil {
 			modules.User.RegisterPublicRoutes(publicAuth)
+		}
+		if modules.Channel != nil {
+			modules.Channel.RegisterPublicRoutes(publicAuth)
 		}
 		if modules.Conversation != nil {
 			modules.Conversation.RegisterPublicRoutes(publicAuth)
@@ -205,7 +210,7 @@ func NewEngine(cfg *config.Runtime, log *zap.Logger, modules Modules, hc HealthC
 	if modules.User != nil {
 		modules.User.RegisterRoutes(authRequired)
 	}
-	if modules.Admin != nil || modules.Auth != nil || modules.Billing != nil || modules.Channel != nil || modules.MCP != nil || modules.Settings != nil || modules.Announcement != nil || modules.PromptPreset != nil || modules.Skill != nil {
+	if modules.Admin != nil || modules.Auth != nil || modules.Billing != nil || modules.Channel != nil || modules.MCP != nil || modules.Settings != nil || modules.Announcement != nil || modules.PromptPreset != nil || modules.Skill != nil || modules.ContentModeration != nil {
 		adminGroup := authRequired.Group("/admin")
 		adminGroup.Use(middleware.AdminOnly())
 		if modules.Auth != nil {
@@ -213,6 +218,9 @@ func NewEngine(cfg *config.Runtime, log *zap.Logger, modules Modules, hc HealthC
 		}
 		if modules.Admin != nil {
 			modules.Admin.RegisterRoutes(adminGroup)
+		}
+		if modules.ContentModeration != nil {
+			modules.ContentModeration.RegisterRoutes(adminGroup)
 		}
 		if modules.Billing != nil {
 			modules.Billing.RegisterAdminRoutes(adminGroup)

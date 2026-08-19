@@ -81,6 +81,8 @@ var (
 	ErrEmbeddingUnavailable = errors.New("embedding unavailable")
 	// ErrTooManyMessageFiles 单条消息文件数超限。
 	ErrTooManyMessageFiles = errors.New("too many message files")
+	// ErrTooManySelectedTools 单条消息选择的 MCP 工具数超限。
+	ErrTooManySelectedTools = errors.New("too many selected tools")
 	// ErrMultipleImageAttachmentProcessors 单条消息不能同时选择多个图片附件处理器。
 	ErrMultipleImageAttachmentProcessors = errors.New("multiple image attachment processors selected")
 	// ErrImageAttachmentProcessingFailed 图片附件处理器调用失败。
@@ -111,6 +113,10 @@ var (
 	ErrMessageEditTargetInvalid = errors.New("invalid message edit target")
 	// ErrMessageEditStateInvalid 当前消息状态不允许编辑。
 	ErrMessageEditStateInvalid = errors.New("invalid message edit state")
+	// ErrMessageForkStateInvalid 当前消息状态不允许 fork。
+	ErrMessageForkStateInvalid = errors.New("invalid message fork state")
+	// ErrMessageForkHistoryIncomplete 消息祖先链超过安全上限或已损坏，无法完整 fork。
+	ErrMessageForkHistoryIncomplete = errors.New("message fork history incomplete")
 	// ErrModelRouteNotConfigured 模型路由未配置。
 	ErrModelRouteNotConfigured = errors.New("model route not configured")
 	// ErrModelAccessDenied 当前用户无权使用此模型。

@@ -69,6 +69,11 @@ func (h *Handler) parseSendMessageInput(c *gin.Context) (appconversation.SendMes
 	}
 	req.ClientRunID = appconversation.EnsureMessageGenerationRunID(req.ClientRunID)
 	req.Options = sanitizeMessageOptions(req.Options)
+	// 流式接口写入响应头前先拦截明显超限请求，避免后续只能用 NDJSON error 表达 400。
+	if err = h.service.ValidateSelectedToolIDs(req.SelectedToolIDs); err != nil {
+		handleSendMessageError(c, err)
+		return appconversation.SendMessageInput{}, nil, nil, err
+	}
 
 	conversation, err := h.service.GetConversationByPublicID(c.Request.Context(), userID, publicID)
 	if err != nil {
@@ -367,6 +372,8 @@ func handleSendMessageError(c *gin.Context, err error) {
 		response.Error(c, http.StatusRequestEntityTooLarge, "file too large")
 	case errors.Is(err, appconversation.ErrTooManyMessageFiles):
 		response.Error(c, http.StatusBadRequest, "too many files in one message")
+	case errors.Is(err, appconversation.ErrTooManySelectedTools):
+		response.Error(c, http.StatusBadRequest, "too many selected tools")
 	case errors.Is(err, appconversation.ErrMultipleImageAttachmentProcessors):
 		response.Error(c, http.StatusBadRequest, "multiple image attachment processors selected")
 	case errors.Is(err, appconversation.ErrImageAttachmentProcessingFailed):
@@ -542,7 +549,7 @@ func (h *Handler) StreamMessage(c *gin.Context) {
 		})
 	}
 
-	// 将中间事件（rag_search 等）通过 NDJSON 推送给客户端。
+	// 将中间事件（含 moderation_*）通过 NDJSON 推送给客户端。
 	input.OnEvent = func(eventType string, payload map[string]interface{}) error {
 		_ = flushStreamEvent(normalizeStreamEventPayload(eventType, payload))
 		return nil
@@ -555,6 +562,22 @@ func (h *Handler) StreamMessage(c *gin.Context) {
 		})
 		return nil
 	})
+	if err == nil && result != nil && result.IsModerationBlocked() {
+		// Guarantee a terminal event even if live OnEvent path missed emit.
+		if !result.ModerationTerminalEmitted() {
+			_ = flushStreamEvent(moderationBlockedStreamPayload(result))
+		}
+		if result.Billable {
+			billingCtx, billingCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			_ = h.recordAndApplySendMessageBilling(billingCtx, middleware.MustUserID(c), conversation, req, result, authorization)
+			billingCancel()
+		} else {
+			_ = h.releaseSendMessageUsageAuthorization(authorization)
+		}
+		h.service.FinishMessageGeneration(input.ClientRunID)
+		h.recordStreamSendMessageAuditAsync(c, conversation, req, result, "stream_message")
+		return
+	}
 	if err != nil {
 		if result != nil {
 			if !result.Billable {
@@ -668,6 +691,7 @@ func (h *Handler) CancelMessageGeneration(c *gin.Context) {
 // @Security BearerAuth
 // @Param run_id path string true "运行 ID"
 // @Param after query int false "已接收的最后事件序号"
+// @Param snapshot query bool false "是否返回可替换当前正文的权威文本快照"
 // @Success 200 {string} string "NDJSON stream"
 // @Failure 404 {object} ErrorDoc
 // @Router /conversation-runs/{run_id}/stream [get]
@@ -682,11 +706,13 @@ func (h *Handler) ResumeMessageGenerationStream(c *gin.Context) {
 		afterSeq = 0
 	}
 	userID := middleware.MustUserID(c)
+	includeTextSnapshot, _ := strconv.ParseBool(strings.TrimSpace(c.Query("snapshot")))
 	replay, events, unsubscribe, ok := h.service.SubscribeMessageGeneration(
 		c.Request.Context(),
 		userID,
 		runID,
 		afterSeq,
+		includeTextSnapshot,
 	)
 	if !ok {
 		h.service.MarkMessageGenerationInterrupted(c.Request.Context(), userID, runID)
@@ -703,7 +729,7 @@ func (h *Handler) ResumeMessageGenerationStream(c *gin.Context) {
 
 	isTerminal := func(payload map[string]interface{}) bool {
 		eventType, _ := payload["type"].(string)
-		return eventType == "completed" || eventType == "error"
+		return eventType == "completed" || eventType == "error" || eventType == "moderation_blocked"
 	}
 	terminalWritten := false
 	writeEvent := func(payload map[string]interface{}) bool {

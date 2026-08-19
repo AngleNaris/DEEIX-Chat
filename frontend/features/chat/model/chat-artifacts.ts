@@ -3,11 +3,11 @@ import {
   ARTIFACT_THUMBNAIL_REQUEST,
   ARTIFACT_THUMBNAIL_RESPONSE,
 } from "@/features/chat/model/artifact-thumbnail-protocol";
-import {
-  resolveArtifactPreviewKind,
-  type ArtifactPreviewKind,
-} from "@/shared/lib/artifact-preview";
 import { getBrandingSnapshot } from "@/shared/config/branding";
+import {
+  type ArtifactPreviewKind,
+  resolveArtifactPreviewKind,
+} from "@/shared/lib/artifact-preview";
 import type { HTMLVisualThemeSnapshot } from "@/shared/lib/html-visual-theme";
 
 export type { ArtifactPreviewKind } from "@/shared/lib/artifact-preview";
@@ -51,7 +51,6 @@ const ARTIFACT_CSP = [
   "connect-src 'none'",
   "manifest-src 'none'",
   "prefetch-src 'none'",
-  "navigate-to 'none'",
   "img-src data: blob:",
   "media-src data: blob:",
   "font-src data:",
@@ -364,7 +363,7 @@ body { margin: 0; font: 14px/1.5 var(--font-sans); color: var(--foreground); bac
 }
 
 export function buildArtifactPreviewDocument(
-  kind: ArtifactPreviewKind,
+  kind: Exclude<ArtifactPreviewKind, "svg">,
   code: string,
   theme: HTMLVisualThemeSnapshot,
 ): string {
@@ -376,19 +375,8 @@ export function buildArtifactPreviewDocument(
 export function resolveArtifactDownloadName(kind: ArtifactPreviewKind): string {
   if (kind === "css") return "artifact-css-preview.html";
   if (kind === "javascript") return "artifact-js-preview.html";
+  if (kind === "svg") return "artifact.svg";
   return "artifact-preview.html";
-}
-
-export function downloadArtifactHTML(fileName: string, value: string): void {
-  const blob = new Blob([value], { type: "text/html;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = fileName;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
 }
 
 export function extractArtifactsFromContent(

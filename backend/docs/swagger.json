@@ -4,7 +4,7 @@
         "description": "DEEIX Chat 后端 API 文档",
         "title": "DEEIX Chat API",
         "contact": {},
-        "version": "0.3.4"
+        "version": "0.3.5"
     },
     "basePath": "/api/v1",
     "paths": {
@@ -1353,6 +1353,293 @@
                 }
             }
         },
+        "/admin/content-moderation/config": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin-content-moderation"
+                ],
+                "summary": "Get content moderation config",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ContentModerationConfigResponseDoc"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin-content-moderation"
+                ],
+                "summary": "Update content moderation config",
+                "parameters": [
+                    {
+                        "description": "Content moderation configuration",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/ContentModerationUpdateConfigRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ContentModerationConfigUpdateResponseDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/content-moderation/events": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin-content-moderation"
+                ],
+                "summary": "List content moderation events",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Page number",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page size",
+                        "name": "pageSize",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Exact event, user, run, model, result, or summary search",
+                        "name": "query",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Result filter",
+                        "name": "result",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Direction filter",
+                        "name": "direction",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Modality filter",
+                        "name": "modality",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Category filter",
+                        "name": "category",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "User ID",
+                        "name": "userId",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Run ID",
+                        "name": "runId",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Start time (RFC3339)",
+                        "name": "from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "End time (RFC3339)",
+                        "name": "to",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ContentModerationEventListResponseDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/content-moderation/events/{eventID}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin-content-moderation"
+                ],
+                "summary": "Get content moderation event detail",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Moderation event ID",
+                        "name": "eventID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ContentModerationEventDetailResponseDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/content-moderation/events/{eventID}/images/{index}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/octet-stream"
+                ],
+                "tags": [
+                    "admin-content-moderation"
+                ],
+                "summary": "Stream a isolated moderation image",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Moderation event ID",
+                        "name": "eventID",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Image index",
+                        "name": "index",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "file"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/content-moderation/probe": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin-content-moderation"
+                ],
+                "summary": "Probe content moderation service",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ContentModerationProbeResponseDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/content-moderation/stats": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin-content-moderation"
+                ],
+                "summary": "Get content moderation daily stats",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Start time (RFC3339)",
+                        "name": "from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "End time (RFC3339)",
+                        "name": "to",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ContentModerationStatsResponseDoc"
+                        }
+                    }
+                }
+            }
+        },
         "/admin/conversation-events": {
             "get": {
                 "security": [
@@ -1593,6 +1880,150 @@
                         "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/AdminErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/llm/icon-assets": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "分页查询仍在图标库中的已上传图标，按上传时间倒序返回",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "llm"
+                ],
+                "summary": "管理员查询已上传的模型展示图标",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "页码",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "每页数量",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ModelIconAssetListResponseDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/ChannelErrorDoc"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "上传 PNG、JPEG 或 WebP 图标；后端校验内容、尺寸并按 SHA-256 去重",
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "llm"
+                ],
+                "summary": "管理员上传模型展示图标",
+                "parameters": [
+                    {
+                        "type": "file",
+                        "description": "图标文件，最大 1 MiB",
+                        "name": "file",
+                        "in": "formData",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ModelIconAssetResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/ChannelErrorDoc"
+                        }
+                    },
+                    "413": {
+                        "description": "Request Entity Too Large",
+                        "schema": {
+                            "$ref": "#/definitions/ChannelErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/ChannelErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/llm/icon-assets/{public_id}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "仅允许移除无引用图标；立即从图标库隐藏，持续 24 小时无引用后物理清理",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "llm"
+                ],
+                "summary": "管理员从图标库移除已上传图标",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "图标公开 ID",
+                        "name": "public_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/SuccessDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/ChannelErrorDoc"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/ModelIconAssetDeleteConflictDoc"
                         }
                     }
                 }
@@ -1906,6 +2337,56 @@
             }
         },
         "/admin/llm/model-vendors/{key}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "仅允许删除未被平台模型引用的非内置厂商；冲突响应包含关联模型预览",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "llm"
+                ],
+                "summary": "管理员删除自定义模型技术厂商",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "技术厂商 key",
+                        "name": "key",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/SuccessDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/ChannelErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/ChannelErrorDoc"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/ModelVendorDeleteConflictDoc"
+                        }
+                    }
+                }
+            },
             "patch": {
                 "security": [
                     {
@@ -2371,6 +2852,76 @@
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/ChannelErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/ChannelErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/llm/models/{id}/protocols": {
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "在单个数据库事务中更新平台模型能力类型，并将该模型全部上游绑定替换为指定的完整协议集合",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "llm"
+                ],
+                "summary": "管理员替换模型全部来源的协议集合",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "模型ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "完整协议集合与模型能力类型",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/SetModelProtocolsRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/SetModelProtocolsResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/ChannelErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/ChannelErrorDoc"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
                         "schema": {
                             "$ref": "#/definitions/ChannelErrorDoc"
                         }
@@ -3152,6 +3703,12 @@
                             "$ref": "#/definitions/ChannelErrorDoc"
                         }
                     },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/ChannelErrorDoc"
+                        }
+                    },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
@@ -3736,6 +4293,12 @@
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/ChannelErrorDoc"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
                         "schema": {
                             "$ref": "#/definitions/ChannelErrorDoc"
                         }
@@ -9891,6 +10454,12 @@
                         "description": "已接收的最后事件序号",
                         "name": "after",
                         "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "是否返回可替换当前正文的权威文本快照",
+                        "name": "snapshot",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -10801,6 +11370,74 @@
                     },
                     "400": {
                         "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/ConversationErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/ConversationErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/ConversationErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/conversations/{id}/messages/{message_id}/fork": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "将会话从开头到指定消息（含）的祖先链复制为一个新会话；不携带原会话的运行记录与计费，附件以引用方式复用",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "chat"
+                ],
+                "summary": "从指定消息 fork 新会话",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "会话 public_id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "消息 public_id",
+                        "name": "message_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ConversationUpdateResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/ConversationErrorDoc"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
                         "schema": {
                             "$ref": "#/definitions/ConversationErrorDoc"
                         }
@@ -11867,6 +12504,43 @@
                         "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/ConversationErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/llm/icon-assets/{public_id}": {
+            "get": {
+                "description": "公开读取经过后端校验的不可变模型展示图标",
+                "produces": [
+                    "image/png",
+                    "image/jpeg",
+                    "image/webp"
+                ],
+                "tags": [
+                    "llm"
+                ],
+                "summary": "读取模型展示图标",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "图标公开 ID",
+                        "name": "public_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/ChannelErrorDoc"
                         }
                     }
                 }
@@ -16401,6 +17075,561 @@
                 }
             }
         },
+        "ContentModerationCategoryCatalogResponse": {
+            "type": "object",
+            "required": [
+                "image",
+                "text"
+            ],
+            "properties": {
+                "image": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "text": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "ContentModerationConfigDataResponse": {
+            "type": "object",
+            "required": [
+                "categories",
+                "config"
+            ],
+            "properties": {
+                "categories": {
+                    "$ref": "#/definitions/ContentModerationCategoryCatalogResponse"
+                },
+                "config": {
+                    "$ref": "#/definitions/ContentModerationServiceConfigResponse"
+                }
+            }
+        },
+        "ContentModerationConfigResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/ContentModerationConfigDataResponse"
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "ContentModerationConfigUpdateDataResponse": {
+            "type": "object",
+            "required": [
+                "config"
+            ],
+            "properties": {
+                "config": {
+                    "$ref": "#/definitions/ContentModerationServiceConfigResponse"
+                }
+            }
+        },
+        "ContentModerationConfigUpdateResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/ContentModerationConfigUpdateDataResponse"
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "ContentModerationDailyStatResponse": {
+            "type": "object",
+            "required": [
+                "category",
+                "checkCount",
+                "contentItems",
+                "direction",
+                "failureCount",
+                "hitCount",
+                "latencyCount",
+                "latencySumMS",
+                "modality",
+                "result",
+                "statDate"
+            ],
+            "properties": {
+                "category": {
+                    "type": "string"
+                },
+                "checkCount": {
+                    "type": "integer"
+                },
+                "contentItems": {
+                    "type": "integer"
+                },
+                "direction": {
+                    "type": "string"
+                },
+                "failureCount": {
+                    "type": "integer"
+                },
+                "hitCount": {
+                    "type": "integer"
+                },
+                "latencyCount": {
+                    "type": "integer"
+                },
+                "latencySumMS": {
+                    "type": "integer"
+                },
+                "modality": {
+                    "type": "string"
+                },
+                "result": {
+                    "type": "string"
+                },
+                "statDate": {
+                    "type": "string"
+                }
+            }
+        },
+        "ContentModerationEventDetailResponse": {
+            "type": "object",
+            "required": [
+                "categoryScores",
+                "event",
+                "images",
+                "imagesAvailable",
+                "textAvailable"
+            ],
+            "properties": {
+                "categoryScores": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "number",
+                        "format": "float64"
+                    }
+                },
+                "decryptedText": {
+                    "type": "string"
+                },
+                "event": {
+                    "$ref": "#/definitions/ContentModerationEventResponse"
+                },
+                "images": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/ContentModerationIsolatedImageResponse"
+                    }
+                },
+                "imagesAvailable": {
+                    "type": "boolean"
+                },
+                "textAvailable": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "ContentModerationEventDetailResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/ContentModerationEventDetailResponse"
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "ContentModerationEventListDataResponse": {
+            "type": "object",
+            "required": [
+                "items",
+                "page",
+                "pageSize",
+                "total"
+            ],
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/ContentModerationEventResponse"
+                    }
+                },
+                "page": {
+                    "type": "integer"
+                },
+                "pageSize": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "ContentModerationEventListResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/ContentModerationEventListDataResponse"
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "ContentModerationEventResponse": {
+            "type": "object",
+            "required": [
+                "categories",
+                "contentSummary",
+                "conversationID",
+                "createdAt",
+                "direction",
+                "errorCode",
+                "errorMessage",
+                "latencyMS",
+                "messagePublicID",
+                "modality",
+                "model",
+                "policyVersion",
+                "publicID",
+                "result",
+                "runID",
+                "userID"
+            ],
+            "properties": {
+                "categories": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "contentSummary": {
+                    "type": "string"
+                },
+                "conversationID": {
+                    "type": "integer"
+                },
+                "createdAt": {
+                    "type": "string"
+                },
+                "direction": {
+                    "type": "string"
+                },
+                "errorCode": {
+                    "type": "string"
+                },
+                "errorMessage": {
+                    "type": "string"
+                },
+                "latencyMS": {
+                    "type": "integer"
+                },
+                "messagePublicID": {
+                    "type": "string"
+                },
+                "modality": {
+                    "type": "string"
+                },
+                "model": {
+                    "type": "string"
+                },
+                "policyVersion": {
+                    "type": "integer"
+                },
+                "publicID": {
+                    "type": "string"
+                },
+                "result": {
+                    "type": "string"
+                },
+                "runID": {
+                    "type": "string"
+                },
+                "userID": {
+                    "type": "integer"
+                },
+                "userLabel": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "ContentModerationIsolatedImageResponse": {
+            "type": "object",
+            "required": [
+                "index",
+                "mimeType",
+                "sha256",
+                "sizeBytes"
+            ],
+            "properties": {
+                "index": {
+                    "type": "integer"
+                },
+                "mimeType": {
+                    "type": "string"
+                },
+                "sha256": {
+                    "type": "string"
+                },
+                "sizeBytes": {
+                    "type": "integer"
+                },
+                "sourceFileID": {
+                    "type": "string"
+                }
+            }
+        },
+        "ContentModerationPolicyRequest": {
+            "type": "object",
+            "required": [
+                "inputImageCategories",
+                "inputTextCategories",
+                "outputImageCategories",
+                "outputTextCategories"
+            ],
+            "properties": {
+                "inputImageCategories": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "inputTextCategories": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "outputImageCategories": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "outputTextCategories": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "ContentModerationPolicyResponse": {
+            "type": "object",
+            "required": [
+                "inputImageCategories",
+                "inputTextCategories",
+                "outputImageCategories",
+                "outputTextCategories",
+                "version"
+            ],
+            "properties": {
+                "inputImageCategories": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "inputTextCategories": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "outputImageCategories": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "outputTextCategories": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "version": {
+                    "type": "integer"
+                }
+            }
+        },
+        "ContentModerationProbeResponse": {
+            "type": "object",
+            "required": [
+                "image",
+                "text"
+            ],
+            "properties": {
+                "image": {
+                    "$ref": "#/definitions/ContentModerationProbeResultResponse"
+                },
+                "text": {
+                    "$ref": "#/definitions/ContentModerationProbeResultResponse"
+                }
+            }
+        },
+        "ContentModerationProbeResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/ContentModerationProbeResponse"
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "ContentModerationProbeResultResponse": {
+            "type": "object",
+            "required": [
+                "latencyMS",
+                "valid"
+            ],
+            "properties": {
+                "error": {
+                    "type": "string"
+                },
+                "latencyMS": {
+                    "type": "integer"
+                },
+                "model": {
+                    "type": "string"
+                },
+                "valid": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "ContentModerationServiceConfigResponse": {
+            "type": "object",
+            "required": [
+                "baseUrl",
+                "enabled",
+                "hasAPIKey",
+                "maxConcurrency",
+                "model",
+                "policy",
+                "queueCapacity",
+                "timeoutSeconds"
+            ],
+            "properties": {
+                "apiKeyMasked": {
+                    "type": "string"
+                },
+                "baseUrl": {
+                    "type": "string"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "hasAPIKey": {
+                    "type": "boolean"
+                },
+                "maxConcurrency": {
+                    "type": "integer"
+                },
+                "model": {
+                    "type": "string"
+                },
+                "policy": {
+                    "$ref": "#/definitions/ContentModerationPolicyResponse"
+                },
+                "queueCapacity": {
+                    "type": "integer"
+                },
+                "timeoutSeconds": {
+                    "type": "integer"
+                }
+            }
+        },
+        "ContentModerationStatsDataResponse": {
+            "type": "object",
+            "required": [
+                "items"
+            ],
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/ContentModerationDailyStatResponse"
+                    }
+                }
+            }
+        },
+        "ContentModerationStatsResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/ContentModerationStatsDataResponse"
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "ContentModerationUpdateConfigRequest": {
+            "type": "object",
+            "properties": {
+                "apiKey": {
+                    "type": "string"
+                },
+                "baseUrl": {
+                    "type": "string"
+                },
+                "clearAPIKey": {
+                    "type": "boolean"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "maxConcurrency": {
+                    "type": "integer"
+                },
+                "model": {
+                    "type": "string"
+                },
+                "policy": {
+                    "$ref": "#/definitions/ContentModerationPolicyRequest"
+                },
+                "queueCapacity": {
+                    "type": "integer"
+                },
+                "timeoutSeconds": {
+                    "type": "integer"
+                }
+            }
+        },
         "ContextArtifactResponse": {
             "type": "object",
             "required": [
@@ -17851,7 +19080,7 @@
                 },
                 "icon": {
                     "type": "string",
-                    "maxLength": 128
+                    "maxLength": 2048
                 },
                 "kindsJSON": {
                     "type": "string",
@@ -19571,6 +20800,26 @@
                 }
             }
         },
+        "MessageModerationResponse": {
+            "type": "object",
+            "properties": {
+                "categories": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "direction": {
+                    "type": "string"
+                },
+                "eventID": {
+                    "type": "string"
+                },
+                "state": {
+                    "type": "string"
+                }
+            }
+        },
         "MessageProcessTraceResponse": {
             "type": "object",
             "required": [
@@ -19804,6 +21053,9 @@
                 },
                 "modelVendor": {
                     "type": "string"
+                },
+                "moderation": {
+                    "$ref": "#/definitions/MessageModerationResponse"
                 },
                 "myFeedback": {
                     "type": "string"
@@ -20078,6 +21330,172 @@
                     "type": "integer"
                 },
                 "updatedAt": {
+                    "type": "string"
+                }
+            }
+        },
+        "ModelIconAssetDeleteConflictDetails": {
+            "type": "object",
+            "required": [
+                "conversationRuns",
+                "displayGroups",
+                "models",
+                "referenceCount",
+                "vendors"
+            ],
+            "properties": {
+                "conversationRuns": {
+                    "type": "integer"
+                },
+                "displayGroups": {
+                    "type": "integer"
+                },
+                "models": {
+                    "type": "integer"
+                },
+                "referenceCount": {
+                    "type": "integer"
+                },
+                "vendors": {
+                    "type": "integer"
+                }
+            }
+        },
+        "ModelIconAssetDeleteConflictDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "details",
+                "errorCode",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {},
+                "details": {
+                    "$ref": "#/definitions/ModelIconAssetDeleteConflictDetails"
+                },
+                "errorCode": {
+                    "type": "string"
+                },
+                "errorMsg": {
+                    "type": "string"
+                },
+                "requestId": {
+                    "type": "string"
+                }
+            }
+        },
+        "ModelIconAssetListItemResponse": {
+            "type": "object",
+            "required": [
+                "contentType",
+                "createdAt",
+                "height",
+                "publicID",
+                "ref",
+                "sizeBytes",
+                "width"
+            ],
+            "properties": {
+                "contentType": {
+                    "type": "string"
+                },
+                "createdAt": {
+                    "type": "string"
+                },
+                "height": {
+                    "type": "integer"
+                },
+                "publicID": {
+                    "type": "string"
+                },
+                "ref": {
+                    "type": "string"
+                },
+                "sizeBytes": {
+                    "type": "integer"
+                },
+                "width": {
+                    "type": "integer"
+                }
+            }
+        },
+        "ModelIconAssetListResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "type": "object",
+                    "required": [
+                        "results",
+                        "total"
+                    ],
+                    "properties": {
+                        "results": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/ModelIconAssetListItemResponse"
+                            }
+                        },
+                        "total": {
+                            "type": "integer"
+                        }
+                    }
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "ModelIconAssetResponse": {
+            "type": "object",
+            "required": [
+                "contentType",
+                "height",
+                "publicID",
+                "ref",
+                "reused",
+                "sizeBytes",
+                "width"
+            ],
+            "properties": {
+                "contentType": {
+                    "type": "string"
+                },
+                "height": {
+                    "type": "integer"
+                },
+                "publicID": {
+                    "type": "string"
+                },
+                "ref": {
+                    "type": "string"
+                },
+                "reused": {
+                    "type": "boolean"
+                },
+                "sizeBytes": {
+                    "type": "integer"
+                },
+                "width": {
+                    "type": "integer"
+                }
+            }
+        },
+        "ModelIconAssetResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/ModelIconAssetResponse"
+                },
+                "errorMsg": {
                     "type": "string"
                 }
             }
@@ -20792,6 +22210,56 @@
                 }
             }
         },
+        "ModelVendorDeleteConflictDetails": {
+            "type": "object",
+            "required": [
+                "models",
+                "reason",
+                "referenceCount"
+            ],
+            "properties": {
+                "models": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/ModelVendorReferenceResponse"
+                    }
+                },
+                "reason": {
+                    "type": "string",
+                    "enum": [
+                        "built_in",
+                        "referenced_models"
+                    ]
+                },
+                "referenceCount": {
+                    "type": "integer"
+                }
+            }
+        },
+        "ModelVendorDeleteConflictDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "details",
+                "errorCode",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {},
+                "details": {
+                    "$ref": "#/definitions/ModelVendorDeleteConflictDetails"
+                },
+                "errorCode": {
+                    "type": "string"
+                },
+                "errorMsg": {
+                    "type": "string"
+                },
+                "requestId": {
+                    "type": "string"
+                }
+            }
+        },
         "ModelVendorListResponseDoc": {
             "type": "object",
             "required": [
@@ -20818,6 +22286,21 @@
                     }
                 },
                 "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "ModelVendorReferenceResponse": {
+            "type": "object",
+            "required": [
+                "id",
+                "platformModelName"
+            ],
+            "properties": {
+                "id": {
+                    "type": "integer"
+                },
+                "platformModelName": {
                     "type": "string"
                 }
             }
@@ -23621,6 +25104,44 @@
                 }
             }
         },
+        "SetModelProtocolsRequest": {
+            "type": "object",
+            "required": [
+                "kindsJSON",
+                "protocols"
+            ],
+            "properties": {
+                "kindsJSON": {
+                    "type": "string",
+                    "maxLength": 1000,
+                    "minLength": 2
+                },
+                "protocols": {
+                    "type": "array",
+                    "maxItems": 2,
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "SetModelProtocolsResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/ModelDataResponse"
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
         "SetModelsDisplayGroupRequest": {
             "type": "object",
             "required": [
@@ -24830,7 +26351,7 @@
                 },
                 "icon": {
                     "type": "string",
-                    "maxLength": 128
+                    "maxLength": 2048
                 },
                 "kindsJSON": {
                     "type": "string",
@@ -25334,17 +26855,21 @@
             "type": "object",
             "required": [
                 "platformModelName",
+                "protocols",
                 "upstreamModelName"
             ],
             "properties": {
                 "cbDurationMin": {
-                    "type": "integer"
+                    "type": "integer",
+                    "minimum": 0
                 },
                 "cbFailureThreshold": {
-                    "type": "integer"
+                    "type": "integer",
+                    "minimum": 0
                 },
                 "cbWindowMin": {
-                    "type": "integer"
+                    "type": "integer",
+                    "minimum": 0
                 },
                 "headersJSON": {
                     "type": "string",
@@ -25362,18 +26887,29 @@
                 "priority": {
                     "type": "integer"
                 },
-                "protocol": {
-                    "type": "string",
-                    "maxLength": 64
+                "protocols": {
+                    "description": "Protocols 为空数组时根据模型能力和上游默认配置自动推断完整协议集合。",
+                    "type": "array",
+                    "maxItems": 2,
+                    "uniqueItems": true,
+                    "items": {
+                        "type": "string"
+                    }
                 },
-                "routeID": {
-                    "type": "integer"
+                "routeIDs": {
+                    "type": "array",
+                    "maxItems": 2,
+                    "uniqueItems": true,
+                    "items": {
+                        "type": "integer"
+                    }
                 },
                 "source": {
                     "type": "string",
                     "maxLength": 64
                 },
                 "status": {
+                    "description": "路由配置字段省略时保留已有协议各自的配置；新增协议使用服务端默认值或现有绑定模板。",
                     "type": "string",
                     "enum": [
                         "active",

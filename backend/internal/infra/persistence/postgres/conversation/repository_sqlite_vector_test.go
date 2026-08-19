@@ -13,6 +13,7 @@ import (
 )
 
 func TestSQLiteVectorStoreSearchesFileAndMessageChunks(t *testing.T) {
+	const embeddingSignature = "test-model@3"
 	db := openConversationSQLiteVectorTestDB(t)
 	repo := NewRepo(db)
 	ctx := context.Background()
@@ -26,8 +27,8 @@ func TestSQLiteVectorStoreSearchesFileAndMessageChunks(t *testing.T) {
 	}
 
 	fileChunks := []domainconversation.FileChunk{
-		{FileObjID: 10, UserID: 1, ChunkIndex: 0, Content: "alpha search target", TokenCount: 3},
-		{FileObjID: 10, UserID: 1, ChunkIndex: 1, Content: "beta unrelated", TokenCount: 2},
+		{FileObjID: 10, UserID: 1, ChunkIndex: 0, Content: "alpha search target", TokenCount: 3, EmbeddingSignature: embeddingSignature},
+		{FileObjID: 10, UserID: 1, ChunkIndex: 1, Content: "beta unrelated", TokenCount: 2, EmbeddingSignature: embeddingSignature},
 	}
 	fileEmbeddings := [][]float32{
 		{1, 0, 0},
@@ -36,17 +37,21 @@ func TestSQLiteVectorStoreSearchesFileAndMessageChunks(t *testing.T) {
 	if err := repo.ReplaceFileChunks(ctx, 10, "", fileChunks, fileEmbeddings); err != nil {
 		t.Fatalf("ReplaceFileChunks() error = %v", err)
 	}
-	fileResults, err := repo.SearchFileChunks(ctx, 1, []uint{10}, []float32{1, 0, 0}, 2)
+	fileResults, err := repo.SearchFileChunks(ctx, 1, []uint{10}, []float32{1, 0, 0}, embeddingSignature, 2)
 	if err != nil {
 		t.Fatalf("SearchFileChunks() error = %v", err)
 	}
 	if len(fileResults) == 0 || fileResults[0].Content != "alpha search target" {
 		t.Fatalf("expected nearest file chunk first, got %#v", fileResults)
 	}
+	isolatedFileResults, err := repo.SearchFileChunks(ctx, 1, []uint{10}, []float32{1, 0, 0}, "other-model@3", 2)
+	if err != nil || len(isolatedFileResults) != 0 {
+		t.Fatalf("expected file vectors from another signature to stay hidden, got %#v, err=%v", isolatedFileResults, err)
+	}
 
 	messageChunks := []domainconversation.MessageChunk{
-		{ConversationID: 20, MessageID: 30, UserID: 1, Role: "assistant", ChunkIndex: 0, Content: "message target", TokenCount: 2},
-		{ConversationID: 20, MessageID: 31, UserID: 1, Role: "assistant", ChunkIndex: 0, Content: "message unrelated", TokenCount: 2},
+		{ConversationID: 20, MessageID: 30, UserID: 1, Role: "assistant", ChunkIndex: 0, Content: "message target", TokenCount: 2, EmbeddingSignature: embeddingSignature},
+		{ConversationID: 20, MessageID: 31, UserID: 1, Role: "assistant", ChunkIndex: 0, Content: "message unrelated", TokenCount: 2, EmbeddingSignature: embeddingSignature},
 	}
 	rootMessageID := uint(29)
 	activeMessageID := uint(30)
@@ -84,8 +89,9 @@ func TestSQLiteVectorStoreSearchesFileAndMessageChunks(t *testing.T) {
 			UserID:         1,
 			LeafMessageID:  32,
 		},
-		QueryEmbedding: []float32{1, 0, 0},
-		TopK:           1,
+		QueryEmbedding:     []float32{1, 0, 0},
+		EmbeddingSignature: embeddingSignature,
+		TopK:               1,
 	})
 	if err != nil {
 		t.Fatalf("SearchMessageChunks() error = %v", err)
@@ -101,8 +107,9 @@ func TestSQLiteVectorStoreSearchesFileAndMessageChunks(t *testing.T) {
 			LeafMessageID:           32,
 			ExcludeThroughMessageID: activeMessageID,
 		},
-		QueryEmbedding: []float32{1, 0, 0},
-		TopK:           1,
+		QueryEmbedding:     []float32{1, 0, 0},
+		EmbeddingSignature: embeddingSignature,
+		TopK:               1,
 	})
 	if err != nil {
 		t.Fatalf("SearchMessageChunks(snapshot scope) error = %v", err)

@@ -160,6 +160,7 @@ __pycache__/
 *$py.class
 
 # Backend & Frontend & Docker
+/backend/server
 storage/*
 data/*
 docs/rules/*
@@ -170,7 +171,6 @@ docker-compose.local.yml
 .DS_Store
 .idea
 .pnpm-store
-
 # Local agent workspace (never commit)
 .zcode/
 
@@ -183,3 +183,5 @@ tools/sandbox-mcp/sandbox-mcp
 # local Go build caches (dev tooling)
 .gomodcache/
 .gocache/
+
+.worktrees/

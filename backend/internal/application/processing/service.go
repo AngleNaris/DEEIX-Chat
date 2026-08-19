@@ -772,6 +772,8 @@ func resolveOCRExtractTimeout(cfg config.Config) time.Duration {
 		timeoutSeconds = cfg.ExtractTencentOCRTimeoutSeconds
 	case extraction.OCREngineAliyun:
 		timeoutSeconds = cfg.ExtractAliyunOCRTimeoutSeconds
+	case extraction.OCREngineMistral:
+		timeoutSeconds = cfg.ExtractMistralOCRTimeoutSeconds
 	case extraction.OCREngineLLM:
 		timeoutSeconds = cfg.ExtractLLMOCRTimeoutSeconds
 	default:

@@ -219,41 +219,43 @@ type MessagePromptTrace struct {
 
 // Message 表示会话消息。
 type Message struct {
-	ID               uint
-	ConversationID   uint
-	UserID           uint
-	PublicID         string
-	ParentMessageID  *uint
-	RunID            string
-	Role             string
-	ContentType      string
-	Content          string
-	ReasoningContent string
-	BranchReason     string
-	SourceMessageID  *uint
-	TokenUsage       int64
-	InputTokens      int64
-	OutputTokens     int64
-	CacheReadTokens  int64
-	CacheWriteTokens int64
-	ReasoningTokens  int64
-	LatencyMS        int64
-	BilledCurrency   string
-	BilledNanousd    int64
-	PricingSnapshot  string
-	Status           string
-	ErrorCode        string
-	ErrorMessage     string
-	Attachments      string
-	ParentPublicID   string
-	SourcePublicID   string
-	MyFeedback       string
-	ThumbsUpCount    int64
-	ThumbsDownCount  int64
-	ProcessTrace     *MessageProcessTrace
-	EditedAt         *time.Time
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
+	ID                       uint
+	ConversationID           uint
+	UserID                   uint
+	PublicID                 string
+	ParentMessageID          *uint
+	RunID                    string
+	Role                     string
+	ContentType              string
+	Content                  string
+	ReasoningContent         string
+	BranchReason             string
+	SourceMessageID          *uint
+	TokenUsage               int64
+	InputTokens              int64
+	OutputTokens             int64
+	CacheReadTokens          int64
+	CacheWriteTokens         int64
+	ReasoningTokens          int64
+	LatencyMS                int64
+	BilledCurrency           string
+	BilledNanousd            int64
+	PricingSnapshot          string
+	Status                   string
+	ErrorCode                string
+	ErrorMessage             string
+	ModerationEventID        string
+	ModerationCategoriesJSON string
+	Attachments              string
+	ParentPublicID           string
+	SourcePublicID           string
+	MyFeedback               string
+	ThumbsUpCount            int64
+	ThumbsDownCount          int64
+	ProcessTrace             *MessageProcessTrace
+	EditedAt                 *time.Time
+	CreatedAt                time.Time
+	UpdatedAt                time.Time
 }
 
 // MessageFeedback 表示消息反馈。
@@ -360,15 +362,16 @@ type FileObjectProcessing struct {
 
 // FileChunk 表示文件分片。
 type FileChunk struct {
-	ID         uint
-	FileObjID  uint
-	UserID     uint
-	ChunkIndex int
-	PageNum    int
-	CharOffset int
-	Content    string
-	TokenCount int
-	CreatedAt  time.Time
+	ID                 uint
+	FileObjID          uint
+	UserID             uint
+	ChunkIndex         int
+	PageNum            int
+	CharOffset         int
+	Content            string
+	TokenCount         int
+	EmbeddingSignature string
+	CreatedAt          time.Time
 }
 
 // FileChunkSearchResult 表示分片检索结果。
@@ -390,39 +393,42 @@ type StorageQuota struct {
 
 // Run 表示对话运行日志。
 type Run struct {
-	ID                  uint
-	RunID               string
-	RequestID           string
-	UserID              uint
-	ConversationID      uint
-	TaskType            string
-	Endpoint            string
-	Provider            string
-	ProviderProtocol    string
-	UpstreamID          uint
-	UpstreamModelID     uint
-	UpstreamName        string
-	RequestedModelName  string
-	PlatformModelName   string
-	RoutedBindingCode   string
-	ModelVendor         string
-	ModelIcon           string
-	UpstreamModelName   string
-	InputTokens         int64
-	OutputTokens        int64
-	CacheReadTokens     int64
-	CacheWriteTokens    int64
-	ReasoningTokens     int64
-	ToolCallsCount      int
-	FirstTokenLatencyMS int64
-	TotalLatencyMS      int64
-	Status              string
-	ErrorCode           string
-	ErrorMessage        string
-	StartedAt           time.Time
-	EndedAt             *time.Time
-	CreatedAt           time.Time
-	UpdatedAt           time.Time
+	ID                       uint
+	RunID                    string
+	RequestID                string
+	UserID                   uint
+	ConversationID           uint
+	TaskType                 string
+	Endpoint                 string
+	Provider                 string
+	ProviderProtocol         string
+	UpstreamID               uint
+	UpstreamModelID          uint
+	UpstreamName             string
+	RequestedModelName       string
+	PlatformModelName        string
+	RoutedBindingCode        string
+	ModelVendor              string
+	ModelIcon                string
+	UpstreamModelName        string
+	InputTokens              int64
+	OutputTokens             int64
+	CacheReadTokens          int64
+	CacheWriteTokens         int64
+	ReasoningTokens          int64
+	ToolCallsCount           int
+	FirstTokenLatencyMS      int64
+	TotalLatencyMS           int64
+	Status                   string
+	ErrorCode                string
+	ErrorMessage             string
+	ModerationState          string
+	ModerationEventID        string
+	ModerationCategoriesJSON string
+	StartedAt                time.Time
+	EndedAt                  *time.Time
+	CreatedAt                time.Time
+	UpdatedAt                time.Time
 }
 
 // MessageTrace 表示消息处理轨迹。
@@ -563,14 +569,15 @@ type RAGChunk struct {
 
 // MessageChunk 表示消息向量分片，用于历史对话语义检索。
 type MessageChunk struct {
-	ID             uint
-	ConversationID uint
-	MessageID      uint
-	UserID         uint
-	Role           string
-	ChunkIndex     int
-	Content        string
-	TokenCount     int
-	Similarity     float64 // 检索时附加的相似度分数（写入时为 0）
-	CreatedAt      time.Time
+	ID                 uint
+	ConversationID     uint
+	MessageID          uint
+	UserID             uint
+	Role               string
+	ChunkIndex         int
+	Content            string
+	TokenCount         int
+	EmbeddingSignature string
+	Similarity         float64 // 检索时附加的相似度分数（写入时为 0）
+	CreatedAt          time.Time
 }

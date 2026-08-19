@@ -1,10 +1,10 @@
 "use client";
 
+import { motion } from "motion/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import * as React from "react";
 import { toast } from "sonner";
-import { motion } from "motion/react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -40,14 +40,14 @@ import { useChatScreenshot } from "@/features/chat/hooks/use-chat-screenshot";
 import { useChatViewerProfile } from "@/features/chat/hooks/use-chat-viewer-profile";
 import { useChatVisualPrompt } from "@/features/chat/hooks/use-chat-visual-prompt";
 import { useNewConversationDefaults } from "@/features/chat/hooks/use-new-conversation-defaults";
+import { requestedResponseType } from "@/features/chat/model/chat-task";
 import {
   cloneConversationOptions,
   isConversationOptionsObject,
   sanitizeConversationOptions,
 } from "@/features/chat/model/conversation-options";
-import { toPendingAttachment } from "@/features/chat/model/message-submit";
-import { requestedResponseType } from "@/features/chat/model/chat-task";
 import { resolveImageEditSubmissionAttachments } from "@/features/chat/model/image-edit-submit";
+import { toPendingAttachment } from "@/features/chat/model/message-submit";
 import type { ChatAreaMessage, MessageAttachment } from "@/features/chat/types/messages";
 import { useSettingsChatPreferences } from "@/features/settings/hooks/use-settings-chat-preferences";
 import { cn } from "@/lib/utils";
@@ -173,9 +173,10 @@ function normalizeAvailableMCPTools(tools: MCPToolDTO[]): MCPToolDTO[] {
   });
 }
 
-function filterAvailableMCPToolIDs(toolIDs: number[], tools: MCPToolDTO[]): number[] {
+function filterAvailableMCPToolIDs(toolIDs: number[], tools: MCPToolDTO[], limit?: number): number[] {
   const availableIDs = new Set(tools.map((tool) => tool.id));
-  return toolIDs.filter((id) => availableIDs.has(id));
+  const result = toolIDs.filter((id) => availableIDs.has(id));
+  return typeof limit === "number" && limit >= 0 ? result.slice(0, limit) : result;
 }
 
 export function AppChatArea() {
@@ -265,7 +266,11 @@ export function AppChatArea() {
     [requestNewConversation, routeProjectID, routeRoleID, router],
   );
   const activeGenerationRunsRef = React.useRef<Set<string>>(new Set());
-  const failedGenerationRunsRef = React.useRef<Set<string>>(new Set());
+  // Set 的原地增删不会触发 effect，revision 用于同步断流恢复判断。
+  const [activeGenerationRunsRevision, setActiveGenerationRunsRevision] = React.useState(0);
+  const onActiveGenerationRunsChange = React.useCallback(() => {
+    setActiveGenerationRunsRevision((current) => current + 1);
+  }, []);
   const {
     autoGenerateLabels,
     defaultReasoningEffort,
@@ -279,6 +284,7 @@ export function AppChatArea() {
     prependNewConversation,
     touchByPublicID,
     renameByPublicID,
+    upsertConversation,
     regenerateTitleByPublicID,
     updateLabelsByPublicID,
     setStarByPublicID,
@@ -304,11 +310,12 @@ export function AppChatArea() {
     messages,
     reload,
     replaceMessage,
+    resumingActivityLabel,
     resumingRunID,
   } = useChatData(conversationID, {
     activeGenerationRunsRef,
-    failedGenerationRunsRef,
     isGroupConversation: Boolean(groupConversationAgentGroupID),
+    activeGenerationRunsRevision,
   });
   const { greetingTitle } = useChatViewerProfile();
   const [manualConversationTitle, setManualConversationTitle] = React.useState("");
@@ -496,6 +503,29 @@ export function AppChatArea() {
     [newConversationAgentGroupID, newConversationProjectID, newConversationRoleID, prependNewConversation],
   );
 
+  const handleConversationForked = React.useCallback(
+    async (forked: ConversationDTO) => {
+      const baseTitle = forked.title?.trim() || "";
+      let listed = false;
+      if (baseTitle) {
+        try {
+          const suffix = t("messages.forkTitle", { title: "" });
+          const title = `${Array.from(baseTitle)
+            .slice(0, Math.max(0, 255 - Array.from(suffix).length))
+            .join("")}${suffix}`;
+          listed = Boolean(await renameByPublicID(forked.publicID, title));
+        } catch {
+          listed = false;
+        }
+      }
+      if (!listed) {
+        upsertConversation(forked);
+      }
+      router.push(`/chat?conversation_id=${forked.publicID}`);
+    },
+    [renameByPublicID, router, t, upsertConversation],
+  );
+
   const {
     modelOptions,
     refreshModelCatalog,
@@ -515,6 +545,7 @@ export function AppChatArea() {
     billingDisplayCurrency,
     billingDisplayUsdToCnyRate,
     modelOptionPolicy,
+    mcpMaxSelectedTools,
     selectedPlatformModelName,
     setSelectedPlatformModelName,
   } = useChatModelOptions({
@@ -570,10 +601,11 @@ export function AppChatArea() {
           ? newConversationProject.defaultMCPToolIDs
           : defaultToolIDs,
         availableTools,
+        mcpMaxSelectedTools,
       ),
       availableTools,
     ),
-    [availableTools, defaultToolIDs, newConversationProject],
+    [availableTools, defaultToolIDs, mcpMaxSelectedTools, newConversationProject],
   );
   const newConversationDefaultSkillIDs = React.useMemo(
     () => (newConversationProject?.defaultSkillIDs ?? []).slice(0, MAX_SELECTED_SKILLS_PER_MESSAGE),
@@ -603,14 +635,14 @@ export function AppChatArea() {
       return;
     }
     const normalized = normalizeImageAttachmentProcessorSelection(
-      filterAvailableMCPToolIDs(selectedToolIDs, availableTools),
+      filterAvailableMCPToolIDs(selectedToolIDs, availableTools, mcpMaxSelectedTools),
       availableTools,
     );
     if (normalized.length === selectedToolIDs.length && normalized.every((id, index) => id === selectedToolIDs[index])) {
       return;
     }
     setSelectedToolIDs(normalized);
-  }, [availableTools, selectedToolIDs, setSelectedToolIDs, toolsLoading]);
+  }, [availableTools, mcpMaxSelectedTools, selectedToolIDs, setSelectedToolIDs, toolsLoading]);
   const htmlVisualPrompt = useChatVisualPrompt();
   const initializedOptionsModelRef = React.useRef("");
   const selectedModelDefaultOptionsRef = React.useRef<ConversationOptions>({});
@@ -728,13 +760,14 @@ export function AppChatArea() {
           filterAvailableMCPToolIDs(
             parseDefaultMCPToolIDs(settings[DEFAULT_MCP_TOOLS_SETTING_KEY]),
             tools,
+            mcpMaxSelectedTools,
           ),
           tools,
         );
         setAvailableTools(tools);
         setDefaultToolIDs(userDefaultToolIDs);
         setSelectedToolIDs((previous) => normalizeImageAttachmentProcessorSelection(
-          filterAvailableMCPToolIDs(previous, tools),
+          filterAvailableMCPToolIDs(previous, tools, mcpMaxSelectedTools),
           tools,
         ));
         setToolsErrorMsg("");
@@ -755,14 +788,14 @@ export function AppChatArea() {
     return () => {
       cancelled = true;
     };
-  }, [conversationID, setSelectedToolIDs, t, toolsReloadRevision]);
+  }, [conversationID, mcpMaxSelectedTools, setSelectedToolIDs, t, toolsReloadRevision]);
 
   const retryLoadTools = React.useCallback(() => {
     setToolsReloadRevision((revision) => revision + 1);
   }, []);
 
   const onDefaultToolIDsChange = React.useCallback(async (nextToolIDs: number[]) => {
-    const nextDefaults = filterAvailableMCPToolIDs(nextToolIDs, availableTools);
+    const nextDefaults = filterAvailableMCPToolIDs(nextToolIDs, availableTools, mcpMaxSelectedTools);
     if (hasMultipleImageAttachmentProcessors(nextDefaults, availableTools)) {
       toast.error(t("composer.mcpImageProcessorLimitTitle"), {
         description: t("composer.mcpImageProcessorLimitDescription"),
@@ -786,7 +819,7 @@ export function AppChatArea() {
         description: error instanceof Error ? error.message : t("composer.retryLater"),
       });
     }
-  }, [availableTools, defaultToolIDs, t]);
+  }, [availableTools, defaultToolIDs, mcpMaxSelectedTools, t]);
 
   const {
     uploading,
@@ -810,6 +843,7 @@ export function AppChatArea() {
     onEditAssistantMessage,
     onEditUserMessage,
     onContinueAssistantMessage,
+    onForkMessage,
     onRetryAssistantMessage,
     onRetryUserMessage,
     onSendMessage,
@@ -844,6 +878,7 @@ export function AppChatArea() {
     autoGenerateLabels,
     prependNewConversation: prependNewConversationInContext,
     onConversationCreated: setLocallyCreatedConversationID,
+    onConversationForked: handleConversationForked,
     touchByPublicID,
     reload,
     replaceMessage,
@@ -851,7 +886,9 @@ export function AppChatArea() {
     setAttachments,
     releaseAttachments,
     activeGenerationRunsRef,
-    failedGenerationRunsRef,
+    activeGenerationRunsRevision,
+    onActiveGenerationRunsChange,
+    resumingActivityLabel,
     resumingRunID,
     autoEditDismissed,
   });
@@ -1426,6 +1463,7 @@ export function AppChatArea() {
     defaultToolIDs,
     queuedMessages,
     htmlVisualPromptEnabled: htmlVisualPrompt.enabled,
+    maxSelectedTools: mcpMaxSelectedTools,
     toolsLoading,
     toolsErrorMsg,
     options: effectiveOptions,
@@ -1528,6 +1566,7 @@ export function AppChatArea() {
                   onContinueAssistantMessage={onContinueAssistantMessage}
                   onEditAssistantMessage={onEditAssistantMessage}
                   onEditUserMessage={onEditUserMessage}
+                  onForkMessage={onForkMessage}
                   modelOptions={modelOptions}
                   selectedPlatformModelName={selectedPlatformModelName}
                   onModelChange={setSelectedPlatformModelName}

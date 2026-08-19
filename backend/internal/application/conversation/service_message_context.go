@@ -1459,11 +1459,11 @@ func (s *Service) selectRelevantUserMemories(ctx context.Context, userID uint, q
 	}
 	searchCtx, cancel := context.WithTimeout(ctx, semanticRecallDeadline)
 	defer cancel()
-	embeddings, err := s.embeddingSvc.EmbedTexts(searchCtx, []string{query})
+	embeddings, embeddingSignature, err := s.embeddingSvc.EmbedTextsWithSignature(searchCtx, []string{query})
 	if err != nil || len(embeddings) == 0 {
 		return fallback
 	}
-	matches, err := s.memoryRecorder.SearchUserMemoriesByEmbedding(searchCtx, userID, embeddings[0], topK, 0.7)
+	matches, err := s.memoryRecorder.SearchUserMemoriesByEmbedding(searchCtx, userID, embeddings[0], embeddingSignature, topK, 0.7)
 	if err != nil || len(matches) == 0 {
 		return fallback
 	}

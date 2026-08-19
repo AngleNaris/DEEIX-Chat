@@ -13,13 +13,13 @@ import {
 import { useHiddenQueuedParentRuns } from "@/features/chat/hooks/use-hidden-queued-parent-runs";
 import type { ChatSubmitBlockReason } from "@/features/chat/model/chat-task";
 import { requestedResponseType, resolveChatSubmitDecision } from "@/features/chat/model/chat-task";
-import { resolveImageEditSubmissionAttachments } from "@/features/chat/model/image-edit-submit";
 import {
   buildChildrenIndex,
   parseAttachments,
   toBranchKey,
 } from "@/features/chat/model/chat-thread";
 import { sanitizeConversationOptions } from "@/features/chat/model/conversation-options";
+import { resolveImageEditSubmissionAttachments } from "@/features/chat/model/image-edit-submit";
 import { buildMediaImagePreviewMarkdown } from "@/features/chat/model/media-image-preview";
 import {
   resolveAssistantInputSideUsageValue,
@@ -47,6 +47,7 @@ import {
 import {
   type ConversationStreamOptions,
   cancelMessageGeneration,
+  forkConversationFromMessage,
   getConversation,
   isGroupStreamAwareEvent,
   streamMessage as streamConversationMessage,
@@ -478,6 +479,7 @@ export function useChatMessageSubmit({
   autoGenerateLabels,
   prependNewConversation,
   onConversationCreated,
+  onConversationForked,
   touchByPublicID,
   reload,
   replaceMessage,
@@ -502,7 +504,8 @@ export function useChatMessageSubmit({
   resetStreamBuffer,
   startStream,
   activeGenerationRunsRef,
-  failedGenerationRunsRef,
+  activeGenerationRunsRevision,
+  onActiveGenerationRunsChange,
   resumeGenerationActive = false,
   autoEditDismissed = false,
 }: {
@@ -525,6 +528,7 @@ export function useChatMessageSubmit({
   autoGenerateLabels: boolean;
   prependNewConversation: (platformModelName: string, projectID?: string, roleID?: string) => Promise<ConversationDTO | null | undefined>;
   onConversationCreated?: (conversationPublicID: string) => void;
+  onConversationForked?: (conversation: ConversationDTO) => Promise<void> | void;
   touchByPublicID: (publicID: string, patch?: Partial<ConversationDTO>) => void;
   reload: () => void;
   replaceMessage: (message: MessageDTO) => void;
@@ -549,12 +553,12 @@ export function useChatMessageSubmit({
   resetStreamBuffer: (exchangeKey?: string) => void;
   startStream: (exchangeKey: string, runID?: string) => void;
   activeGenerationRunsRef?: React.RefObject<Set<string>>;
-  failedGenerationRunsRef?: React.RefObject<Set<string>>;
+  activeGenerationRunsRevision: number;
+  onActiveGenerationRunsChange?: () => void;
   resumeGenerationActive?: boolean;
   autoEditDismissed?: boolean;
 }) {
   const t = useTranslations("chat.submit");
-  const [activeRunRevision, setActiveRunRevision] = React.useState(0);
   const activeStreamsRef = React.useRef(new Map<string, ActiveStream>());
   const conversationIDRef = React.useRef(conversationID);
   const conversationScopeKeyRef = React.useRef(conversationScopeKey);
@@ -595,7 +599,7 @@ export function useChatMessageSubmit({
           visibleMessages,
         ),
       ),
-    [activeRunRevision, conversationScopeKey, visibleBranchScopePath, visibleMessages],
+    [activeGenerationRunsRevision, conversationScopeKey, visibleBranchScopePath, visibleMessages],
   );
 
   // §16.10 输入锁：群组会话中，最后一条可见消息是暂停/阻塞的 assistant 消息时禁止发送，
@@ -626,8 +630,8 @@ export function useChatMessageSubmit({
   groupRunAwaitingActionRef.current = groupRunAwaitingAction;
 
   const syncActiveRuns = React.useCallback(() => {
-    setActiveRunRevision((current) => current + 1);
-  }, []);
+    onActiveGenerationRunsChange?.();
+  }, [onActiveGenerationRunsChange]);
 
   React.useEffect(
     () => () => {
@@ -1214,6 +1218,19 @@ export function useChatMessageSubmit({
             );
             enqueueStreamText(exchangeKey, delta);
           },
+          onTextSnapshot: (content) => {
+            // The snapshot is authoritative. Flush and clear queued deltas first so
+            // a later animation frame cannot append pre-snapshot text again.
+            flushStreamTextNow(exchangeKey);
+            updatePendingExchange(exchangeKey, (current) => ({
+              ...current,
+              assistantPending: false,
+              assistantStreaming: true,
+              assistantFileProc: false,
+              assistantActivityLabel: undefined,
+              assistantText: content,
+            }));
+          },
           onUsage: (event) => {
             updatePendingExchange(exchangeKey, (current) => ({
               ...current,
@@ -1226,6 +1243,42 @@ export function useChatMessageSubmit({
               assistantReasoningTokens:
                 event.reasoning_tokens > 0 ? event.reasoning_tokens : current.assistantReasoningTokens,
             }));
+          },
+          onModerationChecking: () => {
+            updatePendingExchange(exchangeKey, (current) => ({
+              ...current,
+              assistantFileProc: true,
+              assistantActivityLabel: t("moderationChecking"),
+            }));
+          },
+          onModerationBlocked: (event) => {
+            const categories = Array.isArray(event.categories) ? event.categories : [];
+            updatePendingExchange(exchangeKey, (current) => ({
+              ...current,
+              assistantPending: false,
+              assistantStreaming: false,
+              assistantFileProc: false,
+              assistantActivityLabel: undefined,
+              assistantText: "",
+              assistantAttachments: [],
+              assistantProcessTrace: undefined,
+              assistantStatus: "blocked",
+              assistantErrorCode: "content_moderation.blocked",
+              assistantErrorMessage: t("moderationBlocked"),
+              assistantInlineAlert: {
+                title: t("moderationBlocked"),
+                message: [
+                  t("moderationBlockedDescription"),
+                  event.eventID ? t("moderationEventId", { id: event.eventID }) : "",
+                  categories.length > 0 ? t("moderationCategories", { categories: categories.join(", ") }) : "",
+                ]
+                  .filter(Boolean)
+                  .join("\n"),
+              },
+            }));
+            toast.error(t("moderationBlocked"), {
+              description: t("moderationBlockedDescription"),
+            });
           },
         };
         modelRunSequence = (nextModelRunSequenceRef.current.get(targetConversationScopeKey) ?? 0) + 1;
@@ -1258,7 +1311,6 @@ export function useChatMessageSubmit({
               : await streamImageEdit(token, targetConversationID, mediaPayload, streamOptions);
         }
 
-        failedGenerationRunsRef?.current.delete(clientRunID);
         sentSuccessfully = true;
         flushStreamTextNow(exchangeKey);
         flushUpstreamThinkNow(exchangeKey);
@@ -1267,6 +1319,9 @@ export function useChatMessageSubmit({
         const assistantMessageSucceeded = assistantMessageStatus === "success";
         updatePendingExchange(exchangeKey, (current) => {
           const streamedText = current.assistantText;
+          const assistantMessageBlocked =
+            assistantMessageStatus.trim().toLowerCase() === "blocked" ||
+            completed.assistantMessage.errorCode === "content_moderation.blocked";
           const terminalErrorMessage = terminalStreamError
             ? resolveErrorMessage(streamEventErrorToApiError(terminalStreamError, t("retryLater")), terminalStreamError.message || t("retryLater"))
             : "";
@@ -1330,7 +1385,12 @@ export function useChatMessageSubmit({
             assistantErrorCode: completed.assistantMessage.errorCode,
             assistantErrorMessage: completed.assistantMessage.errorMessage,
             assistantInlineAlert:
-              completed.assistantMessage.status === "error" || completed.assistantMessage.status === "interrupted"
+              assistantMessageBlocked
+                ? current.assistantInlineAlert ?? {
+                    title: t("moderationBlocked"),
+                    message: t("moderationBlockedDescription"),
+                  }
+                : completed.assistantMessage.status === "error" || completed.assistantMessage.status === "interrupted"
                 ? {
                     title: t("generationInterrupted"),
                     message: terminalErrorMessage || completedErrorMessage || t("retryLater"),
@@ -1338,7 +1398,9 @@ export function useChatMessageSubmit({
                   }
                 : undefined,
             assistantText:
-              streamedText === completed.assistantMessage.content
+              assistantMessageBlocked
+                ? ""
+                : streamedText === completed.assistantMessage.content
                 ? current.assistantText
                 : completed.assistantMessage.content,
           };
@@ -1475,10 +1537,18 @@ export function useChatMessageSubmit({
           }));
           return false;
         }
+        if (error instanceof ApiError && error.errorCode === "content_moderation.blocked") {
+          // UI already updated via onModerationBlocked; settle as a soft block with retry.
+          shouldKeepConversationLayout = true;
+          releaseAttachments(effectiveAttachments);
+          if (conversationScopeKeyRef.current === targetConversationScopeKey) {
+            reload();
+          }
+          return false;
+        }
         const errorMessage = resolveErrorMessage(error, t("retryLater"));
         const errorDetails = resolveErrorDetails(error);
         const errorSummary = resolveErrorSummary(error, t("retryLater"));
-        failedGenerationRunsRef?.current.add(clientRunID);
         shouldKeepConversationLayout = true;
         if (
           resetComposer &&
@@ -1558,7 +1628,6 @@ export function useChatMessageSubmit({
       activeGenerationRunsRef,
       autoGenerateLabels,
       autoEditDismissed,
-      failedGenerationRunsRef,
       enqueueUpstreamThinkDelta,
       enqueueStreamText,
       flushStreamTextNow,
@@ -1997,7 +2066,7 @@ export function useChatMessageSubmit({
         dispatchingQueuedSubmissionIDsRef.current.delete(queuedSubmission.id);
       });
   }, [
-    activeRunRevision,
+    activeGenerationRunsRevision,
     combinedMessages,
     conversationScopeKey,
     currentLeafMessage?.publicID,
@@ -2121,6 +2190,31 @@ export function useChatMessageSubmit({
     [replaceMessage, t],
   );
 
+  const onForkMessage = React.useCallback(
+    async (message: ChatAreaMessage) => {
+      const messagePublicID = resolvePersistedPublicID(message.publicID);
+      const conversationPublicID = conversationIDRef.current?.trim() || "";
+      if (!messagePublicID || !conversationPublicID) {
+        toast.error(t("forkFailed"), { description: t("continueReplyUnavailable") });
+        return;
+      }
+      const token = await resolveAccessToken();
+      if (!token) {
+        toast.error(t("forkFailed"), { description: t("signInRequired") });
+        return;
+      }
+      try {
+        const forked = await forkConversationFromMessage(token, conversationPublicID, messagePublicID);
+        await onConversationForked?.(forked);
+      } catch (error) {
+        toast.error(t("forkFailed"), {
+          description: resolveErrorMessage(error, t("retryLater")),
+        });
+      }
+    },
+    [onConversationForked, t],
+  );
+
   const onCycleMessageBranch = React.useCallback(
     (parentPublicID: string | null, direction: "previous" | "next") => {
       const siblings = buildChildrenIndex(combinedMessages).get(toBranchKey(parentPublicID)) ?? [];
@@ -2152,6 +2246,7 @@ export function useChatMessageSubmit({
     onEditAssistantMessage,
     onEditUserMessage,
     onContinueAssistantMessage,
+    onForkMessage,
     onRetryAssistantMessage,
     onRetryUserMessage,
     onSendMessage,

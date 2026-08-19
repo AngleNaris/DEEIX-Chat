@@ -273,6 +273,14 @@ func (r *RuntimeSettings) applyItem(cfg *config.Config, item domainsettings.Syst
 		cfg.ExtractMinerUTimeoutSeconds = toInt(item.Value, cfg.ExtractMinerUTimeoutSeconds)
 	case "extract:mineru_auth_token":
 		cfg.ExtractMinerUAuthToken = item.Value
+	case "extract:mistral_ocr_base_url":
+		cfg.ExtractMistralOCRBaseURL = item.Value
+	case "extract:mistral_ocr_auth_token":
+		cfg.ExtractMistralOCRAuthToken = item.Value
+	case "extract:mistral_ocr_model":
+		cfg.ExtractMistralOCRModel = item.Value
+	case "extract:mistral_ocr_timeout_seconds":
+		cfg.ExtractMistralOCRTimeoutSeconds = toInt(item.Value, cfg.ExtractMistralOCRTimeoutSeconds)
 	case "extract:llm_ocr_base_url":
 		cfg.ExtractLLMOCRBaseURL = item.Value
 	case "extract:llm_ocr_model":
@@ -367,6 +375,8 @@ func (r *RuntimeSettings) applyItem(cfg *config.Config, item domainsettings.Syst
 		cfg.MCPToolRetryCount = toInt(item.Value, cfg.MCPToolRetryCount)
 	case "mcp:mcp_max_concurrent_calls":
 		cfg.MCPMaxConcurrentCalls = toInt(item.Value, cfg.MCPMaxConcurrentCalls)
+	case "mcp:mcp_max_selected_tools_per_message":
+		cfg.MCPMaxSelectedToolsPerMessage = toInt(item.Value, cfg.MCPMaxSelectedToolsPerMessage)
 	case "mcp:mcp_max_llm_calls_per_run":
 		cfg.MCPMaxLLMCallsPerRun = toInt(item.Value, cfg.MCPMaxLLMCallsPerRun)
 
@@ -412,6 +422,12 @@ func (r *RuntimeSettings) normalizeConfig(cfg *config.Config) {
 	}
 	if strings.TrimSpace(cfg.ModelOptionDeniedPaths) == "" {
 		cfg.ModelOptionDeniedPaths = config.DefaultModelOptionDeniedPathsJSON()
+	}
+	if cfg.MCPMaxSelectedToolsPerMessage <= 0 {
+		cfg.MCPMaxSelectedToolsPerMessage = config.DefaultMCPMaxSelectedToolsPerMessage
+	}
+	if cfg.MCPMaxSelectedToolsPerMessage > config.MaxMCPSelectedToolsPerMessage {
+		cfg.MCPMaxSelectedToolsPerMessage = config.MaxMCPSelectedToolsPerMessage
 	}
 	if cfg.MCPToolTimeoutSeconds <= 0 {
 		cfg.MCPToolTimeoutSeconds = defaultMCPToolTimeoutSeconds

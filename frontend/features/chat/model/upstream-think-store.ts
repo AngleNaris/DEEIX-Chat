@@ -2,8 +2,9 @@
 
 import * as React from "react";
 
-import type { ChatMessageProcessTrace, ChatTraceBlock } from "@/features/chat/types/messages";
 import { toPendingProcessTrace } from "@/features/chat/model/message-submit";
+import { mergeUpstreamThinkContent } from "@/features/chat/model/upstream-think-content";
+import type { ChatMessageProcessTrace, ChatTraceBlock } from "@/features/chat/types/messages";
 import type { StreamMessageEvent } from "@/shared/api/conversation.types";
 
 type UpstreamThinkDeltaEvent = Extract<StreamMessageEvent, { type: "upstream_think_delta" }>;
@@ -20,18 +21,8 @@ function normalizeRunID(runID: string | null | undefined) {
   return runID?.trim() || "";
 }
 
-function mergeContent(previous: string, event: UpstreamThinkDeltaEvent) {
-  if (typeof event.contentMarkdown === "string") {
-    return event.contentMarkdown;
-  }
-  if (typeof event.delta === "string" && event.delta.length > 0) {
-    return `${previous}${event.delta}`;
-  }
-  return previous;
-}
-
 export function mergeUpstreamThinkBlock(current: ChatTraceBlock | undefined, event: UpstreamThinkDeltaEvent): ChatTraceBlock {
-  const contentMarkdown = mergeContent(current?.contentMarkdown ?? "", event);
+  const contentMarkdown = mergeUpstreamThinkContent(current?.contentMarkdown ?? "", current?.roundID, event);
   return {
     title: event.title?.trim() || current?.title || "",
     summary: event.summary?.trim() || current?.summary || "",

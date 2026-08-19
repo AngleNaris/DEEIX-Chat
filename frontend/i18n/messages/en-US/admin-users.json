@@ -15,7 +15,8 @@
     "chatFiles": "Files & retrieval",
     "agentGroups": "Agent Groups",
     "platformTools": "Platform Tools",
-    "about": "About"
+    "about": "About",
+    "contentModeration": "Content moderation"
   },
   "aboutPage": {
     "title": "About",

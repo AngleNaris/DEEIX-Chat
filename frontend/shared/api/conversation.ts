@@ -1,4 +1,5 @@
 import type {
+  ConversationRuns,
   MessageProcessTraceResponse,
   MessageTraceBlockResponse,
   MessageTraceEventResponse,
@@ -12,48 +13,48 @@ import {
 import { apiRequest, ApiError, ApiNetworkError, pathParam } from "@/shared/api/http-client";
 import type { PagePayload } from "@/shared/api/common.types";
 import type {
-  ConversationDTO,
+  BatchSetConversationProjectRequest,
+  BatchSetConversationProjectResult,
+  ContextArtifactDTO,
   ConversationDefaultModelCandidateDTO,
+  ConversationDTO,
   ConversationExportDTO,
+  ConversationPreviewMessageDTO,
   ConversationProjectDTO,
   ConversationProjectFilter,
   ConversationProjectStatusFilter,
-  ConversationPreviewMessageDTO,
+  ConversationRunDTO,
   ConversationSearchPageDTO,
   ConversationShareDTO,
-  ConversationRunDTO,
   ConversationShareFilter,
   ConversationStarredFilter,
   ConversationStatusFilter,
-  ContextArtifactDTO,
   CreateConversationProjectRequest,
   CreateConversationRequest,
   CreateConversationShareRequest,
-  BatchSetConversationProjectRequest,
-  BatchSetConversationProjectResult,
   DeleteConversationData,
+  MediaImageRequest,
+  MediaVideoRequest,
   MessageDTO,
   MessageFeedbackResult,
   MessageProcessTraceDTO,
   PublicSharedConversationDTO,
   RenameConversationRequest,
+  ReorderConversationProjectsRequest,
   RevokeConversationSharesRequest,
   RevokeConversationSharesResult,
-  ReorderConversationProjectsRequest,
   SendMessageRequest,
-  MediaImageRequest,
-  MediaVideoRequest,
   SendMessageResult,
   SetConversationArchiveRequest,
   SetConversationProjectRequest,
   SetConversationStarRequest,
   SetMessageFeedbackRequest,
-  UpdateMessageRequest,
-  UpdateConversationLabelsRequest,
-  UpdateConversationProjectRequest,
   StreamMessageEvent,
   GroupStreamEvent,
   TraceBlockDTO,
+  UpdateConversationLabelsRequest,
+  UpdateConversationProjectRequest,
+  UpdateMessageRequest,
 } from "@/shared/api/conversation.types";
 
 type RawTraceBlock = MessageTraceBlockResponse;
@@ -226,7 +227,11 @@ function handleStreamEvent(event: StreamMessageEvent, options: ConversationStrea
   }
 
   if (event.type === "delta") {
-    options.onDelta?.(event.delta);
+    if (event.replace) {
+      options.onTextSnapshot?.(event.delta);
+    } else {
+      options.onDelta?.(event.delta);
+    }
     return null;
   }
 
@@ -243,6 +248,25 @@ function handleStreamEvent(event: StreamMessageEvent, options: ConversationStrea
   if (event.type === "media_image_delta") {
     options.onMediaImageDelta?.(event);
     return null;
+  }
+
+  if (event.type === "moderation_checking") {
+    options.onModerationChecking?.(event);
+    return null;
+  }
+
+  if (event.type === "moderation_blocked") {
+    options.onModerationBlocked?.(event);
+    throw new ApiError(
+      "content blocked by moderation",
+      responseStatus,
+      {
+        eventID: event.eventID,
+        direction: event.direction,
+        categories: event.categories,
+      },
+      "content_moderation.blocked",
+    );
   }
 
   if (event.type === "completed") {
@@ -903,6 +927,21 @@ export async function updateMessage(
   );
 }
 
+export async function forkConversationFromMessage(
+  accessToken: string,
+  conversationPublicID: string,
+  messagePublicID: string,
+): Promise<ConversationDTO> {
+  return authedRequest<ConversationDTO>(
+    `/api/v1/conversations/${pathParam(conversationPublicID)}/messages/${pathParam(messagePublicID)}/fork`,
+    {
+      method: "POST",
+      accessToken,
+    },
+    true,
+  );
+}
+
 export type CompactDoneEvent = {
   method: string;
   freed_tokens: number;
@@ -915,6 +954,7 @@ export type ConversationStreamOptions = {
   afterSeq?: number;
   onEventSeq?: (seq: number) => void;
   onDelta?: (delta: string) => void;
+  onTextSnapshot?: (content: string) => void;
   onFileProc?: (message: string) => void;
   onRagSearch?: (message: string) => void;
   onMediaStatus?: (event: Extract<StreamMessageEvent, { type: "media_status" }>) => void;
@@ -927,6 +967,8 @@ export type ConversationStreamOptions = {
   onGroupEvent?: (event: GroupStreamEvent) => void;
   onUsage?: (event: Extract<StreamMessageEvent, { type: "usage" }>) => void;
   onInterrupted?: (event: Extract<StreamMessageEvent, { type: "error" }>) => void;
+  onModerationChecking?: (event: Extract<StreamMessageEvent, { type: "moderation_checking" }>) => void;
+  onModerationBlocked?: (event: Extract<StreamMessageEvent, { type: "moderation_blocked" }>) => void;
 };
 
 // readConversationStream 消费 NDJSON 流：群组重试端点复用同一协议
@@ -957,9 +999,16 @@ async function openMessageGenerationResumeResponse(
   afterSeq: number,
   signal?: AbortSignal,
 ): Promise<Response> {
-  const afterQuery = afterSeq > 0 ? `?after=${Math.floor(afterSeq)}` : "";
+  const requestQuery = {
+    snapshot: true,
+    ...(afterSeq > 0 ? { after: Math.floor(afterSeq) } : {}),
+  } satisfies ConversationRuns.StreamList.RequestQuery;
+  const query = new URLSearchParams({ snapshot: String(requestQuery.snapshot) });
+  if (requestQuery.after !== undefined) {
+    query.set("after", String(requestQuery.after));
+  }
   return authedFetch(
-    `/api/v1/conversation-runs/${pathParam(runID)}/stream${afterQuery}`,
+    `/api/v1/conversation-runs/${pathParam(runID)}/stream?${query.toString()}`,
     {
       method: "GET",
       accessToken,
@@ -1027,10 +1076,10 @@ async function postConversationStream<TPayload>(
   const completed = runID
     ? await readRecoverableConversationStream(response, accessToken, runID, options)
     : await readConversationStream(response, options);
-  if (!completed) {
-    throw new ApiError("stream completed without final payload", response.status);
+  if (completed) {
+    return completed;
   }
-  return completed;
+  throw new ApiError("stream completed without final payload", response.status);
 }
 
 export async function streamMessage(

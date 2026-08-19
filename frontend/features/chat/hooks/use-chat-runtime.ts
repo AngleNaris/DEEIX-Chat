@@ -106,6 +106,7 @@ export function useChatRuntime({
   autoGenerateLabels,
   prependNewConversation,
   onConversationCreated,
+  onConversationForked,
   touchByPublicID,
   reload,
   replaceMessage,
@@ -113,9 +114,11 @@ export function useChatRuntime({
   setAttachments,
   releaseAttachments,
   activeGenerationRunsRef,
-  failedGenerationRunsRef,
+  activeGenerationRunsRevision,
+  onActiveGenerationRunsChange,
   resumingRunID = "",
   autoEditDismissed = false,
+  resumingActivityLabel = "",
 }: {
   conversationID: string | null;
   resetToken: number;
@@ -137,6 +140,7 @@ export function useChatRuntime({
   autoGenerateLabels: boolean;
   prependNewConversation: (platformModelName: string) => Promise<ConversationDTO | null | undefined>;
   onConversationCreated?: (conversationPublicID: string) => void;
+  onConversationForked?: (conversation: ConversationDTO) => Promise<void> | void;
   touchByPublicID: (publicID: string, patch?: Partial<ConversationDTO>) => void;
   reload: () => void;
   replaceMessage: (message: MessageDTO) => void;
@@ -144,9 +148,11 @@ export function useChatRuntime({
   setAttachments: React.Dispatch<React.SetStateAction<PendingAttachment[]>>;
   releaseAttachments: (items: PendingAttachment[]) => void;
   activeGenerationRunsRef?: React.RefObject<Set<string>>;
-  failedGenerationRunsRef?: React.RefObject<Set<string>>;
+  activeGenerationRunsRevision: number;
+  onActiveGenerationRunsChange?: () => void;
   resumingRunID?: string;
   autoEditDismissed?: boolean;
+  resumingActivityLabel?: string;
 }) {
   const [showConversationLayout, setShowConversationLayout] = React.useState(false);
   const previousResetTokenRef = React.useRef(resetToken);
@@ -160,6 +166,11 @@ export function useChatRuntime({
     const normalized = resumingRunID.trim();
     return normalized ? new Set([normalized]) : undefined;
   }, [resumingRunID]);
+  const liveActivityLabels = React.useMemo(() => {
+    const runID = resumingRunID.trim();
+    const label = resumingActivityLabel.trim();
+    return runID && label ? new Map([[runID, label]]) : undefined;
+  }, [resumingActivityLabel, resumingRunID]);
 
   const branchState = useChatBranchState({
     conversationID,
@@ -167,6 +178,7 @@ export function useChatRuntime({
     resetToken,
     messages,
     pendingExchanges,
+    liveActivityLabels,
     liveRunIDs: liveServerRunIDs,
   });
   const visibleResumeGenerationActive = React.useMemo(() => {
@@ -204,6 +216,7 @@ export function useChatRuntime({
     autoGenerateLabels,
     prependNewConversation,
     onConversationCreated,
+    onConversationForked,
     touchByPublicID,
     reload,
     replaceMessage,
@@ -222,7 +235,8 @@ export function useChatRuntime({
     combinedMessages: branchState.combinedMessages,
     serverMessagePublicIDs: branchState.serverMessagePublicIDs,
     activeGenerationRunsRef,
-    failedGenerationRunsRef,
+    activeGenerationRunsRevision,
+    onActiveGenerationRunsChange,
     resumeGenerationActive: visibleResumeGenerationActive,
     autoEditDismissed,
   });
@@ -250,6 +264,7 @@ export function useChatRuntime({
     onCycleMessageBranch: submitState.onCycleMessageBranch,
     onEditAssistantMessage: submitState.onEditAssistantMessage,
     onEditUserMessage: submitState.onEditUserMessage,
+    onForkMessage: submitState.onForkMessage,
     onContinueAssistantMessage: submitState.onContinueAssistantMessage,
     onRetryAssistantMessage: submitState.onRetryAssistantMessage,
     onRetryUserMessage: submitState.onRetryUserMessage,

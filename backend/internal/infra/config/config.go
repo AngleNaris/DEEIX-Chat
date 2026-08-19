@@ -40,6 +40,11 @@ const (
 const (
 	// DefaultTurnstileSiteverifyURL 是 Cloudflare Turnstile 默认校验端点。
 	DefaultTurnstileSiteverifyURL = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
+
+	// DefaultMCPMaxSelectedToolsPerMessage 是单次消息可选择 MCP 工具数量的默认值。
+	DefaultMCPMaxSelectedToolsPerMessage = 32
+	// MaxMCPSelectedToolsPerMessage 是运行时配置允许的安全上限，防止一次请求暴露过多工具 schema。
+	MaxMCPSelectedToolsPerMessage = 128
 )
 
 // DefaultModelOptionAllowedPathsJSON 返回用户可透传模型参数的默认白名单。
@@ -108,6 +113,20 @@ func DefaultModelOptionAllowedPathsJSON() string {
     "size",
     "user"
   ],
+  "anthropic_messages": [
+    "speed",
+    "top_k",
+    "thinking.type",
+    "thinking.budget_tokens"
+  ],
+  "gemini_generate_content": [
+    "generationConfig.temperature",
+    "generationConfig.topP",
+    "generationConfig.maxOutputTokens",
+    "generationConfig.responseMimeType",
+    "generationConfig.thinkingConfig.includeThoughts",
+    "generationConfig.thinkingConfig.thinkingLevel"
+  ],
   "google_image_generation": [
     "generationConfig.responseModalities",
     "generationConfig.imageConfig.aspectRatio",
@@ -118,22 +137,13 @@ func DefaultModelOptionAllowedPathsJSON() string {
     "generation_config.top_p",
     "generation_config.max_output_tokens",
     "generation_config.thinking_level",
+    "generation_config.thinking_summaries",
     "response_format.type",
     "response_format.aspect_ratio",
     "response_format.image_size",
     "response_format.mime_type",
-    "responseFormat.type",
-    "responseFormat.aspectRatio",
-    "responseFormat.imageSize",
-    "responseFormat.mimeType",
-    "generationConfig.videoConfig.task",
+    "response_format.schema",
     "generation_config.video_config.task"
-  ],
-  "anthropic_messages": [
-    "speed",
-    "top_k",
-    "thinking.type",
-    "thinking.budget_tokens"
   ],
   "xai_responses": [
     "reasoning.effort",
@@ -158,12 +168,6 @@ func DefaultModelOptionAllowedPathsJSON() string {
     "aspect_ratio",
     "duration",
     "resolution"
-  ],
-  "gemini_generate_content": [
-    "generationConfig.temperature",
-    "generationConfig.topP",
-    "generationConfig.maxOutputTokens",
-    "generationConfig.responseMimeType"
   ]
 }`
 }
@@ -475,6 +479,10 @@ type Config struct {
 	ExtractMinerUFileTypes            string // MinerU 处理的文件类型（逗号分隔）
 	ExtractMinerUTimeoutSeconds       int    // MinerU 请求超时(秒)
 	ExtractMinerUAuthToken            string // MinerU 鉴权 Token
+	ExtractMistralOCRBaseURL          string // Mistral OCR 服务地址
+	ExtractMistralOCRModel            string // Mistral OCR 请求模型
+	ExtractMistralOCRTimeoutSeconds   int    // Mistral OCR 请求超时(秒)
+	ExtractMistralOCRAuthToken        string // Mistral OCR 鉴权 Token
 	ExtractLLMOCRBaseURL              string // LLM OCR 服务地址
 	ExtractLLMOCRModel                string // LLM OCR 请求模型
 	ExtractLLMOCRTimeoutSeconds       int    // LLM OCR 请求超时(秒)
@@ -522,13 +530,14 @@ type Config struct {
 	ProcessTracePersistInflight    bool // 是否在流式阶段持久化轨迹
 	ContextArtifactRetentionDays   int  // 上下文证据保留天数，<=0 表示不自动过期
 	// MCP 配置
-	MCPEnable             bool
-	MCPToolTimeoutSeconds int
-	MCPToolRetryCount     int
-	MCPMaxConcurrentCalls int
-	MCPMaxLLMCallsPerRun  int
-	MCPMaxToolCallsPerRun int
-	MCPToolPrompt         string
+	MCPEnable                     bool
+	MCPToolTimeoutSeconds         int
+	MCPToolRetryCount             int
+	MCPMaxConcurrentCalls         int
+	MCPMaxSelectedToolsPerMessage int
+	MCPMaxLLMCallsPerRun          int
+	MCPMaxToolCallsPerRun         int
+	MCPToolPrompt                 string
 	// SandboxSharedDir 沙箱与多模态 MCP 的共享目录挂载点（DEEIX 容器内路径）。
 	// 工具结果携带 __export__ 标记时，从该目录读取文件并落库为用户文件。
 	SandboxSharedDir string
@@ -723,6 +732,10 @@ func Load() Config {
 		ExtractMinerUFileTypes:            "pdf,word,presentation",
 		ExtractMinerUTimeoutSeconds:       180,
 		ExtractMinerUAuthToken:            "",
+		ExtractMistralOCRBaseURL:          "https://api.mistral.ai/v1/ocr",
+		ExtractMistralOCRModel:            "mistral-ocr-latest",
+		ExtractMistralOCRTimeoutSeconds:   60,
+		ExtractMistralOCRAuthToken:        "",
 		ExtractLLMOCRBaseURL:              "",
 		ExtractLLMOCRModel:                "",
 		ExtractLLMOCRTimeoutSeconds:       180,
@@ -765,6 +778,7 @@ func Load() Config {
 		MCPToolTimeoutSeconds:             10,
 		MCPToolRetryCount:                 0,
 		MCPMaxConcurrentCalls:             8,
+		MCPMaxSelectedToolsPerMessage:     DefaultMCPMaxSelectedToolsPerMessage,
 		MCPMaxLLMCallsPerRun:              5,
 		MCPMaxToolCallsPerRun:             8,
 		MCPToolPrompt:                     "",

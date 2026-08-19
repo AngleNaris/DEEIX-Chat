@@ -64,7 +64,7 @@ export function requestedResponseType(options?: ConversationOptions): "image" | 
   if (!options) {
     return "";
   }
-  return responseFormatType(options.response_format ?? options.responseFormat);
+  return responseFormatType(options.response_format);
 }
 
 export function resolveChatSubmitDecision(

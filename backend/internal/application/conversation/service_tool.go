@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/mcp"
 )
 
@@ -57,6 +58,25 @@ func (s *Service) resolveMaxToolCallsPerRun() int {
 		maxCalls = 64
 	}
 	return maxCalls
+}
+
+func (s *Service) resolveMaxSelectedToolsPerMessage() int {
+	maxTools := s.cfg.Snapshot().MCPMaxSelectedToolsPerMessage
+	if maxTools <= 0 {
+		maxTools = config.DefaultMCPMaxSelectedToolsPerMessage
+	}
+	if maxTools > config.MaxMCPSelectedToolsPerMessage {
+		maxTools = config.MaxMCPSelectedToolsPerMessage
+	}
+	return maxTools
+}
+
+// ValidateSelectedToolIDs 校验单次消息选择的 MCP 工具数量。
+func (s *Service) ValidateSelectedToolIDs(toolIDs []uint) error {
+	if len(toolIDs) > s.resolveMaxSelectedToolsPerMessage() {
+		return ErrTooManySelectedTools
+	}
+	return nil
 }
 
 func (s *Service) resolveMaxLLMCallsPerRun() int {

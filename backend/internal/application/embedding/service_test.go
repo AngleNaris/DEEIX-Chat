@@ -2,6 +2,7 @@ package embedding
 
 import (
 	"context"
+	"math"
 	"testing"
 
 	domainconversation "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
@@ -9,6 +10,22 @@ import (
 	infraembedding "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/embedding"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/security"
 )
+
+func TestPostProcessEmbeddingsSupportsMaximumConfiguredDimensions(t *testing.T) {
+	input := make([]float32, 4096)
+	input[0], input[len(input)-1] = 3, 4
+
+	processed := postProcessEmbeddings([][]float32{input}, 4096, true)
+	if len(processed) != 1 {
+		t.Fatalf("processed vector count = %d, want 1", len(processed))
+	}
+	if len(processed[0]) != 4096 {
+		t.Fatalf("processed dimensions = %d, want 4096", len(processed[0]))
+	}
+	if math.Abs(float64(processed[0][0]-0.6)) > 1e-6 || math.Abs(float64(processed[0][4095]-0.8)) > 1e-6 {
+		t.Fatalf("unexpected normalized boundary values: first=%v last=%v", processed[0][0], processed[0][4095])
+	}
+}
 
 func TestShouldTriggerIncludesOCRImages(t *testing.T) {
 	service := NewService(config.Config{
@@ -329,12 +346,56 @@ func TestProcessFileSkipsVideos(t *testing.T) {
 	}
 }
 
+func TestCompleteFileEmbeddingKeepsChangedConfigurationStale(t *testing.T) {
+	repo := &reindexRepo{}
+	runtime := config.NewRuntime(config.Config{RAGModel: "new-model", EmbeddingOutputDimensions: 4096})
+	service := NewServiceWithRuntime(runtime, repo, nil, nil, nil)
+
+	err := service.completeFileEmbedding(
+		context.Background(),
+		domainconversation.FileObject{UserID: 1, FileID: "file_1"},
+		ComputeModelSignature("old-model", 1536),
+	)
+	if err != nil {
+		t.Fatalf("completeFileEmbedding() error = %v", err)
+	}
+	if len(repo.statusHistory) != 1 || repo.statusHistory[0] != "stale" {
+		t.Fatalf("status history = %#v, want [stale]", repo.statusHistory)
+	}
+}
+
+func TestCompleteFileEmbeddingClosesReadyPublicationRace(t *testing.T) {
+	repo := &reindexRepo{}
+	initial := config.Config{RAGModel: "initial-model", EmbeddingOutputDimensions: 1536}
+	runtime := config.NewRuntime(initial)
+	service := NewServiceWithRuntime(runtime, repo, nil, nil, nil)
+	repo.onStatus = func(status string) {
+		if status == "ready" {
+			runtime.Store(config.Config{RAGModel: "new-model", EmbeddingOutputDimensions: 4096})
+		}
+	}
+
+	err := service.completeFileEmbedding(
+		context.Background(),
+		domainconversation.FileObject{UserID: 1, FileID: "file_1"},
+		ComputeModelSignature(initial.RAGModel, initial.EmbeddingOutputDimensions),
+	)
+	if err != nil {
+		t.Fatalf("completeFileEmbedding() error = %v", err)
+	}
+	if len(repo.statusHistory) != 2 || repo.statusHistory[0] != "ready" || repo.statusHistory[1] != "stale" {
+		t.Fatalf("status history = %#v, want [ready stale]", repo.statusHistory)
+	}
+}
+
 type reindexRepo struct {
 	vectorAvailable   bool
 	files             []domainconversation.FileObject
 	afterIDs          []uint
 	listCalls         int
 	updateStatusCalls int
+	statusHistory     []string
+	onStatus          func(status string)
 }
 
 func (r *reindexRepo) VectorStoreAvailable(context.Context) (bool, error) {
@@ -349,8 +410,12 @@ func (r *reindexRepo) GetFileObjectProcessingByObjectID(context.Context, uint) (
 	return nil, nil
 }
 
-func (r *reindexRepo) UpdateFileObjectEmbedStatus(context.Context, uint, string, string, string, string) error {
+func (r *reindexRepo) UpdateFileObjectEmbedStatus(_ context.Context, _ uint, _ string, _ string, status string, _ string) error {
 	r.updateStatusCalls++
+	r.statusHistory = append(r.statusHistory, status)
+	if r.onStatus != nil {
+		r.onStatus(status)
+	}
 	return nil
 }
 

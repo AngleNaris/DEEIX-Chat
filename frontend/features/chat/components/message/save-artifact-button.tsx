@@ -1,12 +1,11 @@
 "use client";
 
-import * as React from "react";
-import { useTranslations } from "next-intl";
-import { toast } from "sonner";
 import { Save } from "lucide-react";
+import { useTranslations } from "next-intl";
+import * as React from "react";
+import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   Dialog,
   DialogContent,
@@ -15,21 +14,22 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { ArtifactShareLink } from "@/shared/components/artifact-share-link";
-import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
-import { useLocalizedErrorMessage } from "@/i18n/use-localized-error";
-import type { ChatArtifact } from "@/features/chat/model/chat-artifacts";
 import { captureArtifactPreviewThumbnail } from "@/features/chat/model/artifact-thumbnail";
+import type { ChatArtifact } from "@/features/chat/model/chat-artifacts";
+import { useLocalizedErrorMessage } from "@/i18n/use-localized-error";
 import {
-  createArtifact,
-  createArtifactShare,
   type ArtifactKind,
   type ArtifactShareDTO,
+  createArtifact,
+  createArtifactShare,
 } from "@/shared/api/artifacts";
+import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
+import { ArtifactShareLink } from "@/shared/components/artifact-share-link";
 
-// mapArtifactKind 把前端预览类型（html/css/javascript）映射为制品存储类型（html/css/js/text）。
-function mapArtifactKind(kind: ChatArtifact["kind"]): ArtifactKind {
+// mapArtifactKind 把可保存的前端预览类型映射为制品存储类型。
+function mapArtifactKind(kind: Exclude<ChatArtifact["kind"], "svg">): ArtifactKind {
   if (kind === "javascript") return "js";
   return kind;
 }
@@ -52,7 +52,7 @@ export function SaveArtifactButton({
   const [saving, setSaving] = React.useState(false);
   const [share, setShare] = React.useState<ArtifactShareDTO | null>(null);
 
-  const saveable = Boolean(artifact && artifact.complete && artifact.code.trim());
+  const saveable = Boolean(artifact && artifact.kind !== "svg" && artifact.complete && artifact.code.trim());
 
   const openDialog = () => {
     setTitle(defaultArtifactTitle(artifact));
@@ -61,7 +61,7 @@ export function SaveArtifactButton({
   };
 
   const submit = async () => {
-    if (!artifact || !title.trim()) return;
+    if (!artifact || artifact.kind === "svg" || !title.trim()) return;
     setSaving(true);
     try {
       const token = await resolveAccessToken();

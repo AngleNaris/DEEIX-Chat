@@ -236,6 +236,51 @@ func TestUpstreamThinkingDeltaIsCoalescedBetweenFlushes(t *testing.T) {
 	}
 }
 
+func TestSyncStructuredThinkDeduplicatesOnlyWithinGenerationCall(t *testing.T) {
+	var events []map[string]interface{}
+	recorder := &messageTraceRecorder{
+		cfg: config.Config{
+			ProcessTraceEnabled:            true,
+			ProcessTraceVisibleToUser:      true,
+			ProcessTraceStoreUpstreamThink: true,
+		},
+		assistant: &model.Message{ID: 1, ConversationID: 2, UserID: 3, RunID: "run_1"},
+		onEvent: func(eventType string, payload map[string]interface{}) error {
+			if eventType == "upstream_think_delta" {
+				events = append(events, payload)
+			}
+			return nil
+		},
+	}
+
+	recorder.beginGenerationCall()
+	recorder.appendUpstreamReasoning(messageTraceThinkKindContent, "same reasoning", nil)
+	recorder.completeUpstreamThink()
+	completed := recorder.upstreamThink
+	eventCount := len(recorder.events)
+	liveEventCount := len(events)
+
+	recorder.syncStructuredThink("same reasoning", "", map[string]interface{}{"status": "completed"})
+	recorder.completeUpstreamThink()
+
+	if recorder.upstreamThink != completed {
+		t.Fatal("expected terminal reasoning replay to reuse the completed draft")
+	}
+	if len(recorder.events) != eventCount {
+		t.Fatalf("expected no duplicate trace event, got %d events after %d", len(recorder.events), eventCount)
+	}
+	if len(events) != liveEventCount {
+		t.Fatalf("expected no duplicate live event, got %d events after %d", len(events), liveEventCount)
+	}
+
+	recorder.beginGenerationCall()
+	recorder.syncStructuredThink("same reasoning", "", map[string]interface{}{"status": "completed"})
+	recorder.completeUpstreamThink()
+	if recorder.upstreamThink == completed || recorder.upstreamThink.roundID == completed.roundID {
+		t.Fatal("expected identical reasoning from a new generation call to start a new round")
+	}
+}
+
 func TestFailedUpstreamThinkingFlushesBufferedContent(t *testing.T) {
 	var events []map[string]interface{}
 	recorder := &messageTraceRecorder{

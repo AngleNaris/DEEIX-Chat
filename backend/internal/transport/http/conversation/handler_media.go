@@ -178,6 +178,23 @@ func (h *Handler) streamMediaTask(
 		_ = flushStreamEvent(normalizeStreamEventPayload(eventType, payload))
 		return nil
 	})
+	if err == nil && result != nil && result.IsModerationBlocked() {
+		if !result.ModerationTerminalEmitted() {
+			_ = flushStreamEvent(moderationBlockedStreamPayload(result))
+		}
+		if result.Billable {
+			billingCtx, billingCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			usageLedger, billingErr := h.service.RecordSendMessageBilling(billingCtx, billingInput(result), authorization)
+			billingCancel()
+			if billingErr == nil {
+				appconversation.ApplyUsageBilling(&result.AssistantMessage, usageLedger)
+			}
+		} else {
+			_ = h.releaseSendMessageUsageAuthorization(authorization)
+		}
+		h.service.FinishMessageGeneration(clientRunID)
+		return
+	}
 	if err != nil {
 		if result == nil || !result.Billable {
 			if releaseErr := h.releaseSendMessageUsageAuthorization(authorization); releaseErr != nil {

@@ -1,9 +1,10 @@
 "use client";
 
-import * as React from "react";
 import { ChevronDown, ImageIcon, Info, Star } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useTranslations } from "next-intl";
+import * as React from "react";
+import { toast } from "sonner";
 
 import { Unplug } from "@/components/animate-ui/icons/unplug";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -13,6 +14,9 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { MCPToolDTO } from "@/shared/api/mcp.types";
+
+const DEFAULT_MCP_TOOL_SELECTION_LIMIT = 32;
+const MAX_MCP_TOOL_SELECTION_LIMIT = 128;
 
 type MCPToolGroup = {
   key: string;
@@ -28,6 +32,7 @@ type ChatMCPProps = {
   availableTools: MCPToolDTO[];
   selectedToolIDs: number[];
   defaultToolIDs: number[];
+  maxSelectedTools: number;
   disabled: boolean;
   onSelectedToolsChange: (toolIDs: number[]) => void;
   onDefaultToolsChange: (toolIDs: number[]) => void | Promise<void>;
@@ -130,10 +135,18 @@ function filterMCPToolGroups(groups: MCPToolGroup[], query: string): FilteredMCP
   });
 }
 
+function resolveToolSelectionLimit(value: number): number {
+  if (!Number.isFinite(value) || value <= 0) {
+    return DEFAULT_MCP_TOOL_SELECTION_LIMIT;
+  }
+  return Math.min(Math.floor(value), MAX_MCP_TOOL_SELECTION_LIMIT);
+}
+
 export function ChatMCP({
   availableTools,
   selectedToolIDs,
   defaultToolIDs,
+  maxSelectedTools,
   disabled,
   onSelectedToolsChange,
   onDefaultToolsChange,
@@ -148,6 +161,7 @@ export function ChatMCP({
   const selectedToolIDSet = React.useMemo(() => new Set(selectedToolIDs), [selectedToolIDs]);
   const defaultToolIDSet = React.useMemo(() => new Set(defaultToolIDs), [defaultToolIDs]);
   const selectedToolCount = selectedToolIDs.length;
+  const selectionLimit = resolveToolSelectionLimit(maxSelectedTools);
   const toolGroups = React.useMemo(
     () => buildMCPToolGroups(availableTools, tComposer("mcpUnknownServer")),
     [availableTools, tComposer],
@@ -158,10 +172,20 @@ export function ChatMCP({
   );
   const hasSearch = search.trim().length > 0;
 
+  const showToolLimitToast = React.useCallback(() => {
+    toast.error(tComposer("mcpToolLimitTitle"), {
+      description: tComposer("mcpToolLimitDescription", { limit: selectionLimit }),
+    });
+  }, [selectionLimit, tComposer]);
+
   const toggleTool = React.useCallback(
     (toolID: number, checked: boolean) => {
       if (checked) {
         if (selectedToolIDSet.has(toolID)) {
+          return;
+        }
+        if (selectedToolIDs.length >= selectionLimit) {
+          showToolLimitToast();
           return;
         }
         onSelectedToolsChange([...selectedToolIDs, toolID]);
@@ -169,7 +193,7 @@ export function ChatMCP({
       }
       onSelectedToolsChange(selectedToolIDs.filter((item) => item !== toolID));
     },
-    [onSelectedToolsChange, selectedToolIDs, selectedToolIDSet],
+    [onSelectedToolsChange, selectedToolIDs, selectedToolIDSet, selectionLimit, showToolLimitToast],
   );
 
   const toggleToolGroup = React.useCallback(
@@ -182,9 +206,13 @@ export function ChatMCP({
       }
       const selectedSet = new Set(selectedToolIDs);
       const missingIDs = toolIDs.filter((id) => !selectedSet.has(id));
+      if (selectedSet.size + missingIDs.length > selectionLimit) {
+        showToolLimitToast();
+        return;
+      }
       onSelectedToolsChange([...selectedToolIDs, ...missingIDs]);
     },
-    [onSelectedToolsChange, selectedToolIDs],
+    [onSelectedToolsChange, selectedToolIDs, selectionLimit, showToolLimitToast],
   );
 
   const toggleDefaultTool = React.useCallback(
@@ -193,9 +221,13 @@ export function ChatMCP({
         void onDefaultToolsChange(defaultToolIDs.filter((id) => id !== toolID));
         return;
       }
+      if (defaultToolIDs.length >= selectionLimit) {
+        showToolLimitToast();
+        return;
+      }
       void onDefaultToolsChange([...defaultToolIDs, toolID]);
     },
-    [defaultToolIDs, defaultToolIDSet, onDefaultToolsChange],
+    [defaultToolIDs, defaultToolIDSet, onDefaultToolsChange, selectionLimit, showToolLimitToast],
   );
 
   const toggleDefaultToolGroup = React.useCallback(
@@ -211,9 +243,13 @@ export function ChatMCP({
         return;
       }
       const missingIDs = toolIDs.filter((toolID) => !defaultToolIDSet.has(toolID));
+      if (defaultToolIDs.length + missingIDs.length > selectionLimit) {
+        showToolLimitToast();
+        return;
+      }
       void onDefaultToolsChange([...defaultToolIDs, ...missingIDs]);
     },
-    [defaultToolIDs, defaultToolIDSet, onDefaultToolsChange],
+    [defaultToolIDs, defaultToolIDSet, onDefaultToolsChange, selectionLimit, showToolLimitToast],
   );
 
   const toggleServerExpanded = React.useCallback((serverKey: string) => {
@@ -315,6 +351,7 @@ export function ChatMCP({
           {filteredToolGroups.map((group) => {
             const groupState = toolSelectionState(group.tools);
             const expanded = hasSearch || expandedServerKeys.has(group.key);
+            const overLimit = group.tools.length > selectionLimit;
             const groupRowKey = `server:${group.key}`;
             const groupInteractive = hoveredRowKey === groupRowKey || focusedRowKey === groupRowKey;
             const defaultCount = group.tools.filter((tool) => defaultToolIDSet.has(tool.id)).length;
@@ -350,6 +387,11 @@ export function ChatMCP({
                       <span className="shrink-0 text-[10px] leading-none text-foreground/45 transition-colors group-data-[interactive=true]/server:text-accent-foreground/75">
                         {tComposer("mcpServerToolCount", { selected: groupState.selectedCount, total: group.tools.length })}
                       </span>
+                      {overLimit ? (
+                        <span className="min-w-0 truncate text-[10px] leading-none text-amber-600 dark:text-amber-400">
+                          {tComposer("mcpServerLimitHint", { limit: selectionLimit })}
+                        </span>
+                      ) : null}
                     </span>
                   </button>
                   <Tooltip disableHoverableContent>

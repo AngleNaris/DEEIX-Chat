@@ -1,81 +1,34 @@
 "use client";
 
-import * as React from "react";
-import dynamic from "next/dynamic";
-import { Box, CornerDownRight, Eye, EyeOff, Film, Image, ImageOff, ImagePlus, LoaderCircle, PencilLine, RefreshCw, ScrollText, Trash2, WandSparkles } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
-import { useLocale, useTranslations } from "next-intl";
-import { toast } from "sonner";
 import {
   closestCenter,
   DndContext,
+  type DragEndEvent,
   KeyboardSensor,
   PointerSensor,
   useSensor,
   useSensors,
-  type DragEndEvent,
 } from "@dnd-kit/core";
 import {
-  SortableContext,
   horizontalListSortingStrategy,
+  SortableContext,
   sortableKeyboardCoordinates,
   useSortable,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-
-import { GripVerticalIcon } from "@/components/ui/grip-vertical";
-
+import { Box, CornerDownRight, Eye, EyeOff, Film, Image, ImageOff, ImagePlus, LoaderCircle, PencilLine, RefreshCw, ScrollText, Trash2, WandSparkles } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
+import dynamic from "next/dynamic";
+import { useLocale, useTranslations } from "next-intl";
+import * as React from "react";
+import { toast } from "sonner";
 import { AudioLines } from "@/components/animate-ui/icons/audio-lines";
 import { Blocks } from "@/components/animate-ui/icons/blocks";
+import { Crop } from "@/components/animate-ui/icons/crop";
+import { Link as LinkIcon } from "@/components/animate-ui/icons/link";
 import { Pause } from "@/components/animate-ui/icons/pause";
 import { Send } from "@/components/animate-ui/icons/send";
-import { Link as LinkIcon } from "@/components/animate-ui/icons/link";
-import { Crop } from "@/components/animate-ui/icons/crop";
 import { X as XIcon } from "@/components/animate-ui/icons/x";
-import { PlusIcon } from "@/components/ui/plus";
-import type {
-  ChatModelOption,
-  PendingAttachment,
-  UploadingAttachment,
-} from "@/features/chat/types/chat-runtime";
-import {
-  formatClipboardMarkdownPaste,
-  resolveClipboardMarkdownPaste,
-} from "@/features/chat/utils/markdown-paste";
-import {
-  useChatSpeechInput,
-  type SpeechInputErrorCode,
-} from "@/features/chat/hooks/use-chat-speech-input";
-import { useMarkdownPreviewSync } from "@/features/chat/hooks/use-markdown-preview-sync";
-import {
-  useChatMentionMenu,
-  type ChatMentionMenuKind,
-} from "@/features/chat/hooks/use-chat-mention-menu";
-import { ChatMentionMenuPortal } from "@/features/chat/components/shared/chat-mention-menu";
-import { ChatMCP } from "@/features/chat/components/sections/chat-mcp";
-import { ChatModelPicker } from "@/features/chat/components/sections/chat-model-picker";
-import { ChatModelConfig } from "@/features/chat/components/sections/chat-model-config";
-import { ReasoningEffortSelector } from "@/shared/components/reasoning-effort-selector";
-import { ImageQualitySelector } from "@/shared/components/image-quality-selector";
-import { ImageAspectRatioSelector } from "@/shared/components/image-aspect-ratio-selector";
-import { ImageResolutionSelector } from "@/shared/components/image-resolution-selector";
-import {
-  IMAGE_CUSTOM_ASPECT_RATIO,
-  deriveRatioString,
-  inferAspectRatio,
-  inferResolutionLevel,
-  resolveImageSize,
-  type ImageResolutionLevel,
-} from "@/shared/lib/image-size";
-import {
-  getReasoningEffortOptionValue,
-  resolveReasoningEffortProtocol,
-  setModelOptionNestedValue,
-  setReasoningEffortOptionValue,
-} from "@/shared/lib/reasoning-effort";
-import { formatBytes, resolveFileExtension, resolveFileIcon } from "@/shared/lib/file-display";
-import type { ChatSubmitDecision } from "@/features/chat/model/chat-task";
-import { isMediaSubmitTask, resolveChatSubmitDecision } from "@/features/chat/model/chat-task";
 import {
   Attachment,
   AttachmentAction,
@@ -93,27 +46,72 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { GripVerticalIcon } from "@/components/ui/grip-vertical";
 import {
   InputGroup,
   InputGroupAddon,
   InputGroupButton,
   InputGroupTextarea,
 } from "@/components/ui/input-group";
+import { PlusIcon } from "@/components/ui/plus";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { resolveFileProcessingBadge } from "@/shared/lib/file-processing";
-import { useDialogSnapshot } from "@/shared/hooks/use-dialog-snapshot";
-import { StreamdownRender } from "@/shared/components/markdown/streamdown-render";
+import { ChatMCP } from "@/features/chat/components/sections/chat-mcp";
+import { ChatModelConfig } from "@/features/chat/components/sections/chat-model-config";
+import { ChatModelPicker } from "@/features/chat/components/sections/chat-model-picker";
+import { ChatMentionMenuPortal } from "@/features/chat/components/shared/chat-mention-menu";
+import {
+  type ChatMentionMenuKind,
+  useChatMentionMenu,
+} from "@/features/chat/hooks/use-chat-mention-menu";
+import {
+  type SpeechInputErrorCode,
+  useChatSpeechInput,
+} from "@/features/chat/hooks/use-chat-speech-input";
+import { useMarkdownPreviewSync } from "@/features/chat/hooks/use-markdown-preview-sync";
+import type { ChatSubmitDecision } from "@/features/chat/model/chat-task";
+import { isMediaSubmitTask, resolveChatSubmitDecision } from "@/features/chat/model/chat-task";
+import type {
+  ChatModelOption,
+  PendingAttachment,
+  UploadingAttachment,
+} from "@/features/chat/types/chat-runtime";
+import {
+  formatClipboardMarkdownPaste,
+  resolveClipboardMarkdownPaste,
+} from "@/features/chat/utils/markdown-paste";
+import type { SendShortcut } from "@/features/settings/types/settings";
 import { cn } from "@/lib/utils";
+import type { AgentGroupDTO } from "@/shared/api/agent-groups.types";
 import type { ConversationOptions } from "@/shared/api/conversation.types";
 import type { FileObjectDTO } from "@/shared/api/file.types";
-import type { AgentGroupDTO } from "@/shared/api/agent-groups.types";
 import type { MCPToolDTO } from "@/shared/api/mcp.types";
 import type { PromptPresetDTO } from "@/shared/api/prompt-presets.types";
 import type { SkillSummaryDTO } from "@/shared/api/skills.types";
-import type { ModelOptionPolicy } from "@/shared/lib/model-option-policy";
-import type { SendShortcut } from "@/features/settings/types/settings";
-import { isSendShortcutEvent } from "@/shared/lib/platform-shortcuts";
+import { ImageAspectRatioSelector } from "@/shared/components/image-aspect-ratio-selector";
+import { ImageQualitySelector } from "@/shared/components/image-quality-selector";
+import { ImageResolutionSelector } from "@/shared/components/image-resolution-selector";
+import { StreamdownRender } from "@/shared/components/markdown/streamdown-render";
+import { ReasoningEffortSelector } from "@/shared/components/reasoning-effort-selector";
+import { useDialogSnapshot } from "@/shared/hooks/use-dialog-snapshot";
 import type { BillingDisplayCurrency } from "@/shared/lib/billing-display";
+import { formatBytes, resolveFileExtension, resolveFileIcon } from "@/shared/lib/file-display";
+import { resolveFileProcessingBadge } from "@/shared/lib/file-processing";
+import {
+  deriveRatioString,
+  IMAGE_CUSTOM_ASPECT_RATIO,
+  type ImageResolutionLevel,
+  inferAspectRatio,
+  inferResolutionLevel,
+  resolveImageSize,
+} from "@/shared/lib/image-size";
+import type { ModelOptionPolicy } from "@/shared/lib/model-option-policy";
+import { isSendShortcutEvent } from "@/shared/lib/platform-shortcuts";
+import {
+  getReasoningEffortOptionValue,
+  resolveReasoningEffortProtocol,
+  setModelOptionNestedValue,
+  setReasoningEffortOptionValue,
+} from "@/shared/lib/reasoning-effort";
 
 /** 群组会话：@ 菜单不提供模型项，模型由群组配置决定（后端拒绝请求级覆盖）。 */
 const COMPOSER_MENTION_KINDS_WITHOUT_MODEL: readonly ChatMentionMenuKind[] = [
@@ -171,6 +169,7 @@ type ChatInputProps = {
   defaultToolIDs: number[];
   queuedMessages: QueuedComposerMessage[];
   htmlVisualPromptEnabled: boolean;
+  maxSelectedTools: number;
   maxSelectedSkills: number;
   toolsLoading: boolean;
   toolsErrorMsg?: string;
@@ -356,6 +355,7 @@ function ChatInputComponent({
   defaultToolIDs,
   queuedMessages,
   htmlVisualPromptEnabled,
+  maxSelectedTools,
   maxSelectedSkills,
   toolsLoading,
   toolsErrorMsg = "",
@@ -510,7 +510,7 @@ function ChatInputComponent({
     () => modelOptions.find((item) => item.platformModelName === selectedPlatformModelName) ?? null,
     [modelOptions, selectedPlatformModelName],
   );
-  const selectedProtocol = selectedModel?.protocols[0]?.trim() ?? "";
+  const selectedProtocols = React.useMemo(() => selectedModel?.protocols ?? [], [selectedModel]);
   const selectedModelName = selectedModel?.platformModelName || selectedPlatformModelName;
   const reasoningEffortProtocol = resolveReasoningEffortProtocol(selectedModel?.protocols ?? []);
   const reasoningEffortValue = reasoningEffortProtocol
@@ -636,6 +636,7 @@ function ChatInputComponent({
       : disableGroupSummon
         ? COMPOSER_MENTION_KINDS_WITHOUT_GROUP
         : undefined,
+    maxSelectedTools,
     maxSelectedSkills,
     modelOptions,
     selectedPrompts,
@@ -658,6 +659,11 @@ function ChatInputComponent({
     onSkillLimitReached: () => {
       toast.error(tComposer("skillLimitTitle"), {
         description: tComposer("skillLimitDescription", { limit: maxSelectedSkills }),
+      });
+    },
+    onToolLimitReached: () => {
+      toast.error(tComposer("mcpToolLimitTitle"), {
+        description: tComposer("mcpToolLimitDescription", { limit: maxSelectedTools }),
       });
     },
   });
@@ -1202,7 +1208,7 @@ function ChatInputComponent({
                   nativeToolKeys={selectedModel?.nativeToolKeys ?? []}
                   nativeTools={selectedModel?.nativeTools ?? []}
                   modelOptionPolicy={modelOptionPolicy}
-                  selectedProtocol={selectedProtocol}
+                  selectedProtocols={selectedProtocols}
                   selectedModelName={selectedModelName}
                   onOptionsChange={onOptionsChange}
                   onOptionsReset={onOptionsReset}
@@ -1237,6 +1243,7 @@ function ChatInputComponent({
                   availableTools={availableTools}
                   selectedToolIDs={selectedToolIDs}
                   defaultToolIDs={defaultToolIDs}
+                  maxSelectedTools={maxSelectedTools}
                   disabled={loading || uploading || toolsLoading}
                   onSelectedToolsChange={onSelectedToolsChange}
                   onDefaultToolsChange={onDefaultToolsChange}

@@ -124,8 +124,17 @@ function rewriteSharedFileContentURLs(content: string, shareID: string): string 
   );
 }
 
-function mapPublicSharedMessage(item: PublicSharedMessageDTO, fallbackModel: string, shareID: string): ChatAreaMessage {
-  const message = mapServerMessage(toReadOnlyMessageDTO(item));
+function mapPublicSharedMessage(
+  item: PublicSharedMessageDTO,
+  fallbackModel: string,
+  shareID: string,
+  labels: {
+    generationInterrupted: string;
+    moderationBlocked: string;
+    moderationBlockedDescription: string;
+  },
+): ChatAreaMessage {
+  const message = mapServerMessage(toReadOnlyMessageDTO(item), labels);
   const platformModelName = item.platformModelName?.trim() || fallbackModel.trim();
   return {
     ...message,
@@ -267,6 +276,8 @@ function PublicSharedMessage({
 
 export function PublicSharePage() {
   const t = useTranslations("share");
+  const messageT = useTranslations("chat.messages");
+  const submitT = useTranslations("chat.submit");
   const branding = useBranding();
   const { locale } = useAppLocale();
   const resolveErrorMessage = useLocalizedErrorMessage();
@@ -338,8 +349,17 @@ export function PublicSharePage() {
   }, [authSession?.accessToken]);
 
   const messages = React.useMemo(
-    () => data?.messages.map((message) => mapPublicSharedMessage(message, data.model, data.shareID)) ?? [],
-    [data],
+    () => data?.messages.map((message) => mapPublicSharedMessage(
+      message,
+      data.model,
+      data.shareID,
+      {
+        generationInterrupted: messageT("generationInterrupted"),
+        moderationBlocked: submitT("moderationBlocked"),
+        moderationBlockedDescription: submitT("moderationBlockedDescription"),
+      },
+    )) ?? [],
+    [data, messageT, submitT],
   );
   const defaultSelectionKey = React.useMemo(
     () => `${data?.shareID ?? ""}:${data?.defaultMessagePublicIDs?.join(",") ?? ""}`,

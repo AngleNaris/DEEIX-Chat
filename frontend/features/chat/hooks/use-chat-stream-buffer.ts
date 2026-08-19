@@ -3,6 +3,11 @@
 import * as React from "react";
 
 import { clearLiveGroupRun, upsertLiveGroupRunThink } from "@/features/agent-groups/model/group-run-store";
+import {
+  dequeueUpstreamThinkEvent,
+  enqueueUpstreamThinkSegment,
+  type UpstreamThinkBufferSegment,
+} from "@/features/chat/model/upstream-think-buffer";
 import { clearLiveUpstreamThinkTrace, upsertLiveUpstreamThinkTrace } from "@/features/chat/model/upstream-think-store";
 import type { PendingExchangeMap } from "@/features/chat/types/chat-runtime";
 import { isGroupStreamAwareEvent } from "@/shared/api/conversation";
@@ -22,8 +27,7 @@ type StreamBuffer = {
   textFrame: number | null;
   textTimeout: number | null;
   lastTextFlushAt: number;
-  pendingThinkDelta: string;
-  pendingThinkEvent: UpstreamThinkDeltaEvent | null;
+  pendingThinkSegments: UpstreamThinkBufferSegment<UpstreamThinkDeltaEvent>[];
   thinkFrame: number | null;
   thinkTimeout: number | null;
   lastThinkFlushAt: number;
@@ -36,8 +40,7 @@ function createStreamBuffer(runID?: string): StreamBuffer {
     textFrame: null,
     textTimeout: null,
     lastTextFlushAt: 0,
-    pendingThinkDelta: "",
-    pendingThinkEvent: null,
+    pendingThinkSegments: [],
     thinkFrame: null,
     thinkTimeout: null,
     lastThinkFlushAt: 0,
@@ -73,6 +76,14 @@ export function useChatStreamBuffer({
 }) {
   const buffersRef = React.useRef(new Map<string, StreamBuffer>());
   const scheduleThinkFlushRef = React.useRef<(exchangeKey: string) => void>(() => undefined);
+
+  const emitUpstreamThinkEvent = React.useCallback((runID: string, event: UpstreamThinkDeltaEvent) => {
+    if (isGroupStreamAwareEvent(event)) {
+      upsertLiveGroupRunThink(runID, event);
+    } else {
+      upsertLiveUpstreamThinkTrace(runID, event);
+    }
+  }, []);
 
   const flushStreamText = React.useCallback((exchangeKey: string) => {
     const buffer = buffersRef.current.get(exchangeKey);
@@ -111,31 +122,24 @@ export function useChatStreamBuffer({
     }
     buffer.thinkFrame = null;
     buffer.lastThinkFlushAt = performance.now();
-    if (!buffer.runID || !buffer.pendingThinkEvent) {
+    if (!buffer.runID || buffer.pendingThinkSegments.length === 0) {
       return;
     }
 
-    const flushSize = resolveThinkFlushSize(buffer.pendingThinkDelta.length);
-    const delta = flushSize > 0 ? buffer.pendingThinkDelta.slice(0, flushSize) : "";
-    buffer.pendingThinkDelta = flushSize > 0 ? buffer.pendingThinkDelta.slice(flushSize) : "";
-    const event: UpstreamThinkDeltaEvent = {
-      ...buffer.pendingThinkEvent,
-      delta,
-      contentMarkdown: flushSize > 0 ? undefined : buffer.pendingThinkEvent.contentMarkdown,
-    };
-    if (!buffer.pendingThinkDelta) {
-      buffer.pendingThinkEvent = null;
+    const pendingLength = buffer.pendingThinkSegments[0]?.delta.length ?? 0;
+    const event = dequeueUpstreamThinkEvent(
+      buffer.pendingThinkSegments,
+      resolveThinkFlushSize(pendingLength),
+    );
+    if (!event) {
+      return;
     }
-    if (isGroupStreamAwareEvent(event)) {
-      upsertLiveGroupRunThink(buffer.runID, event);
-    } else {
-      upsertLiveUpstreamThinkTrace(buffer.runID, event);
-    }
+    emitUpstreamThinkEvent(buffer.runID, event);
 
-    if (buffer.pendingThinkDelta) {
+    if (buffer.pendingThinkSegments.length > 0) {
       scheduleThinkFlushRef.current(exchangeKey);
     }
-  }, []);
+  }, [emitUpstreamThinkEvent]);
 
   const scheduleStreamFlush = React.useCallback((exchangeKey: string) => {
     const buffer = buffersRef.current.get(exchangeKey);
@@ -187,16 +191,7 @@ export function useChatStreamBuffer({
     if (!buffer) {
       return;
     }
-    if (event.trace?.enabled || typeof event.contentMarkdown === "string") {
-      buffer.pendingThinkDelta = "";
-      buffer.pendingThinkEvent = event;
-      scheduleUpstreamThinkFlush(exchangeKey);
-      return;
-    }
-    if (event.delta) {
-      buffer.pendingThinkDelta += event.delta;
-    }
-    buffer.pendingThinkEvent = { ...event, delta: "" };
+    enqueueUpstreamThinkSegment(buffer.pendingThinkSegments, event);
     scheduleUpstreamThinkFlush(exchangeKey);
   }, [scheduleUpstreamThinkFlush]);
 
@@ -240,22 +235,15 @@ export function useChatStreamBuffer({
       window.clearTimeout(buffer.thinkTimeout);
       buffer.thinkTimeout = null;
     }
-    if (!buffer.runID || !buffer.pendingThinkEvent) {
+    if (!buffer.runID || buffer.pendingThinkSegments.length === 0) {
       return;
     }
-    const event: UpstreamThinkDeltaEvent = {
-      ...buffer.pendingThinkEvent,
-      delta: buffer.pendingThinkDelta,
-      contentMarkdown: buffer.pendingThinkDelta ? undefined : buffer.pendingThinkEvent.contentMarkdown,
-    };
-    buffer.pendingThinkDelta = "";
-    buffer.pendingThinkEvent = null;
-    if (isGroupStreamAwareEvent(event)) {
-      upsertLiveGroupRunThink(buffer.runID, event);
-    } else {
-      upsertLiveUpstreamThinkTrace(buffer.runID, event);
+    let event = dequeueUpstreamThinkEvent(buffer.pendingThinkSegments, Number.MAX_SAFE_INTEGER);
+    while (event) {
+      emitUpstreamThinkEvent(buffer.runID, event);
+      event = dequeueUpstreamThinkEvent(buffer.pendingThinkSegments, Number.MAX_SAFE_INTEGER);
     }
-  }, []);
+  }, [emitUpstreamThinkEvent]);
 
   const resetStreamBuffer = React.useCallback((exchangeKey?: string) => {
     if (exchangeKey) {

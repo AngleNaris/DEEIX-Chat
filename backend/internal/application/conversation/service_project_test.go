@@ -8,6 +8,7 @@ import (
 
 	domainconversation "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 	domainmcp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/mcp"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
 )
 
 func TestNormalizeConversationProjectInputInheritClearsMCPDefaults(t *testing.T) {
@@ -36,7 +37,7 @@ func TestNewProjectDefaultIDs(t *testing.T) {
 }
 
 func TestValidateConversationProjectDefaultsPreservesUnavailableExistingSelections(t *testing.T) {
-	service := &Service{}
+	service := &Service{cfg: config.NewRuntime(config.Config{MCPMaxSelectedToolsPerMessage: 1})}
 	current := &domainconversation.ConversationProject{
 		MCPDefaultMode:    domainconversation.ConversationProjectMCPDefaultModeCustom,
 		DefaultMCPToolIDs: []uint{3, 2},
@@ -57,6 +58,7 @@ func TestValidateConversationProjectDefaultsPreservesUnavailableExistingSelectio
 
 func TestValidateConversationProjectDefaultsRejectsMultipleImageProcessors(t *testing.T) {
 	service := &Service{
+		cfg: config.NewRuntime(config.Config{MCPMaxSelectedToolsPerMessage: 4}),
 		mcpRepo: selectedToolRuntimeMCPRepositoryStub{
 			listToolsByIDs: func(context.Context, []uint) ([]domainmcp.Tool, error) {
 				return []domainmcp.Tool{

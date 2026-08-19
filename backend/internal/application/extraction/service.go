@@ -43,6 +43,7 @@ const (
 	OCREnginePaddle    = "paddle"
 	OCREngineTencent   = "tencent"
 	OCREngineAliyun    = "aliyun"
+	OCREngineMistral   = "mistral"
 	OCREngineLLM       = "llm"
 	defaultOCREngine   = OCREngineRapidOCR
 )
@@ -455,6 +456,8 @@ func normalizeOCREngine(raw string) string {
 		return OCREngineTencent
 	case OCREngineAliyun:
 		return OCREngineAliyun
+	case OCREngineMistral:
+		return OCREngineMistral
 	case OCREngineLLM:
 		return OCREngineLLM
 	case OCREngineRapidOCR:
@@ -743,6 +746,17 @@ func resolveOCREngine(snapshot config.Config, mode string) ocrEngine {
 				TimeoutSeconds: snapshot.ExtractPaddleOCRTimeoutSeconds,
 			}),
 		}
+	case OCREngineMistral:
+		return ocrEngine{
+			provider: mode,
+			client: ocr.NewMistral(ocr.ClientConfig{
+				BaseURL:        snapshot.ExtractMistralOCRBaseURL,
+				AuthToken:      snapshot.ExtractMistralOCRAuthToken,
+				Model:          snapshot.ExtractMistralOCRModel,
+				TimeoutSeconds: snapshot.ExtractMistralOCRTimeoutSeconds,
+				OutboundPolicy: snapshot.TrustedOutboundPolicy(),
+			}),
+		}
 	case OCREngineLLM:
 		return ocrEngine{
 			provider: mode,
@@ -770,6 +784,8 @@ func ocrEngineName(engine string) string {
 		return "ocr_tencent"
 	case OCREngineAliyun:
 		return "ocr_aliyun"
+	case OCREngineMistral:
+		return "ocr_mistral"
 	case OCREngineLLM:
 		return "ocr_llm"
 	case OCREngineRapidOCR:

@@ -1826,6 +1826,389 @@ definitions:
     - data
     - errorMsg
     type: object
+  ContentModerationCategoryCatalogResponse:
+    properties:
+      image:
+        items:
+          type: string
+        type: array
+      text:
+        items:
+          type: string
+        type: array
+    required:
+    - image
+    - text
+    type: object
+  ContentModerationConfigDataResponse:
+    properties:
+      categories:
+        $ref: '#/definitions/ContentModerationCategoryCatalogResponse'
+      config:
+        $ref: '#/definitions/ContentModerationServiceConfigResponse'
+    required:
+    - categories
+    - config
+    type: object
+  ContentModerationConfigResponseDoc:
+    properties:
+      data:
+        $ref: '#/definitions/ContentModerationConfigDataResponse'
+      errorMsg:
+        type: string
+    required:
+    - data
+    - errorMsg
+    type: object
+  ContentModerationConfigUpdateDataResponse:
+    properties:
+      config:
+        $ref: '#/definitions/ContentModerationServiceConfigResponse'
+    required:
+    - config
+    type: object
+  ContentModerationConfigUpdateResponseDoc:
+    properties:
+      data:
+        $ref: '#/definitions/ContentModerationConfigUpdateDataResponse'
+      errorMsg:
+        type: string
+    required:
+    - data
+    - errorMsg
+    type: object
+  ContentModerationDailyStatResponse:
+    properties:
+      category:
+        type: string
+      checkCount:
+        type: integer
+      contentItems:
+        type: integer
+      direction:
+        type: string
+      failureCount:
+        type: integer
+      hitCount:
+        type: integer
+      latencyCount:
+        type: integer
+      latencySumMS:
+        type: integer
+      modality:
+        type: string
+      result:
+        type: string
+      statDate:
+        type: string
+    required:
+    - category
+    - checkCount
+    - contentItems
+    - direction
+    - failureCount
+    - hitCount
+    - latencyCount
+    - latencySumMS
+    - modality
+    - result
+    - statDate
+    type: object
+  ContentModerationEventDetailResponse:
+    properties:
+      categoryScores:
+        additionalProperties:
+          format: float64
+          type: number
+        type: object
+      decryptedText:
+        type: string
+      event:
+        $ref: '#/definitions/ContentModerationEventResponse'
+      images:
+        items:
+          $ref: '#/definitions/ContentModerationIsolatedImageResponse'
+        type: array
+      imagesAvailable:
+        type: boolean
+      textAvailable:
+        type: boolean
+    required:
+    - categoryScores
+    - event
+    - images
+    - imagesAvailable
+    - textAvailable
+    type: object
+  ContentModerationEventDetailResponseDoc:
+    properties:
+      data:
+        $ref: '#/definitions/ContentModerationEventDetailResponse'
+      errorMsg:
+        type: string
+    required:
+    - data
+    - errorMsg
+    type: object
+  ContentModerationEventListDataResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/ContentModerationEventResponse'
+        type: array
+      page:
+        type: integer
+      pageSize:
+        type: integer
+      total:
+        type: integer
+    required:
+    - items
+    - page
+    - pageSize
+    - total
+    type: object
+  ContentModerationEventListResponseDoc:
+    properties:
+      data:
+        $ref: '#/definitions/ContentModerationEventListDataResponse'
+      errorMsg:
+        type: string
+    required:
+    - data
+    - errorMsg
+    type: object
+  ContentModerationEventResponse:
+    properties:
+      categories:
+        items:
+          type: string
+        type: array
+      contentSummary:
+        type: string
+      conversationID:
+        type: integer
+      createdAt:
+        type: string
+      direction:
+        type: string
+      errorCode:
+        type: string
+      errorMessage:
+        type: string
+      latencyMS:
+        type: integer
+      messagePublicID:
+        type: string
+      modality:
+        type: string
+      model:
+        type: string
+      policyVersion:
+        type: integer
+      publicID:
+        type: string
+      result:
+        type: string
+      runID:
+        type: string
+      userID:
+        type: integer
+      userLabel:
+        type: string
+      username:
+        type: string
+    required:
+    - categories
+    - contentSummary
+    - conversationID
+    - createdAt
+    - direction
+    - errorCode
+    - errorMessage
+    - latencyMS
+    - messagePublicID
+    - modality
+    - model
+    - policyVersion
+    - publicID
+    - result
+    - runID
+    - userID
+    type: object
+  ContentModerationIsolatedImageResponse:
+    properties:
+      index:
+        type: integer
+      mimeType:
+        type: string
+      sha256:
+        type: string
+      sizeBytes:
+        type: integer
+      sourceFileID:
+        type: string
+    required:
+    - index
+    - mimeType
+    - sha256
+    - sizeBytes
+    type: object
+  ContentModerationPolicyRequest:
+    properties:
+      inputImageCategories:
+        items:
+          type: string
+        type: array
+      inputTextCategories:
+        items:
+          type: string
+        type: array
+      outputImageCategories:
+        items:
+          type: string
+        type: array
+      outputTextCategories:
+        items:
+          type: string
+        type: array
+    required:
+    - inputImageCategories
+    - inputTextCategories
+    - outputImageCategories
+    - outputTextCategories
+    type: object
+  ContentModerationPolicyResponse:
+    properties:
+      inputImageCategories:
+        items:
+          type: string
+        type: array
+      inputTextCategories:
+        items:
+          type: string
+        type: array
+      outputImageCategories:
+        items:
+          type: string
+        type: array
+      outputTextCategories:
+        items:
+          type: string
+        type: array
+      version:
+        type: integer
+    required:
+    - inputImageCategories
+    - inputTextCategories
+    - outputImageCategories
+    - outputTextCategories
+    - version
+    type: object
+  ContentModerationProbeResponse:
+    properties:
+      image:
+        $ref: '#/definitions/ContentModerationProbeResultResponse'
+      text:
+        $ref: '#/definitions/ContentModerationProbeResultResponse'
+    required:
+    - image
+    - text
+    type: object
+  ContentModerationProbeResponseDoc:
+    properties:
+      data:
+        $ref: '#/definitions/ContentModerationProbeResponse'
+      errorMsg:
+        type: string
+    required:
+    - data
+    - errorMsg
+    type: object
+  ContentModerationProbeResultResponse:
+    properties:
+      error:
+        type: string
+      latencyMS:
+        type: integer
+      model:
+        type: string
+      valid:
+        type: boolean
+    required:
+    - latencyMS
+    - valid
+    type: object
+  ContentModerationServiceConfigResponse:
+    properties:
+      apiKeyMasked:
+        type: string
+      baseUrl:
+        type: string
+      enabled:
+        type: boolean
+      hasAPIKey:
+        type: boolean
+      maxConcurrency:
+        type: integer
+      model:
+        type: string
+      policy:
+        $ref: '#/definitions/ContentModerationPolicyResponse'
+      queueCapacity:
+        type: integer
+      timeoutSeconds:
+        type: integer
+    required:
+    - baseUrl
+    - enabled
+    - hasAPIKey
+    - maxConcurrency
+    - model
+    - policy
+    - queueCapacity
+    - timeoutSeconds
+    type: object
+  ContentModerationStatsDataResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/ContentModerationDailyStatResponse'
+        type: array
+    required:
+    - items
+    type: object
+  ContentModerationStatsResponseDoc:
+    properties:
+      data:
+        $ref: '#/definitions/ContentModerationStatsDataResponse'
+      errorMsg:
+        type: string
+    required:
+    - data
+    - errorMsg
+    type: object
+  ContentModerationUpdateConfigRequest:
+    properties:
+      apiKey:
+        type: string
+      baseUrl:
+        type: string
+      clearAPIKey:
+        type: boolean
+      enabled:
+        type: boolean
+      maxConcurrency:
+        type: integer
+      model:
+        type: string
+      policy:
+        $ref: '#/definitions/ContentModerationPolicyRequest'
+      queueCapacity:
+        type: integer
+      timeoutSeconds:
+        type: integer
+    type: object
   ContextArtifactResponse:
     properties:
       content:
@@ -2857,7 +3240,7 @@ definitions:
       displayGroupID:
         type: integer
       icon:
-        maxLength: 128
+        maxLength: 2048
         type: string
       kindsJSON:
         maxLength: 1000
@@ -4056,6 +4439,19 @@ definitions:
     - data
     - errorMsg
     type: object
+  MessageModerationResponse:
+    properties:
+      categories:
+        items:
+          type: string
+        type: array
+      direction:
+        type: string
+      eventID:
+        type: string
+      state:
+        type: string
+    type: object
   MessageProcessTraceResponse:
     properties:
       enabled:
@@ -4193,6 +4589,8 @@ definitions:
         type: string
       modelVendor:
         type: string
+      moderation:
+        $ref: '#/definitions/MessageModerationResponse'
       myFeedback:
         type: string
       outputTokens:
@@ -4417,6 +4815,122 @@ definitions:
     - name
     - sortOrder
     - updatedAt
+    type: object
+  ModelIconAssetDeleteConflictDetails:
+    properties:
+      conversationRuns:
+        type: integer
+      displayGroups:
+        type: integer
+      models:
+        type: integer
+      referenceCount:
+        type: integer
+      vendors:
+        type: integer
+    required:
+    - conversationRuns
+    - displayGroups
+    - models
+    - referenceCount
+    - vendors
+    type: object
+  ModelIconAssetDeleteConflictDoc:
+    properties:
+      data: {}
+      details:
+        $ref: '#/definitions/ModelIconAssetDeleteConflictDetails'
+      errorCode:
+        type: string
+      errorMsg:
+        type: string
+      requestId:
+        type: string
+    required:
+    - data
+    - details
+    - errorCode
+    - errorMsg
+    type: object
+  ModelIconAssetListItemResponse:
+    properties:
+      contentType:
+        type: string
+      createdAt:
+        type: string
+      height:
+        type: integer
+      publicID:
+        type: string
+      ref:
+        type: string
+      sizeBytes:
+        type: integer
+      width:
+        type: integer
+    required:
+    - contentType
+    - createdAt
+    - height
+    - publicID
+    - ref
+    - sizeBytes
+    - width
+    type: object
+  ModelIconAssetListResponseDoc:
+    properties:
+      data:
+        properties:
+          results:
+            items:
+              $ref: '#/definitions/ModelIconAssetListItemResponse'
+            type: array
+          total:
+            type: integer
+        required:
+        - results
+        - total
+        type: object
+      errorMsg:
+        type: string
+    required:
+    - data
+    - errorMsg
+    type: object
+  ModelIconAssetResponse:
+    properties:
+      contentType:
+        type: string
+      height:
+        type: integer
+      publicID:
+        type: string
+      ref:
+        type: string
+      reused:
+        type: boolean
+      sizeBytes:
+        type: integer
+      width:
+        type: integer
+    required:
+    - contentType
+    - height
+    - publicID
+    - ref
+    - reused
+    - sizeBytes
+    - width
+    type: object
+  ModelIconAssetResponseDoc:
+    properties:
+      data:
+        $ref: '#/definitions/ModelIconAssetResponse'
+      errorMsg:
+        type: string
+    required:
+    - data
+    - errorMsg
     type: object
   ModelListResponseDoc:
     properties:
@@ -4920,6 +5434,41 @@ definitions:
     - data
     - errorMsg
     type: object
+  ModelVendorDeleteConflictDetails:
+    properties:
+      models:
+        items:
+          $ref: '#/definitions/ModelVendorReferenceResponse'
+        type: array
+      reason:
+        enum:
+        - built_in
+        - referenced_models
+        type: string
+      referenceCount:
+        type: integer
+    required:
+    - models
+    - reason
+    - referenceCount
+    type: object
+  ModelVendorDeleteConflictDoc:
+    properties:
+      data: {}
+      details:
+        $ref: '#/definitions/ModelVendorDeleteConflictDetails'
+      errorCode:
+        type: string
+      errorMsg:
+        type: string
+      requestId:
+        type: string
+    required:
+    - data
+    - details
+    - errorCode
+    - errorMsg
+    type: object
   ModelVendorListResponseDoc:
     properties:
       data:
@@ -4939,6 +5488,16 @@ definitions:
     required:
     - data
     - errorMsg
+    type: object
+  ModelVendorReferenceResponse:
+    properties:
+      id:
+        type: integer
+      platformModelName:
+        type: string
+    required:
+    - id
+    - platformModelName
     type: object
   ModelVendorResponse:
     properties:
@@ -6903,6 +7462,33 @@ definitions:
           type: integer
         type: array
     type: object
+  SetModelProtocolsRequest:
+    properties:
+      kindsJSON:
+        maxLength: 1000
+        minLength: 2
+        type: string
+      protocols:
+        items:
+          type: string
+        maxItems: 2
+        minItems: 1
+        type: array
+        uniqueItems: true
+    required:
+    - kindsJSON
+    - protocols
+    type: object
+  SetModelProtocolsResponseDoc:
+    properties:
+      data:
+        $ref: '#/definitions/ModelDataResponse'
+      errorMsg:
+        type: string
+    required:
+    - data
+    - errorMsg
+    type: object
   SetModelsDisplayGroupRequest:
     properties:
       displayGroupID:
@@ -7756,7 +8342,7 @@ definitions:
       displayGroupID:
         type: integer
       icon:
-        maxLength: 128
+        maxLength: 2048
         type: string
       kindsJSON:
         maxLength: 1000
@@ -8117,10 +8703,13 @@ definitions:
   UpsertUpstreamModelRequest:
     properties:
       cbDurationMin:
+        minimum: 0
         type: integer
       cbFailureThreshold:
+        minimum: 0
         type: integer
       cbWindowMin:
+        minimum: 0
         type: integer
       headersJSON:
         maxLength: 10000
@@ -8134,15 +8723,24 @@ definitions:
         type: string
       priority:
         type: integer
-      protocol:
-        maxLength: 64
-        type: string
-      routeID:
-        type: integer
+      protocols:
+        description: Protocols 为空数组时根据模型能力和上游默认配置自动推断完整协议集合。
+        items:
+          type: string
+        maxItems: 2
+        type: array
+        uniqueItems: true
+      routeIDs:
+        items:
+          type: integer
+        maxItems: 2
+        type: array
+        uniqueItems: true
       source:
         maxLength: 64
         type: string
       status:
+        description: 路由配置字段省略时保留已有协议各自的配置；新增协议使用服务端默认值或现有绑定模板。
         enum:
         - active
         - inactive
@@ -8155,6 +8753,7 @@ definitions:
         type: integer
     required:
     - platformModelName
+    - protocols
     - upstreamModelName
     type: object
   UpsertUpstreamModelResponseDoc:
@@ -9316,7 +9915,7 @@ info:
   contact: {}
   description: DEEIX Chat 后端 API 文档
   title: DEEIX Chat API
-  version: "0.3.4"
+  version: "0.3.5"
 paths:
   /admin/announcements:
     get:
@@ -10173,6 +10772,183 @@ paths:
       summary: 管理员查询模型调用日志
       tags:
       - admin
+  /admin/content-moderation/config:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/ContentModerationConfigResponseDoc'
+      security:
+      - BearerAuth: []
+      summary: Get content moderation config
+      tags:
+      - admin-content-moderation
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Content moderation configuration
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/ContentModerationUpdateConfigRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/ContentModerationConfigUpdateResponseDoc'
+      security:
+      - BearerAuth: []
+      summary: Update content moderation config
+      tags:
+      - admin-content-moderation
+  /admin/content-moderation/events:
+    get:
+      parameters:
+      - description: Page number
+        in: query
+        name: page
+        type: integer
+      - description: Page size
+        in: query
+        name: pageSize
+        type: integer
+      - description: Exact event, user, run, model, result, or summary search
+        in: query
+        name: query
+        type: string
+      - description: Result filter
+        in: query
+        name: result
+        type: string
+      - description: Direction filter
+        in: query
+        name: direction
+        type: string
+      - description: Modality filter
+        in: query
+        name: modality
+        type: string
+      - description: Category filter
+        in: query
+        name: category
+        type: string
+      - description: User ID
+        in: query
+        name: userId
+        type: integer
+      - description: Run ID
+        in: query
+        name: runId
+        type: string
+      - description: Start time (RFC3339)
+        in: query
+        name: from
+        type: string
+      - description: End time (RFC3339)
+        in: query
+        name: to
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/ContentModerationEventListResponseDoc'
+      security:
+      - BearerAuth: []
+      summary: List content moderation events
+      tags:
+      - admin-content-moderation
+  /admin/content-moderation/events/{eventID}:
+    get:
+      parameters:
+      - description: Moderation event ID
+        in: path
+        name: eventID
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/ContentModerationEventDetailResponseDoc'
+      security:
+      - BearerAuth: []
+      summary: Get content moderation event detail
+      tags:
+      - admin-content-moderation
+  /admin/content-moderation/events/{eventID}/images/{index}:
+    get:
+      parameters:
+      - description: Moderation event ID
+        in: path
+        name: eventID
+        required: true
+        type: string
+      - description: Image index
+        in: path
+        name: index
+        required: true
+        type: integer
+      produces:
+      - application/octet-stream
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+      security:
+      - BearerAuth: []
+      summary: Stream a isolated moderation image
+      tags:
+      - admin-content-moderation
+  /admin/content-moderation/probe:
+    post:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/ContentModerationProbeResponseDoc'
+      security:
+      - BearerAuth: []
+      summary: Probe content moderation service
+      tags:
+      - admin-content-moderation
+  /admin/content-moderation/stats:
+    get:
+      parameters:
+      - description: Start time (RFC3339)
+        in: query
+        name: from
+        type: string
+      - description: End time (RFC3339)
+        in: query
+        name: to
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/ContentModerationStatsResponseDoc'
+      security:
+      - BearerAuth: []
+      summary: Get content moderation daily stats
+      tags:
+      - admin-content-moderation
   /admin/conversation-events:
     get:
       consumes:
@@ -10329,6 +11105,97 @@ paths:
       summary: 管理员导出全量对话数据
       tags:
       - admin
+  /admin/llm/icon-assets:
+    get:
+      description: 分页查询仍在图标库中的已上传图标，按上传时间倒序返回
+      parameters:
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页数量
+        in: query
+        name: page_size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/ModelIconAssetListResponseDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/ChannelErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 管理员查询已上传的模型展示图标
+      tags:
+      - llm
+    post:
+      consumes:
+      - multipart/form-data
+      description: 上传 PNG、JPEG 或 WebP 图标；后端校验内容、尺寸并按 SHA-256 去重
+      parameters:
+      - description: 图标文件，最大 1 MiB
+        in: formData
+        name: file
+        required: true
+        type: file
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/ModelIconAssetResponseDoc'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/ChannelErrorDoc'
+        "413":
+          description: Request Entity Too Large
+          schema:
+            $ref: '#/definitions/ChannelErrorDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/ChannelErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 管理员上传模型展示图标
+      tags:
+      - llm
+  /admin/llm/icon-assets/{public_id}:
+    delete:
+      description: 仅允许移除无引用图标；立即从图标库隐藏，持续 24 小时无引用后物理清理
+      parameters:
+      - description: 图标公开 ID
+        in: path
+        name: public_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/SuccessDoc'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/ChannelErrorDoc'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/ModelIconAssetDeleteConflictDoc'
+      security:
+      - BearerAuth: []
+      summary: 管理员从图标库移除已上传图标
+      tags:
+      - llm
   /admin/llm/model-display-groups:
     get:
       description: 分页查询自定义展示分组；未绑定分组的模型继续按技术厂商展示
@@ -10524,6 +11391,38 @@ paths:
       tags:
       - llm
   /admin/llm/model-vendors/{key}:
+    delete:
+      description: 仅允许删除未被平台模型引用的非内置厂商；冲突响应包含关联模型预览
+      parameters:
+      - description: 技术厂商 key
+        in: path
+        name: key
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/SuccessDoc'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/ChannelErrorDoc'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/ChannelErrorDoc'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/ModelVendorDeleteConflictDoc'
+      security:
+      - BearerAuth: []
+      summary: 管理员删除自定义模型技术厂商
+      tags:
+      - llm
     patch:
       consumes:
       - application/json
@@ -10730,6 +11629,51 @@ paths:
       security:
       - BearerAuth: []
       summary: 管理员更新模型
+      tags:
+      - llm
+  /admin/llm/models/{id}/protocols:
+    patch:
+      consumes:
+      - application/json
+      description: 在单个数据库事务中更新平台模型能力类型，并将该模型全部上游绑定替换为指定的完整协议集合
+      parameters:
+      - description: 模型ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 完整协议集合与模型能力类型
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/SetModelProtocolsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/SetModelProtocolsResponseDoc'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/ChannelErrorDoc'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/ChannelErrorDoc'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/ChannelErrorDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/ChannelErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 管理员替换模型全部来源的协议集合
       tags:
       - llm
   /admin/llm/models/{id}/sources:
@@ -11287,6 +12231,10 @@ paths:
           description: Not Found
           schema:
             $ref: '#/definitions/ChannelErrorDoc'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/ChannelErrorDoc'
         "500":
           description: Internal Server Error
           schema:
@@ -11507,6 +12455,10 @@ paths:
             $ref: '#/definitions/ChannelErrorDoc'
         "404":
           description: Not Found
+          schema:
+            $ref: '#/definitions/ChannelErrorDoc'
+        "409":
+          description: Conflict
           schema:
             $ref: '#/definitions/ChannelErrorDoc'
         "500":
@@ -15593,6 +16545,10 @@ paths:
         in: query
         name: after
         type: integer
+      - description: 是否返回可替换当前正文的权威文本快照
+        in: query
+        name: snapshot
+        type: boolean
       produces:
       - application/x-ndjson
       responses:
@@ -15961,6 +16917,50 @@ paths:
       security:
       - BearerAuth: []
       summary: 发送消息
+      tags:
+      - chat
+  /conversations/{id}/messages/{message_id}/fork:
+    post:
+      consumes:
+      - application/json
+      description: 将会话从开头到指定消息（含）的祖先链复制为一个新会话；不携带原会话的运行记录与计费，附件以引用方式复用
+      parameters:
+      - description: 会话 public_id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 消息 public_id
+        in: path
+        name: message_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/ConversationUpdateResponseDoc'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/ConversationErrorDoc'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/ConversationErrorDoc'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/ConversationErrorDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/ConversationErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 从指定消息 fork 新会话
       tags:
       - chat
   /conversations/{id}/messages/preview:
@@ -16861,6 +17861,31 @@ paths:
       summary: 获取文件内容
       tags:
       - chat
+  /llm/icon-assets/{public_id}:
+    get:
+      description: 公开读取经过后端校验的不可变模型展示图标
+      parameters:
+      - description: 图标公开 ID
+        in: path
+        name: public_id
+        required: true
+        type: string
+      produces:
+      - image/png
+      - image/jpeg
+      - image/webp
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/ChannelErrorDoc'
+      summary: 读取模型展示图标
+      tags:
+      - llm
   /mcp/tools:
     get:
       description: 获取当前聊天侧可选择的 MCP 工具

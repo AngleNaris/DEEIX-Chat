@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/channel"
+	appcm "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/contentmoderation"
 	appupload "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/upload"
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/llm"
@@ -133,23 +134,50 @@ func (s *Service) StreamMediaVideo(ctx context.Context, input MediaVideoInput) (
 		StartedAt:          startedAt,
 	}
 	var retErr error
+	var moderationCoord *appcm.RunCoordinator
+	var result *SendMessageResult
+	var userMessage *model.Message
+	var assistantMessage *model.Message
 	defer func() {
+		if retErr != nil && moderationCoord != nil {
+			if result == nil && userMessage != nil && assistantMessage != nil {
+				result = &SendMessageResult{
+					UserMessage:      *userMessage,
+					AssistantMessage: *assistantMessage,
+					Billable:         false,
+					StartedAt:        startedAt,
+				}
+			}
+			s.completeModerationAfterFailure(context.WithoutCancel(ctx), moderationCoord, result)
+		}
 		endedAt := time.Now()
 		run.EndedAt = &endedAt
 		run.TotalLatencyMS = endedAt.Sub(startedAt).Milliseconds()
-		if retErr == nil {
+		switch {
+		case result != nil && result.IsModerationBlocked():
+			applyBlockedRunFields(run, result)
+		case retErr == nil:
 			run.Status = "success"
-		} else if errors.Is(retErr, ErrMessageGenerationCanceled) {
+			if result != nil {
+				applyModerationRunState(run, result)
+			}
+		case errors.Is(retErr, ErrMessageGenerationCanceled):
 			run.Status = "canceled"
 			run.ErrorCode = classifyRunErrorCode(retErr)
 			run.ErrorMessage = truncateError(messageErrorSummary(retErr), 255)
-		} else {
+			if result != nil {
+				applyModerationRunState(run, result)
+			}
+		default:
 			run.Status = "error"
 			run.ErrorCode = classifyRunErrorCode(retErr)
 			run.ErrorMessage = truncateError(messageErrorSummary(retErr), 255)
+			if result != nil {
+				applyModerationRunState(run, result)
+			}
 		}
-		if err := s.repo.CreateConversationRun(context.WithoutCancel(ctx), run); err != nil && s.logger != nil {
-			s.logger.Error("create_video_conversation_run_failed",
+		if err := s.repo.UpsertConversationRun(context.WithoutCancel(ctx), run); err != nil && s.logger != nil {
+			s.logger.Error("upsert_video_conversation_run_failed",
 				zap.String("trace_id", traceid.FromContext(ctx)),
 				zap.String("run_id", run.RunID),
 				zap.Error(err),
@@ -160,7 +188,7 @@ func (s *Service) StreamMediaVideo(ctx context.Context, input MediaVideoInput) (
 	ctx = cancelCtx
 	s.generationStreams.register(ctx, runID, input.UserID, cancel)
 
-	assistantMessage := &model.Message{
+	assistantMessage = &model.Message{
 		ConversationID: input.ConversationID,
 		UserID:         input.UserID,
 		PublicID:       normalizePublicID(uuid.NewString()),
@@ -172,7 +200,6 @@ func (s *Service) StreamMediaVideo(ctx context.Context, input MediaVideoInput) (
 		Status:         "pending",
 		Attachments:    "[]",
 	}
-	var userMessage *model.Message
 	if reuseUserMessage {
 		reused := *branchState.ReuseUserMessage
 		userMessage = &reused
@@ -217,6 +244,21 @@ func (s *Service) StreamMediaVideo(ctx context.Context, input MediaVideoInput) (
 			traceRecorder.attachToMessage(assistantMessage)
 		}
 	}()
+	moderationFileIDs := make([]string, 0, len(resolvedAttachments))
+	for _, item := range resolvedAttachments {
+		if fileID := strings.TrimSpace(item.FileID); fileID != "" {
+			moderationFileIDs = append(moderationFileIDs, fileID)
+		}
+	}
+	moderationCoord = s.startModerationRun(ctx, SendMessageInput{
+		UserID:         input.UserID,
+		ConversationID: input.ConversationID,
+		RequestID:      input.RequestID,
+		Content:        strings.TrimSpace(input.Prompt),
+		FileIDs:        moderationFileIDs,
+		ClientRunID:    runID,
+		OnEvent:        input.OnEvent,
+	}, runID, userMessage, assistantMessage, run)
 	emitMediaEvent(input.OnEvent, "queued", "video task queued", "video")
 
 	cfg := s.cfg.Snapshot()
@@ -282,7 +324,8 @@ func (s *Service) StreamMediaVideo(ctx context.Context, input MediaVideoInput) (
 	if err != nil {
 		if s.isCanceledMediaGeneration(ctx, runID, err) {
 			retErr = ErrMessageGenerationCanceled
-			result, cancelErr := s.completeCanceledMediaGeneration(canceledMediaGenerationInput{
+			var cancelErr error
+			result, cancelErr = s.completeCanceledMediaGeneration(canceledMediaGenerationInput{
 				Context:          ctx,
 				Conversation:     conversation,
 				UserMessage:      userMessage,
@@ -432,7 +475,7 @@ func (s *Service) StreamMediaVideo(ctx context.Context, input MediaVideoInput) (
 	run.CacheWriteTokens = usage.CacheWriteTokens
 	run.ReasoningTokens = usage.ReasoningTokens
 
-	return &SendMessageResult{
+	result = &SendMessageResult{
 		UserMessage:         *userMessage,
 		AssistantMessage:    *assistantMessage,
 		MetadataRefreshHint: s.resolveConversationMetadataRefreshHint(ctx, *conversation, *userMessage),
@@ -452,7 +495,21 @@ func (s *Service) StreamMediaVideo(ctx context.Context, input MediaVideoInput) (
 		StartedAt:           startedAt,
 		LatencyMS:           latencyMS,
 		DurationSeconds:     durationSeconds,
-	}, nil
+	}
+	if moderationCoord != nil {
+		// Omni Moderation has no video modality. The prompt and optional input
+		// image still participate in the same barrier as other media tasks.
+		s.completeModerationAfterSuccess(
+			ctx,
+			moderationCoord,
+			result,
+			"",
+			nil,
+			SendMessageInput{UserID: input.UserID, ConversationID: input.ConversationID},
+			reuseUserMessage,
+		)
+	}
+	return result, nil
 }
 
 func mediaVideoUserContentType(hasInputs bool) string {

@@ -102,6 +102,7 @@ func TestNormalizeProviderInputValidatesLogoURL(t *testing.T) {
 		{name: "https url", logoURL: "https://example.com/logo.svg"},
 		{name: "http url", logoURL: "http://example.com/logo.svg"},
 		{name: "absolute path", logoURL: "/identity-providers/acme.svg"},
+		{name: "url credentials", logoURL: "https://user:password@example.com/logo.svg", wantErr: true},
 		{name: "protocol relative url", logoURL: "//example.com/logo.svg", wantErr: true},
 		{name: "data url", logoURL: "data:image/svg+xml,<svg/>", wantErr: true},
 		{name: "javascript url", logoURL: "javascript:alert(1)", wantErr: true},

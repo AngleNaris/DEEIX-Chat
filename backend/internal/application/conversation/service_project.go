@@ -403,7 +403,8 @@ func (s *Service) validateConversationProjectDefaults(
 		mcpDefaultMode != current.MCPDefaultMode ||
 		!slices.Equal(mcpToolIDs, current.DefaultMCPToolIDs)
 	skillSelectionChanged := current == nil || !slices.Equal(skillIDs, current.DefaultSkillIDs)
-	if skillSelectionChanged && len(skillIDs) > s.resolveMaxSelectedSkillsPerMessage() {
+	if (mcpSelectionChanged && len(mcpToolIDs) > s.resolveMaxSelectedToolsPerMessage()) ||
+		(skillSelectionChanged && len(skillIDs) > s.resolveMaxSelectedSkillsPerMessage()) {
 		return ErrInvalidConversationProject
 	}
 	mcpToolIDsToValidate := mcpToolIDs

@@ -62,6 +62,7 @@ type messageTraceDraft struct {
 	eventID         string
 	eventType       string
 	eventSeq        int
+	generationCall  int
 	stage           string
 	roundID         string
 	parentEventID   string
@@ -76,19 +77,20 @@ type messageTraceDraft struct {
 }
 
 type messageTraceRecorder struct {
-	service       *Service
-	ctx           context.Context
-	cfg           config.Config
-	assistant     *model.Message
-	onEvent       func(string, map[string]interface{}) error
-	process       *messageTraceDraft
-	tools         *messageTraceDraft
-	upstreamThink *messageTraceDraft
-	promptTrace   *model.MessagePromptTrace
-	nextEventSeq  int
-	nextRoundSeq  int
-	eventCounters map[string]int
-	events        []model.MessageTraceEvent
+	service        *Service
+	ctx            context.Context
+	cfg            config.Config
+	assistant      *model.Message
+	onEvent        func(string, map[string]interface{}) error
+	process        *messageTraceDraft
+	tools          *messageTraceDraft
+	upstreamThink  *messageTraceDraft
+	promptTrace    *model.MessagePromptTrace
+	nextEventSeq   int
+	nextRoundSeq   int
+	generationCall int
+	eventCounters  map[string]int
+	events         []model.MessageTraceEvent
 
 	upstreamThinkLastLiveFlush  time.Time
 	upstreamThinkLastPersist    time.Time
@@ -203,6 +205,13 @@ func (r *messageTraceRecorder) visible() bool {
 	return r.enabled() && r.cfg.ProcessTraceVisibleToUser
 }
 
+func (r *messageTraceRecorder) beginGenerationCall() {
+	if !r.enabled() {
+		return
+	}
+	r.generationCall++
+}
+
 func (r *messageTraceRecorder) ensureDraft(traceType string) *messageTraceDraft {
 	if !r.enabled() {
 		return nil
@@ -219,6 +228,7 @@ func (r *messageTraceRecorder) ensureDraft(traceType string) *messageTraceDraft 
 		}
 		if r.upstreamThink == nil || r.upstreamThink.status == messageTraceStatusCompleted || r.upstreamThink.status == messageTraceStatusError {
 			r.upstreamThink = r.newTraceDraft(traceType, "think", "模型思考", 3, messageTraceStageThink, r.nextTraceRoundID(), "")
+			r.upstreamThink.generationCall = r.generationCall
 		}
 		return r.upstreamThink
 	case messageTraceTypeTools:
@@ -467,16 +477,26 @@ func (r *messageTraceRecorder) syncStructuredThink(content string, summary strin
 	if content == "" && summary == "" {
 		return
 	}
+	displayContent := strings.TrimSpace(content)
+	if displayContent == "" {
+		displayContent = strings.TrimSpace(summary)
+	}
+	// Streaming adapters may already complete the draft before returning the
+	// same accumulated reasoning in GenerateOutput. Treat that terminal replay
+	// as an idempotent sync instead of opening a duplicate reasoning round.
+	if r.upstreamThink != nil &&
+		r.upstreamThink.status == messageTraceStatusCompleted &&
+		r.upstreamThink.generationCall == r.generationCall &&
+		displayContent != "" &&
+		strings.TrimSpace(r.upstreamThink.contentMarkdown) == displayContent {
+		return
+	}
 	r.completeProcess()
 	draft := r.ensureDraft(messageTraceTypeUpstreamThink)
 	if draft == nil {
 		return
 	}
 	previousContent := draft.contentMarkdown
-	displayContent := strings.TrimSpace(content)
-	if displayContent == "" {
-		displayContent = strings.TrimSpace(summary)
-	}
 	if displayContent != "" {
 		draft.contentMarkdown = displayContent
 	}

@@ -1,23 +1,23 @@
 "use client";
 
-import * as React from "react";
 import { CircleAlert } from "lucide-react";
 import { motion } from "motion/react";
 import { useTranslations } from "next-intl";
+import * as React from "react";
 
 import { ChevronDown } from "@/components/animate-ui/icons/chevron-down";
 import { ChevronUp } from "@/components/animate-ui/icons/chevron-up";
-import { ChatMentionMenuPortal } from "@/features/chat/components/shared/chat-mention-menu";
-import { MessageAttachmentRow } from "@/features/chat/components/message/message-attachment";
-import { UserMessageMeta } from "@/features/chat/components/message/message-meta";
-import type { ChatAreaMessage } from "@/features/chat/types/messages";
-import {
-  useChatMentionMenu,
-  type ChatMentionMenuKind,
-} from "@/features/chat/hooks/use-chat-mention-menu";
-import type { ChatModelOption } from "@/features/chat/types/chat-runtime";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { MessageAttachmentRow } from "@/features/chat/components/message/message-attachment";
+import { UserMessageMeta } from "@/features/chat/components/message/message-meta";
+import { ChatMentionMenuPortal } from "@/features/chat/components/shared/chat-mention-menu";
+import {
+  type ChatMentionMenuKind,
+  useChatMentionMenu,
+} from "@/features/chat/hooks/use-chat-mention-menu";
+import type { ChatModelOption } from "@/features/chat/types/chat-runtime";
+import type { ChatAreaMessage } from "@/features/chat/types/messages";
 import type { FileContentResult } from "@/shared/api/file";
 import type { PreviewDialogFile } from "@/shared/components/file-preview/preview-dialog";
 import { StreamdownRender } from "@/shared/components/markdown/streamdown-render";
@@ -40,6 +40,7 @@ type ChatMessageUserProps = {
   item: ChatAreaMessage;
   onRetryUserMessage: (message: ChatAreaMessage) => Promise<void> | void;
   onEditUserMessage: (message: ChatAreaMessage, content: string) => Promise<boolean> | boolean;
+  onForkMessage?: (message: ChatAreaMessage) => Promise<void> | void;
   modelOptions?: ChatModelOption[];
   selectedPlatformModelName?: string;
   onModelChange?: (platformModelName: string) => void;
@@ -58,6 +59,7 @@ export function ChatMessageUser({
   item,
   onRetryUserMessage,
   onEditUserMessage,
+  onForkMessage,
   modelOptions = [],
   selectedPlatformModelName = "",
   onModelChange = () => undefined,
@@ -139,6 +141,11 @@ export function ChatMessageUser({
     void onRetryUserMessage(item);
   }, [item, onRetryUserMessage]);
 
+  const onFork = React.useCallback(
+    () => onForkMessage?.(item),
+    [item, onForkMessage],
+  );
+
   const onEditSave = React.useCallback(async () => {
     const nextContent = editingValue.trim();
     if (!nextContent || nextContent === item.content.trim()) {
@@ -170,6 +177,7 @@ export function ChatMessageUser({
     disabled: readOnly || !isEditing,
     draft: editingValue,
     enabledKinds: modelMenuDisabled ? EDIT_MESSAGE_PROMPT_ONLY_KINDS : EDIT_MESSAGE_MENTION_KINDS,
+    maxSelectedTools: 0,
     maxSelectedSkills: 0,
     modelOptions,
     selectedSkills: [],
@@ -322,6 +330,7 @@ export function ChatMessageUser({
         onRetry={onRetry}
         onEdit={() => setIsEditing(true)}
         onCopy={onCopy}
+        onFork={onForkMessage ? onFork : undefined}
         copySucceeded={copySucceeded}
         readOnly={readOnly}
         alwaysVisible={readOnly}

@@ -1,38 +1,38 @@
 "use client";
 
-import * as React from "react";
 import { useTranslations } from "next-intl";
-
+import * as React from "react";
+import { sanitizeConversationOptions } from "@/features/chat/model/conversation-options";
 import type {
   ChatModelOption,
   ModelOptionControl,
   ModelOptionControlType,
 } from "@/features/chat/types/chat-runtime";
-import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
-import { parseProtocolsJSON } from "@/shared/lib/model-protocols";
-import { sanitizeConversationOptions } from "@/features/chat/model/conversation-options";
-import {
-  DEFAULT_CHAT_CONTENT_WIDTH,
-  parseChatContentWidth,
-  type ChatContentWidth,
-} from "@/shared/model/chat-content-width";
-import { listConversationRuns } from "@/shared/api/conversation";
-import { listPublicModels } from "@/shared/api/model";
-import { getBillingConfig } from "@/shared/api/billing";
-import { getModelOptionPolicy } from "@/shared/api/settings";
-import { getUserSettings } from "@/shared/api/user-settings";
-import type { PublicModelDTO } from "@/shared/api/model.types";
-import type { ModelNativeToolConfig, ModelOptionPolicy } from "@/shared/lib/model-option-policy";
-import { parseKindsJSON } from "@/shared/model/llm-schema";
-import { resolveConversationDefaultModel } from "@/shared/model/conversation-default-model";
-import type { ConversationOptions } from "@/shared/api/conversation.types";
+import { USER_SETTINGS_UPDATED_EVENT } from "@/features/settings/events/user-settings-events";
 import type { SendShortcut } from "@/features/settings/types/settings";
 import { parseSendShortcut } from "@/features/settings/utils/chat-settings";
-import { USER_SETTINGS_UPDATED_EVENT } from "@/features/settings/events/user-settings-events";
+import { getBillingConfig } from "@/shared/api/billing";
+import { listConversationRuns } from "@/shared/api/conversation";
+import type { ConversationOptions } from "@/shared/api/conversation.types";
+import { listPublicModels } from "@/shared/api/model";
+import type { PublicModelDTO } from "@/shared/api/model.types";
+import { getMCPPolicy, getModelOptionPolicy } from "@/shared/api/settings";
+import { getUserSettings } from "@/shared/api/user-settings";
+import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 import {
-  normalizeBillingDisplayCurrency,
   type BillingDisplayCurrency,
+  normalizeBillingDisplayCurrency,
 } from "@/shared/lib/billing-display";
+import type { ModelNativeToolConfig, ModelOptionPolicy } from "@/shared/lib/model-option-policy";
+import { parseProtocolsJSON } from "@/shared/lib/model-protocols";
+import { nativeToolDefinitionVariantsFromConfig, nativeToolPayloadSignature } from "@/shared/lib/native-tool-payload";
+import {
+  type ChatContentWidth,
+  DEFAULT_CHAT_CONTENT_WIDTH,
+  parseChatContentWidth,
+} from "@/shared/model/chat-content-width";
+import { resolveConversationDefaultModel } from "@/shared/model/conversation-default-model";
+import { parseKindsJSON } from "@/shared/model/llm-schema";
 
 type ModelCatalogRefreshResult = {
   models: PublicModelDTO[];
@@ -57,6 +57,14 @@ function parseJSONObject(raw: string): Record<string, unknown> | null {
 
 function resolveChatContentWidth(settings: Record<string, string>): ChatContentWidth {
   return parseChatContentWidth(settings["chat.content_width"]);
+}
+
+function resolveMCPMaxSelectedTools(value: unknown): number {
+  const numeric = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return 32;
+  }
+  return Math.min(Math.floor(numeric), 128);
 }
 
 function normalizeNativeToolPayload(value: unknown): Record<string, unknown> {
@@ -85,16 +93,16 @@ function normalizeNativeToolStrings(value: unknown): string[] {
 
 function nativeToolID({
   key,
-  protocol,
+  protocols,
   type,
   index,
 }: {
   key: string;
-  protocol: string;
+  protocols: string[];
   type: string;
   index: number;
 }): string {
-  return [key, protocol, type].map((item) => item.trim()).filter(Boolean).join(":") || `native-tool-${index}`;
+  return [key, ...protocols, type].map((item) => item.trim()).filter(Boolean).join(":") || `native-tool-${index}`;
 }
 
 function resolveNativeTools(raw: string): ModelNativeToolConfig[] {
@@ -114,14 +122,15 @@ function resolveNativeTools(raw: string): ModelNativeToolConfig[] {
       const type = normalizeNativeToolString(source.type) || normalizeNativeToolString(payload.type);
       const protocol = normalizeNativeToolString(source.protocol);
       const protocols = normalizeNativeToolStrings(source.protocols);
+      const effectiveProtocols = protocols.length > 0 ? protocols : (protocol ? [protocol] : []);
       if (!key && !type && Object.keys(payload).length === 0) {
         return [];
       }
       return [{
-        id: normalizeNativeToolString(source.id) || nativeToolID({ key, protocol, type, index }),
+        id: normalizeNativeToolString(source.id) || nativeToolID({ key, protocols: effectiveProtocols, type, index }),
         key,
         protocol,
-        protocols: protocols.length > 0 ? protocols : (protocol ? [protocol] : []),
+        protocols: effectiveProtocols,
         provider: normalizeNativeToolString(source.provider) || undefined,
         type,
         label: normalizeNativeToolString(source.label) || type || key,
@@ -133,7 +142,7 @@ function resolveNativeTools(raw: string): ModelNativeToolConfig[] {
     }).filter((item) => item.enabled);
   }
   return resolveNativeToolKeys(raw).map((key, index) => ({
-    id: nativeToolID({ key, protocol: "", type: "", index }),
+    id: nativeToolID({ key, protocols: [], type: "", index }),
     key,
     protocol: "",
     protocols: [],
@@ -145,23 +154,48 @@ function resolveNativeTools(raw: string): ModelNativeToolConfig[] {
   }));
 }
 
-function mergeDefaultNativeTools(defaultOptions: ConversationOptions, nativeTools: ModelNativeToolConfig[]): ConversationOptions {
-  const defaultToolPayloads = nativeTools
-    .filter((tool) => tool.enabled && tool.defaultEnabled && Object.keys(tool.payload).length > 0)
-    .map((tool) => ({ ...tool.payload }));
-  if (defaultToolPayloads.length === 0) {
-    return defaultOptions;
-  }
+function mergeDefaultNativeTools(
+  defaultOptions: ConversationOptions,
+  nativeTools: ModelNativeToolConfig[],
+  catalog: ModelOptionPolicy["nativeTools"],
+  modelProtocols: string[],
+): ConversationOptions {
   const currentTools = Array.isArray(defaultOptions.tools)
     ? defaultOptions.tools.filter((item) => item !== null && typeof item === "object" && !Array.isArray(item))
     : [];
+  const seenPayloads = new Set(currentTools.map(nativeToolPayloadSignature));
+  const defaultToolPayloads = nativeTools
+    .filter((tool) =>
+      tool.enabled
+      && tool.defaultEnabled
+    )
+    .flatMap((tool) => nativeToolDefinitionVariantsFromConfig(tool, catalog, modelProtocols))
+    .flatMap((tool) => {
+      if (Object.keys(tool.payload).length === 0) {
+        return [];
+      }
+      const signature = nativeToolPayloadSignature(tool.payload);
+      if (seenPayloads.has(signature)) {
+        return [];
+      }
+      seenPayloads.add(signature);
+      return [{ ...tool.payload }];
+    });
+  if (defaultToolPayloads.length === 0) {
+    return defaultOptions;
+  }
   return sanitizeConversationOptions({
     ...defaultOptions,
     tools: [...currentTools, ...defaultToolPayloads],
   });
 }
 
-function resolveDefaultOptions(raw: string): ConversationOptions {
+function resolveDefaultOptions(
+  raw: string,
+  nativeTools: ModelNativeToolConfig[],
+  catalog: ModelOptionPolicy["nativeTools"],
+  modelProtocols: string[],
+): ConversationOptions {
   const parsed = parseJSONObject(raw);
   if (!parsed) {
     return {};
@@ -170,7 +204,7 @@ function resolveDefaultOptions(raw: string): ConversationOptions {
   const defaultOptions = defaults === null || Array.isArray(defaults) || typeof defaults !== "object"
     ? {}
     : sanitizeConversationOptions(defaults as ConversationOptions);
-  return mergeDefaultNativeTools(defaultOptions, resolveNativeTools(raw));
+  return mergeDefaultNativeTools(defaultOptions, nativeTools, catalog, modelProtocols);
 }
 
 const MODEL_OPTION_CONTROL_TYPES = new Set<ModelOptionControlType>(["boolean", "number", "select", "text"]);
@@ -301,7 +335,12 @@ function resolveSupportsVision(capabilitiesJSON: string): boolean {
   return parsed?.vision === true;
 }
 
-function toChatModelOption(item: PublicModelDTO): ChatModelOption {
+function toChatModelOption(
+  item: PublicModelDTO,
+  nativeToolCatalog: ModelOptionPolicy["nativeTools"] = [],
+): ChatModelOption {
+  const protocols = parseProtocolsJSON(item.protocolsJSON);
+  const nativeTools = resolveNativeTools(item.capabilitiesJSON);
   return {
     platformModelName: item.platformModelName,
     icon: item.icon,
@@ -312,13 +351,13 @@ function toChatModelOption(item: PublicModelDTO): ChatModelOption {
     displayGroupName: item.displayGroupName,
     displayGroupIcon: item.displayGroupIcon,
     kinds: parseKindsJSON(item.kindsJSON),
-    protocols: parseProtocolsJSON(item.protocolsJSON),
+    protocols,
     supportsVision: resolveSupportsVision(item.capabilitiesJSON),
-    defaultOptions: resolveDefaultOptions(item.capabilitiesJSON),
+    defaultOptions: resolveDefaultOptions(item.capabilitiesJSON, nativeTools, nativeToolCatalog, protocols),
     optionControls: resolveOptionControls(item.capabilitiesJSON),
     lockedOptionPaths: resolveLockedOptionPaths(item.capabilitiesJSON),
     nativeToolKeys: resolveNativeToolKeys(item.capabilitiesJSON),
-    nativeTools: resolveNativeTools(item.capabilitiesJSON),
+    nativeTools,
     pricing: item.pricing,
   };
 }
@@ -353,6 +392,7 @@ export function useChatModelOptions({
   const [billingDisplayCurrency, setBillingDisplayCurrency] = React.useState<BillingDisplayCurrency>("USD");
   const [billingDisplayUsdToCnyRate, setBillingDisplayUsdToCnyRate] = React.useState<number | null>(null);
   const [modelOptionPolicy, setModelOptionPolicy] = React.useState<ModelOptionPolicy | null>(null);
+  const [mcpMaxSelectedTools, setMCPMaxSelectedTools] = React.useState(32);
   const activeConversationRef = React.useRef<string | null>(null);
   const userSelectedModelRef = React.useRef(false);
   const runModelRequestRef = React.useRef(0);
@@ -395,11 +435,11 @@ export function useChatModelOptions({
     setModelOptionPolicy(catalog.modelOptionPolicy);
   }, []);
 
-  const refreshModelCatalog = React.useCallback(async (): Promise<PublicModelDTO[]> => {
+  const refreshModelCatalog = React.useCallback(async (): Promise<ModelCatalogRefreshResult> => {
     const catalog = await loadModelCatalog();
     applyModelCatalog(catalog);
     setModelsErrorMsg("");
-    return catalog.models;
+    return catalog;
   }, [applyModelCatalog, loadModelCatalog]);
 
   const refreshModelOption = React.useCallback(async (platformModelName: string): Promise<ChatModelOption | null> => {
@@ -408,9 +448,9 @@ export function useChatModelOptions({
       return null;
     }
 
-    const nextModels = await refreshModelCatalog();
-    const nextModel = nextModels.find((item) => item.platformModelName === normalizedName);
-    return nextModel ? toChatModelOption(nextModel) : null;
+    const catalog = await refreshModelCatalog();
+    const nextModel = catalog.models.find((item) => item.platformModelName === normalizedName);
+    return nextModel ? toChatModelOption(nextModel, catalog.modelOptionPolicy?.nativeTools ?? []) : null;
   }, [refreshModelCatalog]);
 
   React.useEffect(() => {
@@ -425,15 +465,17 @@ export function useChatModelOptions({
           setModelsErrorMsg(t("signInRequired"));
           return;
         }
-        const [catalog, settings, billingConfig] = await Promise.all([
+        const [catalog, settings, billingConfig, nextMCPPolicy] = await Promise.all([
           loadModelCatalog(token),
           getUserSettings(token).catch(() => ({} as Record<string, string>)),
           getBillingConfig(token).catch(() => null),
+          getMCPPolicy(token).catch(() => null),
         ]);
         if (cancelled) {
           return;
         }
         applyModelCatalog(catalog);
+        setMCPMaxSelectedTools(resolveMCPMaxSelectedTools(nextMCPPolicy?.maxSelectedToolsPerMessage));
         setUserDefaultModel(settings["chat.default_model"]?.trim() ?? "");
         setSendShortcut(parseSendShortcut(settings["chat.send_on_enter"]));
         setRestoreDraftOnFailure(settings["chat.restore_draft_on_failure"] !== "false");
@@ -591,8 +633,8 @@ export function useChatModelOptions({
 
   const modelOptions = React.useMemo<ChatModelOption[]>(
     () =>
-      availableModels.map(toChatModelOption),
-    [availableModels],
+      availableModels.map((model) => toChatModelOption(model, modelOptionPolicy?.nativeTools ?? [])),
+    [availableModels, modelOptionPolicy?.nativeTools],
   );
 
   return {
@@ -614,6 +656,7 @@ export function useChatModelOptions({
     billingDisplayCurrency,
     billingDisplayUsdToCnyRate,
     modelOptionPolicy,
+    mcpMaxSelectedTools,
     selectedPlatformModelName,
     setSelectedPlatformModelName: selectPlatformModelName,
   };
