@@ -4,7 +4,12 @@ import type {
   MessageTraceEventResponse,
 } from "@deeix/api-contract";
 import { authedFetch, authedRequest } from "@/shared/api/authed-client";
-import { apiRequest, ApiError, pathParam } from "@/shared/api/http-client";
+import {
+  DEFAULT_CONVERSATION_STREAM_IDLE_TIMEOUT_MS,
+  readRecoverableSequencedJSONStream,
+  readSequencedJSONStream,
+} from "@/shared/api/conversation-stream-reader";
+import { apiRequest, ApiError, ApiNetworkError, pathParam } from "@/shared/api/http-client";
 import type { PagePayload } from "@/shared/api/common.types";
 import type {
   ConversationDTO,
@@ -145,10 +150,6 @@ function normalizeStreamEvent(rawEvent: unknown): StreamMessageEvent {
   return event;
 }
 
-function streamEventSeq(event: StreamMessageEvent): number {
-  return typeof event.seq === "number" && Number.isFinite(event.seq) && event.seq > 0 ? event.seq : 0;
-}
-
 const GROUP_STREAM_EVENT_TYPES: ReadonlySet<string> = new Set([
   "group_step_started",
   "group_step_output_delta",
@@ -169,84 +170,7 @@ export function isGroupStreamAwareEvent(event: StreamMessageEvent): boolean {
   return "groupRunID" in event && typeof event.groupRunID === "string" && event.groupRunID.trim() !== "";
 }
 
-function extractJSONDocuments(source: string): { documents: string[]; remainder: string } {
-  const documents: string[] = [];
-  let startIndex = -1;
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
-  let lastConsumedIndex = 0;
-
-  for (let index = 0; index < source.length; index += 1) {
-    const char = source[index];
-
-    if (startIndex < 0) {
-      if (char === "{") {
-        startIndex = index;
-        depth = 1;
-        lastConsumedIndex = index;
-      } else if (!/\s/.test(char)) {
-        break;
-      } else {
-        lastConsumedIndex = index + 1;
-      }
-      continue;
-    }
-
-    if (inString) {
-      if (escaped) {
-        escaped = false;
-      } else if (char === "\\") {
-        escaped = true;
-      } else if (char === "\"") {
-        inString = false;
-      }
-      continue;
-    }
-
-    if (char === "\"") {
-      inString = true;
-      continue;
-    }
-
-    if (char === "{") {
-      depth += 1;
-      continue;
-    }
-
-    if (char !== "}") {
-      continue;
-    }
-
-    depth -= 1;
-    if (depth !== 0) {
-      continue;
-    }
-
-    documents.push(source.slice(startIndex, index + 1));
-    startIndex = -1;
-    lastConsumedIndex = index + 1;
-  }
-
-  if (startIndex >= 0) {
-    return {
-      documents,
-      remainder: source.slice(startIndex),
-    };
-  }
-
-  return {
-    documents,
-    remainder: source.slice(lastConsumedIndex),
-  };
-}
-
 function handleStreamEvent(event: StreamMessageEvent, options: ConversationStreamOptions, responseStatus: number): SendMessageResult | null {
-  const seq = streamEventSeq(event);
-  if (seq > 0) {
-    options.onEventSeq?.(seq);
-  }
-
   if (event.type === "file_proc") {
     options.onFileProc?.(event.message);
     return null;
@@ -933,22 +857,18 @@ export async function resumeMessageGenerationStream(
   options: ConversationStreamOptions = {},
 ): Promise<SendMessageResult | null> {
   const afterSeq = options.afterSeq && options.afterSeq > 0 ? Math.floor(options.afterSeq) : 0;
-  const afterQuery = afterSeq > 0 ? `?after=${afterSeq}` : "";
-  const response = await authedFetch(
-    `/api/v1/conversation-runs/${pathParam(runID)}/stream${afterQuery}`,
-    {
-      method: "GET",
-      accessToken,
-      signal: options.signal,
-    },
-    true,
+  const response = await openMessageGenerationResumeResponse(
+    accessToken,
+    runID,
+    afterSeq,
+    options.signal,
   );
 
   if (!response.body) {
     return null;
   }
 
-  return readConversationStream(response, options);
+  return readRecoverableConversationStream(response, accessToken, runID, options);
 }
 
 export async function setMessageFeedback(
@@ -1015,55 +935,67 @@ export async function readConversationStream(
   response: Response,
   options: ConversationStreamOptions,
 ): Promise<SendMessageResult | null> {
-  if (!response.body) {
-    return null;
+  const { result } = await readSequencedJSONStream(response, {
+    signal: options.signal,
+    afterSeq: options.afterSeq,
+    parseEvent: (source) => normalizeStreamEvent(JSON.parse(source)),
+    getEventSeq: (event) => event.seq,
+    handleEvent: (event, responseStatus) => handleStreamEvent(event, options, responseStatus),
+    onEventSeq: options.onEventSeq,
+  });
+  return result;
+}
+
+function shouldRetryGenerationStreamOpen(error: unknown): boolean {
+  return error instanceof ApiNetworkError ||
+    (error instanceof ApiError && (error.status === 408 || error.status === 429 || error.status >= 500));
+}
+
+async function openMessageGenerationResumeResponse(
+  accessToken: string,
+  runID: string,
+  afterSeq: number,
+  signal?: AbortSignal,
+): Promise<Response> {
+  const afterQuery = afterSeq > 0 ? `?after=${Math.floor(afterSeq)}` : "";
+  return authedFetch(
+    `/api/v1/conversation-runs/${pathParam(runID)}/stream${afterQuery}`,
+    {
+      method: "GET",
+      accessToken,
+      signal,
+    },
+    true,
+  );
+}
+
+async function readRecoverableConversationStream(
+  initialResponse: Response,
+  accessToken: string,
+  runID: string,
+  options: ConversationStreamOptions,
+): Promise<SendMessageResult> {
+  return readRecoverableSequencedJSONStream({
+    initialResponse,
+    signal: options.signal,
+    afterSeq: options.afterSeq,
+    idleTimeoutMS: DEFAULT_CONVERSATION_STREAM_IDLE_TIMEOUT_MS,
+    parseEvent: (source) => normalizeStreamEvent(JSON.parse(source)),
+    getEventSeq: (event) => event.seq,
+    handleEvent: (event, responseStatus) => handleStreamEvent(event, options, responseStatus),
+    onEventSeq: options.onEventSeq,
+    openRecovery: (afterSeq, signal) =>
+      openMessageGenerationResumeResponse(accessToken, runID, afterSeq, signal),
+    shouldRetryOpenError: shouldRetryGenerationStreamOpen,
+  });
+}
+
+function payloadRunID(payload: unknown): string {
+  if (!payload || typeof payload !== "object" || !("clientRunID" in payload)) {
+    return "";
   }
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let completed: SendMessageResult | null = null;
-
-  while (true) {
-    let readResult: ReadableStreamReadResult<Uint8Array>;
-    try {
-      readResult = await reader.read();
-    } catch (error) {
-      if (options.signal?.aborted) {
-        throw new DOMException("Aborted", "AbortError");
-      }
-      throw error;
-    }
-
-    const { done, value } = readResult;
-    buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
-
-    const { documents, remainder } = extractJSONDocuments(buffer);
-    buffer = remainder;
-
-    for (const document of documents) {
-      const event = normalizeStreamEvent(JSON.parse(document));
-      const nextCompleted = handleStreamEvent(event, options, response.status);
-      if (nextCompleted) {
-        completed = nextCompleted;
-      }
-    }
-
-    if (done) {
-      break;
-    }
-  }
-
-  const tail = buffer.trim();
-  if (tail) {
-    const event = normalizeStreamEvent(JSON.parse(tail));
-    const nextCompleted = handleStreamEvent(event, options, response.status);
-    if (nextCompleted) {
-      completed = nextCompleted;
-    }
-  }
-
-  return completed;
+  const value = (payload as { clientRunID?: unknown }).clientRunID;
+  return typeof value === "string" ? value.trim() : "";
 }
 
 async function postConversationStream<TPayload>(
@@ -1091,7 +1023,10 @@ async function postConversationStream<TPayload>(
     throw new ApiError("stream body is empty", response.status);
   }
 
-  const completed = await readConversationStream(response, options);
+  const runID = payloadRunID(payload);
+  const completed = runID
+    ? await readRecoverableConversationStream(response, accessToken, runID, options)
+    : await readConversationStream(response, options);
   if (!completed) {
     throw new ApiError("stream completed without final payload", response.status);
   }

@@ -629,6 +629,18 @@ export function useChatMessageSubmit({
     setActiveRunRevision((current) => current + 1);
   }, []);
 
+  React.useEffect(
+    () => () => {
+      for (const [runID, activeStream] of activeStreamsRef.current) {
+        clearCancelSettlementTimer(activeStream);
+        activeStream.controller.abort();
+        activeGenerationRunsRef?.current.delete(runID);
+      }
+      activeStreamsRef.current.clear();
+    },
+    [activeGenerationRunsRef],
+  );
+
   const updatePendingExchange = React.useCallback(
     (exchangeKey: string, update: (current: PendingExchange) => PendingExchange) => {
       setPendingExchanges((current) => {

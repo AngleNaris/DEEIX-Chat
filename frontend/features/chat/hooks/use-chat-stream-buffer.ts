@@ -273,7 +273,16 @@ export function useChatStreamBuffer({
     buffersRef.current.clear();
   }, []);
 
-  React.useEffect(() => () => resetStreamBuffer(), [resetStreamBuffer]);
+  React.useEffect(
+    () => () => {
+      for (const buffer of buffersRef.current.values()) {
+        clearLiveUpstreamThinkTrace(buffer.runID);
+        clearLiveGroupRun(buffer.runID);
+      }
+      resetStreamBuffer();
+    },
+    [resetStreamBuffer],
+  );
 
   return {
     enqueueUpstreamThinkDelta,

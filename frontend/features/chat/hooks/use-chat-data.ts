@@ -12,7 +12,11 @@ import {
   upsertLiveGroupRunTool,
 } from "@/features/agent-groups/model/group-run-store";
 import { buildMediaImagePreviewMarkdown } from "@/features/chat/model/media-image-preview";
-import { upsertLiveUpstreamThinkTrace } from "@/features/chat/model/upstream-think-store";
+import { shouldStartGenerationResume } from "@/features/chat/model/generation-stream-recovery";
+import {
+  clearLiveUpstreamThinkTrace,
+  upsertLiveUpstreamThinkTrace,
+} from "@/features/chat/model/upstream-think-store";
 import { isGroupStreamAwareEvent } from "@/shared/api/conversation";
 import type { MessageDTO } from "@/shared/api/conversation.types";
 
@@ -109,6 +113,11 @@ export function useChatData(
   const pendingAssistantContentRef = React.useRef("");
   const resumeTextReplayByRunRef = React.useRef<Record<string, ResumeTextReplayState>>({});
   const activeResumeStreamRef = React.useRef<ActiveResumeStream | null>(null);
+  const resumedRunIDsRef = React.useRef(new Set<string>());
+  const isGroupConversationRef = React.useRef(Boolean(isGroupConversation));
+  const tSubmitRef = React.useRef(tSubmit);
+  isGroupConversationRef.current = Boolean(isGroupConversation);
+  tSubmitRef.current = tSubmit;
   // 恢复游标只在对应的可见内容仍被保留时有效，两者必须同步清理。
   const clearResumeCheckpoint = React.useCallback((runID: string) => {
     const normalizedRunID = runID.trim();
@@ -331,17 +340,28 @@ export function useChatData(
 
   const pendingRunID = pendingAssistant?.runID?.trim() || "";
 
+  React.useEffect(
+    () => () => {
+      for (const runID of resumedRunIDsRef.current) {
+        clearLiveUpstreamThinkTrace(runID);
+      }
+      resumedRunIDsRef.current.clear();
+    },
+    [],
+  );
+
   React.useEffect(() => {
     pendingAssistantContentRef.current = pendingAssistant?.content ?? "";
   }, [pendingAssistant?.content]);
 
   React.useEffect(() => {
-    if (
-      !conversationID ||
-      !pendingRunID ||
-      activeGenerationRunsRef?.current.has(pendingRunID) ||
-      failedGenerationRunsRef?.current.has(pendingRunID)
-    ) {
+    const shouldResume = shouldStartGenerationResume({
+      conversationID,
+      pendingRunID,
+      generationActive: Boolean(activeGenerationRunsRef?.current.has(pendingRunID)),
+      generationFailed: Boolean(failedGenerationRunsRef?.current.has(pendingRunID)),
+    });
+    if (!shouldResume) {
       setResumingRunID("");
       return;
     }
@@ -368,6 +388,7 @@ export function useChatData(
       runID: pendingRunID,
       accessToken: null,
     };
+    resumedRunIDsRef.current.add(pendingRunID);
     setResumingRunID(pendingRunID);
 
     async function resume() {
@@ -393,11 +414,13 @@ export function useChatData(
             const contentType = event.content_type === "video" ? "video" : "image";
             const activityLabel =
               status === "queued"
-                ? tSubmit(contentType === "video" ? "mediaStatus.videoQueued" : "mediaStatus.queued")
+                ? tSubmitRef.current(contentType === "video" ? "mediaStatus.videoQueued" : "mediaStatus.queued")
                 : status === "running"
-                  ? tSubmit(contentType === "video" ? "mediaStatus.videoRunning" : "mediaStatus.running")
+                  ? tSubmitRef.current(contentType === "video" ? "mediaStatus.videoRunning" : "mediaStatus.running")
                   : status === "saving_artifact"
-                    ? tSubmit(contentType === "video" ? "mediaStatus.videoSavingArtifact" : "mediaStatus.savingArtifact")
+                    ? tSubmitRef.current(
+                        contentType === "video" ? "mediaStatus.videoSavingArtifact" : "mediaStatus.savingArtifact",
+                      )
                     : event.message.trim() || status;
             updateResumeState((prev) => ({
               ...prev,
@@ -413,7 +436,7 @@ export function useChatData(
               return;
             }
             clearResumeTextReplay();
-            const previewMarkdown = buildMediaImagePreviewMarkdown(event, tSubmit("imagePreviewAlt"));
+            const previewMarkdown = buildMediaImagePreviewMarkdown(event, tSubmitRef.current("imagePreviewAlt"));
             if (!previewMarkdown) {
               return;
             }
@@ -506,7 +529,6 @@ export function useChatData(
           },
         });
         if (!controller.signal.aborted && completed === null) {
-          clearResumeCheckpoint(pendingRunID);
           reload();
         }
         if (!controller.signal.aborted && completed) {
@@ -515,7 +537,6 @@ export function useChatData(
         }
       } catch (error) {
         if (!controller.signal.aborted && error instanceof Error && error.name !== "AbortError") {
-          clearResumeCheckpoint(pendingRunID);
           setResumingRunID("");
           reload();
         }
@@ -530,14 +551,13 @@ export function useChatData(
     }
 
     // §16.8：群组会话恢复时先创建占位运行（正在恢复运行），事件重放到达后回填时间线。
-    if (isGroupConversation) {
+    if (isGroupConversationRef.current) {
       ensureLiveGroupRunPlaceholder(pendingRunID, { resuming: true });
     }
     void resume();
     return () => {
       closed = true;
       controller.abort();
-      clearResumeCheckpoint(pendingRunID);
       if (activeResumeStreamRef.current?.controller === controller) {
         activeResumeStreamRef.current = null;
       }
@@ -547,10 +567,8 @@ export function useChatData(
     clearResumeCheckpoint,
     conversationID,
     failedGenerationRunsRef,
-    isGroupConversation,
     pendingRunID,
     reload,
-    tSubmit,
   ]);
 
   React.useEffect(() => {

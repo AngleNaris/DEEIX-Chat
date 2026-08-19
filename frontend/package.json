@@ -15,6 +15,7 @@
     "analyze": "next experimental-analyze",
     "analyze:output": "next experimental-analyze --output",
     "start": "next start",
+    "test": "node --test shared/api/conversation-stream-reader.test.mjs features/chat/model/generation-stream-recovery.test.mjs",
     "typecheck": "tsc --noEmit --pretty false",
     "check": "pnpm lint && pnpm typecheck",
     "lint": "biome lint .",
