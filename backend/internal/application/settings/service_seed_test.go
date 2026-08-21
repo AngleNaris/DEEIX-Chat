@@ -206,6 +206,32 @@ func TestSeedAddsXAIVideoToPreviousDefaultModelOptionAllowedPaths(t *testing.T) 
 	}
 }
 
+func TestSeedAddsXAIVideoExtensionsToPreviousDefaultModelOptionAllowedPaths(t *testing.T) {
+	previousDefault := map[string][]string{}
+	if err := json.Unmarshal([]byte(config.DefaultModelOptionAllowedPathsJSON()), &previousDefault); err != nil {
+		t.Fatalf("decode current model option defaults: %v", err)
+	}
+	delete(previousDefault, "xai_video_extensions")
+	previousJSON, err := json.Marshal(previousDefault)
+	if err != nil {
+		t.Fatalf("encode previous model option defaults: %v", err)
+	}
+	repo := newSettingsSeedRepo(domainsettings.SystemSetting{
+		Namespace: "chat",
+		Key:       "model_option_allowed_paths",
+		Value:     string(previousJSON),
+		ValueType: "json",
+	})
+	service := NewService(repo, "")
+
+	if err := service.Seed(context.Background(), config.Config{}); err != nil {
+		t.Fatalf("seed settings: %v", err)
+	}
+	if got := repo.items["chat:model_option_allowed_paths"].Value; got != config.DefaultModelOptionAllowedPathsJSON() {
+		t.Fatalf("expected xAI video extensions defaults to be added, got %q", got)
+	}
+}
+
 func TestSeedAddsGeminiThinkingSummariesToPreviousDefaultModelOptionAllowedPaths(t *testing.T) {
 	previousDefault := map[string][]string{}
 	if err := json.Unmarshal([]byte(config.DefaultModelOptionAllowedPathsJSON()), &previousDefault); err != nil {

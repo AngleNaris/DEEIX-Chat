@@ -335,7 +335,7 @@
     "duplicateModel": "{model} appears more than once",
     "pricingObject": "{model} pricing must be an object",
     "invalidPricingMode": "{model}.pricingMode must be token, call, duration, or tiered",
-    "durationVideoOnly": "{model}.pricingMode=duration requires the video_gen capability",
+    "durationVideoOnly": "{model}.pricingMode=duration requires a video model capability",
     "invalidNumber": "{model}.{field} must be a number greater than or equal to 0",
     "invalidTieredPricing": "{model}.{field} must contain a non-empty tiers array",
     "invalidTieredPricingJSON": "{model}.tieredPricingJSON is not valid JSON"

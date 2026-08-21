@@ -47,34 +47,36 @@ type Conversation struct {
 
 // ConversationProject 表示用户会话项目分组。
 type ConversationProject struct {
-	ID                uint
-	UserID            uint
-	PublicID          string
-	Name              string
-	Description       string
-	SystemPrompt      string
-	MCPDefaultMode    string
-	DefaultMCPToolIDs []uint
-	DefaultSkillIDs   []uint
-	Color             string
-	Icon              string
-	SortOrder         int
-	Status            string
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
+	ID                      uint
+	UserID                  uint
+	PublicID                string
+	Name                    string
+	Description             string
+	SystemPrompt            string
+	MCPDefaultMode          string
+	DefaultMCPToolIDs       []uint
+	DefaultSkillIDs         []uint
+	DefaultKnowledgeBaseIDs []string
+	Color                   string
+	Icon                    string
+	SortOrder               int
+	Status                  string
+	CreatedAt               time.Time
+	UpdatedAt               time.Time
 }
 
 // ConversationProjectPatch 表示项目分组的局部更新。
 type ConversationProjectPatch struct {
-	Name              *string
-	Description       *string
-	SystemPrompt      *string
-	MCPDefaultMode    *string
-	DefaultMCPToolIDs *[]uint
-	DefaultSkillIDs   *[]uint
-	Color             *string
-	Icon              *string
-	Status            *string
+	Name                    *string
+	Description             *string
+	SystemPrompt            *string
+	MCPDefaultMode          *string
+	DefaultMCPToolIDs       *[]uint
+	DefaultSkillIDs         *[]uint
+	DefaultKnowledgeBaseIDs *[]string
+	Color                   *string
+	Icon                    *string
+	Status                  *string
 }
 
 // ConversationRole 表示用户角色(助手)配置。
@@ -217,6 +219,15 @@ type MessagePromptTrace struct {
 	Blocks                 []MessagePromptTraceBlock
 }
 
+// MessageKnowledgeSource 表示消息生成时实际使用的知识来源。
+type MessageKnowledgeSource struct {
+	FileName   string
+	FileID     string
+	ChunkIndex int
+	Score      float32
+	Preview    string
+}
+
 // Message 表示会话消息。
 type Message struct {
 	ID                       uint
@@ -246,6 +257,7 @@ type Message struct {
 	ErrorMessage             string
 	ModerationEventID        string
 	ModerationCategoriesJSON string
+	KnowledgeSources         []MessageKnowledgeSource
 	Attachments              string
 	ParentPublicID           string
 	SourcePublicID           string
@@ -319,6 +331,7 @@ type FileObject struct {
 	RAGReady               bool
 	RAGReason              string
 	EmbedStatus            string
+	EmbedSignature         string
 	EmbedError             string
 	PageCount              int
 	ChunkCount             int
@@ -378,6 +391,7 @@ type FileChunk struct {
 type FileChunkSearchResult struct {
 	FileChunk
 	Similarity float32
+	RankScore  float32
 }
 
 // StorageQuota 表示用户文件配额。

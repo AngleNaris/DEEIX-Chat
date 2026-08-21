@@ -34,6 +34,7 @@ const ADMIN_SECTION_LABEL_KEYS: Record<AdminSection, string> = {
   "agent-groups": "sections.agentGroups",
   "platform-tools": "sections.platformTools",
   "chat-files": "sections.chatFiles",
+  "knowledge-bases": "sections.knowledgeBases",
   about: "sections.about",
 };
 

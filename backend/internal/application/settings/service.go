@@ -237,7 +237,10 @@ func isLegacyDefaultModelOptionAllowedPaths(value string) bool {
 	)
 	legacyCombinedDefault := cloneStringSliceMap(legacyInteractionsWithoutSummaries)
 	legacyCombinedDefault["gemini_generate_content"] = previousGenerateContentDefault["gemini_generate_content"]
+	previousWithoutXAIVideoExtensions := cloneStringSliceMap(latestDefault)
+	delete(previousWithoutXAIVideoExtensions, "xai_video_extensions")
 	previousDefaults := []map[string][]string{
+		previousWithoutXAIVideoExtensions,
 		previousGenerateContentDefault,
 		previousInteractionsDefault,
 		previousCombinedDefault,
@@ -532,8 +535,20 @@ func validatePatchItem(item PatchItem) error {
 		return validateOptionalIntZeroOrMinMax(value, 128, 1000000, key)
 	case "file:full_context_pdf_max_pages":
 		return validateOptionalIntZeroOrMinMax(value, 1, 500, key)
+	case "file:rag_top_k":
+		return validateIntMinMax(value, 1, 50, key)
+	case "chat:rag_min_similarity":
+		return validateFloatMinMax(value, 0.000001, 1, key)
+	case "chat:rag_token_budget":
+		return validateIntMinMax(value, 128, 100000, key)
+	case "chat:rag_fetch_multiplier":
+		return validateIntMinMax(value, 1, 20, key)
 	case "chat:rag_wait_ready_ms":
 		return validateIntMinMax(value, 1000, 120000, key)
+	case "chat:rag_query_history_turns":
+		return validateIntMinMax(value, 0, 20, key)
+	case "chat:rag_retrieval_cache_ttl_seconds":
+		return validateIntMinMax(value, 0, 86400, key)
 	case "chat:context_artifact_retention_days":
 		return validateIntMinMax(value, 0, 3650, key)
 	case "file:embedding_timeout_seconds":
@@ -625,7 +640,7 @@ func validatePatchItem(item PatchItem) error {
 		return validateStringMax(value, 255, key)
 	case "extract:tencent_ocr_secret_id", "extract:tencent_ocr_secret_key", "extract:aliyun_ocr_access_key_id", "extract:aliyun_ocr_access_key_secret":
 		return validateStringMax(value, 512, key)
-	case "auth:username_login_enabled", "auth:email_login_enabled", "auth:third_party_login_enabled", "auth:email_registration_enabled", "auth:email_verification_enabled", "auth:password_reset_enabled", "auth:email_registration_block_plus_alias", "auth:auto_link_verified_email", "auth:turnstile_registration_enabled", "auth:rate_limit_enabled", "billing:native_tool_billing_enabled", "chat:multimodal_delegation_enabled", "chat:rag_enabled", "chat:message_embedding_enabled", "chat:semantic_context_enabled", "file:full_context_limit_enabled", "file:embedding_enabled", "file:embed_trigger_on_upload", "file:embedding_normalize", "extract:image_ocr_enabled", "extract:pdf_ocr_fallback_enabled", "mcp:mcp_enable":
+	case "auth:username_login_enabled", "auth:email_login_enabled", "auth:third_party_login_enabled", "auth:email_registration_enabled", "auth:email_verification_enabled", "auth:password_reset_enabled", "auth:email_registration_block_plus_alias", "auth:auto_link_verified_email", "auth:turnstile_registration_enabled", "auth:rate_limit_enabled", "billing:native_tool_billing_enabled", "chat:rag_enabled", "chat:rag_hybrid_enabled", "chat:message_embedding_enabled", "chat:semantic_context_enabled", "file:full_context_limit_enabled", "file:embedding_enabled", "file:embed_trigger_on_upload", "file:embedding_normalize", "extract:image_ocr_enabled", "extract:pdf_ocr_fallback_enabled", "mcp:mcp_enable":
 		if _, err := strconv.ParseBool(value); err != nil {
 			return fmt.Errorf("%s must be bool", key)
 		}

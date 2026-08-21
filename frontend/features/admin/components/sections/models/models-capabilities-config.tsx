@@ -72,7 +72,6 @@ type CapabilityControlType = "text" | "select" | "number" | "boolean";
 type PromptCacheConfig = {
   availability: "auto" | "enabled" | "disabled";
   mode: "implicit" | "explicit";
-  retention: "" | "in_memory" | "24h";
 };
 
 type ParameterRow = {
@@ -120,7 +119,6 @@ const OPENAI_PROMPT_CACHE_PROTOCOLS = new Set(["openai_chat_completions", "opena
 const DEFAULT_PROMPT_CACHE_CONFIG: PromptCacheConfig = {
   availability: "auto",
   mode: "implicit",
-  retention: "",
 };
 
 function nativeToolDisplayName(row: NativeToolRow): { name: string; specificName: string } {
@@ -168,12 +166,7 @@ function parsePromptCacheConfig(value: unknown): PromptCacheConfig {
       ? "disabled"
       : "auto";
   const mode = value.mode === "explicit" ? "explicit" : "implicit";
-  const retention = value.retention === "24h"
-    ? "24h"
-    : value.retention === "in_memory" || value.retention === "in-memory"
-      ? "in_memory"
-      : "";
-  return { availability, mode, retention };
+  return { availability, mode };
 }
 
 function applyPromptCacheConfig(payload: Record<string, unknown>, config: PromptCacheConfig) {
@@ -196,14 +189,11 @@ function applyPromptCacheConfig(payload: Record<string, unknown>, config: Prompt
       promptCache.ttl = "30m";
       delete promptCache.retention;
     } else {
+      delete promptCache.mode;
       delete promptCache.ttl;
-      if (config.retention) {
-        promptCache.mode = "implicit";
-        promptCache.retention = config.retention;
-      } else {
-        delete promptCache.mode;
-        delete promptCache.retention;
-      }
+      // Retention is intentionally unsupported. Remove legacy values whenever
+      // the visual editor saves a model capability configuration.
+      delete promptCache.retention;
     }
   }
 
@@ -1484,7 +1474,10 @@ export function ModelCapabilitiesQuickConfig({
                       {t("sheet.capabilitiesQuick.promptCacheDescription")}
                     </p>
                   </div>
-                  <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-3">
+                  <div className={cn(
+                    "grid min-w-0 grid-cols-1 gap-2",
+                    promptCacheConfig.mode === "explicit" ? "sm:grid-cols-3" : "sm:grid-cols-2",
+                  )}>
                     <label className="min-w-0 space-y-1">
                       <span className="block truncate px-1 text-[11px] text-muted-foreground">
                         {t("sheet.capabilitiesQuick.promptCacheAvailability")}
@@ -1527,13 +1520,11 @@ export function ModelCapabilitiesQuickConfig({
                         </SelectContent>
                       </Select>
                     </label>
-                    <label className="min-w-0 space-y-1">
-                      <span className="block truncate px-1 text-[11px] text-muted-foreground">
-                        {promptCacheConfig.mode === "explicit"
-                          ? t("sheet.capabilitiesQuick.promptCacheTTL")
-                          : t("sheet.capabilitiesQuick.promptCacheRetention")}
-                      </span>
-                      {promptCacheConfig.mode === "explicit" ? (
+                    {promptCacheConfig.mode === "explicit" ? (
+                      <label className="min-w-0 space-y-1">
+                        <span className="block truncate px-1 text-[11px] text-muted-foreground">
+                          {t("sheet.capabilitiesQuick.promptCacheTTL")}
+                        </span>
                         <Select value="30m" disabled>
                           <SelectTrigger className="h-8 w-full">
                             <SelectValue />
@@ -1542,28 +1533,8 @@ export function ModelCapabilitiesQuickConfig({
                             <SelectItem value="30m">30m</SelectItem>
                           </SelectContent>
                         </Select>
-                      ) : (
-                        <Select
-                          value={promptCacheConfig.retention || "default"}
-                          disabled={promptCacheConfig.availability === "disabled"}
-                          onValueChange={(retention) => setPromptCacheConfig((current) => ({
-                            ...current,
-                            retention: retention === "default"
-                              ? ""
-                              : retention as PromptCacheConfig["retention"],
-                          }))}
-                        >
-                          <SelectTrigger className="h-8 w-full">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="default">{t("sheet.capabilitiesQuick.promptCacheRetentionDefault")}</SelectItem>
-                            <SelectItem value="in_memory">in_memory</SelectItem>
-                            <SelectItem value="24h">24h</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      )}
-                    </label>
+                      </label>
+                    ) : null}
                   </div>
                 </div>
               ) : null}

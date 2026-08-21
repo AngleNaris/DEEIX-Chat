@@ -39,7 +39,8 @@
     "audio": "Audio",
     "image_gen": "Image generation",
     "image_edit": "Image editing",
-    "video_gen": "Video generation"
+    "video_gen": "Video generation",
+    "video_extension": "Video extension"
   },
   "table": {
     "searchPlaceholder": "Search model, vendor, group, or description",
@@ -423,8 +424,6 @@
       "promptCacheImplicit": "Implicit",
       "promptCacheExplicit": "Explicit (GPT-5.6+)",
       "promptCacheTTL": "Cache TTL",
-      "promptCacheRetention": "Retention",
-      "promptCacheRetentionDefault": "Provider default",
       "toolsIntro": "Configure official native tools allowed for this model. Only tools enabled here can enter conversation settings.",
       "defaultsHelp": "Default parameters are written to defaultOptions. value is parsed as a JSON value, for example 0.7, true, null, \"high\", or an object.",
       "controlsHelp": "Parameter controls are written to optionControls. path maps to the real request option path, and final passthrough is still controlled by the option policy.",

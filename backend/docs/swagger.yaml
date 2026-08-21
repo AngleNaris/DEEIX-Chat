@@ -115,27 +115,16 @@ definitions:
     - timezoneName
     - updatedAt
     type: object
-  AddAgentGroupMemberRequest:
+  AddKnowledgeBaseFilesRequest:
     properties:
-      dutyInstruction:
-        maxLength: 4000
-        type: string
-      modelOverride:
-        maxLength: 128
-        type: string
-      reasoningEffort:
-        enum:
-        - low
-        - medium
-        - high
-        - xhigh
-        - max
-        type: string
-      rolePublicID:
-        maxLength: 32
-        type: string
+      fileIDs:
+        items:
+          type: string
+        maxItems: 100
+        minItems: 1
+        type: array
     required:
-    - rolePublicID
+    - fileIDs
     type: object
   AdminAnnouncementListResponseDoc:
     properties:
@@ -2610,6 +2599,10 @@ definitions:
         type: string
       createdAt:
         type: string
+      defaultKnowledgeBaseIDs:
+        items:
+          type: string
+        type: array
       defaultMCPToolIDs:
         items:
           type: integer
@@ -2641,6 +2634,7 @@ definitions:
     required:
     - color
     - createdAt
+    - defaultKnowledgeBaseIDs
     - defaultMCPToolIDs
     - defaultSkillIDs
     - description
@@ -3065,6 +3059,11 @@ definitions:
       color:
         maxLength: 32
         type: string
+      defaultKnowledgeBaseIDs:
+        items:
+          type: string
+        maxItems: 8
+        type: array
       defaultMCPToolIDs:
         items:
           type: integer
@@ -3092,6 +3091,7 @@ definitions:
         maxLength: 12000
         type: string
     required:
+    - defaultKnowledgeBaseIDs
     - name
     type: object
   CreateConversationRequest:
@@ -4221,6 +4221,206 @@ definitions:
     - data
     - errorMsg
     type: object
+  KnowledgeBaseDataResponse:
+    properties:
+      knowledgeBase:
+        $ref: '#/definitions/KnowledgeBaseResponse'
+    required:
+    - knowledgeBase
+    type: object
+  KnowledgeBaseDeleteDataResponse:
+    properties:
+      deleted:
+        type: boolean
+      deletedFileCount:
+        type: integer
+    required:
+    - deleted
+    type: object
+  KnowledgeBaseDeleteResponseDoc:
+    properties:
+      data:
+        $ref: '#/definitions/KnowledgeBaseDeleteDataResponse'
+      errorMsg:
+        type: string
+    required:
+    - data
+    - errorMsg
+    type: object
+  KnowledgeBaseFileDataResponse:
+    properties:
+      file:
+        $ref: '#/definitions/KnowledgeBaseFileResponse'
+    required:
+    - file
+    type: object
+  KnowledgeBaseFileMutationDataResponse:
+    properties:
+      updated:
+        type: boolean
+    required:
+    - updated
+    type: object
+  KnowledgeBaseFileMutationResponseDoc:
+    properties:
+      data:
+        $ref: '#/definitions/KnowledgeBaseFileMutationDataResponse'
+      errorMsg:
+        type: string
+    required:
+    - data
+    - errorMsg
+    type: object
+  KnowledgeBaseFilePageResponseDoc:
+    properties:
+      data:
+        properties:
+          results:
+            items:
+              $ref: '#/definitions/KnowledgeBaseFileResponse'
+            type: array
+          total:
+            type: integer
+        required:
+        - results
+        - total
+        type: object
+      errorMsg:
+        type: string
+    required:
+    - data
+    - errorMsg
+    type: object
+  KnowledgeBaseFileResponse:
+    properties:
+      chunkCount:
+        type: integer
+      createdAt:
+        type: string
+      detectedMIME:
+        type: string
+      embedStatus:
+        type: string
+      fileCategory:
+        type: string
+      fileID:
+        type: string
+      fileName:
+        type: string
+      mimeType:
+        type: string
+      processingReady:
+        type: boolean
+      processingStatus:
+        type: string
+      ragOptOut:
+        type: boolean
+      sizeBytes:
+        type: integer
+      updatedAt:
+        type: string
+    required:
+    - chunkCount
+    - createdAt
+    - detectedMIME
+    - embedStatus
+    - fileCategory
+    - fileID
+    - fileName
+    - mimeType
+    - processingReady
+    - processingStatus
+    - ragOptOut
+    - sizeBytes
+    - updatedAt
+    type: object
+  KnowledgeBaseFileResponseDoc:
+    properties:
+      data:
+        $ref: '#/definitions/KnowledgeBaseFileDataResponse'
+      errorMsg:
+        type: string
+    required:
+    - data
+    - errorMsg
+    type: object
+  KnowledgeBasePageResponseDoc:
+    properties:
+      data:
+        properties:
+          results:
+            items:
+              $ref: '#/definitions/KnowledgeBaseResponse'
+            type: array
+          total:
+            type: integer
+        required:
+        - results
+        - total
+        type: object
+      errorMsg:
+        type: string
+    required:
+    - data
+    - errorMsg
+    type: object
+  KnowledgeBaseResponse:
+    properties:
+      createdAt:
+        type: string
+      description:
+        type: string
+      enabled:
+        type: boolean
+      fileCount:
+        type: integer
+      name:
+        type: string
+      publicID:
+        type: string
+      readyFileCount:
+        type: integer
+      revision:
+        type: integer
+      scope:
+        enum:
+        - builtin
+        - user
+        type: string
+      sortOrder:
+        type: integer
+      updatedAt:
+        type: string
+    required:
+    - createdAt
+    - description
+    - enabled
+    - fileCount
+    - name
+    - publicID
+    - readyFileCount
+    - revision
+    - scope
+    - sortOrder
+    - updatedAt
+    type: object
+  KnowledgeBaseResponseDoc:
+    properties:
+      data:
+        $ref: '#/definitions/KnowledgeBaseDataResponse'
+      errorMsg:
+        type: string
+    required:
+    - data
+    - errorMsg
+    type: object
+  KnowledgebaseErrorDoc:
+    properties:
+      errorMsg:
+        type: string
+    required:
+    - errorMsg
+    type: object
   LoginOptionsResponse:
     properties:
       emailEnabled:
@@ -4357,6 +4557,38 @@ definitions:
     - data
     - errorMsg
     type: object
+  MediaVideoExtensionRequest:
+    properties:
+      branchReason:
+        enum:
+        - default
+        - retry
+        - edit
+        type: string
+      clientRunID:
+        maxLength: 64
+        type: string
+      model:
+        maxLength: 128
+        type: string
+      options:
+        additionalProperties: true
+        type: object
+      parentMessagePublicID:
+        maxLength: 32
+        type: string
+      prompt:
+        type: string
+      sourceMessagePublicID:
+        maxLength: 32
+        type: string
+      sourceVideoFileID:
+        maxLength: 128
+        type: string
+    required:
+    - prompt
+    - sourceVideoFileID
+    type: object
   MemoryErrorDoc:
     properties:
       data: {}
@@ -4418,6 +4650,25 @@ definitions:
     required:
     - data
     - errorMsg
+    type: object
+  MessageKnowledgeSourceResponse:
+    properties:
+      chunkIndex:
+        type: integer
+      fileID:
+        type: string
+      fileName:
+        type: string
+      preview:
+        type: string
+      score:
+        type: number
+    required:
+    - chunkIndex
+    - fileID
+    - fileName
+    - preview
+    - score
     type: object
   MessageListResponseDoc:
     properties:
@@ -4583,6 +4834,10 @@ definitions:
         type: integer
       inputTokens:
         type: integer
+      knowledgeSources:
+        items:
+          $ref: '#/definitions/MessageKnowledgeSourceResponse'
+        type: array
       latencyMS:
         type: integer
       modelIcon:
@@ -5161,6 +5416,7 @@ definitions:
         - image_generation
         - image_edit
         - video_generation
+        - video_extension
         type: string
     type: object
   ModelProbeResponse:
@@ -5782,6 +6038,19 @@ definitions:
     - key
     - namespace
     type: object
+  PatchKnowledgeBaseRequest:
+    properties:
+      description:
+        maxLength: 255
+        type: string
+      enabled:
+        type: boolean
+      name:
+        maxLength: 80
+        type: string
+      sortOrder:
+        type: integer
+    type: object
   PatchMeRequest:
     properties:
       appearancePreferences:
@@ -5813,6 +6082,15 @@ definitions:
     required:
     - data
     - errorMsg
+    type: object
+  PatchMyKnowledgeBaseRequest:
+    properties:
+      description:
+        maxLength: 255
+        type: string
+      name:
+        maxLength: 80
+        type: string
     type: object
   PatchPromptPresetRequest:
     properties:
@@ -6162,6 +6440,23 @@ definitions:
         items:
           $ref: '#/definitions/BillingPlanResponse'
         type: array
+      errorMsg:
+        type: string
+    required:
+    - data
+    - errorMsg
+    type: object
+  PlatformFileDeleteDataResponse:
+    properties:
+      deleted:
+        type: boolean
+    required:
+    - deleted
+    type: object
+  PlatformFileDeleteResponseDoc:
+    properties:
+      data:
+        $ref: '#/definitions/PlatformFileDeleteDataResponse'
       errorMsg:
         type: string
     required:
@@ -7247,6 +7542,11 @@ definitions:
         type: array
       htmlVisualPrompt:
         type: boolean
+      knowledgeBaseIDs:
+        items:
+          type: string
+        maxItems: 8
+        type: array
       model:
         maxLength: 128
         type: string
@@ -7271,6 +7571,7 @@ definitions:
     required:
     - content
     - contentType
+    - knowledgeBaseIDs
     type: object
   SendMessageResponse:
     properties:
@@ -8148,6 +8449,11 @@ definitions:
       color:
         maxLength: 32
         type: string
+      defaultKnowledgeBaseIDs:
+        items:
+          type: string
+        maxItems: 8
+        type: array
       defaultMCPToolIDs:
         items:
           type: integer
@@ -8179,6 +8485,8 @@ definitions:
       systemPrompt:
         maxLength: 12000
         type: string
+    required:
+    - defaultKnowledgeBaseIDs
     type: object
   UpdateConversationRoleRequest:
     properties:
@@ -9865,6 +10173,32 @@ definitions:
     - data
     - errorMsg
     type: object
+  WriteKnowledgeBaseRequest:
+    properties:
+      description:
+        maxLength: 255
+        type: string
+      enabled:
+        type: boolean
+      name:
+        maxLength: 80
+        type: string
+      sortOrder:
+        type: integer
+    required:
+    - name
+    type: object
+  WriteMyKnowledgeBaseRequest:
+    properties:
+      description:
+        maxLength: 255
+        type: string
+      name:
+        maxLength: 80
+        type: string
+    required:
+    - name
+    type: object
   WritePromptPresetRequest:
     properties:
       content:
@@ -9915,7 +10249,7 @@ info:
   contact: {}
   description: DEEIX Chat 后端 API 文档
   title: DEEIX Chat API
-  version: "0.3.5"
+  version: "0.3.6"
 paths:
   /admin/announcements:
     get:
@@ -11105,6 +11439,387 @@ paths:
       summary: 管理员导出全量对话数据
       tags:
       - admin
+  /admin/knowledge-bases:
+    get:
+      parameters:
+      - description: 搜索关键词
+        in: query
+        name: q
+        type: string
+      - description: 可用状态
+        in: query
+        name: enabled
+        type: boolean
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页数量
+        in: query
+        name: page_size
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/KnowledgeBasePageResponseDoc'
+      security:
+      - BearerAuth: []
+      summary: 查询内置知识库
+      tags:
+      - admin-knowledge-bases
+    post:
+      parameters:
+      - description: 知识库配置
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/WriteKnowledgeBaseRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/KnowledgeBaseResponseDoc'
+      security:
+      - BearerAuth: []
+      summary: 创建内置知识库
+      tags:
+      - admin-knowledge-bases
+  /admin/knowledge-bases/{id}:
+    delete:
+      parameters:
+      - description: 知识库ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 是否同步删除不再被其他资源引用的知识库文件
+        in: query
+        name: delete_files
+        type: boolean
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/KnowledgeBaseDeleteResponseDoc'
+      security:
+      - BearerAuth: []
+      summary: 删除内置知识库
+      tags:
+      - admin-knowledge-bases
+    patch:
+      parameters:
+      - description: 知识库ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 更新字段
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/PatchKnowledgeBaseRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/KnowledgeBaseResponseDoc'
+      security:
+      - BearerAuth: []
+      summary: 更新内置知识库
+      tags:
+      - admin-knowledge-bases
+  /admin/knowledge-bases/{id}/available-files:
+    get:
+      description: 分页返回尚未关联到指定内置知识库的平台资料
+      parameters:
+      - description: 知识库ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 文件名搜索关键词
+        in: query
+        name: q
+        type: string
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页数量
+        in: query
+        name: page_size
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/KnowledgeBaseFilePageResponseDoc'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/KnowledgebaseErrorDoc'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/KnowledgebaseErrorDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/KnowledgebaseErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 查询可加入内置知识库的文件
+      tags:
+      - admin-knowledge-bases
+  /admin/knowledge-bases/{id}/files:
+    get:
+      parameters:
+      - description: 知识库ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页数量
+        in: query
+        name: page_size
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/KnowledgeBaseFilePageResponseDoc'
+      security:
+      - BearerAuth: []
+      summary: 查询内置知识库文件
+      tags:
+      - admin-knowledge-bases
+    post:
+      parameters:
+      - description: 知识库ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 文件ID列表
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/AddKnowledgeBaseFilesRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/KnowledgeBaseFileMutationResponseDoc'
+      security:
+      - BearerAuth: []
+      summary: 将平台资料加入内置知识库
+      tags:
+      - admin-knowledge-bases
+  /admin/knowledge-bases/{id}/files/{file_id}:
+    delete:
+      parameters:
+      - description: 知识库ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 文件ID
+        in: path
+        name: file_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/KnowledgeBaseFileMutationResponseDoc'
+      security:
+      - BearerAuth: []
+      summary: 将文件移出内置知识库
+      tags:
+      - admin-knowledge-bases
+  /admin/knowledge-bases/{id}/files/{file_id}/content:
+    get:
+      description: 仅允许读取仍与指定内置知识库关联的文件
+      parameters:
+      - description: 知识库ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 文件ID
+        in: path
+        name: file_id
+        required: true
+        type: string
+      produces:
+      - application/octet-stream
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/KnowledgebaseErrorDoc'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/KnowledgebaseErrorDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/KnowledgebaseErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 获取内置知识库文件内容
+      tags:
+      - admin-knowledge-bases
+  /admin/knowledge-bases/files:
+    get:
+      description: 分页返回供内置知识库复用的全部平台资料
+      parameters:
+      - description: 文件名搜索关键词
+        in: query
+        name: q
+        type: string
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页数量
+        in: query
+        name: page_size
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/KnowledgeBaseFilePageResponseDoc'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/KnowledgebaseErrorDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/KnowledgebaseErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 查询平台资料
+      tags:
+      - admin-knowledge-bases
+    post:
+      consumes:
+      - multipart/form-data
+      description: 上传平台级资料，不占用管理员个人存储额度
+      parameters:
+      - description: 文件
+        in: formData
+        name: file
+        required: true
+        type: file
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/KnowledgeBaseFileResponseDoc'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/KnowledgebaseErrorDoc'
+        "413":
+          description: Request Entity Too Large
+          schema:
+            $ref: '#/definitions/KnowledgebaseErrorDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/KnowledgebaseErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 上传内置知识库资料
+      tags:
+      - admin-knowledge-bases
+  /admin/knowledge-bases/files/{file_id}:
+    delete:
+      description: 仅允许删除未被任何知识库、会话或账户资料引用的平台资料
+      parameters:
+      - description: 文件ID
+        in: path
+        name: file_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/PlatformFileDeleteResponseDoc'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/KnowledgebaseErrorDoc'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/KnowledgebaseErrorDoc'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/KnowledgebaseErrorDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/KnowledgebaseErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 删除平台资料
+      tags:
+      - admin-knowledge-bases
+  /admin/knowledge-bases/files/{file_id}/content:
+    get:
+      description: 仅允许管理员读取平台资料池中的文件
+      parameters:
+      - description: 文件ID
+        in: path
+        name: file_id
+        required: true
+        type: string
+      produces:
+      - application/octet-stream
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/KnowledgebaseErrorDoc'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/KnowledgebaseErrorDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/KnowledgebaseErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 获取平台资料内容
+      tags:
+      - admin-knowledge-bases
   /admin/llm/icon-assets:
     get:
       description: 分页查询仍在图标库中的已上传图标，按上传时间倒序返回
@@ -16836,6 +17551,44 @@ paths:
       summary: 更新会话标签
       tags:
       - chat
+  /conversations/{id}/media/videos/extensions/stream:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 会话 Public ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 视频扩展请求
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/MediaVideoExtensionRequest'
+      produces:
+      - application/x-ndjson
+      responses:
+        "200":
+          description: NDJSON stream
+          schema:
+            type: string
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/Envelope'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/Envelope'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/Envelope'
+      summary: 扩展会话视频
+      tags:
+      - Conversations
   /conversations/{id}/messages:
     get:
       consumes:
@@ -17861,6 +18614,295 @@ paths:
       summary: 获取文件内容
       tags:
       - chat
+  /knowledge-bases:
+    get:
+      parameters:
+      - description: 搜索关键词
+        in: query
+        name: q
+        type: string
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页数量
+        in: query
+        name: page_size
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/KnowledgeBasePageResponseDoc'
+      security:
+      - BearerAuth: []
+      summary: 查询当前用户可用知识库
+      tags:
+      - knowledge-bases
+  /knowledge-bases/{id}:
+    get:
+      parameters:
+      - description: 知识库ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/KnowledgeBaseResponseDoc'
+      security:
+      - BearerAuth: []
+      summary: 查询知识库详情
+      tags:
+      - knowledge-bases
+  /knowledge-bases/{id}/files:
+    get:
+      parameters:
+      - description: 知识库ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页数量
+        in: query
+        name: page_size
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/KnowledgeBaseFilePageResponseDoc'
+      security:
+      - BearerAuth: []
+      summary: 查询知识库文件
+      tags:
+      - knowledge-bases
+  /knowledge-bases/{id}/files/{file_id}/content:
+    get:
+      description: 仅允许读取当前用户可见且仍与知识库关联的文件
+      parameters:
+      - description: 知识库ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 文件ID
+        in: path
+        name: file_id
+        required: true
+        type: string
+      produces:
+      - application/octet-stream
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/KnowledgebaseErrorDoc'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/KnowledgebaseErrorDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/KnowledgebaseErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 获取知识库文件内容
+      tags:
+      - knowledge-bases
+  /knowledge-bases/mine:
+    get:
+      parameters:
+      - description: 搜索关键词
+        in: query
+        name: q
+        type: string
+      - description: 可用状态
+        in: query
+        name: enabled
+        type: boolean
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页数量
+        in: query
+        name: page_size
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/KnowledgeBasePageResponseDoc'
+      security:
+      - BearerAuth: []
+      summary: 查询我的知识库
+      tags:
+      - knowledge-bases
+    post:
+      parameters:
+      - description: 知识库配置
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/WriteMyKnowledgeBaseRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/KnowledgeBaseResponseDoc'
+      security:
+      - BearerAuth: []
+      summary: 创建个人知识库
+      tags:
+      - knowledge-bases
+  /knowledge-bases/mine/{id}:
+    delete:
+      parameters:
+      - description: 知识库ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 是否同步删除不再被其他资源引用的知识库文件
+        in: query
+        name: delete_files
+        type: boolean
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/KnowledgeBaseDeleteResponseDoc'
+      security:
+      - BearerAuth: []
+      summary: 删除个人知识库
+      tags:
+      - knowledge-bases
+    patch:
+      parameters:
+      - description: 知识库ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 更新字段
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/PatchMyKnowledgeBaseRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/KnowledgeBaseResponseDoc'
+      security:
+      - BearerAuth: []
+      summary: 更新个人知识库
+      tags:
+      - knowledge-bases
+  /knowledge-bases/mine/{id}/available-files:
+    get:
+      description: 分页返回当前用户尚未关联到指定个人知识库的有效文件
+      parameters:
+      - description: 知识库ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 文件名搜索关键词
+        in: query
+        name: q
+        type: string
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页数量
+        in: query
+        name: page_size
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/KnowledgeBaseFilePageResponseDoc'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/KnowledgebaseErrorDoc'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/KnowledgebaseErrorDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/KnowledgebaseErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 查询可加入个人知识库的文件
+      tags:
+      - knowledge-bases
+  /knowledge-bases/mine/{id}/files:
+    post:
+      parameters:
+      - description: 知识库ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 文件ID列表
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/AddKnowledgeBaseFilesRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/KnowledgeBaseFileMutationResponseDoc'
+      security:
+      - BearerAuth: []
+      summary: 将已有文件加入个人知识库
+      tags:
+      - knowledge-bases
+  /knowledge-bases/mine/{id}/files/{file_id}:
+    delete:
+      parameters:
+      - description: 知识库ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 文件ID
+        in: path
+        name: file_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/KnowledgeBaseFileMutationResponseDoc'
+      security:
+      - BearerAuth: []
+      summary: 将文件移出个人知识库
+      tags:
+      - knowledge-bases
   /llm/icon-assets/{public_id}:
     get:
       description: 公开读取经过后端校验的不可变模型展示图标
@@ -17930,6 +18972,10 @@ paths:
             $ref: '#/definitions/AuthErrorDoc'
         "403":
           description: Forbidden
+          schema:
+            $ref: '#/definitions/AuthErrorDoc'
+        "409":
+          description: Conflict
           schema:
             $ref: '#/definitions/AuthErrorDoc'
         "500":

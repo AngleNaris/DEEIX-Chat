@@ -103,6 +103,7 @@ func (h *Handler) parseSendMessageInput(c *gin.Context) (appconversation.SendMes
 		FileIDs:                 req.FileIDs,
 		SelectedToolIDs:         req.SelectedToolIDs,
 		SkillIDs:                req.SkillIDs,
+		KnowledgeBaseIDs:        req.KnowledgeBaseIDs,
 		HTMLVisualPromptEnabled: req.HTMLVisualPromptEnabled,
 		ParentMessagePublicID:   req.ParentMessagePublicID,
 		SourceMessagePublicID:   req.SourceMessagePublicID,
@@ -392,6 +393,12 @@ func handleSendMessageError(c *gin.Context, err error) {
 		response.Error(c, http.StatusBadRequest, "file too large for full context")
 	case errors.Is(err, appconversation.ErrEmbeddingUnavailable):
 		response.Error(c, http.StatusBadRequest, "embedding unavailable for current file capability")
+	case errors.Is(err, appconversation.ErrInvalidKnowledgeBaseReference):
+		response.ErrorWithCode(c, http.StatusBadRequest, appconversation.MessageErrorCodeKnowledgeBaseInvalidReference, "invalid knowledge base reference")
+	case errors.Is(err, appconversation.ErrKnowledgeBaseUnavailable):
+		response.ErrorWithCode(c, http.StatusServiceUnavailable, appconversation.MessageErrorCodeKnowledgeBaseUnavailable, "knowledge base retrieval is unavailable")
+	case errors.Is(err, appconversation.ErrKnowledgeBaseNotReady):
+		response.ErrorWithCode(c, http.StatusConflict, appconversation.MessageErrorCodeKnowledgeBaseNotReady, "selected knowledge base has no ready files")
 	case errors.Is(err, appconversation.ErrModelRouteNotConfigured):
 		response.Error(c, http.StatusServiceUnavailable, "model route not configured")
 	case errors.Is(err, appconversation.ErrGeneratedMediaArtifactUnavailable):

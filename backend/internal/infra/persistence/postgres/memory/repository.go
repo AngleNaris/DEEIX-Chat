@@ -14,7 +14,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// float32SliceToVec 将向量对齐到物理存储维度并转换为 pgvector 文本格式。
+// float32SliceToVec 按模型原始维度序列化 PostgreSQL 向量。
 func float32SliceToVec(v []float32) (string, error) {
 	return vectorutil.PostgresLiteral(v)
 }
@@ -173,30 +173,33 @@ func (r *Repo) SearchUserMemoriesByEmbedding(ctx context.Context, userID uint, q
 	if r.sqliteDialect() {
 		return r.searchSQLiteUserMemoriesByEmbedding(ctx, userID, queryEmbedding, embeddingSignature, topK, minSimilarity)
 	}
-	vec, err := float32SliceToVec(queryEmbedding)
+	vec, err := vectorutil.PostgresPaddedLiteral(queryEmbedding)
 	if err != nil {
 		return nil, err
 	}
 	candidateLimit := vectorutil.CandidateLimit(topK)
+	indexExpression := vectorutil.PostgresIndexExpression("embedding")
+	exactExpression := vectorutil.PostgresPaddedExpression("memories.embedding")
 	query := fmt.Sprintf(`
 		WITH vector_candidates AS MATERIALIZED (
 			SELECT id
 			FROM user_memories
 			WHERE user_id = ? AND embedding_signature = ? AND embedding IS NOT NULL
-			ORDER BY subvector(embedding, 1, %d)::halfvec(%d)
+			ORDER BY %s
 				<=> subvector(?::vector, 1, %d)::halfvec(%d)
 			LIMIT ?
 		)
 		SELECT memories.id, memories.user_id, memories.memory_key, memories.value, memories.scope, memories.updated_by,
-		       (1 - (memories.embedding <=> ?::vector)) AS similarity
+		       (1 - (%s <=> ?::vector(%d))) AS similarity
 		FROM user_memories AS memories
 		JOIN vector_candidates AS candidates ON candidates.id = memories.id
 		ORDER BY similarity DESC
 		LIMIT ?`,
+		indexExpression,
 		vectorutil.IndexDimensions,
 		vectorutil.IndexDimensions,
-		vectorutil.IndexDimensions,
-		vectorutil.IndexDimensions,
+		exactExpression,
+		vectorutil.MaxDimensions,
 	)
 	var rows []userMemorySearchRow
 	if err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {

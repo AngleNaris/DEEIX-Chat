@@ -589,3 +589,23 @@ func TestRuntimeSettingsTreatsEmptyFullContextLimitsAsUnlimited(t *testing.T) {
 		)
 	}
 }
+
+func TestValidatePatchItemRejectsUnsafeRAGSettings(t *testing.T) {
+	tests := []PatchItem{
+		{Namespace: "file", Key: "rag_top_k", Value: "0"},
+		{Namespace: "chat", Key: "rag_min_similarity", Value: "1.1"},
+		{Namespace: "chat", Key: "rag_token_budget", Value: "64"},
+		{Namespace: "chat", Key: "rag_fetch_multiplier", Value: "100"},
+		{Namespace: "chat", Key: "rag_query_history_turns", Value: "-1"},
+		{Namespace: "chat", Key: "rag_retrieval_cache_ttl_seconds", Value: "86401"},
+		{Namespace: "chat", Key: "rag_hybrid_enabled", Value: "sometimes"},
+	}
+	for _, item := range tests {
+		item := item
+		t.Run(item.Namespace+":"+item.Key, func(t *testing.T) {
+			if err := validatePatchItem(item); err == nil {
+				t.Fatalf("validatePatchItem(%#v) expected an error", item)
+			}
+		})
+	}
+}

@@ -393,23 +393,65 @@ export function ModelSheet({ open, mode, target, models, vendors, displayGroups,
   }
 
   function handleBindRowModelChange(rowID: string, upstreamModelID: string) {
-    setBindRows((current) =>
-      current.map((row) => {
-        if (row.id !== rowID) {
-          return row;
-        }
-        const upstreamModels = upstreamModelsByID[row.draft.upstreamID] ?? [];
-        const selected = upstreamModels.find((item) => String(item.id) === upstreamModelID);
-        return {
-          ...row,
-          draft: {
-            ...row.draft,
-            upstreamModelID,
-            protocol: selected?.suggestedProtocol ?? "",
-          },
-        };
-      }),
-    );
+    const targetRow = bindRows.find((row) => row.id === rowID);
+    const selected = targetRow
+      ? (upstreamModelsByID[targetRow.draft.upstreamID] ?? []).find(
+          (item) => String(item.id) === upstreamModelID,
+        )
+      : undefined;
+    if (selected?.suggestedProtocol === "xai_video") {
+      setForm((current) => ({
+        ...current,
+        kinds: Array.from(new Set([...current.kinds, "video_gen", "video_extension"])),
+      }));
+    }
+    setBindRows((current) => {
+      const currentTargetRow = current.find((row) => row.id === rowID);
+      if (!currentTargetRow) {
+        return current;
+      }
+      const protocols: AdminLLMAdapter[] = selected?.suggestedProtocol === "xai_video"
+        ? ["xai_video", "xai_video_extensions"]
+        : selected?.suggestedProtocol
+          ? [selected.suggestedProtocol]
+          : [];
+      const existingProtocols = new Set(
+        current
+          .filter(
+            (row) =>
+              row.id !== rowID &&
+              row.draft.upstreamID === currentTargetRow.draft.upstreamID &&
+              row.draft.upstreamModelID === upstreamModelID,
+          )
+          .map((row) => row.draft.protocol)
+          .filter(Boolean),
+      );
+      const missingProtocols = protocols.filter((protocol) => !existingProtocols.has(protocol));
+      const primaryProtocol = missingProtocols[0] ?? "";
+      const companionRows = missingProtocols.slice(1).map((protocol) =>
+        createModelSourceBindDraftRow({
+          ...currentTargetRow.draft,
+          upstreamModelID,
+          protocol,
+        }),
+      );
+
+      return current.flatMap((row) =>
+        row.id === rowID
+          ? [
+              {
+                ...row,
+                draft: {
+                  ...row.draft,
+                  upstreamModelID,
+                  protocol: primaryProtocol,
+                },
+              },
+              ...companionRows,
+            ]
+          : [row],
+      );
+    });
   }
 
   function setBindRowField<K extends keyof ModelSourceBindDraftRow["draft"]>(

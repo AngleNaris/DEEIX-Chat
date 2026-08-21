@@ -68,12 +68,22 @@ type Service struct {
 // UploadFileInput 定义文件上传请求。
 type UploadFileInput struct {
 	UserID       uint
+	Ownership    FileOwnership
 	Purpose      string
 	FileName     string
 	MimeType     string
 	DeclaredSize int64
 	Reader       io.Reader
 }
+
+// FileOwnership 定义文件所属的存储账户。
+// 用户文件计入上传者额度；平台文件使用保留的 owner ID 0 和独立的无限额平台账户。
+type FileOwnership string
+
+const (
+	FileOwnershipUser   FileOwnership = "user"
+	FileOwnershipSystem FileOwnership = "system"
+)
 
 // UploadFileResult 定义文件上传结果。
 type UploadFileResult struct {
@@ -225,9 +235,18 @@ func (s *Service) UploadFile(ctx context.Context, input UploadFileInput) (*Uploa
 	}
 
 	fileID := "file_" + conv.NormalizePublicID(uuid.NewString())
-	storageUserID := strings.TrimSpace(userItem.PublicID)
-	if storageUserID == "" {
-		storageUserID = fmt.Sprintf("uid_%d", userItem.ID)
+	ownerUserID := input.UserID
+	quotaBytes := cfg.UserStorageQuotaBytes
+	storageOwner := strings.TrimSpace(userItem.PublicID)
+	if input.Ownership == FileOwnershipSystem {
+		ownerUserID = 0
+		quotaBytes = 0
+		storageOwner = "system"
+	} else if input.Ownership != "" && input.Ownership != FileOwnershipUser {
+		return nil, s.errInvalidFileReference()
+	}
+	if storageOwner == "" {
+		storageOwner = fmt.Sprintf("uid_%d", userItem.ID)
 	}
 	store, err := s.openObjectStore(ctx)
 	if err != nil {
@@ -237,7 +256,7 @@ func (s *Service) UploadFile(ctx context.Context, input UploadFileInput) (*Uploa
 		ctx,
 		store,
 		input.Reader,
-		storageUserID,
+		storageOwner,
 		fileID,
 		normalizedName,
 		maxUploadBytes,
@@ -269,7 +288,7 @@ func (s *Service) UploadFile(ctx context.Context, input UploadFileInput) (*Uploa
 		return nil, s.errFileTooLarge()
 	}
 
-	if result, reused, reuseErr := s.tryReuseExistingFile(ctx, store, input.UserID, shaValue, sizeBytes, cfg.UserStorageQuotaBytes); reuseErr != nil {
+	if result, reused, reuseErr := s.tryReuseExistingFile(ctx, store, ownerUserID, shaValue, sizeBytes, quotaBytes); reuseErr != nil {
 		logRemoveErr(relativePath, store.Delete(ctx, relativePath))
 		return nil, reuseErr
 	} else if reused {
@@ -279,7 +298,7 @@ func (s *Service) UploadFile(ctx context.Context, input UploadFileInput) (*Uploa
 
 	fileItem := &domainconversation.FileObject{
 		FileID:           fileID,
-		UserID:           input.UserID,
+		UserID:           ownerUserID,
 		Purpose:          normalizePurpose(input.Purpose),
 		FileName:         normalizedName,
 		MimeType:         normalizedMIME,
@@ -297,16 +316,16 @@ func (s *Service) UploadFile(ctx context.Context, input UploadFileInput) (*Uploa
 		ExpiresAt:        nil,
 	}
 
-	quota, err := s.repo.CreateFileObjectAndConsumeQuota(ctx, fileItem, cfg.UserStorageQuotaBytes)
+	quota, err := s.repo.CreateFileObjectAndConsumeQuota(ctx, fileItem, quotaBytes)
 	if err != nil && errors.Is(err, repository.ErrDuplicate) {
-		if result, reused, reuseErr := s.tryReuseExistingFile(ctx, store, input.UserID, shaValue, sizeBytes, cfg.UserStorageQuotaBytes); reuseErr != nil {
+		if result, reused, reuseErr := s.tryReuseExistingFile(ctx, store, ownerUserID, shaValue, sizeBytes, quotaBytes); reuseErr != nil {
 			logRemoveErr(relativePath, store.Delete(ctx, relativePath))
 			return nil, reuseErr
 		} else if reused {
 			logRemoveErr(relativePath, store.Delete(ctx, relativePath))
 			return result, nil
 		}
-		quota, err = s.repo.CreateFileObjectAndConsumeQuota(ctx, fileItem, cfg.UserStorageQuotaBytes)
+		quota, err = s.repo.CreateFileObjectAndConsumeQuota(ctx, fileItem, quotaBytes)
 	}
 	if err != nil {
 		if errors.Is(err, repository.ErrDuplicate) {
@@ -479,7 +498,11 @@ func (s *Service) deleteFile(ctx context.Context, userID uint, fileID string, op
 	}
 
 	cfg := s.snapshot()
-	deletedFile, quota, shouldRemovePhysical, err := s.repo.DeleteFileObjectAndReleaseQuota(ctx, userID, normalizedFileID, cfg.UserStorageQuotaBytes, options)
+	quotaBytes := cfg.UserStorageQuotaBytes
+	if userID == 0 {
+		quotaBytes = 0
+	}
+	deletedFile, quota, shouldRemovePhysical, err := s.repo.DeleteFileObjectAndReleaseQuota(ctx, userID, normalizedFileID, quotaBytes, options)
 	if err != nil {
 		if options.RequireUnreferenced && errors.Is(err, repository.ErrConflict) {
 			return nil, false, nil

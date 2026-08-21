@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	EmbeddingDimensions = vectorutil.StorageDimensions
+	EmbeddingDimensions = vectorutil.MaxDimensions
 
 	FileChunkVectorTable    = "file_chunk_vectors"
 	MessageChunkVectorTable = "chat_message_chunk_vectors"

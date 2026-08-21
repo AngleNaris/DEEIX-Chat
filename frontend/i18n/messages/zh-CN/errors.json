@@ -190,6 +190,21 @@
   "internal": {
     "error": "服务器内部错误，请稍后重试。"
   },
+  "knowledgeBase": {
+    "conflict": "当前范围内已存在同名知识库。",
+		"fileCleanupUnavailable": "平台资料清理服务暂不可用，请稍后重试。",
+    "internal": "知识库操作失败，请稍后重试。",
+    "invalid": "知识库配置无效。",
+    "invalidReference": "所选知识库不存在、已停用或无权访问。",
+		"notFound": "知识库不存在。",
+		"notReady": "所选知识库暂无可检索文件，请等待索引完成。",
+		"ownerFileReference": "该账号仍有文件被内置知识库引用，请先移除或由其他管理员重新上传接管。",
+		"platformFileInUse": "该平台资料仍被其他资源引用，请解除引用后再删除。",
+		"unavailable": "知识库检索暂不可用，请稍后重试；若问题持续，请联系管理员检查向量服务。"
+  },
+  "toolRun": {
+    "finalAnswerMissing": "工具调用已到达运行上限，但模型没有生成最终回答。请重试或减少本次启用的工具。"
+  },
   "llm": {
     "apiKeysRequired": "API Keys 不能为空。",
     "circuitBreakerDisabled": "模型熔断未开启，请先启用后再执行此操作。",

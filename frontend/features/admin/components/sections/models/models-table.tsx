@@ -176,7 +176,7 @@ function KindsBadges({ kindsJson }: { kindsJson: string | null | undefined }) {
     <div className="flex min-w-0 flex-nowrap items-center justify-start gap-1 overflow-hidden">
       {kinds.map((kind) => (
         <Badge key={kind} variant="secondary">
-          {["chat", "audio", "image_gen", "image_edit", "video_gen"].includes(kind)
+          {["chat", "audio", "image_gen", "image_edit", "video_gen", "video_extension"].includes(kind)
             ? t(`kinds.${kind}`)
             : kind}
         </Badge>

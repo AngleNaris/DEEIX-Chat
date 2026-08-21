@@ -457,9 +457,9 @@ func vectorBaselineRequired(cfg config.Config) bool {
 	return cfg.EmbeddingEnabled || cfg.RAGEnabled || cfg.MessageEmbeddingEnabled || cfg.SemanticContextEnabled
 }
 
-// applyVectorBaseline 确保 pgvector 扩展、统一维度的向量列和候选索引存在。
-// 物理列使用 4096 维以覆盖全部受支持的 embedding 输出；低维向量写入前补零，
-// 余弦相似度保持不变。检索先使用 4000 维 halfvec HNSW 召回候选，再按完整向量精排。
+// applyVectorBaseline 确保 pgvector 扩展、原生维度向量列和候选索引存在。
+// PostgreSQL 保留模型输出的原始维度，查询时再补齐到统一比较维度；这既保留历史向量，
+// 也避免升级时重写整张向量表。候选索引使用 4000 维 halfvec，最终按完整向量精排。
 func applyVectorBaseline(db *gorm.DB, required bool) error {
 	if err := db.Exec(`CREATE EXTENSION IF NOT EXISTS vector`).Error; err != nil {
 		return handleOptionalVectorBaselineError(required, "create pgvector extension", err)
@@ -478,12 +478,16 @@ func applyVectorBaseline(db *gorm.DB, required bool) error {
 		{table: "user_memories", column: "embedding", indexName: "idx_user_memories_embedding"},
 	}
 
-	for _, spec := range specs {
-		if err := ensurePostgresVectorColumn(db, spec.table, spec.column, spec.indexName); err != nil {
-			if baselineErr := handleOptionalVectorBaselineError(required, "migrate "+spec.table+" vector storage", err); baselineErr != nil {
-				return baselineErr
+	err := withPostgresVectorMigrationLock(db, func(connection *gorm.DB) error {
+		for _, spec := range specs {
+			if err := ensurePostgresVectorColumnLocked(connection, spec.table, spec.column, spec.indexName); err != nil {
+				return fmt.Errorf("migrate %s vector storage: %w", spec.table, err)
 			}
 		}
+		return nil
+	})
+	if err != nil {
+		return handleOptionalVectorBaselineError(required, "apply PostgreSQL vector baseline", err)
 	}
 	return nil
 }
@@ -507,104 +511,168 @@ func postgresExtensionVersionAtLeast(version string, requiredMajor int, required
 	return major > requiredMajor || (major == requiredMajor && minor >= requiredMinor)
 }
 
-func ensurePostgresVectorColumn(db *gorm.DB, table string, column string, legacyIndex string) error {
-	expectedType := fmt.Sprintf("vector(%d)", vectorutil.StorageDimensions)
-	return db.Transaction(func(tx *gorm.DB) error {
-		var currentSchema string
-		if err := tx.Raw(`SELECT current_schema()`).Scan(&currentSchema).Error; err != nil {
-			return err
-		}
-		if strings.TrimSpace(currentSchema) == "" {
-			return fmt.Errorf("current PostgreSQL schema is unavailable")
-		}
-		var currentType string
-		result := tx.Raw(`
-			SELECT format_type(attribute.atttypid, attribute.atttypmod)
-			FROM pg_attribute AS attribute
-			JOIN pg_class AS relation ON relation.oid = attribute.attrelid
-			JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
-			WHERE namespace.nspname = current_schema()
-			  AND relation.relname = ?
-			  AND attribute.attname = ?
-			  AND attribute.attnum > 0
-			  AND NOT attribute.attisdropped`, table, column).Scan(&currentType)
-		if result.Error != nil {
-			return result.Error
-		}
-		var indexDefinition string
-		if err := tx.Raw(`SELECT indexdef FROM pg_indexes WHERE schemaname = current_schema() AND indexname = ?`, legacyIndex).
-			Scan(&indexDefinition).Error; err != nil {
-			return err
-		}
-		indexCurrent := postgresVectorIndexMatches(indexDefinition)
-		if currentType == expectedType && indexCurrent {
-			return nil
-		}
-		if strings.TrimSpace(indexDefinition) != "" {
-			if err := tx.Exec("DROP INDEX " + postgresQualifiedIdentifier(currentSchema, legacyIndex)).Error; err != nil {
-				return err
-			}
-		}
-		if strings.TrimSpace(currentType) == "" {
-			if err := tx.Exec(fmt.Sprintf(
-				`ALTER TABLE %s ADD COLUMN %s vector(%d)`,
-				postgresQualifiedIdentifier(currentSchema, table), postgresIdentifier(column), vectorutil.StorageDimensions,
-			)).Error; err != nil {
-				return err
-			}
-		} else if currentType != expectedType {
-			if currentType != "vector" && !strings.HasPrefix(currentType, "vector(") {
-				return fmt.Errorf("%s.%s has incompatible type %s", table, column, currentType)
-			}
-			if err := tx.Exec(postgresVectorColumnMigrationSQL(currentSchema, table, column)).Error; err != nil {
-				return err
-			}
-		}
-		return tx.Exec(postgresVectorIndexSQL(currentSchema, table, column, legacyIndex)).Error
+func ensurePostgresVectorColumn(db *gorm.DB, table string, column string, indexName string) error {
+	return withPostgresVectorMigrationLock(db, func(connection *gorm.DB) error {
+		return ensurePostgresVectorColumnLocked(connection, table, column, indexName)
 	})
+}
+
+const postgresVectorMigrationLockName = "deeix_postgres_vector_baseline_v2"
+
+func withPostgresVectorMigrationLock(db *gorm.DB, operation func(*gorm.DB) error) error {
+	return db.Connection(func(connection *gorm.DB) error {
+		if err := connection.Exec(`SELECT pg_advisory_lock(hashtext(?))`, postgresVectorMigrationLockName).Error; err != nil {
+			return fmt.Errorf("acquire vector migration lock: %w", err)
+		}
+		operationErr := operation(connection)
+		unlockErr := connection.Exec(`SELECT pg_advisory_unlock(hashtext(?))`, postgresVectorMigrationLockName).Error
+		if operationErr != nil {
+			return operationErr
+		}
+		if unlockErr != nil {
+			return fmt.Errorf("release vector migration lock: %w", unlockErr)
+		}
+		return nil
+	})
+}
+
+type postgresVectorIndexState struct {
+	Definition string `gorm:"column:definition"`
+	Valid      bool   `gorm:"column:valid"`
+}
+
+func ensurePostgresVectorColumnLocked(db *gorm.DB, table string, column string, indexName string) error {
+	var currentSchema string
+	if err := db.Raw(`SELECT current_schema()`).Scan(&currentSchema).Error; err != nil {
+		return err
+	}
+	if strings.TrimSpace(currentSchema) == "" {
+		return fmt.Errorf("current PostgreSQL schema is unavailable")
+	}
+
+	var currentType string
+	if err := db.Raw(`
+		SELECT format_type(attribute.atttypid, attribute.atttypmod)
+		FROM pg_attribute AS attribute
+		JOIN pg_class AS relation ON relation.oid = attribute.attrelid
+		JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+		WHERE namespace.nspname = current_schema()
+		  AND relation.relname = ?
+		  AND attribute.attname = ?
+		  AND attribute.attnum > 0
+		  AND NOT attribute.attisdropped`, table, column).Scan(&currentType).Error; err != nil {
+		return err
+	}
+	if currentType != "" && currentType != "vector" && !strings.HasPrefix(currentType, "vector(") {
+		return fmt.Errorf("%s.%s has incompatible type %s", table, column, currentType)
+	}
+
+	indexState, err := inspectPostgresVectorIndex(db, indexName)
+	if err != nil {
+		return err
+	}
+	indexCurrent := indexState.Valid && postgresVectorIndexMatches(indexState.Definition)
+	if currentType == "vector" && indexCurrent {
+		return nil
+	}
+	if currentType != "" {
+		if err := ensurePostgresVectorDimensionsSupported(db, currentSchema, table, column, currentType); err != nil {
+			return err
+		}
+	}
+
+	if strings.TrimSpace(indexState.Definition) != "" {
+		if err := db.Exec("DROP INDEX CONCURRENTLY " + postgresQualifiedIdentifier(currentSchema, indexName)).Error; err != nil {
+			return err
+		}
+	}
+	if currentType == "" {
+		if err := db.Exec(fmt.Sprintf(
+			`ALTER TABLE %s ADD COLUMN %s vector`,
+			postgresQualifiedIdentifier(currentSchema, table),
+			postgresIdentifier(column),
+		)).Error; err != nil {
+			return err
+		}
+	} else if currentType != "vector" {
+		if err := alterPostgresVectorColumnToVariableWidth(db, currentSchema, table, column); err != nil {
+			return err
+		}
+	}
+	return db.Exec(postgresVectorIndexSQL(currentSchema, table, column, indexName)).Error
+}
+
+func inspectPostgresVectorIndex(db *gorm.DB, indexName string) (postgresVectorIndexState, error) {
+	var state postgresVectorIndexState
+	err := db.Raw(`
+		SELECT pg_get_indexdef(index_status.indexrelid) AS definition,
+		       index_status.indisvalid AS valid
+		FROM pg_index AS index_status
+		JOIN pg_class AS index_relation ON index_relation.oid = index_status.indexrelid
+		JOIN pg_namespace AS namespace ON namespace.oid = index_relation.relnamespace
+		WHERE namespace.nspname = current_schema()
+		  AND index_relation.relname = ?`, indexName).Scan(&state).Error
+	return state, err
+}
+
+func ensurePostgresVectorDimensionsSupported(db *gorm.DB, schemaName string, table string, column string, currentType string) error {
+	var declaredDimensions int
+	if matched, _ := fmt.Sscanf(currentType, "vector(%d)", &declaredDimensions); matched == 1 && declaredDimensions <= vectorutil.MaxDimensions {
+		return nil
+	}
+	var maximum int
+	query := fmt.Sprintf(
+		`SELECT COALESCE(MAX(vector_dims(%s)), 0) FROM %s WHERE %s IS NOT NULL`,
+		postgresIdentifier(column),
+		postgresQualifiedIdentifier(schemaName, table),
+		postgresIdentifier(column),
+	)
+	if err := db.Raw(query).Scan(&maximum).Error; err != nil {
+		return err
+	}
+	if maximum > vectorutil.MaxDimensions {
+		return fmt.Errorf("%s.%s contains %d-dimensional vectors; supported maximum is %d", table, column, maximum, vectorutil.MaxDimensions)
+	}
+	return nil
+}
+
+func alterPostgresVectorColumnToVariableWidth(db *gorm.DB, schemaName string, table string, column string) error {
+	if err := db.Exec(`SET lock_timeout TO '5s'`).Error; err != nil {
+		return err
+	}
+	alterErr := db.Exec(postgresVectorColumnTypmodRemovalSQL(schemaName, table, column)).Error
+	resetErr := db.Exec(`SET lock_timeout TO DEFAULT`).Error
+	if alterErr != nil {
+		return alterErr
+	}
+	return resetErr
 }
 
 func postgresVectorIndexMatches(definition string) bool {
 	normalized := strings.ToLower(strings.Join(strings.Fields(definition), " "))
 	return strings.Contains(normalized, " using hnsw ") &&
 		strings.Contains(normalized, "subvector(") &&
+		strings.Contains(normalized, "vector_dims(") &&
 		strings.Contains(normalized, fmt.Sprintf("::halfvec(%d)", vectorutil.IndexDimensions)) &&
 		strings.Contains(normalized, "halfvec_cosine_ops")
 }
 
 func postgresVectorIndexSQL(schemaName string, table string, column string, indexName string) string {
+	indexExpression := vectorutil.PostgresIndexExpression(postgresIdentifier(column))
 	return fmt.Sprintf(
-		`CREATE INDEX %s ON %s USING hnsw ((subvector(%s, 1, %d)::halfvec(%d)) halfvec_cosine_ops) WHERE %s IS NOT NULL`,
+		`CREATE INDEX CONCURRENTLY %s ON %s USING hnsw ((%s) halfvec_cosine_ops) WHERE %s IS NOT NULL`,
 		postgresIdentifier(indexName),
 		postgresQualifiedIdentifier(schemaName, table),
-		postgresIdentifier(column),
-		vectorutil.IndexDimensions,
-		vectorutil.IndexDimensions,
+		indexExpression,
 		postgresIdentifier(column),
 	)
 }
 
-func postgresVectorColumnMigrationSQL(schemaName string, table string, column string) string {
-	qualifiedTable := postgresQualifiedIdentifier(schemaName, table)
-	quotedColumn := postgresIdentifier(column)
-	return fmt.Sprintf(`
-			ALTER TABLE %s
-			ALTER COLUMN %s TYPE vector(%d)
-			USING CASE
-				WHEN %s IS NULL THEN NULL
-				WHEN vector_dims(%s) = %d THEN %s::vector(%d)
-				WHEN vector_dims(%s) < %d THEN (
-					%s::real[] || array_fill(0::real, ARRAY[%d - vector_dims(%s)])
-				)::vector(%d)
-				ELSE %s::vector(%d)
-			END`,
-		qualifiedTable, quotedColumn, vectorutil.StorageDimensions,
-		quotedColumn,
-		quotedColumn, vectorutil.StorageDimensions, quotedColumn, vectorutil.StorageDimensions,
-		quotedColumn, vectorutil.StorageDimensions,
-		quotedColumn, vectorutil.StorageDimensions, quotedColumn,
-		vectorutil.StorageDimensions,
-		quotedColumn, vectorutil.StorageDimensions,
+func postgresVectorColumnTypmodRemovalSQL(schemaName string, table string, column string) string {
+	return fmt.Sprintf(
+		`ALTER TABLE %s ALTER COLUMN %s TYPE vector`,
+		postgresQualifiedIdentifier(schemaName, table),
+		postgresIdentifier(column),
 	)
 }
 

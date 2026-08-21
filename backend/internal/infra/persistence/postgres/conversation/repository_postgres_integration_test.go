@@ -26,7 +26,7 @@ func TestSearchMessageChunksFiltersPostgresBranchBeforeTopK(t *testing.T) {
 	if err := db.AutoMigrate(&model.Message{}, &model.MessageChunk{}); err != nil {
 		t.Fatalf("migrate conversation vector models: %v", err)
 	}
-	if err := db.Exec(`ALTER TABLE chat_message_chunks ADD COLUMN IF NOT EXISTS embedding vector(4096)`).Error; err != nil {
+	if err := db.Exec(`ALTER TABLE chat_message_chunks ADD COLUMN IF NOT EXISTS embedding vector`).Error; err != nil {
 		t.Fatalf("add message embedding column: %v", err)
 	}
 

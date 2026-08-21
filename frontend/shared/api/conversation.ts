@@ -34,6 +34,7 @@ import type {
   CreateConversationShareRequest,
   DeleteConversationData,
   MediaImageRequest,
+  MediaVideoExtensionRequest,
   MediaVideoRequest,
   MessageDTO,
   MessageFeedbackResult,
@@ -1131,6 +1132,21 @@ export async function streamVideoGeneration(
     accessToken,
     conversationPublicID,
     "/media/videos/generations/stream",
+    payload,
+    options,
+  );
+}
+
+export async function streamVideoExtension(
+  accessToken: string,
+  conversationPublicID: string,
+  payload: MediaVideoExtensionRequest,
+  options: ConversationStreamOptions = {},
+): Promise<SendMessageResult> {
+  return postConversationStream(
+    accessToken,
+    conversationPublicID,
+    "/media/videos/extensions/stream",
     payload,
     options,
   );

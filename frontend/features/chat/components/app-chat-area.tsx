@@ -1,6 +1,5 @@
 "use client";
 
-import { motion } from "motion/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import * as React from "react";
@@ -21,8 +20,6 @@ import {
   useConversationExport,
   useSidebarConversations,
 } from "@/entities/conversation";
-import { useGroupRunRecovery } from "@/features/agent-groups/hooks/use-group-run-recovery";
-import { subscribeGroupRunSettled } from "@/features/agent-groups/model/group-run-store";
 import { ChatArea, ChatAreaLoadError, ChatAreaSkeleton } from "@/features/chat/components/sections/chat-area";
 import { ChatArtifactWorkspace } from "@/features/chat/components/sections/chat-artifact";
 import { ChatEmptyState } from "@/features/chat/components/sections/chat-empty";
@@ -40,27 +37,20 @@ import { useChatScreenshot } from "@/features/chat/hooks/use-chat-screenshot";
 import { useChatViewerProfile } from "@/features/chat/hooks/use-chat-viewer-profile";
 import { useChatVisualPrompt } from "@/features/chat/hooks/use-chat-visual-prompt";
 import { useNewConversationDefaults } from "@/features/chat/hooks/use-new-conversation-defaults";
-import { requestedResponseType } from "@/features/chat/model/chat-task";
 import {
   cloneConversationOptions,
   isConversationOptionsObject,
   sanitizeConversationOptions,
 } from "@/features/chat/model/conversation-options";
-import { resolveImageEditSubmissionAttachments } from "@/features/chat/model/image-edit-submit";
 import { toPendingAttachment } from "@/features/chat/model/message-submit";
 import type { ChatAreaMessage, MessageAttachment } from "@/features/chat/types/messages";
 import { useSettingsChatPreferences } from "@/features/settings/hooks/use-settings-chat-preferences";
 import { cn } from "@/lib/utils";
-import { getAgentGroup } from "@/shared/api/agent-groups";
-import type { AgentGroupDTO } from "@/shared/api/agent-groups.types";
 import { getConversation } from "@/shared/api/conversation";
 import type { ConversationDTO, ConversationOptions } from "@/shared/api/conversation.types";
 import type { FileObjectDTO } from "@/shared/api/file.types";
 import { listAvailableMCPTools } from "@/shared/api/mcp";
 import type { MCPToolDTO } from "@/shared/api/mcp.types";
-import type { PromptPresetDTO } from "@/shared/api/prompt-presets.types";
-import { getConversationRole } from "@/shared/api/roles";
-import type { ConversationRoleDTO } from "@/shared/api/roles.types";
 import { getUserSettings, patchUserSettings } from "@/shared/api/user-settings";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 import { DeleteFilesOption } from "@/shared/components/delete-files-option";
@@ -69,12 +59,6 @@ import {
   hasMultipleImageAttachmentProcessors,
   normalizeImageAttachmentProcessorSelection,
 } from "@/shared/lib/mcp-tool-selection";
-import {
-  getReasoningEffortOptionValue,
-  isReasoningEffortLevel,
-  resolveReasoningEffortProtocol,
-  setReasoningEffortOptionValue,
-} from "@/shared/lib/reasoning-effort";
 import { resolveChatContentWidthClassName } from "@/shared/model/chat-content-width";
 
 const MODEL_OPTIONS_STORAGE_PREFIX = "deeix-chat:chat-model-options:";
@@ -583,8 +567,10 @@ export function AppChatArea() {
   const {
     selectedToolIDs,
     selectedSkills,
+    selectedKnowledgeBaseIDs,
     setSelectedToolIDs,
     setSelectedSkills,
+    setSelectedKnowledgeBaseIDs,
   } = useChatComposerSelection({
     conversationKey,
     createdConversationID: locallyCreatedConversationID,
@@ -611,15 +597,21 @@ export function AppChatArea() {
     () => (newConversationProject?.defaultSkillIDs ?? []).slice(0, MAX_SELECTED_SKILLS_PER_MESSAGE),
     [newConversationProject],
   );
-  const { onSelectedSkillsChange, onSelectedToolsChange: applySelectedToolsChange } = useNewConversationDefaults({
+  const newConversationDefaultKnowledgeBaseIDs = React.useMemo(
+    () => (newConversationProject?.defaultKnowledgeBaseIDs ?? []).slice(0, 8),
+    [newConversationProject],
+  );
+  const { onSelectedKnowledgeBasesChange, onSelectedSkillsChange, onSelectedToolsChange: applySelectedToolsChange } = useNewConversationDefaults({
     conversationID,
     contextKey: newConversationSelectionKey,
     defaultsPending: Boolean(newConversationProjectID && !newConversationProject),
     defaultMCPToolIDs: newConversationDefaultMCPToolIDs,
     defaultSkillIDs: newConversationDefaultSkillIDs,
+    defaultKnowledgeBaseIDs: newConversationDefaultKnowledgeBaseIDs,
     toolsLoading,
     setSelectedToolIDs,
     setSelectedSkills,
+    setSelectedKnowledgeBaseIDs,
   });
   const onSelectedToolsChange = React.useCallback((nextToolIDs: number[]) => {
     if (hasMultipleImageAttachmentProcessors(nextToolIDs, availableTools)) {
@@ -826,6 +818,8 @@ export function AppChatArea() {
     uploadingAttachments,
     maxFilesPerMessage,
     fileMode,
+    ragAvailable,
+    ragAvailabilityReason,
     releaseAttachments,
     onRemoveAttachment,
     onUploadFiles,
@@ -867,7 +861,7 @@ export function AppChatArea() {
     modelOptions,
     selectedToolIDs,
     selectedSkills,
-    selectedPrompts,
+    selectedKnowledgeBaseIDs,
     htmlVisualPromptEnabled: htmlVisualPrompt.enabled,
     options: modelOptionPolicyDisabled ? EMPTY_CONVERSATION_OPTIONS : options,
     draft,
@@ -1000,6 +994,42 @@ export function AppChatArea() {
       maxFilesPerMessage,
       modelOptions,
       selectedModel,
+      setAttachments,
+      setSelectedPlatformModelName,
+      t,
+    ],
+  );
+
+  const onExtendGeneratedVideoAttachment = React.useCallback(
+    (attachment: MessageAttachment, sourceModelName?: string) => {
+      const normalizedSourceModelName = sourceModelName?.trim() || "";
+      const sourceModel = modelOptions.find(
+        (item) =>
+          item.platformModelName === normalizedSourceModelName &&
+          item.videoExtension?.enabled,
+      );
+      const extensionModel =
+        sourceModel ??
+        (selectedModel?.videoExtension?.enabled ? selectedModel : undefined) ??
+        modelOptions.find((item) => item.videoExtension?.enabled);
+
+      if (!extensionModel) {
+        toast.error(t("submit.mediaMode.blockedDescriptions.video_extension_unsupported"));
+        return;
+      }
+
+      releaseAttachments(attachments);
+      setAttachments([toPendingAttachment(attachment)]);
+      if (extensionModel.platformModelName !== selectedPlatformModelName) {
+        setSelectedPlatformModelName(extensionModel.platformModelName);
+      }
+    },
+    [
+      attachments,
+      modelOptions,
+      releaseAttachments,
+      selectedModel,
+      selectedPlatformModelName,
       setAttachments,
       setSelectedPlatformModelName,
       t,
@@ -1448,6 +1478,8 @@ export function AppChatArea() {
     isConversationMode,
     maxFilesPerMessage,
     fileMode,
+    ragAvailable,
+    ragAvailabilityReason,
     sendShortcut,
     inputHeight,
     attachments,
@@ -1460,6 +1492,7 @@ export function AppChatArea() {
     selectedToolIDs,
     selectedPrompts,
     selectedSkills,
+    selectedKnowledgeBaseIDs,
     defaultToolIDs,
     queuedMessages,
     htmlVisualPromptEnabled: htmlVisualPrompt.enabled,
@@ -1481,6 +1514,7 @@ export function AppChatArea() {
     onSelectedPromptsChange: setSelectedPrompts,
     maxSelectedSkills: MAX_SELECTED_SKILLS_PER_MESSAGE,
     onSelectedSkillsChange,
+    onSelectedKnowledgeBasesChange,
     onDefaultToolsChange: onDefaultToolIDsChange,
     onHTMLVisualPromptChange: htmlVisualPrompt.setEnabled,
     onOptionsChange: setModelOptions,
@@ -1577,6 +1611,7 @@ export function AppChatArea() {
                       : null
                   }
                   onEditImageAttachment={onEditGeneratedImageAttachment}
+                  onExtendVideoAttachment={onExtendGeneratedVideoAttachment}
                   onOpenCodeArtifact={artifactWorkspace.openArtifact}
                   onCycleMessageBranch={onCycleMessageBranch}
                   onToggleStar={onToggleActiveConversationStar}

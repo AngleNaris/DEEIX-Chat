@@ -12,20 +12,21 @@ import (
 	"gorm.io/gorm"
 )
 
-func TestPostgresVectorColumnMigrationSQLUsesPhysicalDimensions(t *testing.T) {
-	statement := postgresVectorColumnMigrationSQL("public", "file_chunks", "embedding")
+func TestPostgresVectorColumnTypmodRemovalSQLPreservesNativeDimensions(t *testing.T) {
+	statement := postgresVectorColumnTypmodRemovalSQL("public", "file_chunks", "embedding")
 	if strings.Contains(statement, "%!") {
 		t.Fatalf("vector migration SQL contains formatting errors: %s", statement)
 	}
 	for _, expected := range []string{
 		`ALTER TABLE "public"."file_chunks"`,
-		`ALTER COLUMN "embedding" TYPE vector(4096)`,
-		`array_fill(0::real, ARRAY[4096 - vector_dims("embedding")])`,
-		`ELSE "embedding"::vector(4096)`,
+		`ALTER COLUMN "embedding" TYPE vector`,
 	} {
 		if !strings.Contains(statement, expected) {
 			t.Fatalf("vector migration SQL missing %q: %s", expected, statement)
 		}
+	}
+	if strings.Contains(statement, "vector(4096)") || strings.Contains(statement, "array_fill") {
+		t.Fatalf("vector typmod removal must not expand stored rows: %s", statement)
 	}
 }
 
@@ -47,8 +48,8 @@ func TestPostgresExtensionVersionAtLeast(t *testing.T) {
 	}
 }
 
-func TestPostgresVectorColumnMigrationSQLDoesNotTruncateOversizedVectors(t *testing.T) {
-	statement := postgresVectorColumnMigrationSQL("public", "file_chunks", "embedding")
+func TestPostgresVectorColumnTypmodRemovalSQLDoesNotTruncateVectors(t *testing.T) {
+	statement := postgresVectorColumnTypmodRemovalSQL("public", "file_chunks", "embedding")
 	if strings.Contains(statement, `[1:4096]`) {
 		t.Fatalf("vector migration SQL must not silently truncate oversized vectors: %s", statement)
 	}
@@ -57,9 +58,11 @@ func TestPostgresVectorColumnMigrationSQLDoesNotTruncateOversizedVectors(t *test
 func TestPostgresVectorIndexSQLUsesHalfVectorCandidates(t *testing.T) {
 	statement := postgresVectorIndexSQL("public", "file_chunks", "embedding", "idx_file_chunks_embedding")
 	for _, expected := range []string{
-		`CREATE INDEX "idx_file_chunks_embedding"`,
+		`CREATE INDEX CONCURRENTLY "idx_file_chunks_embedding"`,
 		`USING hnsw`,
-		`subvector("embedding", 1, 4000)::halfvec(4000)`,
+		`vector_dims("embedding")`,
+		`subvector(`,
+		`::halfvec(4000)`,
 		`halfvec_cosine_ops`,
 	} {
 		if !strings.Contains(statement, expected) {
@@ -68,7 +71,7 @@ func TestPostgresVectorIndexSQLUsesHalfVectorCandidates(t *testing.T) {
 	}
 }
 
-func TestEnsurePostgresVectorColumnExpandsLegacyVectors(t *testing.T) {
+func TestEnsurePostgresVectorColumnPreservesLegacyVectors(t *testing.T) {
 	dsn := strings.TrimSpace(os.Getenv("DEEIX_TEST_DATABASE_DSN"))
 	if dsn == "" {
 		t.Skip("set DEEIX_TEST_DATABASE_DSN to run PostgreSQL vector migration integration test")
@@ -130,7 +133,7 @@ func TestEnsurePostgresVectorColumnExpandsLegacyVectors(t *testing.T) {
 		  AND attribute.attname = 'embedding'`).Scan(&columnType).Error; err != nil {
 		t.Fatalf("read migrated column type: %v", err)
 	}
-	expectedType := fmt.Sprintf("vector(%d)", vectorutil.StorageDimensions)
+	expectedType := "vector"
 	if columnType != expectedType {
 		t.Fatalf("migrated column type = %q, want %q", columnType, expectedType)
 	}
@@ -139,21 +142,46 @@ func TestEnsurePostgresVectorColumnExpandsLegacyVectors(t *testing.T) {
 		Dimensions int     `gorm:"column:dimensions"`
 		First      float32 `gorm:"column:first"`
 		Second     float32 `gorm:"column:second"`
-		Padded     float32 `gorm:"column:padded"`
 	}
 	if err = database.Raw(`
 		SELECT vector_dims(embedding) AS dimensions,
 		       (embedding::real[])[1] AS first,
-		       (embedding::real[])[2] AS second,
-		       (embedding::real[])[1537] AS padded
+		       (embedding::real[])[2] AS second
 		FROM file_chunks WHERE id = 1`).Scan(&values).Error; err != nil {
 		t.Fatalf("read migrated vector: %v", err)
 	}
-	if values.Dimensions != vectorutil.StorageDimensions {
-		t.Fatalf("migrated dimensions = %d, want %d", values.Dimensions, vectorutil.StorageDimensions)
+	if values.Dimensions != 1536 {
+		t.Fatalf("migrated dimensions = %d, want original 1536", values.Dimensions)
 	}
-	if values.First != 1 || values.Second != -2 || values.Padded != 0 {
-		t.Fatalf("migrated vector values were not preserved and padded")
+	if values.First != 1 || values.Second != -2 {
+		t.Fatalf("migrated vector values were not preserved")
+	}
+	if err = database.Exec(`INSERT INTO file_chunks (id, embedding) VALUES
+		(2, (ARRAY[3::real] || array_fill(0::real, ARRAY[4095]))::vector),
+		(3, (ARRAY[4::real] || array_fill(0::real, ARRAY[1535]))::vector)`).Error; err != nil {
+		t.Fatalf("insert mixed-dimension vectors after migration: %v", err)
+	}
+	var mixedDimensions struct {
+		Legacy  int `gorm:"column:legacy"`
+		Maximum int `gorm:"column:maximum"`
+		Reduced int `gorm:"column:reduced"`
+		Padded  int `gorm:"column:padded"`
+	}
+	paddedExpression := vectorutil.PostgresPaddedExpression("embedding")
+	if err = database.Raw(fmt.Sprintf(`
+		SELECT
+			MAX(CASE WHEN id = 1 THEN vector_dims(embedding) END) AS legacy,
+			MAX(CASE WHEN id = 2 THEN vector_dims(embedding) END) AS maximum,
+			MAX(CASE WHEN id = 3 THEN vector_dims(embedding) END) AS reduced,
+			MIN(vector_dims(%s)) AS padded
+		FROM file_chunks`, paddedExpression)).Scan(&mixedDimensions).Error; err != nil {
+		t.Fatalf("read mixed-dimension vectors: %v", err)
+	}
+	if mixedDimensions.Legacy != 1536 || mixedDimensions.Maximum != 4096 || mixedDimensions.Reduced != 1536 {
+		t.Fatalf("stored vector dimensions changed unexpectedly: %#v", mixedDimensions)
+	}
+	if mixedDimensions.Padded != vectorutil.MaxDimensions {
+		t.Fatalf("query boundary dimensions = %d, want %d", mixedDimensions.Padded, vectorutil.MaxDimensions)
 	}
 	var indexDefinition string
 	if err = database.Raw(`SELECT indexdef FROM pg_indexes

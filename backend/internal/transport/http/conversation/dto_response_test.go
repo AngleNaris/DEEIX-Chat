@@ -1,37 +1,25 @@
 package conversation
 
 import (
-	"encoding/json"
 	"strings"
 	"testing"
-	"time"
-
-	appconversation "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/conversation"
 )
 
-func TestPublicGroupRunResponseMapsThinkAndToolsWithoutInternalSnapshots(t *testing.T) {
-	timeline := appconversation.PublicGroupRunTimeline{
-		GroupRunID: "run_public", Status: "completed", StartedAt: time.Unix(1, 0), UpdatedAt: time.Unix(2, 0),
-		Steps: []appconversation.PublicGroupRunStep{{
-			StepID: "step_public", StepType: "member_execute", Actor: appconversation.PublicGroupRunActor{MemberID: "member", Name: "Worker", Type: "worker"},
-			Attempts: []appconversation.PublicGroupRunAttempt{{
-				AttemptID: "attempt_public", AttemptNumber: 1, Status: "completed", Output: "public output",
-				ThinkMarkdown: "public thought", ToolCallsJSON: `[{"name":"public_tool"}]`,
-			}},
-		}},
-	}
-	response := toPublicGroupRunTimelineResponse(timeline)
-	if got := response.Steps[0].Attempts[0]; got.ThinkMarkdown != "public thought" || got.ToolCallsJSON != `[{"name":"public_tool"}]` {
-		t.Fatalf("public fields did not pass through: %#v", got)
-	}
-	encoded, err := json.Marshal(response)
-	if err != nil {
-		t.Fatal(err)
-	}
-	text := string(encoded)
-	for _, forbidden := range []string{"input_snapshot_json", "InputSnapshotJSON", "internal instruction", "secret instruction"} {
-		if strings.Contains(text, forbidden) {
-			t.Fatalf("public response leaked %q: %s", forbidden, text)
+func TestSanitizePublicTracePayloadRemovesKnowledgeEvidence(t *testing.T) {
+	raw := `{
+		"query":"internal policy",
+		"file_names":["policy.md"],
+		"citations":[{"file_id":"file_secret","file_name":"policy.md","preview":"confidential excerpt","score":0.9}],
+		"stage":{"kind":"retrieval","status":"completed"}
+	}`
+
+	got := sanitizePublicTracePayloadJSON(raw)
+	for _, secret := range []string{"file_secret", "policy.md", "confidential excerpt", "citations", "file_names"} {
+		if strings.Contains(got, secret) {
+			t.Fatalf("sanitizePublicTracePayloadJSON() leaked %q in %s", secret, got)
 		}
+	}
+	if !strings.Contains(got, `"kind":"retrieval"`) || !strings.Contains(got, `"status":"completed"`) {
+		t.Fatalf("sanitizePublicTracePayloadJSON() removed safe retrieval diagnostics: %s", got)
 	}
 }

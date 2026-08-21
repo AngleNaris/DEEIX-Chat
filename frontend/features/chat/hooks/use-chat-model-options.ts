@@ -315,6 +315,39 @@ function resolveOptionControls(raw: string): ModelOptionControl[] {
   return controls.filter((item, index) => controls.findIndex((candidate) => candidate.path === item.path) === index);
 }
 
+function resolveVideoExtensionConfig(raw: string, protocols: string[]): ChatModelOption["videoExtension"] {
+  const parsed = parseJSONObject(raw);
+  const mediaTasks = parsed?.mediaTasks;
+  const taskSource = mediaTasks && typeof mediaTasks === "object" && !Array.isArray(mediaTasks)
+    ? (mediaTasks as Record<string, unknown>).video_extension
+    : undefined;
+  const task = taskSource && typeof taskSource === "object" && !Array.isArray(taskSource)
+    ? (taskSource as Record<string, unknown>)
+    : null;
+  const protocolSupported = protocols.includes("xai_video_extensions");
+  if (!protocolSupported || task?.enabled === false) {
+    return null;
+  }
+  const defaultOptions = task?.defaultOptions && typeof task.defaultOptions === "object" && !Array.isArray(task.defaultOptions)
+    ? sanitizeConversationOptions(task.defaultOptions as ConversationOptions)
+    : { duration: 6 };
+  const rawControls = Array.isArray(task?.optionControls) ? task.optionControls : [{ path: "duration", type: "select", label: "Duration", description: "2–10 seconds", options: ["2", "3", "4", "5", "6", "7", "8", "9", "10"] }];
+  const controls = rawControls.flatMap((item): ModelOptionControl[] => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const source = item as Record<string, unknown>;
+    const path = normalizeOptionControlPath(source.path);
+    if (path !== "duration") return [];
+    return [{
+      path,
+      type: normalizeOptionControlType(source.type) ?? "select",
+      label: normalizeOptionControlString(source.label),
+      description: normalizeOptionControlString(source.description),
+      options: normalizeOptionControlOptions(source.options) ?? ["2", "3", "4", "5", "6", "7", "8", "9", "10"],
+    }];
+  });
+  return { enabled: true, defaultOptions, optionControls: controls };
+}
+
 function resolveNativeToolKeys(raw: string): string[] {
   const parsed = parseJSONObject(raw);
   const rawKeys = parsed?.nativeToolKeys;
@@ -359,6 +392,7 @@ function toChatModelOption(
     nativeToolKeys: resolveNativeToolKeys(item.capabilitiesJSON),
     nativeTools,
     pricing: item.pricing,
+    videoExtension: resolveVideoExtensionConfig(item.capabilitiesJSON, protocols),
   };
 }
 

@@ -168,6 +168,7 @@ func (s *Service) resolveAttachments(
 				EmbedStatus:            fileItem.EmbedStatus,
 				RagOptOut:              fileItem.RagOptOut,
 				ChunkCount:             fileItem.ChunkCount,
+				FileUpdatedAt:          fileItem.UpdatedAt,
 			})
 		}
 	}
@@ -246,6 +247,7 @@ func (s *Service) resolveConversationFileContext(
 			EmbedStatus:            fileItem.EmbedStatus,
 			RagOptOut:              fileItem.RagOptOut,
 			ChunkCount:             fileItem.ChunkCount,
+			FileUpdatedAt:          fileItem.UpdatedAt,
 			Current:                isCurrent,
 		})
 	}
@@ -324,6 +326,7 @@ func (s *Service) hydrateAttachmentsForSend(
 			items[i].ExtractStatus = readyFile.ExtractStatus
 			items[i].EmbedStatus = readyFile.EmbedStatus
 			items[i].ExtractedText = readyFile.ExtractedText
+			items[i].FileUpdatedAt = readyFile.File.UpdatedAt
 			return nil
 		})
 	}

@@ -1,6 +1,6 @@
 # DEEIX Chat Backend
 
-DEEIX Chat 后端是 Go API 服务，负责认证、用户、对话、模型渠道、模型能力、文件处理、MCP 工具、官方原生工具、记忆、计费、支付、系统设置、审计日志与可观测性等核心业务。
+DEEIX Chat 后端是 Go API 服务，负责认证、用户、对话、模型渠道、模型能力、文件处理、知识库、MCP 工具、官方原生工具、记忆、计费、支付、系统设置、审计日志与可观测性等核心业务。
 
 ## 技术栈
 
@@ -214,11 +214,13 @@ R2、OSS、MinIO、AWS S3 等统一走 S3 兼容协议，不为不同厂商维�
 
 ## 向量存储
 
-Embedding 输出支持 64–4096 维，超过上限的向量会被拒绝，不会静默截断。PostgreSQL 与 SQLite 的物理向量槽统一为 4096 维，较短向量在持久化边界补零；补零不会改变余弦相似度。文件、历史消息和用户记忆向量都会记录模型与维度签名，检索只使用当前向量空间的数据。
+Embedding 输出支持 64–4096 维。系统会通过 OpenAI-compatible `dimensions` 参数请求目标维度，并校验上游实际返回的向量长度；维度不一致时明确失败，不会通过截断或补零伪装成目标维度。PostgreSQL 按模型原始维度保存向量，SQLite 因 vec0 固定槽限制在持久化边界补零至 4096 维。文件、历史消息和用户记忆向量都会记录模型、服务端点与维度共同生成的空间签名，检索只使用当前向量空间的数据。
 
 PostgreSQL 使用 4000 维 `halfvec` HNSW 表达式索引召回候选，再按完整 4096 维向量精确重排；这样既避开标准 `vector` ANN 的维度限制，也不会用降维距离作为最终排序结果。使用 PostgreSQL 时需安装 pgvector 0.8.0 或更高版本，以支持 `halfvec`、HNSW 迭代扫描和 4096 维 `vector` 存储；启用向量能力时，版本不满足要求会在启动迁移阶段明确失败。
 
-从旧版本升级时，启动迁移会把 PostgreSQL `vector(1536)` 列和 SQLite `FLOAT[1536]` vec0 表扩展为 4096 维，并保留已有向量值、在尾部补零；旧 PostgreSQL IVFFlat 索引会被替换为 HNSW 候选索引。没有向量签名的既有文件会进入重建队列，旧历史消息和用户记忆向量在重新生成前不会参与语义检索。PostgreSQL 列改写及 HNSW 索引构建可能耗时并持有数据库资源；大型实例应在维护窗口升级并先完成数据库备份。
+从旧版本升级时，PostgreSQL 会移除 `vector(1536)` 的固定维度约束，但不会扩展或重写已有向量行；SQLite 的 `FLOAT[1536]` vec0 表会迁移为固定 4096 维并在尾部补零。旧 PostgreSQL IVFFlat 索引会通过并发 DDL 替换为 HNSW 候选索引。没有向量签名的既有文件会进入待重建状态，旧历史消息和用户记忆向量在重新生成前不会参与语义检索。大型 PostgreSQL 实例首次构建 HNSW 索引仍可能消耗较多时间与数据库资源，应在维护窗口升级并先完成数据库备份。
+
+管理员切换 Embedding 模型、服务地址或输出维度时，系统只将不属于新空间的文件标记为待重建，不修改原始文件。后台重建按固定并发执行并按文件任务签名原子发布；新空间任务领取后，旧任务即使更晚完成也不能覆盖新分片或状态。1536 与 4096 可以双向切换，但切换完成前相关文件暂不参与新空间检索。
 
 ## GeoIP
 
@@ -256,6 +258,10 @@ MinerU 可在设置中选择处理的文件类型；云端 MinerU 支持 `.doc/.
 OCR 引擎配置由后台文件设置管理，当前支持 RapidOCR、Tesseract OCR、Paddle OCR、腾讯云 OCR、阿里云 OCR、Mistral OCR 与 LLM OCR。服务地址、鉴权密钥和超时时间按具体引擎配置。
 
 用户文件存储配额由运行时设置 `storage:user_storage_quota_bytes` 管理。后台 `/admin/chat-files` 页面中的 `storage:max_upload_file_bytes`、`storage:user_storage_quota_bytes`、`file:image_max_bytes`、`file:doc_max_bytes` 和 `file:file_full_context_max_bytes` 统一按 MB 输入，设置值在 API、数据库和运行时内部统一按字节保存与计算；值为 `0` 表示不限制。非零时，上传、分享克隆和文件复用链路都会按用户维度校验并同步最新配额。前端 `/files` 页支持单个删除和批量删除，后端会在删除后释放对应配额。
+
+## 知识库
+
+知识库是独立于文件管理页面的检索集合。后端按 `domain/knowledgebase -> application/knowledgebase -> repository.KnowledgeBaseRepository -> infra/persistence/postgres/knowledgebase -> transport/http/knowledgebase` 分层，用户与管理员接口统一使用 `/api/v1/knowledge-bases` 资源路径。知识库只关联文件对象，不复制文件内容；删除知识库时仅在用户明确选择后清理未被其他资源引用的文件。
 
 ## 模型能力与官方原生工具
 
@@ -335,19 +341,7 @@ OpenAI 的 `X-Client-Request-Id` 要求每次请求使用唯一值，应配置�
 
 若中转站接受顶层 `prompt_cache_options`，但拒绝消息内容中的 `prompt_cache_breakpoint`，省略 `messageBreakpoints` 或将其设为 `false`。此时 DEEIX 仍发送稳定的 `prompt_cache_key` 和显式缓存选项，由中转站选择缓存边界。
 
-隐式缓存可独立配置保留策略：
-
-```json
-{
-  "promptCache": {
-    "enabled": true,
-    "mode": "implicit",
-    "retention": "24h"
-  }
-}
-```
-
-显式缓存当前只接受 `ttl=30m`；隐式缓存的 `retention` 接受 `in_memory` 或 `24h`，两者语义不互相替代。已有模型中的 `defaultOptions.prompt_cache_retention` 配置仍会生效。未声明能力的兼容中转站不会收到 `prompt_cache_key`、`prompt_cache_options`、`prompt_cache_retention` 或 `prompt_cache_breakpoint`。DEEIX 不再依赖上游错误文本执行无记忆缓存重试。
+显式缓存当前只接受 `ttl=30m`。隐式缓存使用上游默认保留策略；DEEIX 不配置或透传保留策略。未声明能力的兼容中转站不会收到 `prompt_cache_key`、`prompt_cache_options` 或 `prompt_cache_breakpoint`。DEEIX 不再依赖上游错误文本执行无记忆缓存重试。
 
 ## MCP 工具
 

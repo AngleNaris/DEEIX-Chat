@@ -27,7 +27,7 @@ export function useChatSubmitStream({
   modelOptions,
   selectedToolIDs,
   selectedSkills,
-  selectedPrompts,
+  selectedKnowledgeBaseIDs,
   htmlVisualPromptEnabled,
   options,
   draft,
@@ -70,7 +70,7 @@ export function useChatSubmitStream({
   modelOptions: ChatModelOption[];
   selectedToolIDs: number[];
   selectedSkills: SkillSummaryDTO[];
-  selectedPrompts: PromptPresetDTO[];
+  selectedKnowledgeBaseIDs: string[];
   htmlVisualPromptEnabled: boolean;
   options: ConversationOptions;
   draft: string;
@@ -118,7 +118,7 @@ export function useChatSubmitStream({
     modelOptions,
     selectedToolIDs,
     selectedSkills,
-    selectedPrompts,
+    selectedKnowledgeBaseIDs,
     htmlVisualPromptEnabled,
     options,
     draft,

@@ -11,8 +11,8 @@ func TestAlignForStoragePadsWithoutChangingValues(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AlignForStorage() error = %v", err)
 	}
-	if len(result) != StorageDimensions {
-		t.Fatalf("aligned dimensions = %d, want %d", len(result), StorageDimensions)
+	if len(result) != MaxDimensions {
+		t.Fatalf("aligned dimensions = %d, want %d", len(result), MaxDimensions)
 	}
 	for index, value := range input {
 		if result[index] != value {
@@ -25,22 +25,30 @@ func TestAlignForStoragePadsWithoutChangingValues(t *testing.T) {
 }
 
 func TestAlignForStorageRejectsOversizedInput(t *testing.T) {
-	input := make([]float32, StorageDimensions+1)
+	input := make([]float32, MaxDimensions+1)
 	if _, err := AlignForStorage(input); err == nil {
 		t.Fatal("expected oversized vector to be rejected")
 	}
 }
 
-func TestPostgresLiteralUsesPhysicalDimensions(t *testing.T) {
+func TestPostgresLiteralPreservesNativeDimensions(t *testing.T) {
 	literal, err := PostgresLiteral([]float32{1, 2})
 	if err != nil {
 		t.Fatalf("PostgresLiteral() error = %v", err)
 	}
-	if strings.Count(literal, ",") != StorageDimensions-1 {
-		t.Fatalf("literal dimensions = %d, want %d", strings.Count(literal, ",")+1, StorageDimensions)
+	if literal != "[1,2]" {
+		t.Fatalf("PostgresLiteral() = %q, want native-width literal", literal)
 	}
-	if !strings.HasPrefix(literal, "[1,2,0,") || !strings.HasSuffix(literal, ",0]") {
-		t.Fatalf("unexpected literal boundary: %.16s ... %s", literal, literal[len(literal)-8:])
+
+	padded, err := PostgresPaddedLiteral([]float32{1, 2})
+	if err != nil {
+		t.Fatalf("PostgresPaddedLiteral() error = %v", err)
+	}
+	if strings.Count(padded, ",") != MaxDimensions-1 {
+		t.Fatalf("padded literal dimensions = %d, want %d", strings.Count(padded, ",")+1, MaxDimensions)
+	}
+	if !strings.HasPrefix(padded, "[1,2,0,") || !strings.HasSuffix(padded, ",0]") {
+		t.Fatalf("unexpected padded literal boundary: %.16s ... %s", padded, padded[len(padded)-8:])
 	}
 }
 

@@ -95,7 +95,7 @@ export function useChatRuntime({
   modelOptions,
   selectedToolIDs,
   selectedSkills,
-  selectedPrompts,
+  selectedKnowledgeBaseIDs,
   htmlVisualPromptEnabled,
   options,
   draft,
@@ -129,7 +129,7 @@ export function useChatRuntime({
   modelOptions: ChatModelOption[];
   selectedToolIDs: number[];
   selectedSkills: SkillSummaryDTO[];
-  selectedPrompts: PromptPresetDTO[];
+  selectedKnowledgeBaseIDs: string[];
   htmlVisualPromptEnabled: boolean;
   options: ConversationOptions;
   draft: string;
@@ -205,7 +205,7 @@ export function useChatRuntime({
     modelOptions,
     selectedToolIDs,
     selectedSkills,
-    selectedPrompts,
+    selectedKnowledgeBaseIDs,
     htmlVisualPromptEnabled,
     options,
     draft,

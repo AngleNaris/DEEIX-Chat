@@ -616,6 +616,7 @@ export function NavProjects() {
         mcpDefaultMode: draft.mcpDefaultMode,
         defaultMCPToolIDs: draft.mcpDefaultMode === "custom" ? draft.defaultMCPToolIDs : [],
         defaultSkillIDs: draft.defaultSkillIDs,
+        defaultKnowledgeBaseIDs: draft.defaultKnowledgeBaseIDs,
       });
     } else {
       await createProject({
@@ -624,6 +625,7 @@ export function NavProjects() {
         mcpDefaultMode: draft.mcpDefaultMode,
         defaultMCPToolIDs: draft.mcpDefaultMode === "custom" ? draft.defaultMCPToolIDs : [],
         defaultSkillIDs: draft.defaultSkillIDs,
+        defaultKnowledgeBaseIDs: draft.defaultKnowledgeBaseIDs,
       });
     }
     closeDraft();
@@ -706,6 +708,7 @@ export function NavProjects() {
                   mcpDefaultMode: "inherit",
                   defaultMCPToolIDs: [],
                   defaultSkillIDs: [],
+                  defaultKnowledgeBaseIDs: [],
                 })}
                 onOpenChange={setProjectsOpen}
                 toggleLabel={projectsOpen ? t("collapseSection") : t("expandSection")}
@@ -737,6 +740,7 @@ export function NavProjects() {
                 mcpDefaultMode: "inherit",
                 defaultMCPToolIDs: [],
                 defaultSkillIDs: [],
+                defaultKnowledgeBaseIDs: [],
               })}
               onOpenChange={setProjectsOpen}
               toggleLabel={projectsOpen ? t("collapseSection") : t("expandSection")}
@@ -848,6 +852,7 @@ export function NavProjects() {
                                           mcpDefaultMode: project.mcpDefaultMode ?? "inherit",
                                           defaultMCPToolIDs: project.defaultMCPToolIDs ?? [],
                                           defaultSkillIDs: project.defaultSkillIDs ?? [],
+                                          defaultKnowledgeBaseIDs: project.defaultKnowledgeBaseIDs ?? [],
                                         });
                                       }}
                                     >

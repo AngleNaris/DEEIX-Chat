@@ -22,6 +22,7 @@ import enConversation from "@/i18n/messages/en-US/conversation.json";
 import enErrors from "@/i18n/messages/en-US/errors.json";
 import enFiles from "@/i18n/messages/en-US/files.json";
 import enGuide from "@/i18n/messages/en-US/guide.json";
+import enKnowledgeBases from "@/i18n/messages/en-US/knowledge-bases.json";
 import enLogin from "@/i18n/messages/en-US/login.json";
 import enPrompts from "@/i18n/messages/en-US/prompts.json";
 import enRecent from "@/i18n/messages/en-US/recent.json";
@@ -41,6 +42,7 @@ const ENGLISH_MESSAGES = {
   recent: enRecent,
   share: enShare,
   files: enFiles,
+  knowledgeBases: enKnowledgeBases,
   settings: enSettings,
   adminAgentGroups: enAdminAgentGroups,
   adminPlatformTools: enAdminPlatformTools,
@@ -126,6 +128,7 @@ export async function loadLocaleMessages(locale: AppLocale): Promise<AppMessages
     recent,
     share,
     files,
+    knowledgeBases,
     settings,
     adminAgentGroups,
     adminPlatformTools,
@@ -155,6 +158,7 @@ export async function loadLocaleMessages(locale: AppLocale): Promise<AppMessages
     import("@/i18n/messages/zh-CN/recent.json"),
     import("@/i18n/messages/zh-CN/share.json"),
     import("@/i18n/messages/zh-CN/files.json"),
+    import("@/i18n/messages/zh-CN/knowledge-bases.json"),
     import("@/i18n/messages/zh-CN/settings.json"),
     import("@/i18n/messages/zh-CN/admin-agent-groups.json"),
     import("@/i18n/messages/zh-CN/admin-platform-tools.json"),
@@ -186,6 +190,7 @@ export async function loadLocaleMessages(locale: AppLocale): Promise<AppMessages
     recent: recent.default,
     share: share.default,
     files: files.default,
+    knowledgeBases: knowledgeBases.default,
     settings: settings.default,
     adminAgentGroups: adminAgentGroups.default,
     adminPlatformTools: adminPlatformTools.default,

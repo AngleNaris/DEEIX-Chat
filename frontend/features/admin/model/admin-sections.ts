@@ -14,6 +14,7 @@ export const ADMIN_SECTIONS = [
   { id: "agent-groups", label: "Agent Groups", href: "/agent-groups" },
   { id: "platform-tools", label: "Platform Tools", href: "/platform-tools" },
   { id: "chat-files", label: "Files & retrieval", href: "/chat-files" },
+  { id: "knowledge-bases", label: "Knowledge bases", href: "/knowledge-bases" },
   { id: "about", label: "About", href: "/about" },
 ] as const;
 

@@ -1,13 +1,9 @@
 "use client";
 
-import * as React from "react";
 import { CircleHelp, Download, Save } from "lucide-react";
 import { useTranslations } from "next-intl";
+import * as React from "react";
 import { toast } from "sonner";
-
-import { TaskModelField, type ModelOption } from "../shared/task-model-field";
-import { SettingsFieldEditor } from "../shared/settings-runtime-panel";
-import { ConversationPromptPresetsSection } from "@/features/admin/components/sections/conversation/conversation-prompt-presets";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -20,8 +16,22 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { exportAllConversations, getAdminReferenceData, listAdminSettings, patchAdminSettings } from "@/features/admin/api";
+import { ConversationPromptPresetsSection } from "@/features/admin/components/sections/conversation/conversation-prompt-presets";
+import {
+  buildConversationSettingsFields,
+  CONVERSATION_DEFAULT_MODEL_SYSTEM,
+  CONVERSATION_TASK_MODEL_FOLLOW,
+  type ConversationSettingsField,
+  fieldID,
+  flattenConversationSettings,
+  resolveVisibleConversationFields,
+  toEditorField,
+} from "@/features/admin/model/conversation-settings";
+import { buildTaskModelOptions } from "@/features/admin/model/task-model-options";
+import { resolveAdminErrorMessage } from "@/features/admin/utils/admin-error";
+import type { PatchSettingItem } from "@/shared/api/settings.types";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
-import { downloadBlob, readExportManifest } from "@/shared/lib/export-download";
 import {
   SettingsFieldInset,
   SettingsFieldItem,
@@ -31,29 +41,17 @@ import {
   SettingsSection,
   SettingsSectionSeparator,
 } from "@/shared/components/settings-layout";
-import { exportAllConversations, getAdminReferenceData, listAdminSettings, patchAdminSettings } from "@/features/admin/api";
-import {
-  buildConversationSettingsFields,
-  CONVERSATION_DEFAULT_MODEL_SYSTEM,
-  CONVERSATION_TASK_MODEL_FOLLOW,
-  MULTIMODAL_DELEGATION_MODEL_UNCONFIGURED,
-  fieldID,
-  flattenConversationSettings,
-  resolveVisibleConversationFields,
-  toEditorField,
-  type ConversationSettingsField,
-} from "@/features/admin/model/conversation-settings";
-import { resolveAdminErrorMessage } from "@/features/admin/utils/admin-error";
-import { buildTaskModelOptions } from "@/features/admin/model/task-model-options";
-import type { PatchSettingItem } from "@/shared/api/settings.types";
+import { downloadBlob, readExportManifest } from "@/shared/lib/export-download";
 import {
   HARD_DENIED_MODEL_OPTION_PATHS,
   MODEL_OPTION_POLICY_PROTOCOL_LABELS,
   MODEL_OPTION_POLICY_PROTOCOLS,
+  type ModelOptionRuleMap,
   parseModelOptionRuleMap,
   uniqueModelOptionPaths,
-  type ModelOptionRuleMap,
 } from "@/shared/lib/model-option-policy";
+import { SettingsFieldEditor } from "../shared/settings-runtime-panel";
+import { type ModelOption, TaskModelField } from "../shared/task-model-field";
 
 function isModelOptionPolicyField(field: ConversationSettingsField): boolean {
   return field.section === "optionPassthrough";
@@ -288,6 +286,9 @@ generationConfig.safetySettings.threshold`}
     "aspect_ratio",
     "duration",
     "resolution"
+  ],
+  "xai_video_extensions": [
+    "duration"
   ],
   "openai_chat_completions": [
     "service_tier",

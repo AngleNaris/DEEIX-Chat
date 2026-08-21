@@ -335,7 +335,7 @@
     "duplicateModel": "{model} 重复出现",
     "pricingObject": "{model} 的定价配置必须是对象",
     "invalidPricingMode": "{model}.pricingMode 必须是 token、call、duration 或 tiered",
-    "durationVideoOnly": "{model}.pricingMode=duration 需要 video_gen 能力",
+    "durationVideoOnly": "{model}.pricingMode=duration 需要视频模型能力",
     "invalidNumber": "{model}.{field} 必须是大于等于 0 的数字",
     "invalidTieredPricing": "{model}.{field} 需要包含非空 tiers 数组",
     "invalidTieredPricingJSON": "{model}.tieredPricingJSON 不是合法 JSON"

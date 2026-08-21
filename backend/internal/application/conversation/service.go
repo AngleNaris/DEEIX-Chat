@@ -28,8 +28,7 @@ import (
 	appupload "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/upload"
 	domainagentgroup "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/agentgroup"
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
-	domaindoccard "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/doccard"
-	domaindynamicprompt "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/dynamicprompt"
+	domainknowledgebase "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/knowledgebase"
 	domainmcp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/mcp"
 	domainmemory "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/memory"
 	domainpromptpreset "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/promptpreset"
@@ -85,6 +84,10 @@ type skillResolver interface {
 	UpdateUser(ctx context.Context, userID uint, id uint, input appskill.PatchInput) (*domainskill.Skill, error)
 	// DeleteUser 供平台工具 delete_skill 删除用户自己的技能。
 	DeleteUser(ctx context.Context, userID uint, id uint) error
+}
+
+type knowledgeBaseResolver interface {
+	ResolveFiles(ctx context.Context, userID uint, publicIDs []string) ([]domainknowledgebase.KnowledgeBase, []model.FileObject, error)
 }
 
 type mcpToolResolver interface {
@@ -231,23 +234,6 @@ type Service struct {
 	routeResolver         routeResolver
 	memoryRecorder        memoryRecorder
 	mcpRepo               mcpToolResolver
-	agentGroupRepo        agentGroupResolver
-	agentGroupRunStore    repository.AgentGroupRunRepository
-	agentGroupSettings    agentGroupSettingsReader
-	agentGroupRunLocks    sync.Map                    // conversationID (uint) → *sync.Mutex，同会话串行
-	platformToolsSettings agentGroupSettingsReader    // platform_tools 运行时设置
-	platformApprovals     *platformWriteApprovalStore // ask 模式待批准写操作
-	reindexScheduler      *fileReindexScheduler       // write_file 延迟重建（debounce）
-	userSettingsSvc       userSettingsWriter          // 用户个人设置读写（平台工具 list/update_user_setting）
-	agentGroupWriter      agentGroupWriter            // Agent 群组创建/列表（平台工具 create/list_agent_group）
-	userProfile           userProfileReader           // 用户档案读取（模板变量 {{language}}/{{username}}）
-	artifactSvc           *appartifact.Service        // 制品保存/分享（平台工具 save/list/delete/share_artifact）
-	docCards              docCardReader               // 文档卡片读取（关键字触发注入）
-	docCardCache          sync.Map                    // userID (uint) → *cachedDocCards
-	dynamicPrompts        dynamicPromptReader         // 动态提示词读取（{{script: name}} 展开 + 平台工具脚本管理）
-	credentials           credentialResolver          // 用户凭据（{{credential: name}} 展开 + 平台工具管理）
-	dynamicPromptCache    sync.Map                    // userID (uint) → *cachedDynamicPrompts
-	promptPresets         promptPresetResolver        // 预制提示词（平台工具 list/create/update/delete_prompt_preset）
 	llmClient             *llm.Client
 	mediaDownloader       generatedMediaDownloader
 	mcpClient             *mcp.Client
@@ -258,6 +244,7 @@ type Service struct {
 	extractSvc            *extraction.Service
 	ragSvc                *apprag.Service
 	skillResolver         skillResolver
+	knowledgeBaseResolver knowledgeBaseResolver
 	billingSvc            *appbilling.Service
 	auditWriter           auditWriter
 	storeProvider         appstorage.Provider
@@ -267,7 +254,6 @@ type Service struct {
 	generationStreams     *generationStreamRegistry
 	snapshotCache         sync.Map // conversationID (uint) → *cachedSnapshot
 	userMemCache          sync.Map // userID (uint) → *cachedUserMemories
-	userSettingCache      sync.Map // "userID:key" (string) → *cachedUserSetting
 	imageContextCache     *preparedConversationImageCache
 }
 
@@ -302,6 +288,7 @@ type AttachmentInput struct {
 	ExtractedText          string
 	RagOptOut              bool // 用户是否关闭该文件的 RAG；RAG 段直接复用，无需重查 DB
 	ChunkCount             int  // 向量分块数；RAG 缓存 key 需要
+	FileUpdatedAt          time.Time
 	Current                bool // 是否为本轮用户显式上传的附件
 	MessageRole            string
 	ContextMode            string
@@ -321,6 +308,7 @@ type SendMessageInput struct {
 	FileIDs                 []string
 	SelectedToolIDs         []uint
 	SkillIDs                []uint
+	KnowledgeBaseIDs        []string
 	HTMLVisualPromptEnabled bool
 	ParentMessagePublicID   string
 	SourceMessagePublicID   string
@@ -333,6 +321,11 @@ type SendMessageInput struct {
 // SetSkillResolver 注入会话技能解析器。
 func (s *Service) SetSkillResolver(resolver skillResolver) {
 	s.skillResolver = resolver
+}
+
+// SetKnowledgeBaseResolver 注入会话知识库解析器。
+func (s *Service) SetKnowledgeBaseResolver(resolver knowledgeBaseResolver) {
+	s.knowledgeBaseResolver = resolver
 }
 
 // SendMessageResult 返回用户消息与 AI 消息。

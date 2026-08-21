@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
 	domainconversation "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
+	domainknowledgebase "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/knowledgebase"
 	domainuser "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/user"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/dberror"
 	models "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/models"
@@ -977,6 +977,19 @@ func ensureFileObjectUnreferencedByUserAvatars(tx *gorm.DB, fileID string) error
 	return nil
 }
 
+func ensureFileObjectUnreferencedByKnowledgeBases(tx *gorm.DB, fileObjectID uint) error {
+	var activeReferences int64
+	if err := tx.Model(&models.KnowledgeBaseFile{}).
+		Where("file_object_id = ?", fileObjectID).
+		Count(&activeReferences).Error; err != nil {
+		return translateError(err)
+	}
+	if activeReferences > 0 {
+		return repository.ErrConflict
+	}
+	return nil
+}
+
 // GetUserByID 按 ID 查询用户。
 func (r *Repo) GetUserByID(ctx context.Context, userID uint) (*domainuser.User, error) {
 	var item models.User
@@ -1414,23 +1427,27 @@ func (r *Repo) UpdateAssistantMessageCompletion(
 	if update.LatencyMS < 0 {
 		update.LatencyMS = 0
 	}
+	updates := map[string]interface{}{
+		"content":            update.Content,
+		"reasoning_content":  update.ReasoningContent,
+		"token_usage":        tokenUsage,
+		"input_tokens":       update.InputTokens,
+		"output_tokens":      update.OutputTokens,
+		"cache_read_tokens":  update.CacheReadTokens,
+		"cache_write_tokens": update.CacheWriteTokens,
+		"reasoning_tokens":   update.ReasoningTokens,
+		"latency_ms":         update.LatencyMS,
+		"status":             update.Status,
+		"error_code":         update.ErrorCode,
+		"error_message":      update.ErrorMessage,
+	}
+	if update.KnowledgeSources != nil {
+		updates["knowledge_sources_json"] = marshalMessageKnowledgeSources(update.KnowledgeSources)
+	}
 	return translateError(r.db.WithContext(ctx).
 		Model(&models.Message{}).
 		Where("id = ?", messageID).
-		Updates(map[string]interface{}{
-			"content":            update.Content,
-			"reasoning_content":  update.ReasoningContent,
-			"token_usage":        tokenUsage,
-			"input_tokens":       update.InputTokens,
-			"output_tokens":      update.OutputTokens,
-			"cache_read_tokens":  update.CacheReadTokens,
-			"cache_write_tokens": update.CacheWriteTokens,
-			"reasoning_tokens":   update.ReasoningTokens,
-			"latency_ms":         update.LatencyMS,
-			"status":             update.Status,
-			"error_code":         update.ErrorCode,
-			"error_message":      update.ErrorMessage,
-		}).
+		Updates(updates).
 		Error)
 }
 
@@ -1504,6 +1521,9 @@ func (r *Repo) CompleteAssistantMessageWithAttachments(
 		if contentType := strings.TrimSpace(assistantCompletion.ContentType); contentType != "" {
 			updates["content_type"] = contentType
 		}
+		if assistantCompletion.KnowledgeSources != nil {
+			updates["knowledge_sources_json"] = marshalMessageKnowledgeSources(assistantCompletion.KnowledgeSources)
+		}
 		return tx.Model(&models.Message{}).
 			Where("id = ?", assistantMessageID).
 			Updates(updates).Error
@@ -1560,6 +1580,9 @@ func (r *Repo) CompleteAssistantMessageWithGeneratedAttachments(
 		}
 		if contentType := strings.TrimSpace(assistantCompletion.ContentType); contentType != "" {
 			updates["content_type"] = contentType
+		}
+		if assistantCompletion.KnowledgeSources != nil {
+			updates["knowledge_sources_json"] = marshalMessageKnowledgeSources(assistantCompletion.KnowledgeSources)
 		}
 		return tx.Model(&models.Message{}).
 			Where("id = ?", assistantMessageID).
@@ -3222,6 +3245,9 @@ func (r *Repo) DeleteFileObjectAndReleaseQuota(
 		if err := ensureFileObjectUnreferencedByUserAvatars(tx, fileID); err != nil {
 			return err
 		}
+		if err := ensureFileObjectUnreferencedByKnowledgeBases(tx, deletedFile.ID); err != nil {
+			return err
+		}
 
 		quota, err := getOrInitQuotaForUpdate(tx, userID, defaultQuotaBytes)
 		if err != nil {
@@ -3344,41 +3370,45 @@ func getOrInitQuotaForUpdate(tx *gorm.DB, userID uint, defaultQuotaBytes int64) 
 	return &quota, nil
 }
 
-// UpdateFileObjectEmbedStatus 更新指定内容版本的 embedding 状态。
-func (r *Repo) UpdateFileObjectEmbedStatus(ctx context.Context, userID uint, fileID string, expectedStoragePath string, status string, embedErr string) error {
-	query := r.db.WithContext(ctx).
+// ClaimFileEmbedding 原子领取指定向量空间的文件任务。
+// 同一签名已经处于 processing/ready 时不会重复领取；切换向量空间后允许新任务接管。
+func (r *Repo) ClaimFileEmbedding(ctx context.Context, userID uint, fileID string, embeddingSignature string) (bool, error) {
+	fileID = strings.TrimSpace(fileID)
+	embeddingSignature = strings.TrimSpace(embeddingSignature)
+	if fileID == "" || embeddingSignature == "" {
+		return false, repository.ErrInvalidInput
+	}
+	result := r.db.WithContext(ctx).
 		Model(&models.FileObject{}).
-		Where("user_id = ? AND file_id = ?", userID, fileID)
-	if expectedStoragePath != "" {
-		query = query.Where("storage_path = ?", expectedStoragePath)
-	}
-	result := query.Updates(map[string]interface{}{
-		"embed_status": status,
-		"embed_error":  embedErr,
-	})
-	if result.Error != nil {
-		return translateError(result.Error)
-	}
-	if result.RowsAffected == 0 {
-		return fileObjectVersionConflictOrNotFoundByFileID(r.db.WithContext(ctx), userID, fileID, expectedStoragePath)
-	}
-	return nil
+		Where("user_id = ? AND file_id = ? AND status = ?", userID, fileID, "active").
+		Where("NOT (embed_signature = ? AND embed_status IN ?)", embeddingSignature, []string{"processing", "ready"}).
+		Updates(map[string]interface{}{
+			"embed_status":    "processing",
+			"embed_signature": embeddingSignature,
+			"embed_error":     "",
+		})
+	return result.RowsAffected > 0, translateError(result.Error)
 }
 
-// UpdateFileObjectChunkCount 更新指定内容版本的分片数量。
-func (r *Repo) UpdateFileObjectChunkCount(ctx context.Context, fileObjID uint, expectedStoragePath string, chunkCount int) error {
-	query := r.db.WithContext(ctx).Model(&models.FileObject{}).Where("id = ?", fileObjID)
-	if expectedStoragePath != "" {
-		query = query.Where("storage_path = ?", expectedStoragePath)
-	}
-	result := query.Update("chunk_count", chunkCount)
-	if result.Error != nil {
-		return translateError(result.Error)
-	}
-	if result.RowsAffected == 0 {
-		return fileObjectVersionConflictOrNotFound(r.db.WithContext(ctx), fileObjID, 0, expectedStoragePath)
-	}
-	return nil
+// UpdateFileObjectEmbedStatus 仅更新仍属于指定向量空间任务的文件状态。
+func (r *Repo) UpdateFileObjectEmbedStatus(ctx context.Context, userID uint, fileID string, embeddingSignature string, status string, embedErr string) (bool, error) {
+	result := r.db.WithContext(ctx).
+		Model(&models.FileObject{}).
+		Where("user_id = ? AND file_id = ? AND status = ? AND embed_signature = ?", userID, fileID, "active", strings.TrimSpace(embeddingSignature)).
+		Updates(map[string]interface{}{
+			"embed_status": status,
+			"embed_error":  embedErr,
+		})
+	return result.RowsAffected > 0, translateError(result.Error)
+}
+
+// UpdateFileObjectChunkCount 在 embedding 完成后更新分片数量。
+func (r *Repo) UpdateFileObjectChunkCount(ctx context.Context, fileObjID uint, embeddingSignature string, chunkCount int) (bool, error) {
+	result := r.db.WithContext(ctx).
+		Model(&models.FileObject{}).
+		Where("id = ? AND status = ? AND embed_signature = ?", fileObjID, "active", strings.TrimSpace(embeddingSignature)).
+		Update("chunk_count", chunkCount)
+	return result.RowsAffected > 0, translateError(result.Error)
 }
 
 // CloneFileEmbeddingArtifacts 复用已完成 embedding 的文件分片到新的逻辑别名文件。
@@ -3393,11 +3423,12 @@ func (r *Repo) CloneFileEmbeddingArtifacts(ctx context.Context, source *domainco
 		if err := tx.Model(&models.FileObject{}).
 			Where("id = ?", targetEntity.ID).
 			Updates(map[string]interface{}{
-				"embed_status": "ready",
-				"embed_error":  "",
-				"page_count":   sourceEntity.PageCount,
-				"chunk_count":  sourceEntity.ChunkCount,
-				"extracted_at": sourceEntity.ExtractedAt,
+				"embed_status":    "ready",
+				"embed_signature": sourceEntity.EmbedSignature,
+				"embed_error":     "",
+				"page_count":      sourceEntity.PageCount,
+				"chunk_count":     sourceEntity.ChunkCount,
+				"extracted_at":    sourceEntity.ExtractedAt,
 			}).Error; err != nil {
 			return translateError(err)
 		}
@@ -3459,27 +3490,34 @@ func (r *Repo) CloneFileEmbeddingArtifacts(ctx context.Context, source *domainco
 	})
 }
 
-// ReplaceFileChunks 替换指定内容版本的所有分片（删除旧的，插入新的，并写入 embedding）。
-func (r *Repo) ReplaceFileChunks(ctx context.Context, fileObjID uint, expectedStoragePath string, chunks []domainconversation.FileChunk, embeddings [][]float32) error {
+// ReplaceFileChunks 仅在文件任务仍属于指定向量空间时替换全部分片。
+// 文件行锁使配置切换后的新任务领取与旧任务发布按顺序完成，避免旧向量覆盖新向量。
+func (r *Repo) ReplaceFileChunks(ctx context.Context, fileObjID uint, embeddingSignature string, chunks []domainconversation.FileChunk, embeddings [][]float32) (bool, error) {
 	if len(chunks) != len(embeddings) {
-		return fmt.Errorf("embedding count mismatch: chunks=%d embeddings=%d", len(chunks), len(embeddings))
+		return false, fmt.Errorf("embedding count mismatch: chunks=%d embeddings=%d", len(chunks), len(embeddings))
 	}
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if expectedStoragePath != "" {
-			var current models.FileObject
-			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-				Model(&models.FileObject{}).
-				Select("id").
-				Where("id = ? AND storage_path = ?", fileObjID, expectedStoragePath).
-				First(&current).Error; err != nil {
-				if errors.Is(err, gorm.ErrRecordNotFound) {
-					return fileObjectVersionConflictOrNotFound(tx, fileObjID, 0, expectedStoragePath)
-				}
-				return translateError(err)
-			}
+	embeddingSignature = strings.TrimSpace(embeddingSignature)
+	if fileObjID == 0 || embeddingSignature == "" {
+		return false, repository.ErrInvalidInput
+	}
+	published := false
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var file models.FileObject
+		claim := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Select("id").
+			Where("id = ? AND status = ? AND embed_status = ? AND embed_signature = ?", fileObjID, "active", "processing", embeddingSignature).
+			Take(&file)
+		if errors.Is(claim.Error, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		if claim.Error != nil {
+			return translateError(claim.Error)
 		}
 		entities := make([]models.FileChunk, 0, len(chunks))
 		for i := range chunks {
+			if strings.TrimSpace(chunks[i].EmbeddingSignature) != embeddingSignature {
+				return fmt.Errorf("chunk embedding signature mismatch")
+			}
 			entities = append(entities, toFileChunkModel(&chunks[i]))
 		}
 		if r.sqliteDialect() {
@@ -3492,6 +3530,7 @@ func (r *Repo) ReplaceFileChunks(ctx context.Context, fileObjID uint, expectedSt
 			return translateError(err)
 		}
 		if len(entities) == 0 {
+			published = true
 			return nil
 		}
 		// 插入新分片
@@ -3499,7 +3538,11 @@ func (r *Repo) ReplaceFileChunks(ctx context.Context, fileObjID uint, expectedSt
 			return translateError(err)
 		}
 		if r.sqliteDialect() {
-			return insertSQLiteFileChunkVectors(tx, entities, embeddings)
+			if err := insertSQLiteFileChunkVectors(tx, entities, embeddings); err != nil {
+				return err
+			}
+			published = true
+			return nil
 		}
 		// 更新 embedding（通过 raw SQL 写入 vector 值）
 		for i, chunk := range entities {
@@ -3517,8 +3560,10 @@ func (r *Repo) ReplaceFileChunks(ctx context.Context, fileObjID uint, expectedSt
 				return translateError(err)
 			}
 		}
+		published = true
 		return nil
 	})
+	return published, err
 }
 
 // GetFirstActiveUpstream 查询第一个激活的上游（用于 embedding API）。
@@ -3551,9 +3596,14 @@ func (r *Repo) GetUpstreamByID(ctx context.Context, upstreamID uint) (*models.LL
 	return &item, nil
 }
 
-// float32SliceToPostgresVector 将向量对齐到物理存储维度并转换为 pgvector 文本格式。
+// float32SliceToPostgresVector 按模型原始维度序列化 PostgreSQL 向量。
 func float32SliceToPostgresVector(v []float32) (string, error) {
 	return vectorutil.PostgresLiteral(v)
+}
+
+// float32SliceToPostgresQueryVector 将查询向量补齐到统一比较维度。
+func float32SliceToPostgresQueryVector(v []float32) (string, error) {
+	return vectorutil.PostgresPaddedLiteral(v)
 }
 
 // fileChunkSearchRow 是原始 SQL 扫描专用的本地类型，携带 gorm column tag 映射相似度列。
@@ -3610,55 +3660,100 @@ func (r *Repo) searchSQLiteFileChunks(ctx context.Context, userID uint, fileObjI
 	if err != nil {
 		return nil, err
 	}
-	results := make([]domainconversation.FileChunkSearchResult, 0, topK)
+	uniqueFileObjIDs := make([]uint, 0, len(fileObjIDs))
 	seenFileObjIDs := make(map[uint]struct{}, len(fileObjIDs))
 	for _, fileObjID := range fileObjIDs {
-		if _, ok := seenFileObjIDs[fileObjID]; ok {
+		if fileObjID == 0 {
+			continue
+		}
+		if _, exists := seenFileObjIDs[fileObjID]; exists {
 			continue
 		}
 		seenFileObjIDs[fileObjID] = struct{}{}
-		var rows []fileChunkSearchRow
-		query := fmt.Sprintf(`
-			SELECT chunks.id, chunks.file_obj_id, chunks.user_id, chunks.chunk_index, chunks.page_num,
-			       chunks.char_offset, chunks.content, chunks.token_count, chunks.created_at,
-			       (1.0 - vectors.distance) AS similarity
-			FROM %s AS vectors
-			JOIN "file_chunks" AS chunks
-				ON chunks.id = vectors.chunk_id
-			WHERE vectors.embedding MATCH ?
-				AND vectors.k = ?
-				AND vectors.user_id = ?
-				AND vectors.file_obj_id = ?
-				AND vectors.embedding_signature = ?
-				AND chunks.embedding_signature = ?
-			ORDER BY vectors.distance ASC`,
-			sqlitevec.FileChunkVectorTable,
-		)
-		if err := r.db.WithContext(ctx).Raw(query, vector, topK, userID, fileObjID, embeddingSignature, embeddingSignature).Scan(&rows).Error; err != nil {
-			return nil, translateError(err)
-		}
-		for _, row := range rows {
-			results = append(results, domainconversation.FileChunkSearchResult{
-				FileChunk: domainconversation.FileChunk{
-					ID:         row.ID,
-					FileObjID:  row.FileObjID,
-					UserID:     row.UserID,
-					ChunkIndex: row.ChunkIndex,
-					PageNum:    row.PageNum,
-					CharOffset: row.CharOffset,
-					Content:    row.Content,
-					TokenCount: row.TokenCount,
-					CreatedAt:  row.CreatedAt,
-				},
-				Similarity: row.Similarity,
-			})
-		}
+		uniqueFileObjIDs = append(uniqueFileObjIDs, fileObjID)
 	}
-	sort.SliceStable(results, func(i, j int) bool {
-		return results[i].Similarity > results[j].Similarity
-	})
-	if len(results) > topK {
-		results = results[:topK]
+	if len(uniqueFileObjIDs) == 0 {
+		return nil, nil
+	}
+	// sqlite-vec applies k before the outer JOIN predicates. Resolve the allowed
+	// file IDs first so unauthorized nearest neighbours cannot displace valid
+	// candidates from the virtual-table result window.
+	authorizedFileObjIDs := make([]uint, 0, len(uniqueFileObjIDs))
+	if err := r.db.WithContext(ctx).Table("file_chunks").
+		Distinct("file_chunks.file_obj_id").
+		Where("file_chunks.file_obj_id IN ?", uniqueFileObjIDs).
+		Where(`
+			file_chunks.user_id = ?
+			OR EXISTS (
+				SELECT 1
+				FROM knowledge_base_files AS kbf
+				JOIN knowledge_bases AS kb ON kb.id = kbf.knowledge_base_id
+				WHERE kbf.file_object_id = file_chunks.file_obj_id
+					AND kb.scope = ?
+					AND kb.enabled = ?
+			)`, userID, domainknowledgebase.ScopeBuiltin, true).
+		Pluck("file_chunks.file_obj_id", &authorizedFileObjIDs).Error; err != nil {
+		return nil, translateError(err)
+	}
+	if len(authorizedFileObjIDs) == 0 {
+		return nil, nil
+	}
+	var rows []fileChunkSearchRow
+	query := fmt.Sprintf(`
+		SELECT chunks.id, chunks.file_obj_id, chunks.user_id, chunks.chunk_index, chunks.page_num,
+		       chunks.char_offset, chunks.content, chunks.token_count, chunks.created_at,
+		       (1.0 - vectors.distance) AS similarity
+		FROM %s AS vectors
+		JOIN "file_chunks" AS chunks
+			ON chunks.id = vectors.chunk_id
+		WHERE vectors.embedding MATCH ?
+			AND vectors.k = ?
+			AND vectors.file_obj_id IN ?
+			AND vectors.embedding_signature = ?
+			AND chunks.embedding_signature = ?
+			AND (
+				chunks.user_id = ?
+				OR EXISTS (
+					SELECT 1
+					FROM knowledge_base_files AS kbf
+					JOIN knowledge_bases AS kb ON kb.id = kbf.knowledge_base_id
+					WHERE kbf.file_object_id = chunks.file_obj_id
+						AND kb.scope = ?
+						AND kb.enabled = ?
+				)
+			)
+		ORDER BY vectors.distance ASC`,
+		sqlitevec.FileChunkVectorTable,
+	)
+	if err := r.db.WithContext(ctx).Raw(
+		query,
+		vector,
+		topK,
+		authorizedFileObjIDs,
+		embeddingSignature,
+		embeddingSignature,
+		userID,
+		domainknowledgebase.ScopeBuiltin,
+		true,
+	).Scan(&rows).Error; err != nil {
+		return nil, translateError(err)
+	}
+	results := make([]domainconversation.FileChunkSearchResult, 0, len(rows))
+	for _, row := range rows {
+		results = append(results, domainconversation.FileChunkSearchResult{
+			FileChunk: domainconversation.FileChunk{
+				ID:         row.ID,
+				FileObjID:  row.FileObjID,
+				UserID:     row.UserID,
+				ChunkIndex: row.ChunkIndex,
+				PageNum:    row.PageNum,
+				CharOffset: row.CharOffset,
+				Content:    row.Content,
+				TokenCount: row.TokenCount,
+				CreatedAt:  row.CreatedAt,
+			},
+			Similarity: row.Similarity,
+		})
 	}
 	return results, nil
 }
@@ -3666,7 +3761,7 @@ func (r *Repo) searchSQLiteFileChunks(ctx context.Context, userID uint, fileObjI
 // SearchFileChunks 使用向量存储的余弦距离检索最相关的文本分片。
 // 返回结果按相似度降序排列，已携带 Similarity 分数以供阈值过滤。
 func (r *Repo) SearchFileChunks(ctx context.Context, userID uint, fileObjIDs []uint, queryEmbedding []float32, embeddingSignature string, topK int) ([]domainconversation.FileChunkSearchResult, error) {
-	if len(fileObjIDs) == 0 || len(queryEmbedding) == 0 || strings.TrimSpace(embeddingSignature) == "" {
+	if userID == 0 || len(fileObjIDs) == 0 || len(queryEmbedding) == 0 || strings.TrimSpace(embeddingSignature) == "" {
 		return nil, nil
 	}
 	if topK <= 0 {
@@ -3675,38 +3770,65 @@ func (r *Repo) SearchFileChunks(ctx context.Context, userID uint, fileObjIDs []u
 	if r.sqliteDialect() {
 		return r.searchSQLiteFileChunks(ctx, userID, fileObjIDs, queryEmbedding, embeddingSignature, topK)
 	}
-	vec, err := float32SliceToPostgresVector(queryEmbedding)
+	vec, err := float32SliceToPostgresQueryVector(queryEmbedding)
 	if err != nil {
 		return nil, err
 	}
 	candidateLimit := vectorutil.CandidateLimit(topK)
+	indexExpression := vectorutil.PostgresIndexExpression("source_chunks.embedding")
+	exactExpression := vectorutil.PostgresPaddedExpression("chunks.embedding")
 	query := fmt.Sprintf(`
 		WITH vector_candidates AS MATERIALIZED (
-			SELECT id
-			FROM file_chunks
-			WHERE user_id = ? AND file_obj_id IN ? AND embedding_signature = ? AND embedding IS NOT NULL
-			ORDER BY subvector(embedding, 1, %d)::halfvec(%d)
+			SELECT source_chunks.id
+			FROM file_chunks AS source_chunks
+			WHERE source_chunks.file_obj_id IN ?
+				AND source_chunks.embedding_signature = ?
+				AND source_chunks.embedding IS NOT NULL
+				AND (
+					source_chunks.user_id = ?
+					OR EXISTS (
+						SELECT 1
+						FROM knowledge_base_files AS kbf
+						JOIN knowledge_bases AS kb ON kb.id = kbf.knowledge_base_id
+						WHERE kbf.file_object_id = source_chunks.file_obj_id
+							AND kb.scope = ?
+							AND kb.enabled = ?
+					)
+				)
+			ORDER BY %s
 				<=> subvector(?::vector, 1, %d)::halfvec(%d)
 			LIMIT ?
 		)
 		SELECT chunks.id, chunks.file_obj_id, chunks.user_id, chunks.chunk_index, chunks.page_num,
 		       chunks.char_offset, chunks.content, chunks.token_count, chunks.created_at,
-		       (1 - (chunks.embedding <=> ?::vector)) AS similarity
+		       (1 - (%s <=> ?::vector(%d))) AS similarity
 		FROM file_chunks AS chunks
 		JOIN vector_candidates AS candidates ON candidates.id = chunks.id
 		ORDER BY similarity DESC
 		LIMIT ?`,
+		indexExpression,
 		vectorutil.IndexDimensions,
 		vectorutil.IndexDimensions,
-		vectorutil.IndexDimensions,
-		vectorutil.IndexDimensions,
+		exactExpression,
+		vectorutil.MaxDimensions,
 	)
 	var rows []fileChunkSearchRow
 	if err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := vectorutil.ConfigurePostgresCandidateSearch(tx); err != nil {
 			return err
 		}
-		return tx.Raw(query, userID, fileObjIDs, embeddingSignature, vec, candidateLimit, vec, topK).Scan(&rows).Error
+		return tx.Raw(
+			query,
+			fileObjIDs,
+			embeddingSignature,
+			userID,
+			domainknowledgebase.ScopeBuiltin,
+			true,
+			vec,
+			candidateLimit,
+			vec,
+			topK,
+		).Scan(&rows).Error
 	}); err != nil {
 		return nil, translateError(err)
 	}
@@ -3733,7 +3855,7 @@ func (r *Repo) SearchFileChunks(ctx context.Context, userID uint, fileObjIDs []u
 // BM25SearchFileChunks 使用 PostgreSQL tsvector 全文检索文件分片，中文字符以空格切字作为后备分词策略。
 // 返回结果按 ts_rank 降序，Similarity 字段存放归一化后的排名得分（0-1）。
 func (r *Repo) BM25SearchFileChunks(ctx context.Context, userID uint, fileObjIDs []uint, query string, topK int) ([]domainconversation.FileChunkSearchResult, error) {
-	if len(fileObjIDs) == 0 || strings.TrimSpace(query) == "" {
+	if userID == 0 || len(fileObjIDs) == 0 || strings.TrimSpace(query) == "" {
 		return nil, nil
 	}
 	if topK <= 0 {
@@ -3751,12 +3873,32 @@ func (r *Repo) BM25SearchFileChunks(ctx context.Context, userID uint, fileObjIDs
 		SELECT id, file_obj_id, user_id, chunk_index, page_num, char_offset, content, token_count, created_at,
 		       ts_rank(to_tsvector('simple', content), to_tsquery('simple', ?)) AS similarity
 		FROM file_chunks
-		WHERE user_id = ? AND file_obj_id IN ?
+		WHERE file_obj_id IN ?
+		  AND (
+			  file_chunks.user_id = ?
+			  OR EXISTS (
+				  SELECT 1
+				  FROM knowledge_base_files AS kbf
+				  JOIN knowledge_bases AS kb ON kb.id = kbf.knowledge_base_id
+				  WHERE kbf.file_object_id = file_chunks.file_obj_id
+					AND kb.scope = ?
+					AND kb.enabled = ?
+			  )
+		  )
 		  AND to_tsvector('simple', content) @@ to_tsquery('simple', ?)
 		ORDER BY similarity DESC
 		LIMIT ?`
 	var rows []fileChunkSearchRow
-	if err := r.db.WithContext(ctx).Raw(rawQuery, tsQuery, userID, fileObjIDs, tsQuery, topK).Scan(&rows).Error; err != nil {
+	if err := r.db.WithContext(ctx).Raw(
+		rawQuery,
+		tsQuery,
+		fileObjIDs,
+		userID,
+		domainknowledgebase.ScopeBuiltin,
+		true,
+		tsQuery,
+		topK,
+	).Scan(&rows).Error; err != nil {
 		return nil, translateError(err)
 	}
 	results := make([]domainconversation.FileChunkSearchResult, 0, len(rows))
@@ -3786,7 +3928,17 @@ func (r *Repo) keywordSearchFileChunks(ctx context.Context, userID uint, fileObj
 	}
 	dbq := r.db.WithContext(ctx).
 		Model(&models.FileChunk{}).
-		Where("user_id = ? AND file_obj_id IN ?", userID, fileObjIDs)
+		Where("file_obj_id IN ?", fileObjIDs).
+		Where(`
+			file_chunks.user_id = ?
+			OR EXISTS (
+				SELECT 1
+				FROM knowledge_base_files AS kbf
+				JOIN knowledge_bases AS kb ON kb.id = kbf.knowledge_base_id
+				WHERE kbf.file_object_id = file_chunks.file_obj_id
+					AND kb.scope = ?
+					AND kb.enabled = ?
+			)`, userID, domainknowledgebase.ScopeBuiltin, true)
 	for _, term := range terms {
 		if strings.TrimSpace(term) == "" {
 			continue
@@ -4210,6 +4362,7 @@ func toMessageDomain(item models.Message) domainconversation.Message {
 		ErrorMessage:             item.ErrorMessage,
 		ModerationEventID:        item.ModerationEventID,
 		ModerationCategoriesJSON: item.ModerationCategoriesJSON,
+		KnowledgeSources:         parseMessageKnowledgeSources(item.KnowledgeSourcesJSON),
 		Attachments:              item.Attachments,
 		ParentPublicID:           item.ParentPublicID,
 		SourcePublicID:           item.SourcePublicID,
@@ -4261,6 +4414,7 @@ func toMessageModel(item *domainconversation.Message) models.Message {
 		ErrorMessage:             item.ErrorMessage,
 		ModerationEventID:        item.ModerationEventID,
 		ModerationCategoriesJSON: item.ModerationCategoriesJSON,
+		KnowledgeSourcesJSON:     marshalMessageKnowledgeSources(item.KnowledgeSources),
 		EditedAt:                 item.EditedAt,
 	}
 }
@@ -4439,6 +4593,50 @@ func defaultJSONArray(value string) string {
 		return "[]"
 	}
 	return value
+}
+
+type messageKnowledgeSourceRecord struct {
+	FileName   string  `json:"file_name"`
+	FileID     string  `json:"file_id"`
+	ChunkIndex int     `json:"chunk_index"`
+	Score      float32 `json:"score"`
+	Preview    string  `json:"preview"`
+}
+
+func marshalMessageKnowledgeSources(items []domainconversation.MessageKnowledgeSource) string {
+	if len(items) == 0 {
+		return "[]"
+	}
+	records := make([]messageKnowledgeSourceRecord, 0, len(items))
+	for _, item := range items {
+		records = append(records, messageKnowledgeSourceRecord{
+			FileName: item.FileName, FileID: item.FileID, ChunkIndex: item.ChunkIndex,
+			Score: item.Score, Preview: item.Preview,
+		})
+	}
+	raw, err := json.Marshal(records)
+	if err != nil {
+		return "[]"
+	}
+	return string(raw)
+}
+
+func parseMessageKnowledgeSources(raw string) []domainconversation.MessageKnowledgeSource {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	var records []messageKnowledgeSourceRecord
+	if err := json.Unmarshal([]byte(raw), &records); err != nil {
+		return nil
+	}
+	items := make([]domainconversation.MessageKnowledgeSource, 0, len(records))
+	for _, record := range records {
+		items = append(items, domainconversation.MessageKnowledgeSource{
+			FileName: record.FileName, FileID: record.FileID, ChunkIndex: record.ChunkIndex,
+			Score: record.Score, Preview: record.Preview,
+		})
+	}
+	return items
 }
 
 func toConversationMessageTraceDomains(items []models.ChatRunEvent) []domainconversation.MessageTrace {
@@ -4782,6 +4980,7 @@ func toFileObjectDomain(item models.FileObject) domainconversation.FileObject {
 		RAGReady:               item.RAGReady,
 		RAGReason:              item.RAGReason,
 		EmbedStatus:            item.EmbedStatus,
+		EmbedSignature:         item.EmbedSignature,
 		EmbedError:             item.EmbedError,
 		PageCount:              item.PageCount,
 		ChunkCount:             item.ChunkCount,
@@ -4837,6 +5036,7 @@ func toFileObjectModel(item *domainconversation.FileObject) models.FileObject {
 		RAGReady:               item.RAGReady,
 		RAGReason:              item.RAGReason,
 		EmbedStatus:            item.EmbedStatus,
+		EmbedSignature:         item.EmbedSignature,
 		EmbedError:             item.EmbedError,
 		PageCount:              item.PageCount,
 		ChunkCount:             item.ChunkCount,
@@ -4940,7 +5140,7 @@ func (r *Repo) VectorStoreAvailable(ctx context.Context) (bool, error) {
 	if r.sqliteDialect() {
 		return sqlitevec.Available(ctx, r.db)
 	}
-	expectedType := fmt.Sprintf("vector(%d)", vectorutil.StorageDimensions)
+	expectedType := "vector"
 	type availabilityCheck struct {
 		query string
 		args  []any
@@ -4957,12 +5157,17 @@ func (r *Repo) VectorStoreAvailable(ctx context.Context) (bool, error) {
 				AND format_type(attribute.atttypid, attribute.atttypmod) = ?
 		)`
 	indexQuery := `SELECT EXISTS (
-		SELECT 1 FROM pg_indexes
-		WHERE schemaname = current_schema()
-			AND indexname = ?
-			AND lower(indexdef) LIKE '% using hnsw %'
-			AND lower(indexdef) LIKE ?
-			AND lower(indexdef) LIKE '%halfvec_cosine_ops%'
+		SELECT 1
+		FROM pg_index AS index_status
+		JOIN pg_class AS index_relation ON index_relation.oid = index_status.indexrelid
+		JOIN pg_namespace AS namespace ON namespace.oid = index_relation.relnamespace
+		WHERE namespace.nspname = current_schema()
+			AND index_relation.relname = ?
+			AND index_status.indisvalid
+			AND lower(pg_get_indexdef(index_status.indexrelid)) LIKE '% using hnsw %'
+			AND lower(pg_get_indexdef(index_status.indexrelid)) LIKE ?
+			AND lower(pg_get_indexdef(index_status.indexrelid)) LIKE '%vector_dims(%'
+			AND lower(pg_get_indexdef(index_status.indexrelid)) LIKE '%halfvec_cosine_ops%'
 	)`
 	indexPattern := fmt.Sprintf("%%::halfvec(%d)%%", vectorutil.IndexDimensions)
 	checks := []availabilityCheck{
@@ -5162,12 +5367,14 @@ func (r *Repo) SearchMessageChunks(ctx context.Context, input repository.Message
 	if r.sqliteDialect() {
 		return r.searchSQLiteMessageChunks(ctx, input)
 	}
-	vec, err := float32SliceToPostgresVector(input.QueryEmbedding)
+	vec, err := float32SliceToPostgresQueryVector(input.QueryEmbedding)
 	if err != nil {
 		return nil, err
 	}
 	candidateLimit := vectorutil.CandidateLimit(input.TopK)
 	// 候选阶段已经限定当前分支和向量签名，随后再按完整 4096 维向量精确重排。
+	indexExpression := vectorutil.PostgresIndexExpression("chunks.embedding")
+	exactExpression := vectorutil.PostgresPaddedExpression("chunks.embedding")
 	query := historicalMessageScopeCTE + fmt.Sprintf(`,
 		vector_candidates AS MATERIALIZED (
 			SELECT chunks.id
@@ -5177,21 +5384,22 @@ func (r *Repo) SearchMessageChunks(ctx context.Context, input repository.Message
 			  AND chunks.embedding_signature = ?
 			  AND chunks.embedding IS NOT NULL
 			  AND chunks.message_id IN (SELECT id FROM valid_historical_message_scope)
-			ORDER BY subvector(chunks.embedding, 1, %d)::halfvec(%d)
+			ORDER BY %s
 				<=> subvector(?::vector, 1, %d)::halfvec(%d)
 			LIMIT ?
 		)
 		SELECT chunks.id, chunks.conversation_id, chunks.message_id, chunks.user_id, chunks.role,
 		       chunks.chunk_index, chunks.content, chunks.token_count, chunks.created_at,
-		       (1 - (chunks.embedding <=> ?::vector)) AS similarity
+		       (1 - (%s <=> ?::vector(%d))) AS similarity
 		FROM chat_message_chunks AS chunks
 		JOIN vector_candidates AS candidates ON candidates.id = chunks.id
 		ORDER BY similarity DESC
 		LIMIT ?`,
+		indexExpression,
 		vectorutil.IndexDimensions,
 		vectorutil.IndexDimensions,
-		vectorutil.IndexDimensions,
-		vectorutil.IndexDimensions,
+		exactExpression,
+		vectorutil.MaxDimensions,
 	)
 	args := historicalMessageScopeArgs(input.Scope)
 	args = append(args,
@@ -5232,14 +5440,24 @@ func (r *Repo) SearchMessageChunks(ctx context.Context, input repository.Message
 	return results, nil
 }
 
-// MarkAllEmbeddedFilesStale 将所有 embed_status=ready 的文件标记为 stale。
-func (r *Repo) MarkAllEmbeddedFilesStale(ctx context.Context) (int64, error) {
+// MarkEmbeddedFilesStale 将缺少当前向量空间签名分片的 ready/processing 文件标记为 stale。
+func (r *Repo) MarkEmbeddedFilesStale(ctx context.Context, activeSignature string) (int64, error) {
+	activeSignature = strings.TrimSpace(activeSignature)
+	if activeSignature == "" {
+		return 0, repository.ErrInvalidInput
+	}
 	result := r.db.WithContext(ctx).
 		Model(&models.FileObject{}).
-		Where("embed_status = ? AND status = ?", "ready", "active").
+		Where("embed_status IN ? AND status = ?", []string{"ready", "processing"}, "active").
+		Where(`NOT EXISTS (
+			SELECT 1
+			FROM file_chunks
+			WHERE file_chunks.file_obj_id = file_objects.id
+				AND file_chunks.embedding_signature = ?
+		)`, activeSignature).
 		Updates(map[string]interface{}{
 			"embed_status": "stale",
-			"embed_error":  "embedding model changed, reindex required",
+			"embed_error":  "embedding configuration changed, reindex required",
 		})
 	return result.RowsAffected, translateError(result.Error)
 }

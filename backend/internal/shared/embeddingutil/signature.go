@@ -14,3 +14,14 @@ func ModelSignature(model string, outputDimensions int) string {
 	sum := sha256.Sum256([]byte(raw))
 	return hex.EncodeToString(sum[:4]) + "@" + strconv.Itoa(outputDimensions)
 }
+
+// SpaceSignature identifies an embedding vector space including the provider
+// endpoint. The endpoint is normalized so a trailing slash does not create a
+// different space, while switching providers cannot accidentally reuse vectors
+// produced by a different service under the same model name.
+func SpaceSignature(model string, outputDimensions int, endpoint string) string {
+	normalizedEndpoint := strings.TrimRight(strings.TrimSpace(endpoint), "/")
+	raw := strings.TrimSpace(model) + "@" + strconv.Itoa(outputDimensions) + "@" + normalizedEndpoint
+	sum := sha256.Sum256([]byte(raw))
+	return hex.EncodeToString(sum[:8]) + "@" + strconv.Itoa(outputDimensions)
+}

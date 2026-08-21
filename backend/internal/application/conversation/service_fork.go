@@ -147,6 +147,7 @@ func buildForkedMessage(
 		Status:           normalizeForkedMessageStatus(source.Status),
 		ErrorCode:        source.ErrorCode,
 		ErrorMessage:     source.ErrorMessage,
+		KnowledgeSources: append([]model.MessageKnowledgeSource(nil), source.KnowledgeSources...),
 		EditedAt:         source.EditedAt,
 	}
 }

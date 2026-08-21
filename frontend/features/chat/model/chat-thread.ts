@@ -236,6 +236,13 @@ export function mapServerMessage(
     msg.reasoningTokens = item.reasoningTokens ?? 0;
     msg.latencyMS = item.latencyMS ?? 0;
     msg.billingCost = item.billingCost;
+    msg.knowledgeSources = item.knowledgeSources?.map((source) => ({
+      file_name: source.fileName,
+      file_id: source.fileID,
+      chunk_index: source.chunkIndex,
+      score: source.score,
+      preview: source.preview,
+    }));
     msg.processTrace = parseProcessTrace(item);
     const status = item.status.trim().toLowerCase();
     const moderationBlocked = status === "blocked" || item.errorCode === "content_moderation.blocked";

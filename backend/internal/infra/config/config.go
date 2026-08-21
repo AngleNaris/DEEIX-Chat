@@ -168,6 +168,9 @@ func DefaultModelOptionAllowedPathsJSON() string {
     "aspect_ratio",
     "duration",
     "resolution"
+  ],
+  "xai_video_extensions": [
+    "duration"
   ]
 }`
 }

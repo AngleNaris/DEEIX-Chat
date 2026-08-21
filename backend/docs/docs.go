@@ -1892,6 +1892,612 @@ const docTemplate = `{
                 }
             }
         },
+        "/admin/knowledge-bases": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "admin-knowledge-bases"
+                ],
+                "summary": "查询内置知识库",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "搜索关键词",
+                        "name": "q",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "可用状态",
+                        "name": "enabled",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "页码",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "每页数量",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/KnowledgeBasePageResponseDoc"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "admin-knowledge-bases"
+                ],
+                "summary": "创建内置知识库",
+                "parameters": [
+                    {
+                        "description": "知识库配置",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/WriteKnowledgeBaseRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/KnowledgeBaseResponseDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/knowledge-bases/files": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "分页返回供内置知识库复用的全部平台资料",
+                "tags": [
+                    "admin-knowledge-bases"
+                ],
+                "summary": "查询平台资料",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "文件名搜索关键词",
+                        "name": "q",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "页码",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "每页数量",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/KnowledgeBaseFilePageResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/KnowledgebaseErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/KnowledgebaseErrorDoc"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "上传平台级资料，不占用管理员个人存储额度",
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin-knowledge-bases"
+                ],
+                "summary": "上传内置知识库资料",
+                "parameters": [
+                    {
+                        "type": "file",
+                        "description": "文件",
+                        "name": "file",
+                        "in": "formData",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/KnowledgeBaseFileResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/KnowledgebaseErrorDoc"
+                        }
+                    },
+                    "413": {
+                        "description": "Request Entity Too Large",
+                        "schema": {
+                            "$ref": "#/definitions/KnowledgebaseErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/KnowledgebaseErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/knowledge-bases/files/{file_id}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "仅允许删除未被任何知识库、会话或账户资料引用的平台资料",
+                "tags": [
+                    "admin-knowledge-bases"
+                ],
+                "summary": "删除平台资料",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "文件ID",
+                        "name": "file_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/PlatformFileDeleteResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/KnowledgebaseErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/KnowledgebaseErrorDoc"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/KnowledgebaseErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/KnowledgebaseErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/knowledge-bases/files/{file_id}/content": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "仅允许管理员读取平台资料池中的文件",
+                "produces": [
+                    "application/octet-stream"
+                ],
+                "tags": [
+                    "admin-knowledge-bases"
+                ],
+                "summary": "获取平台资料内容",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "文件ID",
+                        "name": "file_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/KnowledgebaseErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/KnowledgebaseErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/KnowledgebaseErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/knowledge-bases/{id}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "admin-knowledge-bases"
+                ],
+                "summary": "删除内置知识库",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "知识库ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "是否同步删除不再被其他资源引用的知识库文件",
+                        "name": "delete_files",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/KnowledgeBaseDeleteResponseDoc"
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "admin-knowledge-bases"
+                ],
+                "summary": "更新内置知识库",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "知识库ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "更新字段",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/PatchKnowledgeBaseRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/KnowledgeBaseResponseDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/knowledge-bases/{id}/available-files": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "分页返回尚未关联到指定内置知识库的平台资料",
+                "tags": [
+                    "admin-knowledge-bases"
+                ],
+                "summary": "查询可加入内置知识库的文件",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "知识库ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "文件名搜索关键词",
+                        "name": "q",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "页码",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "每页数量",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/KnowledgeBaseFilePageResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/KnowledgebaseErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/KnowledgebaseErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/KnowledgebaseErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/knowledge-bases/{id}/files": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "admin-knowledge-bases"
+                ],
+                "summary": "查询内置知识库文件",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "知识库ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "页码",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "每页数量",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/KnowledgeBaseFilePageResponseDoc"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "admin-knowledge-bases"
+                ],
+                "summary": "将平台资料加入内置知识库",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "知识库ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "文件ID列表",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/AddKnowledgeBaseFilesRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/KnowledgeBaseFileMutationResponseDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/knowledge-bases/{id}/files/{file_id}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "admin-knowledge-bases"
+                ],
+                "summary": "将文件移出内置知识库",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "知识库ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "文件ID",
+                        "name": "file_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/KnowledgeBaseFileMutationResponseDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/knowledge-bases/{id}/files/{file_id}/content": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "仅允许读取仍与指定内置知识库关联的文件",
+                "produces": [
+                    "application/octet-stream"
+                ],
+                "tags": [
+                    "admin-knowledge-bases"
+                ],
+                "summary": "获取内置知识库文件内容",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "知识库ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "文件ID",
+                        "name": "file_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/KnowledgebaseErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/KnowledgebaseErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/KnowledgebaseErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
         "/admin/llm/icon-assets": {
             "get": {
                 "security": [
@@ -11148,6 +11754,64 @@ const docTemplate = `{
                 }
             }
         },
+        "/conversations/{id}/media/videos/extensions/stream": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/x-ndjson"
+                ],
+                "tags": [
+                    "Conversations"
+                ],
+                "summary": "扩展会话视频",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "会话 Public ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "视频扩展请求",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/MediaVideoExtensionRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "NDJSON stream",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/Envelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/Envelope"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/Envelope"
+                        }
+                    }
+                }
+            }
+        },
         "/conversations/{id}/messages": {
             "get": {
                 "security": [
@@ -12516,6 +13180,471 @@ const docTemplate = `{
                 }
             }
         },
+        "/knowledge-bases": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "knowledge-bases"
+                ],
+                "summary": "查询当前用户可用知识库",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "搜索关键词",
+                        "name": "q",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "页码",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "每页数量",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/KnowledgeBasePageResponseDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/knowledge-bases/mine": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "knowledge-bases"
+                ],
+                "summary": "查询我的知识库",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "搜索关键词",
+                        "name": "q",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "可用状态",
+                        "name": "enabled",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "页码",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "每页数量",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/KnowledgeBasePageResponseDoc"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "knowledge-bases"
+                ],
+                "summary": "创建个人知识库",
+                "parameters": [
+                    {
+                        "description": "知识库配置",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/WriteMyKnowledgeBaseRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/KnowledgeBaseResponseDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/knowledge-bases/mine/{id}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "knowledge-bases"
+                ],
+                "summary": "删除个人知识库",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "知识库ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "是否同步删除不再被其他资源引用的知识库文件",
+                        "name": "delete_files",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/KnowledgeBaseDeleteResponseDoc"
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "knowledge-bases"
+                ],
+                "summary": "更新个人知识库",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "知识库ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "更新字段",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/PatchMyKnowledgeBaseRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/KnowledgeBaseResponseDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/knowledge-bases/mine/{id}/available-files": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "分页返回当前用户尚未关联到指定个人知识库的有效文件",
+                "tags": [
+                    "knowledge-bases"
+                ],
+                "summary": "查询可加入个人知识库的文件",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "知识库ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "文件名搜索关键词",
+                        "name": "q",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "页码",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "每页数量",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/KnowledgeBaseFilePageResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/KnowledgebaseErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/KnowledgebaseErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/KnowledgebaseErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/knowledge-bases/mine/{id}/files": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "knowledge-bases"
+                ],
+                "summary": "将已有文件加入个人知识库",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "知识库ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "文件ID列表",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/AddKnowledgeBaseFilesRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/KnowledgeBaseFileMutationResponseDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/knowledge-bases/mine/{id}/files/{file_id}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "knowledge-bases"
+                ],
+                "summary": "将文件移出个人知识库",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "知识库ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "文件ID",
+                        "name": "file_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/KnowledgeBaseFileMutationResponseDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/knowledge-bases/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "knowledge-bases"
+                ],
+                "summary": "查询知识库详情",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "知识库ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/KnowledgeBaseResponseDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/knowledge-bases/{id}/files": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "knowledge-bases"
+                ],
+                "summary": "查询知识库文件",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "知识库ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "页码",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "每页数量",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/KnowledgeBaseFilePageResponseDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/knowledge-bases/{id}/files/{file_id}/content": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "仅允许读取当前用户可见且仍与知识库关联的文件",
+                "produces": [
+                    "application/octet-stream"
+                ],
+                "tags": [
+                    "knowledge-bases"
+                ],
+                "summary": "获取知识库文件内容",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "知识库ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "文件ID",
+                        "name": "file_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/KnowledgebaseErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/KnowledgebaseErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/KnowledgebaseErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
         "/llm/icon-assets/{public_id}": {
             "get": {
                 "description": "公开读取经过后端校验的不可变模型展示图标",
@@ -12666,6 +13795,12 @@ const docTemplate = `{
                     },
                     "403": {
                         "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/AuthErrorDoc"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
                         "schema": {
                             "$ref": "#/definitions/AuthErrorDoc"
                         }
@@ -14665,33 +15800,19 @@ const docTemplate = `{
                 }
             }
         },
-        "AddAgentGroupMemberRequest": {
+        "AddKnowledgeBaseFilesRequest": {
             "type": "object",
             "required": [
-                "rolePublicID"
+                "fileIDs"
             ],
             "properties": {
-                "dutyInstruction": {
-                    "type": "string",
-                    "maxLength": 4000
-                },
-                "modelOverride": {
-                    "type": "string",
-                    "maxLength": 128
-                },
-                "reasoningEffort": {
-                    "type": "string",
-                    "enum": [
-                        "low",
-                        "medium",
-                        "high",
-                        "xhigh",
-                        "max"
-                    ]
-                },
-                "rolePublicID": {
-                    "type": "string",
-                    "maxLength": 32
+                "fileIDs": {
+                    "type": "array",
+                    "maxItems": 100,
+                    "minItems": 1,
+                    "items": {
+                        "type": "string"
+                    }
                 }
             }
         },
@@ -18203,6 +19324,7 @@ const docTemplate = `{
             "required": [
                 "color",
                 "createdAt",
+                "defaultKnowledgeBaseIDs",
                 "defaultMCPToolIDs",
                 "defaultSkillIDs",
                 "description",
@@ -18222,6 +19344,12 @@ const docTemplate = `{
                 },
                 "createdAt": {
                     "type": "string"
+                },
+                "defaultKnowledgeBaseIDs": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "defaultMCPToolIDs": {
                     "type": "array",
@@ -18834,12 +19962,20 @@ const docTemplate = `{
         "CreateConversationProjectRequest": {
             "type": "object",
             "required": [
+                "defaultKnowledgeBaseIDs",
                 "name"
             ],
             "properties": {
                 "color": {
                     "type": "string",
                     "maxLength": 32
+                },
+                "defaultKnowledgeBaseIDs": {
+                    "type": "array",
+                    "maxItems": 8,
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "defaultMCPToolIDs": {
                     "type": "array",
@@ -20490,6 +21626,298 @@ const docTemplate = `{
                 }
             }
         },
+        "KnowledgeBaseDataResponse": {
+            "type": "object",
+            "required": [
+                "knowledgeBase"
+            ],
+            "properties": {
+                "knowledgeBase": {
+                    "$ref": "#/definitions/KnowledgeBaseResponse"
+                }
+            }
+        },
+        "KnowledgeBaseDeleteDataResponse": {
+            "type": "object",
+            "required": [
+                "deleted"
+            ],
+            "properties": {
+                "deleted": {
+                    "type": "boolean"
+                },
+                "deletedFileCount": {
+                    "type": "integer"
+                }
+            }
+        },
+        "KnowledgeBaseDeleteResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/KnowledgeBaseDeleteDataResponse"
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "KnowledgeBaseFileDataResponse": {
+            "type": "object",
+            "required": [
+                "file"
+            ],
+            "properties": {
+                "file": {
+                    "$ref": "#/definitions/KnowledgeBaseFileResponse"
+                }
+            }
+        },
+        "KnowledgeBaseFileMutationDataResponse": {
+            "type": "object",
+            "required": [
+                "updated"
+            ],
+            "properties": {
+                "updated": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "KnowledgeBaseFileMutationResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/KnowledgeBaseFileMutationDataResponse"
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "KnowledgeBaseFilePageResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "type": "object",
+                    "required": [
+                        "results",
+                        "total"
+                    ],
+                    "properties": {
+                        "results": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/KnowledgeBaseFileResponse"
+                            }
+                        },
+                        "total": {
+                            "type": "integer"
+                        }
+                    }
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "KnowledgeBaseFileResponse": {
+            "type": "object",
+            "required": [
+                "chunkCount",
+                "createdAt",
+                "detectedMIME",
+                "embedStatus",
+                "fileCategory",
+                "fileID",
+                "fileName",
+                "mimeType",
+                "processingReady",
+                "processingStatus",
+                "ragOptOut",
+                "sizeBytes",
+                "updatedAt"
+            ],
+            "properties": {
+                "chunkCount": {
+                    "type": "integer"
+                },
+                "createdAt": {
+                    "type": "string"
+                },
+                "detectedMIME": {
+                    "type": "string"
+                },
+                "embedStatus": {
+                    "type": "string"
+                },
+                "fileCategory": {
+                    "type": "string"
+                },
+                "fileID": {
+                    "type": "string"
+                },
+                "fileName": {
+                    "type": "string"
+                },
+                "mimeType": {
+                    "type": "string"
+                },
+                "processingReady": {
+                    "type": "boolean"
+                },
+                "processingStatus": {
+                    "type": "string"
+                },
+                "ragOptOut": {
+                    "type": "boolean"
+                },
+                "sizeBytes": {
+                    "type": "integer"
+                },
+                "updatedAt": {
+                    "type": "string"
+                }
+            }
+        },
+        "KnowledgeBaseFileResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/KnowledgeBaseFileDataResponse"
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "KnowledgeBasePageResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "type": "object",
+                    "required": [
+                        "results",
+                        "total"
+                    ],
+                    "properties": {
+                        "results": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/KnowledgeBaseResponse"
+                            }
+                        },
+                        "total": {
+                            "type": "integer"
+                        }
+                    }
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "KnowledgeBaseResponse": {
+            "type": "object",
+            "required": [
+                "createdAt",
+                "description",
+                "enabled",
+                "fileCount",
+                "name",
+                "publicID",
+                "readyFileCount",
+                "revision",
+                "scope",
+                "sortOrder",
+                "updatedAt"
+            ],
+            "properties": {
+                "createdAt": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "fileCount": {
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "publicID": {
+                    "type": "string"
+                },
+                "readyFileCount": {
+                    "type": "integer"
+                },
+                "revision": {
+                    "type": "integer"
+                },
+                "scope": {
+                    "type": "string",
+                    "enum": [
+                        "builtin",
+                        "user"
+                    ]
+                },
+                "sortOrder": {
+                    "type": "integer"
+                },
+                "updatedAt": {
+                    "type": "string"
+                }
+            }
+        },
+        "KnowledgeBaseResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/KnowledgeBaseDataResponse"
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "KnowledgebaseErrorDoc": {
+            "type": "object",
+            "required": [
+                "errorMsg"
+            ],
+            "properties": {
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
         "LoginOptionsResponse": {
             "type": "object",
             "required": [
@@ -20688,6 +22116,50 @@ const docTemplate = `{
                 }
             }
         },
+        "MediaVideoExtensionRequest": {
+            "type": "object",
+            "required": [
+                "prompt",
+                "sourceVideoFileID"
+            ],
+            "properties": {
+                "branchReason": {
+                    "type": "string",
+                    "enum": [
+                        "default",
+                        "retry",
+                        "edit"
+                    ]
+                },
+                "clientRunID": {
+                    "type": "string",
+                    "maxLength": 64
+                },
+                "model": {
+                    "type": "string",
+                    "maxLength": 128
+                },
+                "options": {
+                    "type": "object",
+                    "additionalProperties": true
+                },
+                "parentMessagePublicID": {
+                    "type": "string",
+                    "maxLength": 32
+                },
+                "prompt": {
+                    "type": "string"
+                },
+                "sourceMessagePublicID": {
+                    "type": "string",
+                    "maxLength": 32
+                },
+                "sourceVideoFileID": {
+                    "type": "string",
+                    "maxLength": 128
+                }
+            }
+        },
         "MemoryErrorDoc": {
             "type": "object",
             "required": [
@@ -20774,6 +22246,33 @@ const docTemplate = `{
                 },
                 "errorMsg": {
                     "type": "string"
+                }
+            }
+        },
+        "MessageKnowledgeSourceResponse": {
+            "type": "object",
+            "required": [
+                "chunkIndex",
+                "fileID",
+                "fileName",
+                "preview",
+                "score"
+            ],
+            "properties": {
+                "chunkIndex": {
+                    "type": "integer"
+                },
+                "fileID": {
+                    "type": "string"
+                },
+                "fileName": {
+                    "type": "string"
+                },
+                "preview": {
+                    "type": "string"
+                },
+                "score": {
+                    "type": "number"
                 }
             }
         },
@@ -21051,6 +22550,12 @@ const docTemplate = `{
                 },
                 "inputTokens": {
                     "type": "integer"
+                },
+                "knowledgeSources": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/MessageKnowledgeSourceResponse"
+                    }
                 },
                 "latencyMS": {
                     "type": "integer"
@@ -21835,7 +23340,8 @@ const docTemplate = `{
                         "chat",
                         "image_generation",
                         "image_edit",
-                        "video_generation"
+                        "video_generation",
+                        "video_extension"
                     ]
                 }
             }
@@ -22720,6 +24226,25 @@ const docTemplate = `{
                 }
             }
         },
+        "PatchKnowledgeBaseRequest": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string",
+                    "maxLength": 80
+                },
+                "sortOrder": {
+                    "type": "integer"
+                }
+            }
+        },
         "PatchMeRequest": {
             "type": "object",
             "properties": {
@@ -22762,6 +24287,19 @@ const docTemplate = `{
                 },
                 "errorMsg": {
                     "type": "string"
+                }
+            }
+        },
+        "PatchMyKnowledgeBaseRequest": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "name": {
+                    "type": "string",
+                    "maxLength": 80
                 }
             }
         },
@@ -23258,6 +24796,32 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/BillingPlanResponse"
                     }
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "PlatformFileDeleteDataResponse": {
+            "type": "object",
+            "required": [
+                "deleted"
+            ],
+            "properties": {
+                "deleted": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "PlatformFileDeleteResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/PlatformFileDeleteDataResponse"
                 },
                 "errorMsg": {
                     "type": "string"
@@ -24760,7 +26324,8 @@ const docTemplate = `{
             "type": "object",
             "required": [
                 "content",
-                "contentType"
+                "contentType",
+                "knowledgeBaseIDs"
             ],
             "properties": {
                 "branchReason": {
@@ -24797,6 +26362,13 @@ const docTemplate = `{
                 },
                 "htmlVisualPrompt": {
                     "type": "boolean"
+                },
+                "knowledgeBaseIDs": {
+                    "type": "array",
+                    "maxItems": 8,
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "model": {
                     "type": "string",
@@ -26078,10 +27650,20 @@ const docTemplate = `{
         },
         "UpdateConversationProjectRequest": {
             "type": "object",
+            "required": [
+                "defaultKnowledgeBaseIDs"
+            ],
             "properties": {
                 "color": {
                     "type": "string",
                     "maxLength": 32
+                },
+                "defaultKnowledgeBaseIDs": {
+                    "type": "array",
+                    "maxItems": 8,
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "defaultMCPToolIDs": {
                     "type": "array",
@@ -28486,6 +30068,44 @@ const docTemplate = `{
                 }
             }
         },
+        "WriteKnowledgeBaseRequest": {
+            "type": "object",
+            "required": [
+                "name"
+            ],
+            "properties": {
+                "description": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string",
+                    "maxLength": 80
+                },
+                "sortOrder": {
+                    "type": "integer"
+                }
+            }
+        },
+        "WriteMyKnowledgeBaseRequest": {
+            "type": "object",
+            "required": [
+                "name"
+            ],
+            "properties": {
+                "description": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "name": {
+                    "type": "string",
+                    "maxLength": 80
+                }
+            }
+        },
         "WritePromptPresetRequest": {
             "type": "object",
             "required": [
@@ -28562,7 +30182,7 @@ const docTemplate = `{
 
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
-	Version:          "0.3.5",
+	Version:          "0.3.6",
 	Host:             "",
 	BasePath:         "/api/v1",
 	Schemes:          []string{},

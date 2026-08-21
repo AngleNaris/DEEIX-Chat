@@ -1,41 +1,45 @@
 "use client";
 
-import * as React from "react";
 import {
   ArrowDownToLine,
   ArrowUpFromLine,
   Brain,
+  CircleDollarSign,
   ClockArrowUp,
   ClockCheck,
-  CircleDollarSign,
-  TicketSlash,
+  Cpu,
   DatabaseSearch,
   DatabaseZap,
-  Cpu,
   FilePenLine,
   Forward,
+  TicketSlash,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
+import * as React from "react";
 import { toast } from "sonner";
 
 import { Brush } from "@/components/animate-ui/icons/brush";
+import { Check } from "@/components/animate-ui/icons/check";
 import { ChevronLeft } from "@/components/animate-ui/icons/chevron-left";
 import { ChevronRight } from "@/components/animate-ui/icons/chevron-right";
-import { Check } from "@/components/animate-ui/icons/check";
 import { Copy } from "@/components/animate-ui/icons/copy";
 import { GitFork } from "@/components/animate-ui/icons/git-fork";
 import { Heart } from "@/components/animate-ui/icons/heart";
 import { RotateCcw } from "@/components/animate-ui/icons/rotate-ccw";
 import { ThumbsDown } from "@/components/animate-ui/icons/thumbs-down";
 import { ThumbsUp } from "@/components/animate-ui/icons/thumbs-up";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
-import { upsertUserMemory } from "@/shared/api/memory";
-import { useLocalizedErrorMessage } from "@/i18n/use-localized-error";
 import { resolvePersistedPublicID } from "@/features/chat/model/message-submit";
+import type { ChatBillingCost, ChatMessageBranchNavigator } from "@/features/chat/types/messages";
+import { useLocalizedErrorMessage } from "@/i18n/use-localized-error";
+import { cn } from "@/lib/utils";
+import { upsertUserMemory } from "@/shared/api/memory";
+import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
+import { usePointerInteraction } from "@/shared/hooks/use-pointer-interaction";
+import type { BillingDisplayCurrency, BillingDisplayLabels, BillingDisplayOptions } from "@/shared/lib/billing-display";
 import {
   billingRateMultiplierNote,
   cacheWriteBillingLabel,
@@ -44,10 +48,6 @@ import {
   formatBillingDisplayPreciseAmountFromUSD,
   formatBillingDisplayUnitPriceFromUSD,
 } from "@/shared/lib/billing-display";
-import type { BillingDisplayCurrency, BillingDisplayLabels, BillingDisplayOptions } from "@/shared/lib/billing-display";
-import type { ChatBillingCost, ChatMessageBranchNavigator } from "@/features/chat/types/messages";
-import { usePointerInteraction } from "@/shared/hooks/use-pointer-interaction";
-import { cn } from "@/lib/utils";
 
 export type ChatMetaMessage = {
   publicID: string;

@@ -583,7 +583,7 @@ func (s *Service) runFileProcessingWorker(ctx context.Context, consumerName stri
 }
 
 func (s *Service) handleProcessingMessage(ctx context.Context, msg repository.FileProcessingMessage) {
-	if msg.UserID == 0 || msg.FileID == "" {
+	if msg.FileID == "" {
 		_ = s.cache.AckFileProcessingMessage(ctx, msg.ID)
 		_ = s.cache.DeleteFileProcessingMessage(ctx, msg.ID)
 		return
@@ -615,7 +615,7 @@ func (s *Service) handleProcessingMessage(ctx context.Context, msg repository.Fi
 }
 
 func (s *Service) forceFinalizeFailed(userID uint, fileID string, processingErr error) {
-	if s == nil || s.repo == nil || userID == 0 || strings.TrimSpace(fileID) == "" {
+	if s == nil || s.repo == nil || strings.TrimSpace(fileID) == "" {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), failurePersistTimeout)

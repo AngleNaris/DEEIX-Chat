@@ -700,20 +700,23 @@ export function AdminFilesSettingsPage() {
                 </SettingsFieldList>
 
                 {group.key === "embedding" && embeddingEnabled && (
-                  <div className="min-w-0 space-y-3 rounded-lg border border-border/60 bg-muted/30 p-4">
+                  <SettingsFieldInset className="min-w-0 space-y-3">
                     <div className="flex min-w-0 items-center justify-between gap-3">
                       <div className="min-w-0 space-y-0.5">
                         <p className="text-xs font-medium">{t("embeddingStatus.title")}</p>
                         {embeddingStatus?.modelSignature ? (
-                          <p className="min-w-0 break-all font-mono text-[11px] text-muted-foreground">{embeddingStatus.modelSignature}</p>
+                          <p className="min-w-0 truncate font-mono text-[10px] text-muted-foreground" title={embeddingStatus.modelSignature}>
+                            {embeddingStatus.modelSignature}
+                          </p>
                         ) : (
-                          <p className="text-[11px] text-muted-foreground">{t("embeddingStatus.noSignature")}</p>
+                          <p className="text-[10px] text-muted-foreground">{t("embeddingStatus.noSignature")}</p>
                         )}
                       </div>
                       <Button
                         type="button"
                         size="sm"
-                        variant="default"
+                        variant="outline"
+                        className="h-7 shrink-0 px-2 text-xs shadow-none"
                         disabled={reindexing || embeddingStatusLoading || loading || saving}
                         onClick={() => void handleReindex()}
                       >
@@ -721,24 +724,24 @@ export function AdminFilesSettingsPage() {
                       </Button>
                     </div>
                     {embeddingStatus ? (
-                      <div className="grid min-w-0 grid-cols-2 gap-2 text-center sm:grid-cols-4">
+                      <div className="grid min-w-0 grid-cols-2 overflow-hidden rounded-md bg-muted/30 text-center sm:grid-cols-4">
                         {[
                           { label: t("embeddingStatus.ready"), value: embeddingStatus.readyCount, color: "text-green-600 dark:text-green-400" },
                           { label: t("embeddingStatus.stale"), value: embeddingStatus.staleCount, color: embeddingStatus.staleCount > 0 ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground" },
                           { label: t("embeddingStatus.pending"), value: embeddingStatus.pendingCount, color: "text-muted-foreground" },
                           { label: t("embeddingStatus.failed"), value: embeddingStatus.failedCount, color: embeddingStatus.failedCount > 0 ? "text-destructive" : "text-muted-foreground" },
                         ].map(({ label, value, color }) => (
-                          <div key={label} className="rounded-md bg-background/60 py-2 px-1 border border-border/40">
-                            <p className={cn("text-base font-semibold tabular-nums", color)}>{value}</p>
-                            <p className="text-[10px] text-muted-foreground mt-0.5">{label}</p>
+                          <div key={label} className="px-3 py-2.5">
+                            <p className={cn("text-sm font-semibold tabular-nums", color)}>{value}</p>
+                            <p className="mt-0.5 text-[10px] text-muted-foreground">{label}</p>
                           </div>
                         ))}
                       </div>
                     ) : embeddingStatusLoading ? (
-                      <div className="grid min-w-0 grid-cols-2 gap-2 sm:grid-cols-4" aria-hidden="true">
+                      <div className="grid min-w-0 grid-cols-2 overflow-hidden rounded-md bg-muted/30 sm:grid-cols-4" aria-hidden="true">
                         {Array.from({ length: 4 }).map((_, index) => (
-                          <div key={`embedding-status-skeleton-${index}`} className="rounded-md border border-border/40 bg-background/60 px-2 py-2">
-                            <div className="mx-auto h-5 w-8 animate-pulse rounded-sm bg-muted/70" />
+                          <div key={`embedding-status-skeleton-${index}`} className="px-3 py-2.5">
+                            <div className="mx-auto h-4 w-8 animate-pulse rounded-sm bg-muted/70" />
                             <div className="mx-auto mt-1.5 h-2.5 w-10 animate-pulse rounded-sm bg-muted/60" />
                           </div>
                         ))}
@@ -753,7 +756,7 @@ export function AdminFilesSettingsPage() {
                         {t("embeddingStatus.needsReindex")}
                       </p>
                     )}
-                  </div>
+                  </SettingsFieldInset>
                 )}
               </SettingsSection>
             )}

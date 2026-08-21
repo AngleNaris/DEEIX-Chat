@@ -330,7 +330,7 @@ func (s *Service) ListActivePlatformModelNames(ctx context.Context) (map[string]
 	return keys, nil
 }
 
-// SupportsVideoGeneration 返回平台模型是否具有真实可路由的视频生成能力。
+// SupportsVideoGeneration 返回平台模型是否具有可按时长计费的视频能力。
 func (s *Service) SupportsVideoGeneration(ctx context.Context, platformModelName string) (bool, error) {
 	name, err := normalizePlatformModelName(platformModelName)
 	if err != nil {
@@ -344,7 +344,8 @@ func (s *Service) SupportsVideoGeneration(ctx context.Context, platformModelName
 		if item.ActiveSourceCount <= 0 || strings.TrimSpace(item.PlatformModelName) != name {
 			continue
 		}
-		return hasModelKind(parseKinds(item.KindsJSON), modelKindVideoGen), nil
+		kinds := parseKinds(item.KindsJSON)
+		return hasModelKind(kinds, modelKindVideoGen) || hasModelKind(kinds, modelKindVideoExtension), nil
 	}
 	return false, nil
 }

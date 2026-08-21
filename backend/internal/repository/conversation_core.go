@@ -31,6 +31,7 @@ type AssistantMessageCompletionUpdate struct {
 	Status           string
 	ErrorCode        string
 	ErrorMessage     string
+	KnowledgeSources []domainconversation.MessageKnowledgeSource
 }
 
 // ForkConversationMessage 描述 fork 时待创建的消息及其源消息关系。

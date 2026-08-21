@@ -50,59 +50,33 @@ func TestUploadFileReturnsExistingActiveDuplicate(t *testing.T) {
 	}
 }
 
-func TestUploadFileRequeuesReusedLegacyImageWhenOCREnabled(t *testing.T) {
+func TestUploadFileStoresSystemAssetOutsideUploaderOwnership(t *testing.T) {
 	ctx := context.Background()
 	repo := newUploadTestRepo()
 	store := newUploadTestStore()
 	service := newUploadTestService(repo, store)
-	imageData := []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n', 0, 0, 0, 0, 'I', 'H', 'D', 'R'}
-	imageInput := func(fileName string) UploadFileInput {
-		return UploadFileInput{
-			UserID:       1,
-			Purpose:      "chat",
-			FileName:     fileName,
-			MimeType:     "image/png",
-			DeclaredSize: int64(len(imageData)),
-			Reader:       bytes.NewReader(imageData),
-		}
-	}
+	input := uploadTestInput("policy.md", "platform knowledge")
+	input.Ownership = FileOwnershipSystem
 
-	first, err := service.UploadFile(ctx, imageInput("legacy.png"))
+	result, err := service.UploadFile(ctx, input)
 	if err != nil {
-		t.Fatalf("first image upload failed: %v", err)
+		t.Fatalf("system upload failed: %v", err)
 	}
-	if !first.File.ProcessingReady || first.File.ExtractStatus != "none" {
-		t.Fatalf("expected legacy image to start ready without OCR, got %#v", first.File)
+	if result.File.UserID != 0 {
+		t.Fatalf("system asset owner = %d, want platform owner 0", result.File.UserID)
 	}
-
-	cfg := service.cfg.Snapshot()
-	cfg.ExtractImageOCREnabled = true
-	service.cfg.Store(cfg)
-	requeueCalls := 0
-	service.hooks.EnsureImageOCRProcessing = func(_ context.Context, userID uint, fileID string) error {
-		requeueCalls++
-		if userID != first.File.UserID || fileID != first.File.FileID {
-			t.Fatalf("requeued file = %d/%q, want %d/%q", userID, fileID, first.File.UserID, first.File.FileID)
-		}
-		for index := range repo.files {
-			if repo.files[index].UserID == userID && repo.files[index].FileID == fileID {
-				repo.files[index].ProcessingStatus = "queued"
-				repo.files[index].ProcessingReady = false
-				repo.files[index].ExtractStatus = "none"
-			}
-		}
-		return nil
+	if result.Quota.QuotaBytes != 0 {
+		t.Fatalf("system quota limit = %d, want unlimited platform quota", result.Quota.QuotaBytes)
 	}
-
-	second, err := service.UploadFile(ctx, imageInput("legacy-copy.png"))
-	if err != nil {
-		t.Fatalf("reused image upload failed: %v", err)
+	if !strings.HasPrefix(result.File.StoragePath, "system/") {
+		t.Fatalf("system storage path = %q, want system namespace", result.File.StoragePath)
 	}
-	if !second.Reused || requeueCalls != 1 {
-		t.Fatalf("expected reused image to requeue once, reused=%v calls=%d", second.Reused, requeueCalls)
+	deleted, ok, err := service.DeleteFileIfUnreferenced(ctx, 0, result.File.FileID)
+	if err != nil || !ok || deleted == nil {
+		t.Fatalf("system delete = %#v deleted=%v error=%v, want deleted platform asset", deleted, ok, err)
 	}
-	if second.File.ProcessingReady || second.File.ProcessingStatus != "queued" || second.File.ExtractStatus != "none" {
-		t.Fatalf("expected reused image to return queued OCR state, got %#v", second.File)
+	if deleted.Quota.QuotaBytes != 0 {
+		t.Fatalf("system quota limit after delete = %d, want unlimited platform quota", deleted.Quota.QuotaBytes)
 	}
 }
 

@@ -13,8 +13,7 @@
     "loginSettings": "Sign-in & auth",
     "conversationSettings": "Conversation",
     "chatFiles": "Files & retrieval",
-    "agentGroups": "Agent Groups",
-    "platformTools": "Platform Tools",
+    "knowledgeBases": "Knowledge bases",
     "about": "About",
     "contentModeration": "Content moderation"
   },

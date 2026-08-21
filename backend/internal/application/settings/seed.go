@@ -149,7 +149,7 @@ func defaultSettings() []domainsettings.SystemSetting {
 		{Namespace: "file", Key: "embedding_timeout_seconds", Value: "60", ValueType: "int", Description: "Embedding 请求超时时间(秒)"},
 		{Namespace: "file", Key: "embedding_output_dimensions", Value: "1536", ValueType: "int", Description: "写库和检索统一使用的向量维度"},
 		{Namespace: "file", Key: "embedding_normalize", Value: "true", ValueType: "bool", Description: "是否归一化Embedding向量"},
-		{Namespace: "file", Key: "embedding_model_signature", Value: "", ValueType: "string", Description: "当前生效的 Embedding 模型签名（系统自动维护，格式: model@dims，勿手动修改）"},
+		{Namespace: "file", Key: "embedding_model_signature", Value: "", ValueType: "string", Description: "当前生效的 Embedding 向量空间标识（系统自动维护，勿手动修改）"},
 		{Namespace: "file", Key: "embed_trigger_on_upload", Value: "true", ValueType: "bool", Description: "上传后异步触发embedding"},
 		{Namespace: "file", Key: "embed_chunk_size_tokens", Value: "1024", ValueType: "int", Description: "RAG分片大小(token估算)"},
 		{Namespace: "file", Key: "embed_chunk_overlap_tokens", Value: "64", ValueType: "int", Description: "分片重叠token数"},

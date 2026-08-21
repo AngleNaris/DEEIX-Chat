@@ -53,6 +53,7 @@ import {
   streamMessage as streamConversationMessage,
   streamImageEdit,
   streamImageGeneration,
+  streamVideoExtension,
   streamVideoGeneration,
   updateMessage,
 } from "@/shared/api/conversation";
@@ -60,6 +61,7 @@ import type {
   ConversationDTO,
   ConversationOptions,
   MediaImageRequest,
+  MediaVideoExtensionRequest,
   MediaVideoRequest,
   MessageDTO,
   SendMessageRequest,
@@ -112,6 +114,13 @@ function resolveImageLoadingAspectRatio(options: ConversationOptions): ImageLoad
     return "portrait";
   }
   return "square";
+}
+
+function resolveVideoExtensionOptions(options: ConversationOptions): ConversationOptions {
+  const duration = Number(options.duration);
+  return {
+    duration: Number.isInteger(duration) && duration >= 2 && duration <= 10 ? duration : 6,
+  };
 }
 
 function streamEventErrorToApiError(
@@ -216,7 +225,7 @@ type QueuedChatSubmission = BranchScope & {
   options: ConversationOptions;
   selectedToolIDs: number[];
   selectedSkills: SkillSummaryDTO[];
-  selectedPrompts: PromptPresetDTO[];
+  selectedKnowledgeBaseIDs: string[];
   htmlVisualPromptEnabled: boolean;
 };
 
@@ -468,7 +477,7 @@ export function useChatMessageSubmit({
   modelOptions,
   selectedToolIDs,
   selectedSkills,
-  selectedPrompts,
+  selectedKnowledgeBaseIDs,
   htmlVisualPromptEnabled,
   options,
   draft,
@@ -517,7 +526,7 @@ export function useChatMessageSubmit({
   modelOptions: ChatModelOption[];
   selectedToolIDs: number[];
   selectedSkills: SkillSummaryDTO[];
-  selectedPrompts: PromptPresetDTO[];
+  selectedKnowledgeBaseIDs: string[];
   htmlVisualPromptEnabled: boolean;
   options: ConversationOptions;
   draft: string;
@@ -792,6 +801,7 @@ export function useChatMessageSubmit({
       const requestOptions = queuedSubmission?.options ?? options;
       const requestSelectedToolIDs = queuedSubmission?.selectedToolIDs ?? selectedToolIDs;
       const requestSelectedSkills = queuedSubmission?.selectedSkills ?? selectedSkills;
+      const requestSelectedKnowledgeBaseIDs = queuedSubmission?.selectedKnowledgeBaseIDs ?? selectedKnowledgeBaseIDs;
       const requestHTMLVisualPromptEnabled = queuedSubmission?.htmlVisualPromptEnabled ?? htmlVisualPromptEnabled;
       let targetConversationScopeKey = queuedSubmission?.conversationScopeKey ?? conversationScopeKeyRef.current;
       const resolvedParentPublicID = resolvePersistedPublicID(parentMessagePublicID);
@@ -929,7 +939,7 @@ export function useChatMessageSubmit({
           ? resolveImageLoadingAspectRatio(sanitizedOptions)
           : undefined;
       const assistantContentType =
-        submitTask === "chat" ? "markdown" : submitTask === "video_generation" ? "video" : "image";
+        submitTask === "chat" ? "markdown" : submitTask === "video_generation" || submitTask === "video_extension" ? "video" : "image";
       let targetConversationID = queuedSubmission?.conversationPublicID ?? conversationIDRef.current;
       let targetConversation = queuedSubmission?.conversation ?? activeConversationRef.current;
       let metadataRefreshInFlight = false;
@@ -1127,14 +1137,12 @@ export function useChatMessageSubmit({
           }
           touchByPublicID(targetConversationID, { title: optimisticTitle });
         }
-        const targetIsAgentGroupConversation =
-          isAgentGroupTarget || Boolean(targetConversation?.agentGroupID?.trim());
+        const effectiveOptions = submitTask === "video_extension"
+          ? resolveVideoExtensionOptions(sanitizedOptions)
+          : sanitizedOptions;
         const commonStreamPayload = {
-          ...(targetIsAgentGroupConversation ? {} : { model: requestPlatformModelName }),
-          options:
-            !targetIsAgentGroupConversation && Object.keys(sanitizedOptions).length > 0
-              ? sanitizedOptions
-              : undefined,
+          model: requestPlatformModelName,
+          options: Object.keys(effectiveOptions).length > 0 ? effectiveOptions : undefined,
           clientRunID: clientRunID,
           fileIDs: resolvedEffectiveAttachments.length > 0 ? resolvedEffectiveAttachments.map((item) => item.fileID) : undefined,
           parentMessagePublicID: resolvedParentPublicID || undefined,
@@ -1291,6 +1299,7 @@ export function useChatMessageSubmit({
             content: payloadContent,
             selectedToolIDs: requestSelectedToolIDs.length > 0 ? requestSelectedToolIDs : undefined,
             skillIDs: requestSelectedSkills.length > 0 ? requestSelectedSkills.map((skill) => skill.id) : undefined,
+            knowledgeBaseIDs: requestSelectedKnowledgeBaseIDs.length > 0 ? requestSelectedKnowledgeBaseIDs : undefined,
             htmlVisualPrompt: requestHTMLVisualPromptEnabled || undefined,
           };
           completed = await streamConversationMessage(token, targetConversationID, chatPayload, streamOptions);
@@ -1300,6 +1309,22 @@ export function useChatMessageSubmit({
             prompt: payloadContent,
           };
           completed = await streamVideoGeneration(token, targetConversationID, mediaPayload, streamOptions);
+        } else if (submitTask === "video_extension") {
+          const sourceVideoFileID = effectiveAttachments[0]?.fileID;
+          if (!sourceVideoFileID) {
+            throw new Error("video extension source is missing");
+          }
+          const mediaPayload: MediaVideoExtensionRequest = {
+            model: commonStreamPayload.model,
+            options: commonStreamPayload.options,
+            clientRunID: commonStreamPayload.clientRunID,
+            parentMessagePublicID: commonStreamPayload.parentMessagePublicID,
+            sourceMessagePublicID: commonStreamPayload.sourceMessagePublicID,
+            branchReason: commonStreamPayload.branchReason,
+            prompt: payloadContent,
+            sourceVideoFileID,
+          };
+          completed = await streamVideoExtension(token, targetConversationID, mediaPayload, streamOptions);
         } else {
           const mediaPayload: MediaImageRequest = {
             ...commonStreamPayload,
@@ -1642,7 +1667,7 @@ export function useChatMessageSubmit({
       modelOptions,
       selectedToolIDs,
       selectedSkills,
-      selectedPrompts,
+      selectedKnowledgeBaseIDs,
       htmlVisualPromptEnabled,
       isAgentGroupConversation,
       selectedPlatformModelName,
@@ -1741,7 +1766,7 @@ export function useChatMessageSubmit({
           options: sanitizeConversationOptions(options),
           selectedToolIDs: selectedToolIDs.slice(),
           selectedSkills: selectedSkills.slice(),
-          selectedPrompts: selectedPrompts.slice(),
+          selectedKnowledgeBaseIDs: selectedKnowledgeBaseIDs.slice(),
           htmlVisualPromptEnabled,
         },
       ];
@@ -1762,6 +1787,7 @@ export function useChatMessageSubmit({
     selectedPlatformModelName,
     selectedPrompts,
     selectedSkills,
+    selectedKnowledgeBaseIDs,
     selectedToolIDs,
     setAttachments,
     setDraft,

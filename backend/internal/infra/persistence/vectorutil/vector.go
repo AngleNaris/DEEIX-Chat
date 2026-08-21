@@ -8,11 +8,11 @@ import (
 	"strings"
 )
 
-// StorageDimensions is the fixed physical vector width used by every vector
-// store. Configured embedding dimensions up to this limit are zero-padded on
-// persistence; zero-padding preserves cosine similarity.
+// MaxDimensions is the largest embedding width supported by persistence.
+// PostgreSQL keeps the model's native width and pads only inside index/search
+// expressions. SQLite requires a fixed-width vec0 table and pads on write.
 const (
-	StorageDimensions = 4096
+	MaxDimensions = 4096
 	// IndexDimensions fits pgvector's halfvec HNSW limit while retaining all but
 	// the final 96 components of a maximum-width vector for candidate recall.
 	IndexDimensions = 4000
@@ -38,37 +38,51 @@ func CandidateLimit(topK int) int {
 	return limit
 }
 
-// AlignForStorage returns a vector with the physical storage width.
+// AlignForStorage returns the fixed-width representation required by SQLite.
 func AlignForStorage(input []float32) ([]float32, error) {
-	if len(input) == 0 || len(input) == StorageDimensions {
+	if len(input) == 0 || len(input) == MaxDimensions {
 		return input, nil
 	}
-	if len(input) > StorageDimensions {
-		return nil, fmt.Errorf("embedding dimensions %d exceed supported maximum %d", len(input), StorageDimensions)
+	if len(input) > MaxDimensions {
+		return nil, fmt.Errorf("embedding dimensions %d exceed supported maximum %d", len(input), MaxDimensions)
 	}
-	result := make([]float32, StorageDimensions)
+	result := make([]float32, MaxDimensions)
 	copy(result, input)
 	return result, nil
 }
 
-// PostgresLiteral serializes a vector after aligning it to the physical width.
+// PostgresLiteral serializes a native-width vector for PostgreSQL storage.
 func PostgresLiteral(input []float32) (string, error) {
+	if len(input) > MaxDimensions {
+		return "", fmt.Errorf("embedding dimensions %d exceed supported maximum %d", len(input), MaxDimensions)
+	}
+	return postgresLiteral(input), nil
+}
+
+// PostgresPaddedLiteral serializes a maximum-width query vector. PostgreSQL
+// search expressions pad stored native-width vectors to the same width before
+// exact reranking, preserving cosine similarity without expanding every row.
+func PostgresPaddedLiteral(input []float32) (string, error) {
 	aligned, err := AlignForStorage(input)
 	if err != nil {
 		return "", err
 	}
-	if len(aligned) == 0 {
-		return "[]", nil
+	return postgresLiteral(aligned), nil
+}
+
+func postgresLiteral(input []float32) string {
+	if len(input) == 0 {
+		return "[]"
 	}
 	var builder strings.Builder
-	builder.Grow(len(aligned) * 4)
+	builder.Grow(len(input) * 4)
 	builder.WriteByte('[')
-	for index, value := range aligned {
+	for index, value := range input {
 		if index > 0 {
 			builder.WriteByte(',')
 		}
 		builder.WriteString(strconv.FormatFloat(float64(value), 'f', -1, 32))
 	}
 	builder.WriteByte(']')
-	return builder.String(), nil
+	return builder.String()
 }
