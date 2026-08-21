@@ -1,8 +1,8 @@
 "use client";
 
-import * as React from "react";
 import { CornerUpLeft, Download, Eye, Maximize2, WandSparkles } from "lucide-react";
 import { useTranslations } from "next-intl";
+import * as React from "react";
 
 import { ChevronDown } from "@/components/animate-ui/icons/chevron-down";
 import { ChevronUp } from "@/components/animate-ui/icons/chevron-up";
@@ -10,6 +10,13 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
+import { CopyActionButton } from "@/shared/components/copy-action";
+import { MediaActionBar, MediaActionButton } from "@/shared/components/media-action-bar";
+import {
+  type ArtifactPreviewKind,
+  resolveArtifactPreviewKind,
+} from "@/shared/lib/artifact-preview";
 import {
   downloadMarkdownImageSource,
   loadProtectedMarkdownImageBlobURL,
@@ -17,12 +24,6 @@ import {
   resolveMarkdownImageSource,
   resolveProtectedMarkdownImageSource,
 } from "@/shared/lib/markdown-image-source";
-import {
-  resolveArtifactPreviewKind,
-  type ArtifactPreviewKind,
-} from "@/shared/lib/artifact-preview";
-import { CopyActionButton } from "@/shared/components/copy-action";
-import { cn } from "@/lib/utils";
 import { sanitizeHTMLStyle } from "./streamdown-style";
 
 const CODE_BLOCK_COLLAPSE_LINE_THRESHOLD = 16;
@@ -708,54 +709,24 @@ export function MarkdownImage({ alt, className, onError, onLoad, src, ...props }
         />
       )}
       {canUseImageActions ? (
-        <span
+        <MediaActionBar
           className={cn(
-            "absolute bottom-2 right-2 inline-flex items-center gap-1 rounded-full border border-border/70 bg-background/88 p-1 text-muted-foreground shadow-sm transition-opacity",
+            "absolute bottom-2 right-2 transition-opacity",
             loaded ? "opacity-100" : "opacity-0",
           )}
         >
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                aria-label={t("previewImage")}
-                className="inline-flex size-7 items-center justify-center rounded-full transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                type="button"
-                onClick={() => setPreviewOpen(true)}
-              >
-                <Maximize2 className="size-3.5" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>{t("previewImage")}</TooltipContent>
-          </Tooltip>
+          <MediaActionButton label={t("previewImage")} onClick={() => setPreviewOpen(true)}>
+            <Maximize2 className="size-3.5" />
+          </MediaActionButton>
           {canEditImage ? (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  aria-label={t("editImage")}
-                  className="inline-flex size-7 items-center justify-center rounded-full transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                  type="button"
-                  onClick={() => imageActions?.onEditImage?.(src)}
-                >
-                  <WandSparkles className="size-3.5" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>{t("editImage")}</TooltipContent>
-            </Tooltip>
+            <MediaActionButton label={t("editImage")} onClick={() => imageActions?.onEditImage?.(src)}>
+              <WandSparkles className="size-3.5" />
+            </MediaActionButton>
           ) : null}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                aria-label={t("downloadImage")}
-                className="inline-flex size-7 items-center justify-center rounded-full transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                type="button"
-                onClick={() => void handleDownload()}
-              >
-                <Download className="size-3.5" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>{t("downloadImage")}</TooltipContent>
-          </Tooltip>
-        </span>
+          <MediaActionButton label={t("downloadImage")} onClick={() => void handleDownload()}>
+            <Download className="size-3.5" />
+          </MediaActionButton>
+        </MediaActionBar>
       ) : null}
       <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
         <DialogContent className="w-fit max-w-[96vw] border-0 bg-transparent p-0 shadow-none sm:max-w-[96vw] [&>button]:border [&>button]:border-border/70 [&>button]:bg-background/90 [&>button]:text-foreground [&>button]:shadow-sm">

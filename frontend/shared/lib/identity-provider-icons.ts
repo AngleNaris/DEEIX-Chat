@@ -33,6 +33,34 @@ export function resolveIdentityProviderIconURL(name: string, slug: string): stri
   return resolveModelIconURL(icon);
 }
 
+export function resolveSafeIdentityProviderIconURL(value: string | null | undefined): string {
+  const normalized = value?.trim() ?? "";
+  if (!normalized) {
+    return "";
+  }
+  for (const character of normalized) {
+    const codePoint = character.codePointAt(0) ?? 0;
+    if (codePoint <= 0x1f || codePoint === 0x7f) {
+      return "";
+    }
+  }
+
+  if (normalized.startsWith("/") && !normalized.startsWith("//") && !normalized.includes("\\")) {
+    const parsed = new URL(normalized, "https://identity-provider.local");
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  }
+
+  try {
+    const parsed = new URL(normalized);
+    if ((parsed.protocol === "https:" || parsed.protocol === "http:") && parsed.hostname && !parsed.username && !parsed.password) {
+      return parsed.href;
+    }
+  } catch {
+    // Invalid and relative URLs are intentionally rejected.
+  }
+  return "";
+}
+
 export function resolveIdentityProviderIconScale(name: string, slug: string): number {
   const icon = resolveIdentityProviderIconKey(name, slug);
   if (icon === "x") return 0.78;

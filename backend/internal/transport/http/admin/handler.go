@@ -18,6 +18,7 @@ import (
 	systemeventapp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/systemevent"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/user"
 	domainconversation "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
+	domainknowledgebase "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/knowledgebase"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/response"
 	conversationhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/conversation"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/middleware"
@@ -1147,6 +1148,9 @@ func (h *Handler) DeleteUser(c *gin.Context) {
 			errors.Is(err, appadmin.ErrSelfDeleteNotAllowed):
 			response.ErrorFrom(c, http.StatusConflict, err)
 			return
+		case errors.Is(err, domainknowledgebase.ErrBuiltinFileOwnerDeleteBlocked):
+			response.ErrorWithCode(c, http.StatusConflict, "knowledge_base.owner_file_reference", "user owns files referenced by builtin knowledge bases")
+			return
 		default:
 			response.Error(c, http.StatusInternalServerError, "delete user failed")
 			return
@@ -1273,7 +1277,7 @@ func (h *Handler) ExportConversations(c *gin.Context) {
 				failedIDs = append(failedIDs, conversations[i].ID)
 				continue
 			}
-			if err := encoder.Encode(conversationhttp.ToConversationExportResponse(result)); err != nil {
+			if err := encoder.Encode(conversationhttp.ToAdminConversationExportResponse(result)); err != nil {
 				return
 			}
 			exported++

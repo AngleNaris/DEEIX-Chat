@@ -120,6 +120,7 @@ import {
   uniqueUpstreamModels,
 } from "@/features/admin/model/models-source-binding";
 import { PermissionGroupSelector } from "@/features/admin/components/sections/groups/permission-group-selector";
+import { ModelIconField } from "@/features/admin/components/sections/models/model-icon-field";
 
 // ---------------------------------------------------------------------------
 // Form state
@@ -273,6 +274,7 @@ export function ModelSheet({ open, mode, target, models, vendors, displayGroups,
   const locale = useLocale();
   const [form, setForm] = useState<FormState>(() => buildInitialState(target));
   const [pending, setPending] = useState(false);
+  const [iconUploading, setIconUploading] = useState(false);
   const [expandedSections, setExpandedSections] = useState<string[]>([]);
   const [showCapabilitiesJSONAdvanced, setShowCapabilitiesJSONAdvanced] = useState(false);
   const sheetContentRef = useRef<HTMLDivElement | null>(null);
@@ -389,23 +391,65 @@ export function ModelSheet({ open, mode, target, models, vendors, displayGroups,
   }
 
   function handleBindRowModelChange(rowID: string, upstreamModelID: string) {
-    setBindRows((current) =>
-      current.map((row) => {
-        if (row.id !== rowID) {
-          return row;
-        }
-        const upstreamModels = upstreamModelsByID[row.draft.upstreamID] ?? [];
-        const selected = upstreamModels.find((item) => String(item.id) === upstreamModelID);
-        return {
-          ...row,
-          draft: {
-            ...row.draft,
-            upstreamModelID,
-            protocol: selected?.suggestedProtocol ?? "",
-          },
-        };
-      }),
-    );
+    const targetRow = bindRows.find((row) => row.id === rowID);
+    const selected = targetRow
+      ? (upstreamModelsByID[targetRow.draft.upstreamID] ?? []).find(
+          (item) => String(item.id) === upstreamModelID,
+        )
+      : undefined;
+    if (selected?.suggestedProtocol === "xai_video") {
+      setForm((current) => ({
+        ...current,
+        kinds: Array.from(new Set([...current.kinds, "video_gen", "video_extension"])),
+      }));
+    }
+    setBindRows((current) => {
+      const currentTargetRow = current.find((row) => row.id === rowID);
+      if (!currentTargetRow) {
+        return current;
+      }
+      const protocols: AdminLLMAdapter[] = selected?.suggestedProtocol === "xai_video"
+        ? ["xai_video", "xai_video_extensions"]
+        : selected?.suggestedProtocol
+          ? [selected.suggestedProtocol]
+          : [];
+      const existingProtocols = new Set(
+        current
+          .filter(
+            (row) =>
+              row.id !== rowID &&
+              row.draft.upstreamID === currentTargetRow.draft.upstreamID &&
+              row.draft.upstreamModelID === upstreamModelID,
+          )
+          .map((row) => row.draft.protocol)
+          .filter(Boolean),
+      );
+      const missingProtocols = protocols.filter((protocol) => !existingProtocols.has(protocol));
+      const primaryProtocol = missingProtocols[0] ?? "";
+      const companionRows = missingProtocols.slice(1).map((protocol) =>
+        createModelSourceBindDraftRow({
+          ...currentTargetRow.draft,
+          upstreamModelID,
+          protocol,
+        }),
+      );
+
+      return current.flatMap((row) =>
+        row.id === rowID
+          ? [
+              {
+                ...row,
+                draft: {
+                  ...row.draft,
+                  upstreamModelID,
+                  protocol: primaryProtocol,
+                },
+              },
+              ...companionRows,
+            ]
+          : [row],
+      );
+    });
   }
 
   function setBindRowField<K extends keyof ModelSourceBindDraftRow["draft"]>(
@@ -638,7 +682,7 @@ export function ModelSheet({ open, mode, target, models, vendors, displayGroups,
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (mode === "edit" && !target) return;
+    if (pending || iconUploading || (mode === "edit" && !target)) return;
 
     const bindDraftResult = mode === "create"
       ? resolveModelSourceBindDraftRows(bindRows)
@@ -762,7 +806,6 @@ export function ModelSheet({ open, mode, target, models, vendors, displayGroups,
     vendor: form.vendor,
     icon: form.icon,
   });
-  const iconPreviewUrl = resolveModelIconURL(form.icon || resolvedIdentity.modelIcon);
   const selectedVendorOption =
     vendorOptions.find((item) => normalizeVendorValue(item.value) === normalizeVendorValue(form.vendor)) ??
     vendorOptions[0];
@@ -936,20 +979,15 @@ export function ModelSheet({ open, mode, target, models, vendors, displayGroups,
 
               <div className="min-w-0 space-y-1">
                 <Label className="text-xs font-normal text-muted-foreground" htmlFor="model-icon">{t("sheet.icon")}</Label>
-                <div className="flex items-center gap-2">
-                  <Input
-                    id="model-icon"
-                    value={form.icon}
-                    placeholder="openai"
-                    onChange={(e) => setField("icon", e.target.value)}
-                    disabled={pending}
-                  />
-                  {iconPreviewUrl ? (
-                    <ModelIcon key={iconPreviewUrl} iconUrl={iconPreviewUrl} label={form.icon} size={24} />
-                  ) : (
-                    <div className="size-6 shrink-0" />
-                  )}
-                </div>
+                <ModelIconField
+                  id="model-icon"
+                  value={form.icon}
+                  placeholder="openai"
+                  help={t("sheet.iconHelp")}
+                  disabled={pending}
+                  onChange={(value) => setField("icon", value)}
+                  onUploadingChange={setIconUploading}
+                />
                 {form.icon.trim() === "" ? (
                   <p className="text-[11px] text-muted-foreground">
                     {t("sheet.iconAutoDescription", { vendor: resolvedIdentity.vendorLabel })}
@@ -1498,8 +1536,8 @@ export function ModelSheet({ open, mode, target, models, vendors, displayGroups,
             >
               {commonT("actions.cancel")}
             </Button>
-            <Button type="submit" disabled={pending}>
-              {pending ? <SpinnerLabel>{t("sheet.saving")}</SpinnerLabel> : commonT("actions.save")}
+            <Button type="submit" disabled={pending || iconUploading}>
+              {pending || iconUploading ? <SpinnerLabel>{t("sheet.saving")}</SpinnerLabel> : commonT("actions.save")}
             </Button>
           </SheetFooter>
         </form>

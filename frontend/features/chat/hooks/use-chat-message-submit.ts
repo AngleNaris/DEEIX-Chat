@@ -1,19 +1,18 @@
 "use client";
 
-import * as React from "react";
 import { useTranslations } from "next-intl";
+import * as React from "react";
 import { toast } from "sonner";
-
-import type { ChatAreaMessage, ImageLoadingAspectRatio } from "@/features/chat/types/messages";
-import type {
-  ChatModelOption,
-  PendingAttachment,
-  PendingExchange,
-  PendingExchangeMap,
-} from "@/features/chat/types/chat-runtime";
+import { useHiddenQueuedParentRuns } from "@/features/chat/hooks/use-hidden-queued-parent-runs";
 import type { ChatSubmitBlockReason } from "@/features/chat/model/chat-task";
 import { resolveChatSubmitDecision } from "@/features/chat/model/chat-task";
-import { useHiddenQueuedParentRuns } from "@/features/chat/hooks/use-hidden-queued-parent-runs";
+import {
+  buildChildrenIndex,
+  parseAttachments,
+  toBranchKey,
+} from "@/features/chat/model/chat-thread";
+import { sanitizeConversationOptions } from "@/features/chat/model/conversation-options";
+import { buildMediaImagePreviewMarkdown } from "@/features/chat/model/media-image-preview";
 import {
   resolveAssistantInputSideUsageValue,
   resolveDefaultSubmissionParentMessage,
@@ -25,34 +24,35 @@ import {
   preserveRicherLiveUpstreamThinkTrace,
   readLiveUpstreamThinkTrace,
 } from "@/features/chat/model/upstream-think-store";
+import type {
+  ChatModelOption,
+  PendingAttachment,
+  PendingExchange,
+  PendingExchangeMap,
+} from "@/features/chat/types/chat-runtime";
+import type { ChatAreaMessage, ImageLoadingAspectRatio } from "@/features/chat/types/messages";
 import {
   resolveErrorDetails,
   resolveErrorMessage,
   resolveErrorSummary,
 } from "@/features/chat/utils/chat-runtime";
 import {
-  buildChildrenIndex,
-  parseAttachments,
-  toBranchKey,
-} from "@/features/chat/model/chat-thread";
-import { sanitizeConversationOptions } from "@/features/chat/model/conversation-options";
-import { buildMediaImagePreviewMarkdown } from "@/features/chat/model/media-image-preview";
-import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
-import { notifyResponseCompletion } from "@/shared/lib/browser-notifications";
-import {
+  type ConversationStreamOptions,
   cancelMessageGeneration,
+  forkConversationFromMessage,
   getConversation,
+  streamMessage as streamConversationMessage,
   streamImageEdit,
   streamImageGeneration,
-  streamMessage as streamConversationMessage,
+  streamVideoExtension,
   streamVideoGeneration,
   updateMessage,
-  type ConversationStreamOptions,
 } from "@/shared/api/conversation";
 import type {
   ConversationDTO,
   ConversationOptions,
   MediaImageRequest,
+  MediaVideoExtensionRequest,
   MediaVideoRequest,
   MessageDTO,
   SendMessageRequest,
@@ -61,6 +61,8 @@ import type {
 } from "@/shared/api/conversation.types";
 import { ApiError } from "@/shared/api/http-client";
 import type { SkillSummaryDTO } from "@/shared/api/skills.types";
+import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
+import { notifyResponseCompletion } from "@/shared/lib/browser-notifications";
 
 const CONVERSATION_METADATA_REFRESH_MAX_WAIT_MS = 45_000;
 const CONVERSATION_METADATA_REFRESH_INITIAL_DELAY_MS = 800;
@@ -94,6 +96,13 @@ function resolveImageLoadingAspectRatio(options: ConversationOptions): ImageLoad
     return "portrait";
   }
   return "square";
+}
+
+function resolveVideoExtensionOptions(options: ConversationOptions): ConversationOptions {
+  const duration = Number(options.duration);
+  return {
+    duration: Number.isInteger(duration) && duration >= 2 && duration <= 10 ? duration : 6,
+  };
 }
 
 function streamEventErrorToApiError(
@@ -198,6 +207,7 @@ type QueuedChatSubmission = BranchScope & {
   options: ConversationOptions;
   selectedToolIDs: number[];
   selectedSkills: SkillSummaryDTO[];
+  selectedKnowledgeBaseIDs: string[];
   htmlVisualPromptEnabled: boolean;
 };
 
@@ -448,6 +458,7 @@ export function useChatMessageSubmit({
   modelOptions,
   selectedToolIDs,
   selectedSkills,
+  selectedKnowledgeBaseIDs,
   htmlVisualPromptEnabled,
   options,
   draft,
@@ -458,6 +469,7 @@ export function useChatMessageSubmit({
   autoGenerateLabels,
   prependNewConversation,
   onConversationCreated,
+  onConversationForked,
   touchByPublicID,
   reload,
   replaceMessage,
@@ -482,7 +494,8 @@ export function useChatMessageSubmit({
   resetStreamBuffer,
   startStream,
   activeGenerationRunsRef,
-  failedGenerationRunsRef,
+  activeGenerationRunsRevision,
+  onActiveGenerationRunsChange,
   resumeGenerationActive = false,
 }: {
   conversationID: string | null;
@@ -492,6 +505,7 @@ export function useChatMessageSubmit({
   modelOptions: ChatModelOption[];
   selectedToolIDs: number[];
   selectedSkills: SkillSummaryDTO[];
+  selectedKnowledgeBaseIDs: string[];
   htmlVisualPromptEnabled: boolean;
   options: ConversationOptions;
   draft: string;
@@ -502,6 +516,7 @@ export function useChatMessageSubmit({
   autoGenerateLabels: boolean;
   prependNewConversation: (platformModelName: string) => Promise<ConversationDTO | null | undefined>;
   onConversationCreated?: (conversationPublicID: string) => void;
+  onConversationForked?: (conversation: ConversationDTO) => Promise<void> | void;
   touchByPublicID: (publicID: string, patch?: Partial<ConversationDTO>) => void;
   reload: () => void;
   replaceMessage: (message: MessageDTO) => void;
@@ -526,11 +541,11 @@ export function useChatMessageSubmit({
   resetStreamBuffer: (exchangeKey?: string) => void;
   startStream: (exchangeKey: string, runID?: string) => void;
   activeGenerationRunsRef?: React.RefObject<Set<string>>;
-  failedGenerationRunsRef?: React.RefObject<Set<string>>;
+  activeGenerationRunsRevision: number;
+  onActiveGenerationRunsChange?: () => void;
   resumeGenerationActive?: boolean;
 }) {
   const t = useTranslations("chat.submit");
-  const [activeRunRevision, setActiveRunRevision] = React.useState(0);
   const activeStreamsRef = React.useRef(new Map<string, ActiveStream>());
   const conversationIDRef = React.useRef(conversationID);
   const conversationScopeKeyRef = React.useRef(conversationScopeKey);
@@ -571,12 +586,12 @@ export function useChatMessageSubmit({
           visibleMessages,
         ),
       ),
-    [activeRunRevision, conversationScopeKey, visibleBranchScopePath, visibleMessages],
+    [activeGenerationRunsRevision, conversationScopeKey, visibleBranchScopePath, visibleMessages],
   );
 
   const syncActiveRuns = React.useCallback(() => {
-    setActiveRunRevision((current) => current + 1);
-  }, []);
+    onActiveGenerationRunsChange?.();
+  }, [onActiveGenerationRunsChange]);
 
   const updatePendingExchange = React.useCallback(
     (exchangeKey: string, update: (current: PendingExchange) => PendingExchange) => {
@@ -725,6 +740,7 @@ export function useChatMessageSubmit({
       const requestOptions = queuedSubmission?.options ?? options;
       const requestSelectedToolIDs = queuedSubmission?.selectedToolIDs ?? selectedToolIDs;
       const requestSelectedSkills = queuedSubmission?.selectedSkills ?? selectedSkills;
+      const requestSelectedKnowledgeBaseIDs = queuedSubmission?.selectedKnowledgeBaseIDs ?? selectedKnowledgeBaseIDs;
       const requestHTMLVisualPromptEnabled = queuedSubmission?.htmlVisualPromptEnabled ?? htmlVisualPromptEnabled;
       let targetConversationScopeKey = queuedSubmission?.conversationScopeKey ?? conversationScopeKeyRef.current;
       const resolvedParentPublicID = resolvePersistedPublicID(parentMessagePublicID);
@@ -833,7 +849,7 @@ export function useChatMessageSubmit({
           ? resolveImageLoadingAspectRatio(sanitizedOptions)
           : undefined;
       const assistantContentType =
-        submitTask === "chat" ? "markdown" : submitTask === "video_generation" ? "video" : "image";
+        submitTask === "chat" ? "markdown" : submitTask === "video_generation" || submitTask === "video_extension" ? "video" : "image";
       let targetConversationID = queuedSubmission?.conversationPublicID ?? conversationIDRef.current;
       let targetConversation = queuedSubmission?.conversation ?? activeConversationRef.current;
       let metadataRefreshInFlight = false;
@@ -1026,9 +1042,12 @@ export function useChatMessageSubmit({
           }
           touchByPublicID(targetConversationID, { title: optimisticTitle });
         }
+        const effectiveOptions = submitTask === "video_extension"
+          ? resolveVideoExtensionOptions(sanitizedOptions)
+          : sanitizedOptions;
         const commonStreamPayload = {
           model: requestPlatformModelName,
-          options: Object.keys(sanitizedOptions).length > 0 ? sanitizedOptions : undefined,
+          options: Object.keys(effectiveOptions).length > 0 ? effectiveOptions : undefined,
           clientRunID: clientRunID,
           fileIDs: effectiveAttachments.length > 0 ? effectiveAttachments.map((item) => item.fileID) : undefined,
           parentMessagePublicID: resolvedParentPublicID || undefined,
@@ -1116,6 +1135,42 @@ export function useChatMessageSubmit({
                 event.reasoning_tokens > 0 ? event.reasoning_tokens : current.assistantReasoningTokens,
             }));
           },
+          onModerationChecking: () => {
+            updatePendingExchange(exchangeKey, (current) => ({
+              ...current,
+              assistantFileProc: true,
+              assistantActivityLabel: t("moderationChecking"),
+            }));
+          },
+          onModerationBlocked: (event) => {
+            const categories = Array.isArray(event.categories) ? event.categories : [];
+            updatePendingExchange(exchangeKey, (current) => ({
+              ...current,
+              assistantPending: false,
+              assistantStreaming: false,
+              assistantFileProc: false,
+              assistantActivityLabel: undefined,
+              assistantText: "",
+              assistantAttachments: [],
+              assistantProcessTrace: undefined,
+              assistantStatus: "blocked",
+              assistantErrorCode: "content_moderation.blocked",
+              assistantErrorMessage: t("moderationBlocked"),
+              assistantInlineAlert: {
+                title: t("moderationBlocked"),
+                message: [
+                  t("moderationBlockedDescription"),
+                  event.eventID ? t("moderationEventId", { id: event.eventID }) : "",
+                  categories.length > 0 ? t("moderationCategories", { categories: categories.join(", ") }) : "",
+                ]
+                  .filter(Boolean)
+                  .join("\n"),
+              },
+            }));
+            toast.error(t("moderationBlocked"), {
+              description: t("moderationBlockedDescription"),
+            });
+          },
         };
         modelRunSequence = (nextModelRunSequenceRef.current.get(targetConversationScopeKey) ?? 0) + 1;
         nextModelRunSequenceRef.current.set(targetConversationScopeKey, modelRunSequence);
@@ -1127,6 +1182,7 @@ export function useChatMessageSubmit({
             content: payloadContent,
             selectedToolIDs: requestSelectedToolIDs.length > 0 ? requestSelectedToolIDs : undefined,
             skillIDs: requestSelectedSkills.length > 0 ? requestSelectedSkills.map((skill) => skill.id) : undefined,
+            knowledgeBaseIDs: requestSelectedKnowledgeBaseIDs.length > 0 ? requestSelectedKnowledgeBaseIDs : undefined,
             htmlVisualPrompt: requestHTMLVisualPromptEnabled || undefined,
           };
           completed = await streamConversationMessage(token, targetConversationID, chatPayload, streamOptions);
@@ -1136,6 +1192,22 @@ export function useChatMessageSubmit({
             prompt: payloadContent,
           };
           completed = await streamVideoGeneration(token, targetConversationID, mediaPayload, streamOptions);
+        } else if (submitTask === "video_extension") {
+          const sourceVideoFileID = effectiveAttachments[0]?.fileID;
+          if (!sourceVideoFileID) {
+            throw new Error("video extension source is missing");
+          }
+          const mediaPayload: MediaVideoExtensionRequest = {
+            model: commonStreamPayload.model,
+            options: commonStreamPayload.options,
+            clientRunID: commonStreamPayload.clientRunID,
+            parentMessagePublicID: commonStreamPayload.parentMessagePublicID,
+            sourceMessagePublicID: commonStreamPayload.sourceMessagePublicID,
+            branchReason: commonStreamPayload.branchReason,
+            prompt: payloadContent,
+            sourceVideoFileID,
+          };
+          completed = await streamVideoExtension(token, targetConversationID, mediaPayload, streamOptions);
         } else {
           const mediaPayload: MediaImageRequest = {
             ...commonStreamPayload,
@@ -1147,7 +1219,6 @@ export function useChatMessageSubmit({
               : await streamImageEdit(token, targetConversationID, mediaPayload, streamOptions);
         }
 
-        failedGenerationRunsRef?.current.delete(clientRunID);
         sentSuccessfully = true;
         flushStreamTextNow(exchangeKey);
         flushUpstreamThinkNow(exchangeKey);
@@ -1156,6 +1227,9 @@ export function useChatMessageSubmit({
         const assistantMessageSucceeded = assistantMessageStatus === "success";
         updatePendingExchange(exchangeKey, (current) => {
           const streamedText = current.assistantText;
+          const assistantMessageBlocked =
+            assistantMessageStatus.trim().toLowerCase() === "blocked" ||
+            completed.assistantMessage.errorCode === "content_moderation.blocked";
           const terminalErrorMessage = terminalStreamError
             ? resolveErrorMessage(streamEventErrorToApiError(terminalStreamError, t("retryLater")), terminalStreamError.message || t("retryLater"))
             : "";
@@ -1219,7 +1293,12 @@ export function useChatMessageSubmit({
             assistantErrorCode: completed.assistantMessage.errorCode,
             assistantErrorMessage: completed.assistantMessage.errorMessage,
             assistantInlineAlert:
-              completed.assistantMessage.status === "error" || completed.assistantMessage.status === "interrupted"
+              assistantMessageBlocked
+                ? current.assistantInlineAlert ?? {
+                    title: t("moderationBlocked"),
+                    message: t("moderationBlockedDescription"),
+                  }
+                : completed.assistantMessage.status === "error" || completed.assistantMessage.status === "interrupted"
                 ? {
                     title: t("generationInterrupted"),
                     message: terminalErrorMessage || completedErrorMessage || t("retryLater"),
@@ -1227,7 +1306,9 @@ export function useChatMessageSubmit({
                   }
                 : undefined,
             assistantText:
-              streamedText === completed.assistantMessage.content
+              assistantMessageBlocked
+                ? ""
+                : streamedText === completed.assistantMessage.content
                 ? current.assistantText
                 : completed.assistantMessage.content,
           };
@@ -1358,10 +1439,18 @@ export function useChatMessageSubmit({
           }));
           return false;
         }
+        if (error instanceof ApiError && error.errorCode === "content_moderation.blocked") {
+          // UI already updated via onModerationBlocked; settle as a soft block with retry.
+          shouldKeepConversationLayout = true;
+          releaseAttachments(effectiveAttachments);
+          if (conversationScopeKeyRef.current === targetConversationScopeKey) {
+            reload();
+          }
+          return false;
+        }
         const errorMessage = resolveErrorMessage(error, t("retryLater"));
         const errorDetails = resolveErrorDetails(error);
         const errorSummary = resolveErrorSummary(error, t("retryLater"));
-        failedGenerationRunsRef?.current.add(clientRunID);
         shouldKeepConversationLayout = true;
         if (
           resetComposer &&
@@ -1440,7 +1529,6 @@ export function useChatMessageSubmit({
     [
       activeGenerationRunsRef,
       autoGenerateLabels,
-      failedGenerationRunsRef,
       enqueueUpstreamThinkDelta,
       enqueueStreamText,
       flushStreamTextNow,
@@ -1455,6 +1543,7 @@ export function useChatMessageSubmit({
       modelOptions,
       selectedToolIDs,
       selectedSkills,
+      selectedKnowledgeBaseIDs,
       htmlVisualPromptEnabled,
       selectedPlatformModelName,
       setAttachments,
@@ -1552,6 +1641,7 @@ export function useChatMessageSubmit({
           options: sanitizeConversationOptions(options),
           selectedToolIDs: selectedToolIDs.slice(),
           selectedSkills: selectedSkills.slice(),
+          selectedKnowledgeBaseIDs: selectedKnowledgeBaseIDs.slice(),
           htmlVisualPromptEnabled,
         },
       ];
@@ -1571,6 +1661,7 @@ export function useChatMessageSubmit({
     options,
     selectedPlatformModelName,
     selectedSkills,
+    selectedKnowledgeBaseIDs,
     selectedToolIDs,
     setAttachments,
     setDraft,
@@ -1875,7 +1966,7 @@ export function useChatMessageSubmit({
         dispatchingQueuedSubmissionIDsRef.current.delete(queuedSubmission.id);
       });
   }, [
-    activeRunRevision,
+    activeGenerationRunsRevision,
     combinedMessages,
     conversationScopeKey,
     currentLeafMessage?.publicID,
@@ -1999,6 +2090,31 @@ export function useChatMessageSubmit({
     [replaceMessage, t],
   );
 
+  const onForkMessage = React.useCallback(
+    async (message: ChatAreaMessage) => {
+      const messagePublicID = resolvePersistedPublicID(message.publicID);
+      const conversationPublicID = conversationIDRef.current?.trim() || "";
+      if (!messagePublicID || !conversationPublicID) {
+        toast.error(t("forkFailed"), { description: t("continueReplyUnavailable") });
+        return;
+      }
+      const token = await resolveAccessToken();
+      if (!token) {
+        toast.error(t("forkFailed"), { description: t("signInRequired") });
+        return;
+      }
+      try {
+        const forked = await forkConversationFromMessage(token, conversationPublicID, messagePublicID);
+        await onConversationForked?.(forked);
+      } catch (error) {
+        toast.error(t("forkFailed"), {
+          description: resolveErrorMessage(error, t("retryLater")),
+        });
+      }
+    },
+    [onConversationForked, t],
+  );
+
   const onCycleMessageBranch = React.useCallback(
     (parentPublicID: string | null, direction: "previous" | "next") => {
       const siblings = buildChildrenIndex(combinedMessages).get(toBranchKey(parentPublicID)) ?? [];
@@ -2030,6 +2146,7 @@ export function useChatMessageSubmit({
     onEditAssistantMessage,
     onEditUserMessage,
     onContinueAssistantMessage,
+    onForkMessage,
     onRetryAssistantMessage,
     onRetryUserMessage,
     onSendMessage,

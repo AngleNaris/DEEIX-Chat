@@ -23,6 +23,7 @@ const (
 	AdapterXAIImage               = "xai_image"                   // POST /v1/images/generations
 	AdapterXAIImageEdits          = "xai_image_edits"             // POST /v1/images/edits
 	AdapterXAIVideo               = "xai_video"                   // POST /v1/videos/generations + GET /v1/videos/{request_id}
+	AdapterXAIVideoExtensions     = "xai_video_extensions"        // POST /v1/videos/extensions + GET /v1/videos/{request_id}
 )
 
 var (
@@ -64,7 +65,8 @@ func IsKnownAdapter(raw string) bool {
 		AdapterXAIResponses,
 		AdapterXAIImage,
 		AdapterXAIImageEdits,
-		AdapterXAIVideo:
+		AdapterXAIVideo,
+		AdapterXAIVideoExtensions:
 		return true
 	default:
 		return false
@@ -75,7 +77,7 @@ func IsKnownAdapter(raw string) bool {
 func IsImplementedAdapter(raw string) bool {
 	switch NormalizeAdapter(raw) {
 	case AdapterOpenAIResponses, AdapterOpenRouterChat, AdapterOpenRouterResponses, AdapterOpenAIChatCompletions, AdapterOpenAIImageGenerations, AdapterOpenAIImageEdits, AdapterXAIResponses,
-		AdapterAnthropicMessages, AdapterGoogleGenerateContent, AdapterGoogleImageGeneration, AdapterGeminiInteractions, AdapterXAIImage, AdapterXAIImageEdits, AdapterXAIVideo:
+		AdapterAnthropicMessages, AdapterGoogleGenerateContent, AdapterGoogleImageGeneration, AdapterGeminiInteractions, AdapterXAIImage, AdapterXAIImageEdits, AdapterXAIVideo, AdapterXAIVideoExtensions:
 		return true
 	default:
 		return false
@@ -141,7 +143,7 @@ func IsImageEditAdapter(raw string) bool {
 // IsVideoGenerationAdapter 返回协议是否属于独立视频生成链路。
 func IsVideoGenerationAdapter(raw string) bool {
 	switch NormalizeAdapter(raw) {
-	case AdapterGeminiInteractions, AdapterXAIVideo:
+	case AdapterGeminiInteractions, AdapterXAIVideo, AdapterXAIVideoExtensions:
 		return true
 	default:
 		return false
@@ -159,6 +161,8 @@ func DefaultEndpointForAdapter(adapter string) string {
 		return EndpointImageEdits
 	case AdapterXAIVideo:
 		return EndpointVideoGenerations
+	case AdapterXAIVideoExtensions:
+		return EndpointVideoExtensions
 	case AdapterGeminiInteractions:
 		return EndpointInteractions
 	default:

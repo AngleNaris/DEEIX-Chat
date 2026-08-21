@@ -320,7 +320,7 @@ func validateKinds(kinds []string) bool {
 		switch kind {
 		case modelKindChat:
 			hasPrimary = true
-		case modelKindAudio, modelKindImageGen, modelKindImageEdit, modelKindVideoGen:
+		case modelKindAudio, modelKindImageGen, modelKindImageEdit, modelKindVideoGen, modelKindVideoExtension:
 			hasPrimary = true
 		default:
 			return false

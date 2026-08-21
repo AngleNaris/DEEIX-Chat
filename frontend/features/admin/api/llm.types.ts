@@ -13,6 +13,8 @@ import type {
   ModelDataResponse,
   ModelDisplayGroupDataResponse,
   ModelDisplayGroupResponse,
+  ModelIconAssetListItemResponse,
+  ModelIconAssetResponse,
   ModelProbeBatchResponse,
   ModelProbeDebugRequestResponse,
   ModelProbeDebugResponse,
@@ -21,12 +23,16 @@ import type {
   ModelResponse,
   ModelUpstreamSourceDataResponse,
   ModelUpstreamSourceResponse,
+  ModelVendorDataResponse,
+  ModelVendorDeleteConflictDetails,
+  ModelVendorResponse,
   ReorderModelsRequest,
+  SetModelProtocolsRequest,
   SetModelsDisplayGroupRequest,
   UpdateModelDisplayGroupRequest,
   UpdateModelRequest,
-  UpdateModelVendorRequest,
   UpdateModelUpstreamSourceRequest,
+  UpdateModelVendorRequest,
   UpdateUpstreamRequest,
   UpsertUpstreamModelRequest,
   UpstreamAPIKeyResponse,
@@ -36,8 +42,6 @@ import type {
   UpstreamRemoteModelResponse,
   UpstreamRemoteModelsResponse,
   UpstreamResponse,
-  ModelVendorDataResponse,
-  ModelVendorResponse,
 } from "@deeix/api-contract";
 
 export type AdminLLMStatus = "active" | "inactive";
@@ -57,7 +61,8 @@ export type AdminLLMAdapter =
   | "xai_responses"
   | "xai_image"
   | "xai_image_edits"
-  | "xai_video";
+  | "xai_video"
+  | "xai_video_extensions";
 export type AdminLLMModelVendor = string;
 export type AdminLLMCompatible =
   | "openai"
@@ -177,7 +182,10 @@ export type AdminLLMSetting = {
 };
 
 export type AdminLLMModelVendorDTO = ModelVendorResponse;
+export type AdminLLMModelVendorDeleteConflictDetails = ModelVendorDeleteConflictDetails;
 export type AdminLLMModelDisplayGroupDTO = ModelDisplayGroupResponse;
+export type AdminLLMModelIconAsset = ModelIconAssetResponse;
+export type AdminLLMModelIconAssetListItem = ModelIconAssetListItemResponse;
 
 // ---------------------------------------------------------------------------
 // Request types
@@ -227,9 +235,12 @@ export type UpdateAdminLLMModelVendorRequest = UpdateModelVendorRequest;
 export type CreateAdminLLMModelDisplayGroupRequest = CreateModelDisplayGroupRequest;
 export type UpdateAdminLLMModelDisplayGroupRequest = UpdateModelDisplayGroupRequest;
 export type SetAdminLLMModelsDisplayGroupRequest = SetModelsDisplayGroupRequest;
+export type SetAdminLLMModelProtocolsRequest = Omit<SetModelProtocolsRequest, "protocols"> & {
+  protocols: AdminLLMAdapter[];
+};
 
-export type UpsertAdminLLMUpstreamModelRequest = Omit<UpsertUpstreamModelRequest, "protocol" | "status"> & {
-  protocol?: AdminLLMAdapter;
+export type UpsertAdminLLMUpstreamModelRequest = Omit<UpsertUpstreamModelRequest, "protocols" | "status"> & {
+  protocols: AdminLLMAdapter[];
   status?: AdminLLMStatus;
 };
 

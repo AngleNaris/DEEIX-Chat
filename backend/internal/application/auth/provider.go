@@ -712,7 +712,7 @@ func isValidProviderLogoURL(value string) bool {
 	if err != nil {
 		return false
 	}
-	if (parsedLogoURL.Scheme == "http" || parsedLogoURL.Scheme == "https") && parsedLogoURL.Host != "" {
+	if (parsedLogoURL.Scheme == "http" || parsedLogoURL.Scheme == "https") && parsedLogoURL.Host != "" && parsedLogoURL.User == nil {
 		return true
 	}
 	return parsedLogoURL.Scheme == "" &&

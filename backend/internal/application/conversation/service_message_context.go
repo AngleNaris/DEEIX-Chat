@@ -19,7 +19,13 @@ import (
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/pkg/conv"
 )
 
-const MessageErrorCodeMediaImageStreamUnsupported = "media.image_stream_unsupported"
+const (
+	MessageErrorCodeMediaImageStreamUnsupported   = "media.image_stream_unsupported"
+	MessageErrorCodeKnowledgeBaseInvalidReference = "knowledge_base.invalid_reference"
+	MessageErrorCodeKnowledgeBaseUnavailable      = "knowledge_base.unavailable"
+	MessageErrorCodeKnowledgeBaseNotReady         = "knowledge_base.not_ready"
+	messageErrorCodeInternal                      = "internal.error"
+)
 
 const (
 	maxConversationImageContextCount = 10
@@ -199,6 +205,12 @@ func classifyRunErrorCode(err error) string {
 		return "storage_quota_exceeded"
 	case errors.Is(err, ErrFileTooLarge):
 		return "file_too_large"
+	case errors.Is(err, ErrInvalidKnowledgeBaseReference):
+		return MessageErrorCodeKnowledgeBaseInvalidReference
+	case errors.Is(err, ErrKnowledgeBaseUnavailable):
+		return MessageErrorCodeKnowledgeBaseUnavailable
+	case errors.Is(err, ErrKnowledgeBaseNotReady):
+		return MessageErrorCodeKnowledgeBaseNotReady
 	case errors.Is(err, ErrModelRouteNotConfigured):
 		return "model_route_not_configured"
 	case errors.Is(err, ErrUpstreamEmptyResponse):
@@ -229,7 +241,7 @@ func classifyRunErrorCode(err error) string {
 	case errors.Is(err, ErrUpstreamRequestFailed):
 		return "upstream_request_failed"
 	default:
-		return "internal_error"
+		return messageErrorCodeInternal
 	}
 }
 
@@ -702,6 +714,7 @@ type userContextInput struct {
 	Attachments         []AttachmentInput
 	ImageAnalyses       []imageAttachmentAnalysis
 	RAGChunks           []domainconversation.RAGChunk
+	RAGNotice           string
 	HistoricalArtifacts []domainconversation.ContextArtifact
 	CurrentArtifacts    []domainconversation.ContextArtifact
 	Snapshot            *snapshotContext
@@ -958,6 +971,7 @@ func injectUserContext(
 	if len(input.Attachments) == 0 &&
 		len(input.ImageAnalyses) == 0 &&
 		len(input.RAGChunks) == 0 &&
+		strings.TrimSpace(input.RAGNotice) == "" &&
 		len(input.HistoricalArtifacts) == 0 &&
 		input.Snapshot == nil &&
 		len(input.Memory) == 0 &&
@@ -1082,13 +1096,14 @@ func formatAttachmentFileContext(fileName string, text string) string {
 }
 
 type userContextXML struct {
-	summary  string
-	memory   []string
-	files    []string
-	images   []string
-	evidence []string
-	rag      []string
-	recall   []string
+	summary   string
+	memory    []string
+	files     []string
+	images    []string
+	evidence  []string
+	rag       []string
+	ragNotice string
+	recall    []string
 }
 
 func (x userContextXML) empty() bool {
@@ -1098,17 +1113,19 @@ func (x userContextXML) empty() bool {
 		len(x.images) == 0 &&
 		len(x.evidence) == 0 &&
 		len(x.rag) == 0 &&
+		strings.TrimSpace(x.ragNotice) == "" &&
 		len(x.recall) == 0
 }
 
 func buildUserContextXML(input userContextInput) userContextXML {
 	return userContextXML{
-		summary:  formatSnapshotContext(input.Snapshot),
-		memory:   formatMemoryContext(input.Memory),
-		images:   formatImageAnalysisContext(input.ImageAnalyses),
-		evidence: formatHistoricalEvidenceContext(input.HistoricalArtifacts),
-		rag:      formatRAGFileContext(input.RAGChunks),
-		recall:   formatRecallContext(input.RecallChunks),
+		summary:   formatSnapshotContext(input.Snapshot),
+		memory:    formatMemoryContext(input.Memory),
+		images:    formatImageAnalysisContext(input.ImageAnalyses),
+		evidence:  formatHistoricalEvidenceContext(input.HistoricalArtifacts),
+		rag:       formatRAGFileContext(input.RAGChunks),
+		ragNotice: strings.TrimSpace(input.RAGNotice),
+		recall:    formatRecallContext(input.RecallChunks),
 	}
 }
 
@@ -1263,6 +1280,11 @@ func buildUserContextPrompt(userRequest string, contextXML userContextXML) strin
 		builder.WriteString(strings.Join(contextXML.rag, "\n"))
 		builder.WriteString("\n</rag>")
 	}
+	if strings.TrimSpace(contextXML.ragNotice) != "" {
+		builder.WriteString("\n<rag_status>")
+		builder.WriteString(xmlEscapeText(contextXML.ragNotice))
+		builder.WriteString("</rag_status>")
+	}
 	if len(contextXML.recall) > 0 {
 		builder.WriteString("\n<recall>\n")
 		builder.WriteString(strings.Join(contextXML.recall, "\n"))
@@ -1372,11 +1394,11 @@ func (s *Service) selectRelevantUserMemories(ctx context.Context, userID uint, q
 	}
 	searchCtx, cancel := context.WithTimeout(ctx, semanticRecallDeadline)
 	defer cancel()
-	embeddings, err := s.embeddingSvc.EmbedTexts(searchCtx, []string{query})
+	embeddings, embeddingSignature, err := s.embeddingSvc.EmbedTextsWithSignature(searchCtx, []string{query})
 	if err != nil || len(embeddings) == 0 {
 		return fallback
 	}
-	matches, err := s.memoryRecorder.SearchUserMemoriesByEmbedding(searchCtx, userID, embeddings[0], topK, 0.7)
+	matches, err := s.memoryRecorder.SearchUserMemoriesByEmbedding(searchCtx, userID, embeddings[0], embeddingSignature, topK, 0.7)
 	if err != nil || len(matches) == 0 {
 		return fallback
 	}

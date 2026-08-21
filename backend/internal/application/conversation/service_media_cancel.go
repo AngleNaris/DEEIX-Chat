@@ -220,7 +220,8 @@ func mediaDurationSecondsFromOptions(options map[string]interface{}) int64 {
 // withDefaultMediaVideoDuration 仅向明确支持 duration 参数的视频协议补齐产品缺省值。
 // 其他协议仍以其返回的真实媒体时长为准，避免发送未声明的厂商参数。
 func withDefaultMediaVideoDuration(options map[string]interface{}, protocol string) map[string]interface{} {
-	if mediaDurationSecondsFromOptions(options) > 0 || llm.NormalizeAdapter(protocol) != llm.AdapterXAIVideo {
+	adapter := llm.NormalizeAdapter(protocol)
+	if mediaDurationSecondsFromOptions(options) > 0 || (adapter != llm.AdapterXAIVideo && adapter != llm.AdapterXAIVideoExtensions) {
 		return options
 	}
 	next := make(map[string]interface{}, len(options)+1)

@@ -1,12 +1,11 @@
 "use client";
 
-import { useState } from "react";
 import { Check, Copy, Search } from "lucide-react";
+import { useState } from "react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   Dialog,
   DialogContent,
@@ -15,11 +14,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { cn } from "@/lib/utils";
 import type { AdminLLMAdapter, AdminLLMModelDTO } from "@/features/admin/api/llm.types";
-import { parseProtocolsJSON } from "@/shared/lib/model-protocols";
+import { cn } from "@/lib/utils";
 import { MODEL_OPTION_POLICY_PROTOCOL_LABELS, resolveModelOptionPolicyProtocol } from "@/shared/lib/model-option-policy";
+import { parseProtocolsJSON } from "@/shared/lib/model-protocols";
 
 type CapabilityPreset = {
   id: string;
@@ -62,6 +62,7 @@ const XAI_IMAGE_ASPECT_RATIOS = [
 const XAI_IMAGE_RESOLUTIONS = ["1k", "2k"];
 const XAI_VIDEO_ASPECT_RATIOS = ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"];
 const XAI_VIDEO_DURATIONS = Array.from({ length: 15 }, (_, index) => String(index + 1));
+const XAI_VIDEO_EXTENSION_DURATIONS = Array.from({ length: 9 }, (_, index) => String(index + 2));
 const XAI_VIDEO_RESOLUTIONS = ["480p", "720p", "1080p"];
 
 const XAI_IMAGE_OPTION_CONTROLS = [
@@ -299,18 +300,20 @@ const MODEL_CAPABILITY_PRESETS: CapabilityPreset[] = [
       nativeTools: [
         {
           key: "google.code_execution",
-          protocols: ["google_generate_content", "gemini_generate_content"],
+          protocols: ["gemini_generate_content"],
           label: "Code Execution",
           enabled: true,
           defaultEnabled: true,
           payload: {
             code_execution: {},
           },
+          provider: "Google",
           type: "code_execution",
+          description: "Google hosted code execution tool.",
         },
         {
           key: "google.google_search",
-          protocols: ["google_generate_content", "gemini_generate_content"],
+          protocols: ["gemini_generate_content"],
           label: "Google Search",
           enabled: true,
           defaultEnabled: true,
@@ -323,14 +326,91 @@ const MODEL_CAPABILITY_PRESETS: CapabilityPreset[] = [
         },
         {
           key: "google.url_context",
-          protocols: ["google_generate_content", "gemini_generate_content"],
+          protocols: ["gemini_generate_content"],
           label: "URL Context",
           enabled: true,
           defaultEnabled: true,
           payload: {
             url_context: {},
           },
+          provider: "Google",
           type: "url_context",
+          description: "Google hosted URL context tool.",
+        },
+      ],
+    },
+  },
+  {
+    id: "gemini_interactions",
+    protocol: "gemini_interactions",
+    payload: {
+      defaultOptions: {
+        generation_config: {
+          thinking_level: "medium",
+          thinking_summaries: "auto",
+        },
+      },
+      optionControls: [
+        {
+          path: "generation_config.thinking_level",
+          type: "select",
+          label: "Thinking Level",
+          description: "Controls the depth of the model's internal reasoning.",
+          options: ["minimal", "low", "medium", "high"],
+        },
+        {
+          path: "generation_config.thinking_summaries",
+          type: "select",
+          label: "Thinking Summaries",
+          description: "Controls whether thought summaries are included in the response.",
+          options: ["none", "auto"],
+        },
+        {
+          path: "generation_config.max_output_tokens",
+          type: "number",
+          label: "Max Output Tokens",
+          description: "Maximum number of tokens to include in the response.",
+        },
+      ],
+      nativeTools: [
+        {
+          key: "google.code_execution",
+          protocols: ["gemini_interactions"],
+          label: "Code Execution",
+          enabled: true,
+          defaultEnabled: true,
+          payload: {
+            type: "code_execution",
+          },
+          provider: "Google",
+          type: "code_execution",
+          description: "Google hosted code execution tool.",
+        },
+        {
+          key: "google.google_search",
+          protocols: ["gemini_interactions"],
+          label: "Google Search",
+          enabled: true,
+          defaultEnabled: true,
+          payload: {
+            type: "google_search",
+          },
+          provider: "Google",
+          type: "google_search",
+          description: "Google hosted search grounding tool.",
+        },
+        {
+          key: "google.url_context",
+          protocols: ["gemini_interactions"],
+          label: "URL Context",
+          enabled: true,
+          defaultEnabled: true,
+          payload: {
+            type: "url_context",
+          },
+          provider: "Google",
+          type: "url_context",
+          description: "Google hosted URL context tool.",
         },
       ],
     },
@@ -500,6 +580,37 @@ const MODEL_CAPABILITY_PRESETS: CapabilityPreset[] = [
           options: XAI_VIDEO_RESOLUTIONS,
         },
       ],
+    },
+  },
+  {
+    id: "xai_video_extensions",
+    protocol: "xai_video_extensions",
+    payload: {
+      defaultOptions: { duration: 6 },
+      optionControls: [
+        {
+          path: "duration",
+          type: "select",
+          label: "Extension duration (seconds)",
+          description: "Additional video duration from 2 to 10 seconds.",
+          options: XAI_VIDEO_EXTENSION_DURATIONS,
+        },
+      ],
+      mediaTasks: {
+        video_extension: {
+          enabled: true,
+          defaultOptions: { duration: 6 },
+          optionControls: [
+            {
+              path: "duration",
+              type: "select",
+              label: "Extension duration (seconds)",
+              description: "Additional video duration from 2 to 10 seconds.",
+              options: XAI_VIDEO_EXTENSION_DURATIONS,
+            },
+          ],
+        },
+      },
     },
   },
 ];

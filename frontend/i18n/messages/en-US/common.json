@@ -46,6 +46,7 @@
     "search": "Search",
     "recent": "Recent",
     "files": "Files",
+    "knowledgeBases": "Knowledge bases",
     "skillsPrompt": "Skills & Prompts",
     "searchTitle": "Search",
     "searchDescription": "Search conversation titles, labels, projects, and message content",
@@ -110,6 +111,7 @@
   },
   "runtime": {
     "status": {
+      "available": "Available",
       "running": "Running",
       "restarting": "Restarting",
       "created": "Created",

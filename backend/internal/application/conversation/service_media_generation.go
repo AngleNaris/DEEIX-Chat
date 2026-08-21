@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/channel"
+	appcm "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/contentmoderation"
 	appupload "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/upload"
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/llm"
@@ -176,23 +177,51 @@ func (s *Service) StreamMediaImage(ctx context.Context, input MediaImageInput) (
 		StartedAt:          startedAt,
 	}
 	var retErr error
+	var moderationCoord *appcm.RunCoordinator
+	var result *SendMessageResult
+	var userMessage *model.Message
+	var assistantMessage *model.Message
 	defer func() {
+		// On generation failure, still finish input-only moderation when active.
+		if retErr != nil && moderationCoord != nil {
+			if result == nil && userMessage != nil && assistantMessage != nil {
+				result = &SendMessageResult{
+					UserMessage:      *userMessage,
+					AssistantMessage: *assistantMessage,
+					Billable:         false,
+					StartedAt:        startedAt,
+				}
+			}
+			s.completeModerationAfterFailure(context.WithoutCancel(ctx), moderationCoord, result)
+		}
 		endedAt := time.Now()
 		run.EndedAt = &endedAt
 		run.TotalLatencyMS = endedAt.Sub(startedAt).Milliseconds()
-		if retErr == nil {
+		switch {
+		case result != nil && result.IsModerationBlocked():
+			applyBlockedRunFields(run, result)
+		case retErr == nil:
 			run.Status = "success"
-		} else if errors.Is(retErr, ErrMessageGenerationCanceled) {
+			if result != nil {
+				applyModerationRunState(run, result)
+			}
+		case errors.Is(retErr, ErrMessageGenerationCanceled):
 			run.Status = "canceled"
 			run.ErrorCode = classifyRunErrorCode(retErr)
 			run.ErrorMessage = truncateError(messageErrorSummary(retErr), 255)
-		} else {
+			if result != nil {
+				applyModerationRunState(run, result)
+			}
+		default:
 			run.Status = "error"
 			run.ErrorCode = classifyRunErrorCode(retErr)
 			run.ErrorMessage = truncateError(messageErrorSummary(retErr), 255)
+			if result != nil {
+				applyModerationRunState(run, result)
+			}
 		}
-		if err := s.repo.CreateConversationRun(context.WithoutCancel(ctx), run); err != nil && s.logger != nil {
-			s.logger.Error("create_media_conversation_run_failed",
+		if err := s.repo.UpsertConversationRun(context.WithoutCancel(ctx), run); err != nil && s.logger != nil {
+			s.logger.Error("upsert_media_conversation_run_failed",
 				zap.String("trace_id", traceid.FromContext(ctx)),
 				zap.String("run_id", run.RunID),
 				zap.Error(err),
@@ -203,7 +232,7 @@ func (s *Service) StreamMediaImage(ctx context.Context, input MediaImageInput) (
 	ctx = cancelCtx
 	s.generationStreams.register(ctx, runID, input.UserID, cancel)
 
-	assistantMessage := &model.Message{
+	assistantMessage = &model.Message{
 		ConversationID: input.ConversationID,
 		UserID:         input.UserID,
 		PublicID:       normalizePublicID(uuid.NewString()),
@@ -215,7 +244,6 @@ func (s *Service) StreamMediaImage(ctx context.Context, input MediaImageInput) (
 		Status:         "pending",
 		Attachments:    "[]",
 	}
-	var userMessage *model.Message
 	if reuseUserMessage {
 		reused := *branchState.ReuseUserMessage
 		userMessage = &reused
@@ -276,11 +304,29 @@ func (s *Service) StreamMediaImage(ctx context.Context, input MediaImageInput) (
 	}
 	traceRecorder := newMessageTraceRecorder(s, ctx, assistantMessage, input.OnEvent)
 	defer func() {
-		if retErr != nil && traceRecorder != nil {
+		if retErr != nil && (result == nil || !result.IsModerationBlocked()) && traceRecorder != nil {
 			traceRecorder.fail(retErr)
 			traceRecorder.attachToMessage(assistantMessage)
 		}
 	}()
+	// Prefer explicit FileIDs; fall back to resolved edit attachments.
+	moderationFileIDs := append([]string{}, input.FileIDs...)
+	if len(moderationFileIDs) == 0 {
+		for _, item := range resolvedAttachments {
+			if id := strings.TrimSpace(item.FileID); id != "" {
+				moderationFileIDs = append(moderationFileIDs, id)
+			}
+		}
+	}
+	moderationCoord = s.startModerationRun(ctx, SendMessageInput{
+		UserID:         input.UserID,
+		ConversationID: input.ConversationID,
+		RequestID:      input.RequestID,
+		Content:        strings.TrimSpace(input.Prompt),
+		FileIDs:        moderationFileIDs,
+		ClientRunID:    runID,
+		OnEvent:        input.OnEvent,
+	}, runID, userMessage, assistantMessage, run)
 	emitMediaEvent(input.OnEvent, "queued", "image task queued")
 
 	cfg := s.cfg.Snapshot()
@@ -409,6 +455,7 @@ func (s *Service) StreamMediaImage(ctx context.Context, input MediaImageInput) (
 	}
 	uploaded := make([]model.FileObject, 0, len(output.GeneratedImages))
 	attachmentRows := make([]model.Attachment, 0, len(output.GeneratedImages))
+	generatedBytesByFileID := make(map[string][]byte, len(output.GeneratedImages))
 	now := time.Now()
 	for i, image := range output.GeneratedImages {
 		data, mimeType, readErr := s.readGeneratedImage(ctx, image, route.BaseURL)
@@ -432,6 +479,7 @@ func (s *Service) StreamMediaImage(ctx context.Context, input MediaImageInput) (
 		}
 		file := uploadResult.File
 		uploaded = append(uploaded, file)
+		generatedBytesByFileID[file.FileID] = data
 		attachmentRows = append(attachmentRows, model.Attachment{
 			ConversationID: input.ConversationID,
 			MessageID:      assistantMessage.ID,
@@ -526,7 +574,7 @@ func (s *Service) StreamMediaImage(ctx context.Context, input MediaImageInput) (
 	run.CacheWriteTokens = usage.CacheWriteTokens
 	run.ReasoningTokens = usage.ReasoningTokens
 
-	return &SendMessageResult{
+	result = &SendMessageResult{
 		UserMessage:         *userMessage,
 		AssistantMessage:    *assistantMessage,
 		MetadataRefreshHint: s.resolveConversationMetadataRefreshHint(ctx, *conversation, *userMessage),
@@ -545,7 +593,23 @@ func (s *Service) StreamMediaImage(ctx context.Context, input MediaImageInput) (
 		CacheWrite1hTokens:  usage.CacheWrite1hTokens,
 		LatencyMS:           latencyMS,
 		StartedAt:           startedAt,
-	}, nil
+	}
+	if moderationCoord != nil {
+		outputImages := loadOutputImagesFromFiles(moderationCoord, uploaded, generatedBytesByFileID)
+		s.completeModerationAfterSuccess(
+			ctx,
+			moderationCoord,
+			result,
+			moderationOutputText(output.Text, traceRecorder.upstreamThinkContent()),
+			outputImages,
+			SendMessageInput{
+				UserID:         input.UserID,
+				ConversationID: input.ConversationID,
+			},
+			reuseUserMessage,
+		)
+	}
+	return result, nil
 }
 
 // mediaOutputUsage 安全提取允许为空的媒体响应 usage。
@@ -690,12 +754,6 @@ func withGeminiInteractionResponseType(options map[string]interface{}, responseT
 		for key, value := range raw {
 			format[key] = value
 		}
-	}
-	if raw, ok := next["responseFormat"].(map[string]interface{}); ok {
-		for key, value := range raw {
-			format[key] = value
-		}
-		delete(next, "responseFormat")
 	}
 	format["type"] = strings.TrimSpace(responseType)
 	next["response_format"] = format

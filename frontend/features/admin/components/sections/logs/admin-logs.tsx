@@ -99,6 +99,8 @@ import {
 } from "@/shared/lib/billing-display";
 import { ModelSelect, type ModelSelectOption } from "@/shared/components/model-select";
 import { formatBytes } from "@/shared/lib/file-display";
+import { ModerationEventTable } from "@/features/admin/components/sections/logs/admin-moderation-events";
+import { useAuthSession } from "@/shared/auth/auth-session-context";
 
 type LogDetail =
   | { kind: "audit"; item: AdminAuditLogDTO }
@@ -2036,6 +2038,8 @@ function LogCleanupDialog({
 
 export function AdminLogsPage() {
   const t = useTranslations("adminLogs");
+  const { user } = useAuthSession();
+  const isSuperAdmin = user?.role === "superadmin";
   const [detail, setDetail] = React.useState<LogDetail | null>(null);
   const [conversationDetailLoading, setConversationDetailLoading] = React.useState(false);
   const detailRequestRef = React.useRef(0);
@@ -2140,6 +2144,7 @@ export function AdminLogsPage() {
           <TabsTrigger value="auth">{t("tabs.auth")}</TabsTrigger>
           <TabsTrigger value="orders">{t("tabs.orders")}</TabsTrigger>
           <TabsTrigger value="conversation">{t("tabs.conversation")}</TabsTrigger>
+          {isSuperAdmin ? <TabsTrigger value="moderation">{t("tabs.moderation")}</TabsTrigger> : null}
         </TabsList>
         <TabsContent value="audit">
           <AuditLogTable key={cleanupRevisions.audit} onOpenDetail={(item) => setDetail({ kind: "audit", item })} />
@@ -2160,6 +2165,11 @@ export function AdminLogsPage() {
         <TabsContent value="conversation">
           <ConversationEventTable key={cleanupRevisions.conversation} onOpenDetail={(item) => void openConversationDetail(item)} />
         </TabsContent>
+        {isSuperAdmin ? (
+          <TabsContent value="moderation">
+            <ModerationEventTable />
+          </TabsContent>
+        ) : null}
       </Tabs>
 
       <LogDetailSheet

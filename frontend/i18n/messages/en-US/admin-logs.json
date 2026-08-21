@@ -10,6 +10,7 @@
     "auth": "Auth security",
     "orders": "Order records",
     "conversation": "Conversation events",
+    "moderation": "Moderation events",
     "system": "System events"
   },
   "cleanup": {
@@ -135,6 +136,7 @@
       "login": "Sign in",
       "stream_message": "Send message",
       "create_conversation": "Create conversation",
+      "fork_conversation": "Fork conversation",
       "rename_conversation": "Rename conversation",
       "update_conversation_labels": "Update conversation labels",
       "export_conversation": "Export conversation",
@@ -388,5 +390,49 @@
     "payloadOmitted": "This historical payload is {size}, above the safe viewing limit, so its content was omitted. Delete the associated run traces to remove this abnormal historical data.",
     "copied": "{label} copied",
     "copyFailed": "Copy failed"
+  },
+  "moderation": {
+    "searchPlaceholder": "Search exact event ID, user, result, or run ID…",
+    "empty": "No moderation events yet.",
+    "loadFailed": "Could not load moderation events",
+    "viewDetail": "View detail",
+    "detailTitle": "Moderation event detail",
+    "detailFailed": "Could not load event detail",
+    "detailText": "Decrypted text",
+    "detailImages": "Isolated images",
+    "detailImageAlt": "Moderation image {index}",
+    "imageLoadFailed": "Failed to load one or more isolated images",
+    "filters": {
+      "all": "All"
+    },
+    "results": {
+      "passed": "Passed",
+      "hit": "Hit",
+      "failedOpen": "Failed open"
+    },
+    "directions": {
+      "input": "Input",
+      "output": "Output"
+    },
+    "modalities": {
+      "text": "Text",
+      "image": "Image"
+    },
+    "columns": {
+      "eventId": "Event ID",
+      "user": "User",
+      "result": "Result",
+      "direction": "Direction",
+      "modality": "Modality",
+      "latency": "Latency",
+      "createdAt": "Created",
+      "actions": "Actions",
+      "model": "Model",
+      "userID": "User ID",
+      "runID": "Run ID"
+    },
+    "blocks": {
+      "event": "Event"
+    }
   }
 }

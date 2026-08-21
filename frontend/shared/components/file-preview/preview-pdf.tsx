@@ -157,17 +157,24 @@ export function PreviewPdf({ source, toolbarContainer, showLoading = true, onLoa
     }
 
     let cancelled = false;
+    const abortController = new AbortController();
     let loadingTask: ReturnType<PdfModule["getDocument"]> | null = null;
+    setDocumentProxy(null);
+    setPageCount(0);
 
     void (async () => {
       try {
         setStatus("loading");
-        const response = await fetch(source);
+        const response = await fetch(source, { signal: abortController.signal });
         const arrayBuffer = await response.arrayBuffer();
+        if (cancelled) {
+          return;
+        }
         loadingTask = pdfModule.getDocument({
           data: new Uint8Array(arrayBuffer),
           cMapUrl: "/pdfjs/cmaps/",
           cMapPacked: true,
+          enableScripting: false,
           standardFontDataUrl: "/pdfjs/standard_fonts/",
           useSystemFonts: true,
           enableXfa: true,
@@ -176,16 +183,10 @@ export function PreviewPdf({ source, toolbarContainer, showLoading = true, onLoa
         const pdf = await loadingTask.promise;
 
         if (cancelled) {
-          await pdf.destroy();
           return;
         }
 
-        setDocumentProxy((current) => {
-          if (current) {
-            void current.destroy();
-          }
-          return pdf;
-        });
+        setDocumentProxy(pdf);
         setPageCount(pdf.numPages);
         setStatus("ready");
       } catch (error) {
@@ -199,8 +200,11 @@ export function PreviewPdf({ source, toolbarContainer, showLoading = true, onLoa
 
     return () => {
       cancelled = true;
+      abortController.abort();
       if (loadingTask) {
-        void loadingTask.destroy();
+        void loadingTask.destroy().catch(() => {
+          // The loading task may already be shutting down after an aborted load.
+        });
       }
     };
   }, [pdfModule, source, t]);
@@ -283,14 +287,6 @@ export function PreviewPdf({ source, toolbarContainer, showLoading = true, onLoa
       });
     };
   }, [availableWidth, documentProxy, status, zoom]);
-
-  React.useEffect(() => {
-    return () => {
-      if (documentProxy) {
-        void documentProxy.destroy();
-      }
-    };
-  }, [documentProxy]);
 
   const toggleFullscreen = React.useCallback(async () => {
     const element = containerRef.current;

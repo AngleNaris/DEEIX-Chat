@@ -1,8 +1,8 @@
+import { CircleOff, CloudDownload, MoreHorizontal, Pencil, RotateCcw, Settings2, ShieldAlert, Trash2, Zap } from "lucide-react";
+import { useLocale, useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Switch } from "@/components/ui/switch";
-import { useLocale, useTranslations } from "next-intl";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -10,6 +10,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Switch } from "@/components/ui/switch";
 import {
   Table,
   TableBody,
@@ -20,15 +21,14 @@ import {
   TableLoadingRow,
   TableRow,
 } from "@/components/ui/table";
-import { useVirtualTableRows, VirtualTablePaddingRow } from "@/components/ui/virtual-table";
-import type { AdminLLMUpstreamView } from "@/features/admin/api/llm.types";
-import { resolveCompatibleLabel, resolveProtocolLabel } from "@/features/admin/utils/llm-display";
-import { CircleOff, CloudDownload, MoreHorizontal, Pencil, RotateCcw, Settings2, ShieldAlert, Trash2, Zap } from "lucide-react";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { useVirtualTableRows, VirtualTablePaddingRow } from "@/components/ui/virtual-table";
+import type { AdminLLMUpstreamView } from "@/features/admin/api/llm.types";
+import { resolveCompatibleLabel, resolveProtocolLabel } from "@/features/admin/utils/llm-display";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -40,6 +40,7 @@ const PROTOCOL_DEFAULT_KIND_ORDER = [
   "image_gen",
   "image_edit",
   "video_gen",
+  "video_extension",
 ];
 const PROTOCOL_DEFAULT_KINDS = new Set(PROTOCOL_DEFAULT_KIND_ORDER);
 
@@ -109,6 +110,7 @@ function protocolDefaultEntries(parsed: Record<string, unknown>): Array<[string,
 type UpstreamsTableProps = {
   items: AdminLLMUpstreamView[];
   loading: boolean;
+  circuitBreakerEnabled: boolean;
   selected: Set<number>;
   togglingStatusIDs: Set<number>;
   onSelectAll: (checked: boolean) => void;
@@ -131,6 +133,7 @@ type UpstreamsTableProps = {
 export function UpstreamsTable({
   items,
   loading,
+  circuitBreakerEnabled,
   selected,
   togglingStatusIDs,
   onSelectAll,
@@ -278,7 +281,7 @@ export function UpstreamsTable({
                         name: item.name,
                       })}
                     />
-                    {item.circuitOpen ? (
+                    {circuitBreakerEnabled && item.circuitOpen ? (
                       <Tooltip>
                         <TooltipTrigger asChild>
                           <ShieldAlert
@@ -335,21 +338,23 @@ export function UpstreamsTable({
                           {t("actions.syncRemoteModels")}
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
-                        {item.circuitOpen ? (
-                          <DropdownMenuItem
-                            onClick={() => onCircuitAction(item, "reset")}
-                          >
-                            <RotateCcw className="size-3.5 stroke-1" />
-                            {t("actions.resetCircuit")}
-                          </DropdownMenuItem>
-                        ) : (
-                          <DropdownMenuItem
-                            onClick={() => onCircuitAction(item, "open")}
-                          >
-                            <CircleOff className="size-3.5 stroke-1" />
-                            {t("actions.openCircuit")}
-                          </DropdownMenuItem>
-                        )}
+                        {circuitBreakerEnabled ? (
+                          item.circuitOpen ? (
+                            <DropdownMenuItem
+                              onClick={() => onCircuitAction(item, "reset")}
+                            >
+                              <RotateCcw className="size-3.5 stroke-1" />
+                              {t("actions.resetCircuit")}
+                            </DropdownMenuItem>
+                          ) : (
+                            <DropdownMenuItem
+                              onClick={() => onCircuitAction(item, "open")}
+                            >
+                              <CircleOff className="size-3.5 stroke-1" />
+                              {t("actions.openCircuit")}
+                            </DropdownMenuItem>
+                          )
+                        ) : null}
                         <DropdownMenuItem onClick={() => onToggleStatus(item)}>
                           <Zap className="size-3.5 stroke-1" />
                           {item.status === "active" ? t("actions.disableUpstream") : t("actions.enableUpstream")}

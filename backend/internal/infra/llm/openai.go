@@ -345,17 +345,6 @@ func setOpenAIResponseTextParam(payload map[string]interface{}, key string, valu
 	text[key] = value
 }
 
-func normalizePromptCacheRetention(value string) string {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "in-memory", "in_memory":
-		return "in_memory"
-	case "24h":
-		return "24h"
-	default:
-		return ""
-	}
-}
-
 func buildOpenAIRequestURL(baseURL string, endpoint string) string {
 	switch endpoint {
 	case EndpointChatCompletions:
@@ -366,6 +355,8 @@ func buildOpenAIRequestURL(baseURL string, endpoint string) string {
 		return buildVersionedEndpointURL(baseURL, "v1", "/images/edits")
 	case EndpointVideoGenerations:
 		return buildVersionedEndpointURL(baseURL, "v1", "/videos/generations")
+	case EndpointVideoExtensions:
+		return buildVersionedEndpointURL(baseURL, "v1", "/videos/extensions")
 	default:
 		return buildVersionedEndpointURL(baseURL, "v1", "/responses")
 	}
