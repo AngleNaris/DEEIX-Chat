@@ -22,6 +22,7 @@ import {
   buildConversationSettingsFields,
   CONVERSATION_DEFAULT_MODEL_SYSTEM,
   CONVERSATION_TASK_MODEL_FOLLOW,
+  MULTIMODAL_DELEGATION_MODEL_UNCONFIGURED,
   type ConversationSettingsField,
   fieldID,
   flattenConversationSettings,

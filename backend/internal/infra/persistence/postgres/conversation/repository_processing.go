@@ -23,6 +23,9 @@ func (r *Repo) UpdateFileObjectProcessingState(ctx context.Context, item *domain
 	if item.ExpectedStoragePath != "" {
 		query = query.Where("storage_path = ?", item.ExpectedStoragePath)
 	}
+	if item.ExpectedProcessingStartedAt != nil {
+		query = query.Where("processing_started_at = ?", *item.ExpectedProcessingStartedAt)
+	}
 	result := query.Updates(fileObjectProcessingStateUpdates(item))
 	if result.Error != nil {
 		return translateError(result.Error)
@@ -83,6 +86,9 @@ func (r *Repo) UpdateFileObjectProcessing(
 		Where("user_id = ? AND file_id = ?", userID, fileID)
 	if input.ExpectedStoragePath != "" {
 		query = query.Where("storage_path = ?", input.ExpectedStoragePath)
+	}
+	if input.ExpectedProcessingStartedAt != nil {
+		query = query.Where("processing_started_at = ?", *input.ExpectedProcessingStartedAt)
 	}
 	result := query.Updates(updates)
 	if result.Error != nil {
@@ -226,7 +232,7 @@ func (r *Repo) ReplaceFileObjectContent(
 		"ocr_used":                 false,
 		"rag_ready":                false,
 		"rag_reason":               "",
-		"embed_status":             "",
+		"embed_status":             "none",
 		"embed_error":              "",
 		"chunk_count":              0,
 		"page_count":               0,
@@ -288,6 +294,121 @@ func (r *Repo) ReplaceFileObjectContent(
 		return repository.ReplaceFileObjectContentResult{}, translateError(err)
 	}
 	return cleanup, nil
+}
+
+func (r *Repo) ClaimFileProcessingQueue(
+	ctx context.Context,
+	userID uint,
+	fileID string,
+	expectedStoragePath string,
+) (bool, error) {
+	result := r.db.WithContext(ctx).
+		Model(&models.FileObject{}).
+		Where("user_id = ? AND file_id = ? AND storage_path = ? AND status = ? AND processing_status = ?",
+			userID, fileID, expectedStoragePath, "active", "pending").
+		Updates(map[string]interface{}{
+			"processing_status": "queued",
+			"updated_at":        time.Now(),
+		})
+	if result.Error != nil {
+		return false, translateError(result.Error)
+	}
+	return result.RowsAffected > 0, nil
+}
+
+func (r *Repo) ReleaseFileProcessingQueueClaim(
+	ctx context.Context,
+	userID uint,
+	fileID string,
+	expectedStoragePath string,
+) error {
+	result := r.db.WithContext(ctx).
+		Model(&models.FileObject{}).
+		Where("user_id = ? AND file_id = ? AND storage_path = ? AND status = ? AND processing_status = ?",
+			userID, fileID, expectedStoragePath, "active", "queued").
+		Updates(map[string]interface{}{
+			"processing_status": "pending",
+			"updated_at":        time.Now(),
+		})
+	return translateError(result.Error)
+}
+
+func (r *Repo) ClaimFileProcessingExecution(
+	ctx context.Context,
+	userID uint,
+	fileID string,
+	expectedStoragePath string,
+	extractorVersion string,
+	processingStartedAt time.Time,
+) (bool, error) {
+	result := r.db.WithContext(ctx).
+		Model(&models.FileObject{}).
+		Where("user_id = ? AND file_id = ? AND storage_path = ? AND status = ? AND processing_status IN ?",
+			userID, fileID, expectedStoragePath, "active", []string{"queued", "failed"}).
+		Updates(map[string]interface{}{
+			"processing_status":        "extracting",
+			"processing_ready":         false,
+			"processing_error_code":    "",
+			"processing_error_message": "",
+			"extract_status":           "processing",
+			"extractor_version":        extractorVersion,
+			"processing_started_at":    processingStartedAt,
+			"processing_completed_at":  nil,
+			"updated_at":               time.Now(),
+		})
+	if result.Error != nil {
+		return false, translateError(result.Error)
+	}
+	return result.RowsAffected > 0, nil
+}
+
+func (r *Repo) ClaimRecoverableFilesForProcessing(
+	ctx context.Context,
+	pendingCutoff time.Time,
+	queuedCutoff time.Time,
+	extractingCutoff time.Time,
+	limit int,
+) ([]domainconversation.FileObject, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	var claimed []domainconversation.FileObject
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var entities []models.FileObject
+		query := tx.Where("status = ? AND ((processing_status = ? AND updated_at < ?) OR (processing_status = ? AND updated_at < ?) OR (processing_status = ? AND updated_at < ?))",
+			"active", "pending", pendingCutoff, "queued", queuedCutoff, "extracting", extractingCutoff).
+			Order("id ASC").
+			Limit(limit)
+		if tx.Dialector.Name() != "sqlite" {
+			query = query.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"})
+		}
+		if err := query.Find(&entities).Error; err != nil {
+			return translateError(err)
+		}
+		for i := range entities {
+			entity := entities[i]
+			result := tx.Model(&models.FileObject{}).
+				Where("id = ? AND storage_path = ? AND processing_status = ?", entity.ID, entity.StoragePath, entity.ProcessingStatus).
+				Updates(map[string]interface{}{
+					"processing_status":     "queued",
+					"processing_started_at": nil,
+					"updated_at":            time.Now(),
+				})
+			if result.Error != nil {
+				return translateError(result.Error)
+			}
+			if result.RowsAffected == 0 {
+				continue
+			}
+			entity.ProcessingStatus = "queued"
+			claimed = append(claimed, toFileObjectDomain(entity))
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return claimed, nil
 }
 
 func fileStoragePathUnreferenced(tx *gorm.DB, storagePath string) (bool, error) {

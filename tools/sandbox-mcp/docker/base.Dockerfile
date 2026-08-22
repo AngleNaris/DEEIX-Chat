@@ -29,8 +29,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         git \
         nodejs \
         npm \
-        procps \
-        file \
+	        procps \
+	        util-linux \
+	        file \
     && rm -rf /var/lib/apt/lists/*
 
 # uv 与常用数据分析/音频处理/抓取依赖。

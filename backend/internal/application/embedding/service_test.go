@@ -176,11 +176,30 @@ func TestReindexStaleFilesDoesNotRequireRAGEnabled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected reindex to ignore chat RAG switch, got %v", err)
 	}
-	if submitted != 0 {
-		t.Fatalf("expected no submitted files, got %d", submitted)
+	if submitted != 1 {
+		t.Fatalf("expected background task acceptance, got %d", submitted)
 	}
+	waitForReindexIdle(t, service)
 	if repo.listCalls != 1 {
 		t.Fatalf("expected reindex list query to run once, got %d", repo.listCalls)
+	}
+}
+
+// waitForReindexIdle 等待后台重建任务结束（预扫描移入后台后的同步点）。
+func waitForReindexIdle(t *testing.T, service *Service) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		service.reindexMu.Lock()
+		running := service.reindexing
+		service.reindexMu.Unlock()
+		if !running {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("background reindex did not finish")
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 
@@ -233,8 +252,9 @@ func TestReindexStaleFilesSkipsUnsupportedCandidates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected reindex to succeed, got %v", err)
 	}
-	if submitted != 0 {
-		t.Fatalf("expected no unsupported files submitted, got %d", submitted)
+	waitForReindexIdle(t, service)
+	if submitted != 1 {
+		t.Fatalf("expected background task acceptance, got %d", submitted)
 	}
 }
 
@@ -262,8 +282,9 @@ func TestReindexStaleFilesAdvancesCursorForUnsupportedCandidates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected reindex to succeed, got %v", err)
 	}
-	if submitted != 0 {
-		t.Fatalf("expected unsupported files to be skipped, got %d", submitted)
+	waitForReindexIdle(t, service)
+	if submitted != 1 {
+		t.Fatalf("expected background task acceptance, got %d", submitted)
 	}
 	if len(repo.afterIDs) != 2 || repo.afterIDs[0] != 0 || repo.afterIDs[1] != 100 {
 		t.Fatalf("expected cursor pagination after ids [0 100], got %#v", repo.afterIDs)
@@ -523,7 +544,8 @@ func (r *blockingReindexRepo) ListFilesForReindex(ctx context.Context, limit int
 	r.listCalls++
 	call := r.listCalls
 	r.mu.Unlock()
-	if call == 2 {
+	// 预扫描已移入后台：第一次 list 即代表后台任务已启动。
+	if call == 1 {
 		close(r.backgroundStarted)
 		select {
 		case <-r.releaseBackground:
@@ -531,7 +553,7 @@ func (r *blockingReindexRepo) ListFilesForReindex(ctx context.Context, limit int
 			return nil, ctx.Err()
 		}
 	}
-	if call > 2 || afterID > 0 {
+	if call > 1 || afterID > 0 {
 		return nil, nil
 	}
 	return append([]domainconversation.FileObject(nil), r.files...), nil

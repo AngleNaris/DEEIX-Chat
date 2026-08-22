@@ -2,13 +2,16 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -435,6 +438,144 @@ func TestEnsureSessionContainerRestoresPreviousNameWhenRecreateFails(t *testing.
 	}
 }
 
+func TestCappedBufferKeepsPrefixAndDrainsWrites(t *testing.T) {
+	var buffer cappedBuffer
+	buffer.limit = 4
+
+	if written, err := buffer.Write([]byte("abcdef")); err != nil || written != 6 {
+		t.Fatalf("first write = (%d, %v), want (6, nil)", written, err)
+	}
+	if written, err := buffer.Write([]byte("gh")); err != nil || written != 2 {
+		t.Fatalf("second write = (%d, %v), want (2, nil)", written, err)
+	}
+	if got := buffer.String(); got != "abcd" {
+		t.Fatalf("buffer = %q, want %q", got, "abcd")
+	}
+}
+
+func TestExecWrapperForwardsCommandArguments(t *testing.T) {
+	if _, err := exec.LookPath("setsid"); err != nil {
+		t.Skip("setsid is unavailable")
+	}
+	pidFile := filepath.Join(t.TempDir(), "exec.pid")
+	command := exec.Command(
+		"/bin/sh", "-c", execWrapperScript, "deeix-exec", pidFile,
+		"/bin/sh", "-c", `printf '%s|%s' "$1" "$2"`, "inner", "alpha beta", "gamma",
+	)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run exec wrapper: %v: %s", err, output)
+	}
+	if got := string(output); got != "alpha beta|gamma" {
+		t.Fatalf("wrapper output = %q", got)
+	}
+	if _, err := os.Stat(pidFile); !os.IsNotExist(err) {
+		t.Fatalf("pid file was not removed: %v", err)
+	}
+}
+
+func TestExecInContainerTerminatesProcessGroupAfterTimeout(t *testing.T) {
+	var mu sync.Mutex
+	var execOptions []container.ExecOptions
+	attachStarted := make(chan struct{})
+
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestPath := strings.TrimPrefix(r.URL.Path, "/v1.49")
+		switch {
+		case r.Method == http.MethodPost && requestPath == "/containers/sandbox/exec":
+			var options container.ExecOptions
+			if err := json.NewDecoder(r.Body).Decode(&options); err != nil {
+				t.Errorf("decode exec options: %v", err)
+				http.Error(w, "invalid options", http.StatusBadRequest)
+				return
+			}
+			mu.Lock()
+			execOptions = append(execOptions, options)
+			execNumber := len(execOptions)
+			mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprintf(w, `{"Id":"exec-%d"}`, execNumber)
+		case r.Method == http.MethodPost && requestPath == "/exec/exec-1/start":
+			conn := hijackDockerAttach(t, w)
+			close(attachStarted)
+			_, _ = io.Copy(io.Discard, conn)
+			_ = conn.Close()
+		case r.Method == http.MethodPost && requestPath == "/exec/exec-2/start":
+			conn := hijackDockerAttach(t, w)
+			_ = conn.Close()
+		default:
+			http.Error(w, "unexpected request", http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	apiClient, err := client.NewClientWithOpts(
+		client.WithHost("tcp://"+server.Listener.Addr().String()),
+		client.WithVersion("1.49"),
+		client.WithHTTPClient(server.Client()),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer apiClient.Close()
+
+	docker := &dockerClient{cli: apiClient}
+	result := make(chan error, 1)
+	go func() {
+		_, execErr := docker.execInContainer(context.Background(), "sandbox", []string{"/bin/sh", "-c", "sleep 60"}, "/workspace", nil, 100*time.Millisecond, 1024)
+		result <- execErr
+	}()
+
+	select {
+	case <-attachStarted:
+	case execErr := <-result:
+		t.Fatalf("exec ended before primary attach: %v", execErr)
+	case <-time.After(time.Second):
+		t.Fatal("primary exec did not attach")
+	}
+	select {
+	case execErr := <-result:
+		if execErr == nil || !strings.Contains(execErr.Error(), "exec timeout") {
+			t.Fatalf("exec error = %v", execErr)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for exec cancellation")
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(execOptions) != 2 {
+		t.Fatalf("exec create count = %d, want 2", len(execOptions))
+	}
+	primary := execOptions[0].Cmd
+	terminator := execOptions[1].Cmd
+	if len(primary) < 7 || primary[0] != "/bin/sh" || primary[2] != execWrapperScript {
+		t.Fatalf("unexpected primary command: %#v", primary)
+	}
+	pidFile := primary[4]
+	if len(terminator) != 5 || terminator[2] != terminateExecScript || terminator[4] != pidFile {
+		t.Fatalf("unexpected terminator command: %#v; pid file %q", terminator, pidFile)
+	}
+}
+
+func hijackDockerAttach(t *testing.T, w http.ResponseWriter) io.ReadWriteCloser {
+	t.Helper()
+	hijacker, ok := w.(http.Hijacker)
+	if !ok {
+		t.Fatal("test server does not support hijacking")
+	}
+	conn, buffer, err := hijacker.Hijack()
+	if err != nil {
+		t.Fatalf("hijack Docker attach: %v", err)
+	}
+	_, _ = buffer.WriteString("HTTP/1.1 101 UPGRADED\r\nContent-Type: application/vnd.docker.raw-stream\r\nConnection: Upgrade\r\nUpgrade: tcp\r\n\r\n")
+	if err := buffer.Flush(); err != nil {
+		_ = conn.Close()
+		t.Fatalf("flush Docker attach response: %v", err)
+	}
+	return conn
+}
+
 func TestParseMemoryBytes(t *testing.T) {
 	cases := map[string]int64{
 		"1g":       1 << 30,
@@ -581,31 +722,28 @@ func TestTruncateNoPanic(t *testing.T) {
 func TestSessionReclaimableRequiresTrueIdle(t *testing.T) {
 	now := time.Now()
 	ttl := 5 * time.Minute
-	base := Session{LastUsedAt: now.Add(-time.Hour), tasks: make(map[string]*BackgroundTask)}
+	expiredAt := now.Add(-time.Hour)
+	base := Session{LastUsedAt: expiredAt, tasks: make(map[string]*BackgroundTask)}
 	if !sessionReclaimable(&base, now, ttl) {
 		t.Fatal("idle expired session should be reclaimable")
 	}
 
-	active := base
-	active.activeOps = 1
+	active := Session{LastUsedAt: expiredAt, tasks: make(map[string]*BackgroundTask), activeOps: 1}
 	if sessionReclaimable(&active, now, ttl) {
 		t.Fatal("active operation must prevent reclaim")
 	}
 
-	background := base
-	background.tasks = map[string]*BackgroundTask{"t1": {ID: "t1"}}
+	background := Session{LastUsedAt: expiredAt, tasks: map[string]*BackgroundTask{"t1": {ID: "t1"}}}
 	if sessionReclaimable(&background, now, ttl) {
 		t.Fatal("background task must prevent reclaim")
 	}
 
-	reclaiming := base
-	reclaiming.reclaiming = true
+	reclaiming := Session{LastUsedAt: expiredAt, tasks: make(map[string]*BackgroundTask), reclaiming: true}
 	if sessionReclaimable(&reclaiming, now, ttl) {
 		t.Fatal("session already reclaiming must not be selected again")
 	}
 
-	recent := base
-	recent.LastUsedAt = now
+	recent := Session{LastUsedAt: now, tasks: make(map[string]*BackgroundTask)}
 	if sessionReclaimable(&recent, now, ttl) {
 		t.Fatal("recent session must not be reclaimed")
 	}

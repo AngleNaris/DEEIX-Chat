@@ -14,10 +14,10 @@ import (
 	appbilling "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/billing"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/channel"
 	appcompact "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/compact"
+	appcm "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/contentmoderation"
 	appcredentials "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/credentials"
 	appdoccard "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/doccard"
 	appdynamicprompt "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/dynamicprompt"
-	appcm "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/contentmoderation"
 	appembedding "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/embedding"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/extraction"
 	appstorage "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/objectstorage"
@@ -28,6 +28,8 @@ import (
 	appupload "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/upload"
 	domainagentgroup "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/agentgroup"
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
+	domaindoccard "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/doccard"
+	domaindynamicprompt "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/dynamicprompt"
 	domainknowledgebase "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/knowledgebase"
 	domainmcp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/mcp"
 	domainmemory "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/memory"
@@ -234,6 +236,23 @@ type Service struct {
 	routeResolver         routeResolver
 	memoryRecorder        memoryRecorder
 	mcpRepo               mcpToolResolver
+	agentGroupRepo        agentGroupResolver
+	agentGroupRunStore    repository.AgentGroupRunRepository
+	agentGroupSettings    agentGroupSettingsReader
+	agentGroupRunLocks    agentGroupRunLockSet
+	platformToolsSettings agentGroupSettingsReader
+	platformApprovals     *platformWriteApprovalStore
+	reindexScheduler      *fileReindexScheduler
+	userSettingsSvc       userSettingsWriter
+	agentGroupWriter      agentGroupWriter
+	userProfile           userProfileReader
+	artifactSvc           *appartifact.Service
+	docCards              docCardReader
+	docCardCache          sync.Map
+	dynamicPrompts        dynamicPromptReader
+	credentials           credentialResolver
+	dynamicPromptCache    sync.Map
+	promptPresets         promptPresetResolver
 	llmClient             *llm.Client
 	mediaDownloader       generatedMediaDownloader
 	mcpClient             *mcp.Client
@@ -475,8 +494,9 @@ func NewServiceWithRuntime(
 	svc.platformApprovals = newPlatformWriteApprovalStore()
 	svc.reindexScheduler = newFileReindexScheduler(
 		10*time.Second,
-		func() time.Duration { return svc.ResolvePlatformReindexDelay(context.Background()) },
-		processingSvc.ProcessFile,
+		svc.ResolvePlatformReindexDelay,
+		processingSvc.EnqueueFileProcessing,
+		processingSvc.RecoverFileProcessingQueue,
 		logger,
 	)
 	// 注入 LLM 语义压缩回调（在 svc 完全初始化后绑定）

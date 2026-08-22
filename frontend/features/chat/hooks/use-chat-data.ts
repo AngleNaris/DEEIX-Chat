@@ -18,6 +18,8 @@ import type { MessageDTO } from "@/shared/api/conversation.types";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 
 const MESSAGE_PAGE_SIZE = 100;
+// 恢复失败后允许的后台确认轮询次数；耗尽仍 pending 则本地落为 interrupted。
+const RESUME_FAILURE_CONFIRMATIONS = 3;
 
 type ChatDataState = {
   loading: boolean;
@@ -541,7 +543,11 @@ export function useChatData(
         }
       } catch (error) {
         if (!controller.signal.aborted && error instanceof Error && error.name !== "AbortError") {
+          // 瞬时失败不永久拉黑：登记确认轮询预算，由下方 effect 有限次收敛。
           if ("errorCode" in error && error.errorCode === "content_moderation.blocked") {
+            clearResumeCheckpoint(pendingRunID);
+          } else {
+            resumeFailureBudgetRef.current.set(pendingRunID, RESUME_FAILURE_CONFIRMATIONS);
             clearResumeCheckpoint(pendingRunID);
           }
           setResumingRunID("");
@@ -580,6 +586,9 @@ export function useChatData(
     reload,
   ]);
 
+  // 恢复失败后的确认轮询预算：每个 run 最多 RESUME_FAILURE_CONFIRMATIONS 次 reload；
+  // 耗尽仍 pending 则本地落为 interrupted，避免无限轮询，也避免消息永久停留在 pending。
+  const resumeFailureBudgetRef = React.useRef(new Map<string, number>());
   React.useEffect(() => {
     if (
       !conversationID ||
@@ -589,13 +598,35 @@ export function useChatData(
     ) {
       return;
     }
+    const budgetKey = pendingRunID || "unknown";
+    const remaining = resumeFailureBudgetRef.current.get(budgetKey);
+    if (remaining === undefined) {
+      return;
+    }
+    if (remaining <= 0) {
+      resumeFailureBudgetRef.current.delete(budgetKey);
+      setState((prev) => ({
+        ...prev,
+        messages: prev.messages.map((message) =>
+          message.role === "assistant" && message.status === "pending" && (message.runID?.trim() || "") === budgetKey
+            ? {
+                ...message,
+                status: "interrupted",
+                errorMessage: t("resumeFailedInterrupted"),
+              }
+            : message,
+        ),
+      }));
+      return;
+    }
+    resumeFailureBudgetRef.current.set(budgetKey, remaining - 1);
     const timer = window.setTimeout(() => {
       reload();
     }, 1500);
     return () => {
       window.clearTimeout(timer);
     };
-  }, [conversationID, pendingAssistant, pendingRunID, pendingRunIsActive, reload, resumingRunID]);
+  }, [conversationID, pendingAssistant, pendingRunID, pendingRunIsActive, reload, resumingRunID, t]);
 
   return {
     ...state,

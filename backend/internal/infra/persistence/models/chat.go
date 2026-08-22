@@ -206,7 +206,7 @@ type FileObject struct {
 	Status                 string     `gorm:"size:32;not null;default:'active';index:idx_file_objects_status;comment:文件状态"`
 	LastAccessedAt         *time.Time `gorm:"index:idx_file_objects_last_accessed_at;comment:最近使用时间"`
 	ExpiresAt              *time.Time `gorm:"index:idx_file_objects_expires_at;comment:过期时间"`
-	ProcessingStatus       string     `gorm:"size:32;not null;default:'uploaded';index:idx_file_objects_processing_status;comment:文件处理状态(uploaded/queued/extracting/extracted/embedding/ready/failed)"`
+	ProcessingStatus       string     `gorm:"size:32;not null;default:'uploaded';index:idx_file_objects_processing_status;comment:文件处理状态(uploaded/pending/queued/extracting/extracted/embedding/ready/failed)"`
 	ProcessingReady        bool       `gorm:"not null;default:false;index:idx_file_objects_processing_ready;comment:是否可用于对话"`
 	ProcessingErrorCode    string     `gorm:"size:64;not null;default:'';comment:文件处理错误码"`
 	ProcessingErrorMessage string     `gorm:"size:255;not null;default:'';comment:文件处理错误信息"`

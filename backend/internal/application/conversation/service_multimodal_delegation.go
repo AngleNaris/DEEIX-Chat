@@ -46,7 +46,7 @@ var systemMultimodalAnalyzeInputSchema = json.RawMessage(`{
 			"items":{"type":"string","minLength":1},
 			"minItems":1,
 			"uniqueItems":true,
-			"description":"One or more file IDs from the current attachment list"
+			"description":"One or more file IDs from the authorized current or historical attachment list. Historical images may be re-inspected when a new angle or verification is needed."
 		},
 		"prompt":{
 			"type":"string",
@@ -81,6 +81,7 @@ type multimodalDelegationInput struct {
 	MainRoute       *channel.ResolvedRoute
 	TraceRecorder   *messageTraceRecorder
 	SkipPersistence bool
+	AllowHistorical bool
 }
 
 type multimodalDelegationResult struct {
@@ -93,11 +94,12 @@ type multimodalDelegationResult struct {
 }
 
 type multimodalDelegationAuditFile struct {
-	FileID   string `json:"file_id"`
-	FileName string `json:"file_name"`
-	MIMEType string `json:"mime_type"`
-	Size     int64  `json:"size"`
-	Modality string `json:"modality"`
+	FileID     string `json:"file_id"`
+	FileName   string `json:"file_name"`
+	MIMEType   string `json:"mime_type"`
+	Size       int64  `json:"size"`
+	Modality   string `json:"modality"`
+	Historical bool   `json:"historical,omitempty"`
 }
 
 type multimodalDelegationResponse struct {
@@ -117,10 +119,19 @@ func (r *selectedToolRuntime) bindMultimodalAnalyzer(
 	mainRoute *channel.ResolvedRoute,
 	attachments []AttachmentInput,
 ) bool {
+	return r.bindMultimodalAnalyzerWithHistory(cfg, mainRoute, attachments, false)
+}
+
+func (r *selectedToolRuntime) bindMultimodalAnalyzerWithHistory(
+	cfg config.Config,
+	mainRoute *channel.ResolvedRoute,
+	attachments []AttachmentInput,
+	allowHistorical bool,
+) bool {
 	if r == nil || !cfg.MultimodalDelegationEnabled || mainRoute == nil {
 		return false
 	}
-	groups := selectMultimodalDelegationGroups(cfg, mainRoute, attachments)
+	groups := selectMultimodalDelegationGroupsWithHistory(cfg, mainRoute, attachments, allowHistorical)
 	analyzer := &selectedMultimodalAnalyzer{
 		mainRoute:   mainRoute,
 		attachments: make(map[string]AttachmentInput),
@@ -148,11 +159,28 @@ func (r *selectedToolRuntime) bindMultimodalAnalyzer(
 	return true
 }
 
+func (a *selectedMultimodalAnalyzer) hasCurrentAttachments() bool {
+	if a == nil {
+		return false
+	}
+	for _, attachment := range a.attachments {
+		if attachment.Current {
+			return true
+		}
+	}
+	return false
+}
+
+func (r selectedToolRuntime) multimodalAnalyzerHandlesCurrentAttachments() bool {
+	return r.multimodalAnalyzer != nil && r.multimodalAnalyzer.hasCurrentAttachments()
+}
+
 func (a *selectedMultimodalAnalyzer) toolDefinition() llm.ToolDefinition {
 	return llm.ToolDefinition{
 		Name: systemMultimodalAnalyzeToolName,
-		Description: "Analyze selected current image, audio, or video attachments through the system multimodal route. " +
-			"The attachments have not been pre-analyzed. Choose only the file IDs needed for the current task and write a precise prompt describing what information you need. " +
+		Description: "Analyze selected current or historical image, audio, or video attachments through the system multimodal route. " +
+			"The attachments may already have an analysis; only re-inspect when a new angle, correction, or verification is needed. " +
+			"Choose only the file IDs needed for the current task and write a precise prompt describing what information you need. " +
 			"Use the returned factual analysis to continue the user's original task; do not guess attachment contents from filenames or metadata.",
 		InputSchema: systemMultimodalAnalyzeInputSchema,
 	}
@@ -164,15 +192,16 @@ func (r selectedToolRuntime) multimodalAnalyzerGuidance() string {
 	}
 	var builder strings.Builder
 	builder.WriteString("# media_attachments\n")
-	builder.WriteString("- The current model cannot directly inspect the attachments listed below. They are marked but have not been pre-analyzed.\n")
+	builder.WriteString("- The current model cannot directly inspect the attachments listed below. Existing analysis is reference only; call system_multimodal_analyze when a new angle, correction, or verification is needed.\n")
 	builder.WriteString("- When attachment contents are needed, call system_multimodal_analyze with only the relevant file_ids and write the prompt yourself for the exact facts needed in the current context.\n")
 	builder.WriteString("- A prompt may request OCR/text, visual layout, objects, spatial relationships, speech, sounds, actions, motion, or another focused analysis. Do not infer contents from filenames or metadata.\n")
-	builder.WriteString("- Available current attachments:\n")
+	builder.WriteString("- Available authorized attachments:\n")
 	for _, item := range r.multimodalAnalyzer.auditFiles {
 		fmt.Fprintf(
 			&builder,
-			"  - file_id=%s; modality=%s; name=%s; mime_type=%s\n",
+			"  - file_id=%s; scope=%s; modality=%s; name=%s; mime_type=%s\n",
 			item.FileID,
+			map[bool]string{true: "historical", false: "current"}[item.Historical],
 			item.Modality,
 			firstNonEmptyString(item.FileName, "unnamed"),
 			firstNonEmptyString(item.MIMEType, "unknown"),
@@ -197,13 +226,13 @@ func (a *selectedMultimodalAnalyzer) resolveAttachments(fileIDs []string) ([]Att
 		}
 		attachment, ok := a.attachments[fileID]
 		if !ok {
-			return nil, fmt.Errorf("file_id %q is not an authorized current attachment for this run", fileID)
+			return nil, fmt.Errorf("file_id %q is not an authorized conversation attachment for this run", fileID)
 		}
 		seen[fileID] = struct{}{}
 		result = append(result, attachment)
 	}
 	if len(result) == 0 {
-		return nil, errors.New("file_ids must contain at least one authorized current attachment")
+		return nil, errors.New("file_ids must contain at least one authorized conversation attachment")
 	}
 	return result, nil
 }
@@ -239,6 +268,7 @@ func (s *Service) executeSystemMultimodalAnalyze(
 		MainRoute:       input.ToolRuntime.multimodalAnalyzer.mainRoute,
 		TraceRecorder:   input.TraceRecorder,
 		SkipPersistence: true,
+		AllowHistorical: true,
 	})
 	if err != nil {
 		return "", err
@@ -289,7 +319,7 @@ func (s *Service) delegateUnsupportedMedia(
 	if !cfg.MultimodalDelegationEnabled {
 		return result, nil
 	}
-	groups := selectMultimodalDelegationGroups(cfg, input.MainRoute, input.Attachments)
+	groups := selectMultimodalDelegationGroupsWithHistory(cfg, input.MainRoute, input.Attachments, input.AllowHistorical)
 	if len(groups) == 0 {
 		return result, nil
 	}
@@ -600,6 +630,15 @@ func selectMultimodalDelegationGroups(
 	mainRoute *channel.ResolvedRoute,
 	attachments []AttachmentInput,
 ) []multimodalDelegationGroup {
+	return selectMultimodalDelegationGroupsWithHistory(cfg, mainRoute, attachments, false)
+}
+
+func selectMultimodalDelegationGroupsWithHistory(
+	cfg config.Config,
+	mainRoute *channel.ResolvedRoute,
+	attachments []AttachmentInput,
+	allowHistorical bool,
+) []multimodalDelegationGroup {
 	if mainRoute == nil {
 		return nil
 	}
@@ -607,7 +646,7 @@ func selectMultimodalDelegationGroups(
 	groups := make([]multimodalDelegationGroup, 0, 3)
 	groupIndexes := make(map[string]int, 3)
 	for _, attachment := range attachments {
-		if !attachment.Current {
+		if !attachment.Current && !(allowHistorical && attachmentMediaModality(attachment) == "image") {
 			continue
 		}
 		modality := attachmentMediaModality(attachment)
@@ -634,11 +673,12 @@ func selectMultimodalDelegationGroups(
 		}
 		groups[index].Attachments = append(groups[index].Attachments, attachment)
 		groups[index].AuditFiles = append(groups[index].AuditFiles, multimodalDelegationAuditFile{
-			FileID:   strings.TrimSpace(attachment.FileID),
-			FileName: strings.TrimSpace(attachment.FileName),
-			MIMEType: firstNonEmptyString(attachment.DetectedMIME, attachment.MimeType),
-			Size:     max(attachment.FileSize, 0),
-			Modality: modality,
+			FileID:     strings.TrimSpace(attachment.FileID),
+			FileName:   strings.TrimSpace(attachment.FileName),
+			MIMEType:   firstNonEmptyString(attachment.DetectedMIME, attachment.MimeType),
+			Size:       max(attachment.FileSize, 0),
+			Modality:   modality,
+			Historical: !attachment.Current,
 		})
 	}
 	return groups

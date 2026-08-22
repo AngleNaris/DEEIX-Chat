@@ -208,9 +208,10 @@ func (s *Service) ExtractStoredFile(ctx context.Context, input ExtractInput) (Re
 }
 
 // WriteExtractedText 将提取结果写入按源对象版本隔离的文本产物路径。
-func (s *Service) WriteExtractedText(ctx context.Context, userID uint, fileID string, sourceStoragePath string, text string) (string, error) {
+func (s *Service) WriteExtractedText(ctx context.Context, userID uint, fileID string, sourceStoragePath string, processingStartedAt time.Time, text string) (string, error) {
 	text = sanitizeExtractedText(text)
-	version := sha256.Sum256([]byte(strings.TrimSpace(sourceStoragePath)))
+	versionSource := fmt.Sprintf("%s\n%s", strings.TrimSpace(sourceStoragePath), processingStartedAt.UTC().Format(time.RFC3339Nano))
+	version := sha256.Sum256([]byte(versionSource))
 
 	now := time.Now()
 	relativePath := filepath.ToSlash(filepath.Join(

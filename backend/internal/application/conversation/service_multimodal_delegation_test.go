@@ -193,9 +193,10 @@ func TestBindMultimodalAnalyzerDisclosesCurrentUnsupportedAttachmentWithoutConfi
 	}
 	guidance := visible.multimodalAnalyzerGuidance()
 	for _, required := range []string{
-		"have not been pre-analyzed",
+		"Existing analysis is reference only",
 		"write the prompt yourself",
 		"file_id=audio-1",
+		"scope=current",
 		"modality=audio",
 		"name=meeting.mp3",
 	} {
@@ -219,7 +220,7 @@ func TestSelectedMultimodalAnalyzerRejectsInvalidAttachmentSelections(t *testing
 		{name: "empty list", wantErr: "at least one"},
 		{name: "empty value", fileIDs: []string{" "}, wantErr: "empty values"},
 		{name: "duplicate", fileIDs: []string{"image-1", " image-1 "}, wantErr: "duplicate"},
-		{name: "not current", fileIDs: []string{"history-1"}, wantErr: "not an authorized current attachment"},
+		{name: "not current", fileIDs: []string{"history-1"}, wantErr: "not an authorized conversation attachment"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -231,6 +232,45 @@ func TestSelectedMultimodalAnalyzerRejectsInvalidAttachmentSelections(t *testing
 	}
 }
 
+func TestSelectMultimodalDelegationGroupsAllowsHistoricalImagesOnlyWhenRequested(t *testing.T) {
+	cfg := config.Config{
+		MultimodalDelegationImageModel: "image-model",
+		MultimodalDelegationModalities: "image",
+	}
+	route := &channel.ResolvedRoute{PlatformModelName: "text-model", ModelCapabilitiesJSON: `{}`}
+	attachments := []AttachmentInput{
+		{FileID: "current-image", DetectedMIME: "image/png", Current: true},
+		{FileID: "history-image", DetectedMIME: "image/png", Current: false},
+	}
+	if groups := selectMultimodalDelegationGroups(cfg, route, attachments); len(groups) != 1 || len(groups[0].Attachments) != 1 || groups[0].Attachments[0].FileID != "current-image" {
+		t.Fatalf("automatic delegation must skip historical images, got %#v", groups)
+	}
+	groups := selectMultimodalDelegationGroupsWithHistory(cfg, route, attachments, true)
+	if len(groups) != 1 || len(groups[0].Attachments) != 2 {
+		t.Fatalf("explicit historical delegation should include both images, got %#v", groups)
+	}
+	if !groups[0].AuditFiles[1].Historical {
+		t.Fatalf("expected historical audit marker, got %#v", groups[0].AuditFiles)
+	}
+}
+
+func TestSelectedMultimodalAnalyzerTracksCurrentAndHistoricalAttachments(t *testing.T) {
+	runtime := selectedToolRuntime{}
+	cfg := config.Config{MultimodalDelegationEnabled: true, MultimodalDelegationModalities: "image", MultimodalDelegationImageModel: "image-model"}
+	route := &channel.ResolvedRoute{PlatformModelName: "text-model", ModelCapabilitiesJSON: `{}`}
+	if !runtime.bindMultimodalAnalyzerWithHistory(cfg, route, []AttachmentInput{{FileID: "history-image", Kind: "image", MimeType: "image/png", Current: false}}, true) {
+		t.Fatal("expected historical image analyzer binding")
+	}
+	if runtime.multimodalAnalyzerHandlesCurrentAttachments() {
+		t.Fatal("historical-only analyzer must not claim current attachments")
+	}
+	if !runtime.bindMultimodalAnalyzerWithHistory(cfg, route, []AttachmentInput{{FileID: "current-image", Kind: "image", MimeType: "image/png", Current: true}}, true) {
+		t.Fatal("expected current image analyzer binding")
+	}
+	if !runtime.multimodalAnalyzerHandlesCurrentAttachments() {
+		t.Fatal("current analyzer must claim current attachments")
+	}
+}
 func TestSelectedMultimodalAnalyzerToolSchemaRequiresFileIDsAndModelPrompt(t *testing.T) {
 	definition := (&selectedMultimodalAnalyzer{}).toolDefinition()
 	schema := string(definition.InputSchema)
@@ -245,8 +285,8 @@ func TestSelectedMultimodalAnalyzerToolSchemaRequiresFileIDsAndModelPrompt(t *te
 			t.Fatalf("tool schema missing %q: %s", required, schema)
 		}
 	}
-	if !strings.Contains(definition.Description, "have not been pre-analyzed") {
-		t.Fatalf("tool description must disclose that no automatic analysis occurred: %s", definition.Description)
+	if !strings.Contains(definition.Description, "may already have an analysis") {
+		t.Fatalf("tool description must disclose that existing analysis may be reused: %s", definition.Description)
 	}
 }
 

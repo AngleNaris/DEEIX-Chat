@@ -344,7 +344,8 @@
   },
   "data": {
     "signInRequired": "未登录，无法加载会话消息",
-    "loadFailed": "加载会话消息失败"
+    "loadFailed": "加载会话消息失败",
+    "resumeFailedInterrupted": "生成已中断，请稍后重试。"
   },
   "models": {
     "signInRequired": "未登录，无法加载模型列表",

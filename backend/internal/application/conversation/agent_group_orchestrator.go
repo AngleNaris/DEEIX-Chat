@@ -75,18 +75,8 @@ func (s *Service) executeAgentGroupRun(
 	}
 
 	// 同会话串行：同一会话内严格排队，不同会话可并发执行。
-	runLock := s.agentGroupRunMutex(input.ConversationID)
-	runLock.Lock()
-	defer runLock.Unlock()
-
-	// 活跃运行守卫（含 blocked：阻塞会话直到 T7 放弃接口）。
-	active, err := s.agentGroupRunStore.GetActiveAgentGroupRunByConversation(ctx, input.ConversationID)
-	if err != nil && !errors.Is(err, repository.ErrNotFound) {
-		return nil, err
-	}
-	if active != nil {
-		return nil, ErrAgentGroupRunInProgress
-	}
+	unlockRun := s.lockAgentGroupRun(input.ConversationID)
+	defer unlockRun()
 
 	// 同一 ClientRunID 重复提交守卫（客户端重试同一流式 run）。
 	existing, err := s.agentGroupRunStore.GetAgentGroupRunByClientRunID(ctx, input.ConversationID, runID)
@@ -135,6 +125,9 @@ func (s *Service) executeAgentGroupRun(
 	contextMessages = agentGroupHistoricalUserContext(contextMessages, pair.user.ID)
 
 	// 创建运行（pending，StateVersion=1）。
+	// admission 原子化：仓储层在事务内复查活跃运行后才插入（PostgreSQL 加会话级
+	// advisory xact lock），多实例下同一会话至多一个活跃运行；消息对已创建，
+	// admission 失败时走与执行失败相同的 failedResult 兜底（消息标记 interrupted）。
 	run := &domainagentgroup.Run{
 		PublicID:           normalizePublicID(uuid.NewString()),
 		ClientRunID:        runID,
@@ -149,24 +142,6 @@ func (s *Service) executeAgentGroupRun(
 		StateVersion:       1,
 		StartedAt:          startedAt,
 	}
-	if err := s.agentGroupRunStore.CreateAgentGroupRun(ctx, run); err != nil {
-		return nil, err
-	}
-	s.RecordAudit(ctx, AuditInput{
-		UserID:     input.UserID,
-		RequestID:  input.RequestID,
-		Action:     "create_agent_group_run",
-		Resource:   "agent_group_run",
-		ResourceID: run.PublicID,
-		Detail: map[string]interface{}{
-			"conversation_id": input.ConversationID,
-			"group_public_id": run.GroupPublicID,
-			"group_revision":  run.GroupRevision,
-			"client_run_id":   runID,
-			"status":          run.Status,
-		},
-	})
-
 	st := &agentGroupRunState{
 		service:           s,
 		input:             input,
@@ -186,6 +161,27 @@ func (s *Service) executeAgentGroupRun(
 		persistToolCalls:  true,
 		mcpActivation:     newMCPActivationState(snapshot.ActivatedMCPServerIDs),
 	}
+	created, err := s.agentGroupRunStore.CreateAgentGroupRunIfIdle(ctx, run)
+	if err != nil {
+		return st.failedResult(), err
+	}
+	if !created {
+		return nil, ErrAgentGroupRunInProgress
+	}
+	s.RecordAudit(ctx, AuditInput{
+		UserID:     input.UserID,
+		RequestID:  input.RequestID,
+		Action:     "create_agent_group_run",
+		Resource:   "agent_group_run",
+		ResourceID: run.PublicID,
+		Detail: map[string]interface{}{
+			"conversation_id": input.ConversationID,
+			"group_public_id": run.GroupPublicID,
+			"group_revision":  run.GroupRevision,
+			"client_run_id":   runID,
+			"status":          run.Status,
+		},
+	})
 
 	// Cancelable 时注册取消。
 	if input.Cancelable {
@@ -226,7 +222,6 @@ func (s *Service) executeAgentGroupRun(
 // runSerial 是严格的串行状态机主循环：主管决策 → 成员执行 → 循环，直到 finish。
 // 每一步完成（含失败）后才创建下一步；成员步骤成功后才回到主管（自动继续）。
 func (st *agentGroupRunState) runSerial(ctx context.Context) error {
-	s := st.service
 	for {
 		// 步骤上限。
 		if st.stepSequence >= st.snapshot.Limits.MaxStepsPerRun {
@@ -275,7 +270,7 @@ func (st *agentGroupRunState) runSerial(ctx context.Context) error {
 			return err
 		}
 		st.emitAgentGroupStepStarted(ctx, memberStep, memberAttempt, member)
-		memberOutput, err := s.ExecuteAgentTurn(ctx, st.agentTurnInput(
+		memberOutput, err := st.executeAgentTurn(ctx, memberAttempt, st.agentTurnInput(
 			memberStep, memberAttempt, member,
 			agentGroupMemberSystemPrompt(st.snapshot, member),
 			agentGroupMemberUserContent(st.input.Content, decision, agentGroupContextBrief(st.summaries)),
@@ -303,9 +298,8 @@ func (st *agentGroupRunState) runSupervisorDecision(
 	attempt *domainagentgroup.Attempt,
 	member *domainagentgroup.RunSnapshotMember,
 ) (*agentGroupSupervisorDecision, *AgentTurnOutput, error) {
-	s := st.service
 	baseUser := agentGroupSupervisorUserContent(st.input.Content, st.snapshot.Members, agentGroupContextBrief(st.summaries))
-	output, err := s.ExecuteAgentTurn(ctx, st.agentTurnInput(
+	output, err := st.executeAgentTurn(ctx, attempt, st.agentTurnInput(
 		step, attempt, member,
 		agentGroupSupervisorSystemPrompt(st.snapshot),
 		baseUser,
@@ -338,7 +332,7 @@ func (st *agentGroupRunState) runSupervisorDecision(
 		}
 		// 回喂纠错提示重新决策；中间回合用量累计进总账。
 		st.accumulateUsage(output)
-		output, err = s.ExecuteAgentTurn(ctx, st.agentTurnInput(
+		output, err = st.executeAgentTurn(ctx, attempt, st.agentTurnInput(
 			step, attempt, member,
 			agentGroupSupervisorSystemPrompt(st.snapshot),
 			baseUser+"\n\n"+agentGroupSupervisorCorrectionHint(decisionErr, st.snapshot.Members),
@@ -350,6 +344,94 @@ func (st *agentGroupRunState) runSupervisorDecision(
 	}
 	// 不可达（循环内已返回）。
 	return nil, output, ErrAgentGroupInvalidDecision
+}
+
+func (st *agentGroupRunState) executeAgentTurn(
+	ctx context.Context,
+	attempt *domainagentgroup.Attempt,
+	input AgentTurnInput,
+) (*AgentTurnOutput, error) {
+	if st == nil || st.service == nil || st.service.agentGroupRunStore == nil || attempt == nil {
+		return nil, ErrAgentGroupRunStateCorrupt
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	lease := st.attemptLease
+	if lease <= 0 {
+		lease = domainagentgroup.DefaultAttemptLease
+	}
+	if err := st.renewAgentGroupAttemptLeaseOnce(ctx, attempt.ID, lease); err != nil {
+		return nil, err
+	}
+
+	execCtx, cancelExec := context.WithCancel(ctx)
+	defer cancelExec()
+	stopHeartbeat := make(chan struct{})
+	heartbeatDone := make(chan error, 1)
+	go func() {
+		heartbeatDone <- st.runAgentGroupAttemptHeartbeat(execCtx, attempt.ID, lease, stopHeartbeat, cancelExec)
+	}()
+
+	output, execErr := st.service.ExecuteAgentTurn(execCtx, input)
+	close(stopHeartbeat)
+	heartbeatErr := <-heartbeatDone
+	if heartbeatErr != nil {
+		return output, heartbeatErr
+	}
+	return output, execErr
+}
+
+func (st *agentGroupRunState) renewAgentGroupAttemptLeaseOnce(ctx context.Context, attemptID uint, lease time.Duration) error {
+	timeout := minDuration(lease/3, 5*time.Second)
+	if timeout < time.Second {
+		timeout = time.Second
+	}
+	renewCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
+	defer cancel()
+	updated, err := st.service.agentGroupRunStore.RenewAgentGroupStepAttemptLease(renewCtx, attemptID, time.Now().Add(lease))
+	if err != nil {
+		return err
+	}
+	if !updated {
+		return ErrAgentGroupCASConflict
+	}
+	return nil
+}
+
+func (st *agentGroupRunState) runAgentGroupAttemptHeartbeat(
+	ctx context.Context,
+	attemptID uint,
+	lease time.Duration,
+	stop <-chan struct{},
+	cancelExec context.CancelFunc,
+) error {
+	interval := lease / 3
+	if interval < time.Second {
+		interval = time.Second
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-stop:
+			return nil
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			if err := st.renewAgentGroupAttemptLeaseOnce(ctx, attemptID, lease); err != nil {
+				cancelExec()
+				return err
+			}
+		}
+	}
+}
+
+func minDuration(left time.Duration, right time.Duration) time.Duration {
+	if left < right {
+		return left
+	}
+	return right
 }
 
 // agentTurnInput 组装一次内部 Actor 回合输入。
@@ -1149,14 +1231,40 @@ func (st *agentGroupRunState) failedResult() *SendMessageResult {
 	return result
 }
 
-// agentGroupRunMutex 返回会话级串行锁（不同会话可并发）。
-func (s *Service) agentGroupRunMutex(conversationID uint) *sync.Mutex {
-	key := conversationID
-	if value, ok := s.agentGroupRunLocks.Load(key); ok {
-		return value.(*sync.Mutex)
+type agentGroupRunLockSet struct {
+	mu      sync.Mutex
+	entries map[uint]*agentGroupRunLockEntry
+}
+
+type agentGroupRunLockEntry struct {
+	mu   sync.Mutex
+	refs int
+}
+
+// lockAgentGroupRun serializes work per conversation and removes idle locks.
+func (s *Service) lockAgentGroupRun(conversationID uint) func() {
+	s.agentGroupRunLocks.mu.Lock()
+	if s.agentGroupRunLocks.entries == nil {
+		s.agentGroupRunLocks.entries = make(map[uint]*agentGroupRunLockEntry)
 	}
-	value, _ := s.agentGroupRunLocks.LoadOrStore(key, &sync.Mutex{})
-	return value.(*sync.Mutex)
+	entry := s.agentGroupRunLocks.entries[conversationID]
+	if entry == nil {
+		entry = &agentGroupRunLockEntry{}
+		s.agentGroupRunLocks.entries[conversationID] = entry
+	}
+	entry.refs++
+	s.agentGroupRunLocks.mu.Unlock()
+
+	entry.mu.Lock()
+	return func() {
+		entry.mu.Unlock()
+		s.agentGroupRunLocks.mu.Lock()
+		entry.refs--
+		if entry.refs == 0 && s.agentGroupRunLocks.entries[conversationID] == entry {
+			delete(s.agentGroupRunLocks.entries, conversationID)
+		}
+		s.agentGroupRunLocks.mu.Unlock()
+	}
 }
 
 // buildAgentGroupRunSnapshot 冻结运行配置快照：

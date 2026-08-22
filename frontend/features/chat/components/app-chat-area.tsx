@@ -1,5 +1,6 @@
 "use client";
 
+import { motion } from "motion/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import * as React from "react";
@@ -20,6 +21,8 @@ import {
   useConversationExport,
   useSidebarConversations,
 } from "@/entities/conversation";
+import { useGroupRunRecovery } from "@/features/agent-groups/hooks/use-group-run-recovery";
+import { subscribeGroupRunSettled } from "@/features/agent-groups/model/group-run-store";
 import { ChatArea, ChatAreaLoadError, ChatAreaSkeleton } from "@/features/chat/components/sections/chat-area";
 import { ChatArtifactWorkspace } from "@/features/chat/components/sections/chat-artifact";
 import { ChatEmptyState } from "@/features/chat/components/sections/chat-empty";
@@ -37,20 +40,27 @@ import { useChatScreenshot } from "@/features/chat/hooks/use-chat-screenshot";
 import { useChatViewerProfile } from "@/features/chat/hooks/use-chat-viewer-profile";
 import { useChatVisualPrompt } from "@/features/chat/hooks/use-chat-visual-prompt";
 import { useNewConversationDefaults } from "@/features/chat/hooks/use-new-conversation-defaults";
+import { requestedResponseType } from "@/features/chat/model/chat-task";
 import {
   cloneConversationOptions,
   isConversationOptionsObject,
   sanitizeConversationOptions,
 } from "@/features/chat/model/conversation-options";
+import { resolveImageEditSubmissionAttachments } from "@/features/chat/model/image-edit-submit";
 import { toPendingAttachment } from "@/features/chat/model/message-submit";
 import type { ChatAreaMessage, MessageAttachment } from "@/features/chat/types/messages";
 import { useSettingsChatPreferences } from "@/features/settings/hooks/use-settings-chat-preferences";
 import { cn } from "@/lib/utils";
+import { getAgentGroup } from "@/shared/api/agent-groups";
+import type { AgentGroupDTO } from "@/shared/api/agent-groups.types";
 import { getConversation } from "@/shared/api/conversation";
 import type { ConversationDTO, ConversationOptions } from "@/shared/api/conversation.types";
 import type { FileObjectDTO } from "@/shared/api/file.types";
 import { listAvailableMCPTools } from "@/shared/api/mcp";
 import type { MCPToolDTO } from "@/shared/api/mcp.types";
+import type { PromptPresetDTO } from "@/shared/api/prompt-presets.types";
+import { getConversationRole } from "@/shared/api/roles";
+import type { ConversationRoleDTO } from "@/shared/api/roles.types";
 import { getUserSettings, patchUserSettings } from "@/shared/api/user-settings";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 import { DeleteFilesOption } from "@/shared/components/delete-files-option";
@@ -59,6 +69,12 @@ import {
   hasMultipleImageAttachmentProcessors,
   normalizeImageAttachmentProcessorSelection,
 } from "@/shared/lib/mcp-tool-selection";
+import {
+  getReasoningEffortOptionValue,
+  isReasoningEffortLevel,
+  resolveReasoningEffortProtocol,
+  setReasoningEffortOptionValue,
+} from "@/shared/lib/reasoning-effort";
 import { resolveChatContentWidthClassName } from "@/shared/model/chat-content-width";
 
 const MODEL_OPTIONS_STORAGE_PREFIX = "deeix-chat:chat-model-options:";
@@ -861,6 +877,7 @@ export function AppChatArea() {
     modelOptions,
     selectedToolIDs,
     selectedSkills,
+    selectedPrompts,
     selectedKnowledgeBaseIDs,
     htmlVisualPromptEnabled: htmlVisualPrompt.enabled,
     options: modelOptionPolicyDisabled ? EMPTY_CONVERSATION_OPTIONS : options,
@@ -895,6 +912,9 @@ export function AppChatArea() {
       return;
     }
     setConversationStreaming(normalizedConversationID, sending || Boolean(resumingRunID));
+    return () => {
+      setConversationStreaming(normalizedConversationID, false);
+    };
   }, [conversationID, resumingRunID, sending, setConversationStreaming]);
   // §16.7/§16.10 刷新恢复：群组会话加载后重建最后一条 assistant 消息的运行时间线；
   // 重试/放弃结算后刷新消息列表（最终答案持久化在顶层消息中，需 reload 展示）。

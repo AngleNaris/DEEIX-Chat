@@ -115,6 +115,28 @@ definitions:
     - timezoneName
     - updatedAt
     type: object
+  AddAgentGroupMemberRequest:
+    properties:
+      dutyInstruction:
+        maxLength: 4000
+        type: string
+      modelOverride:
+        maxLength: 128
+        type: string
+      reasoningEffort:
+        enum:
+        - low
+        - medium
+        - high
+        - xhigh
+        - max
+        type: string
+      rolePublicID:
+        maxLength: 32
+        type: string
+    required:
+    - rolePublicID
+    type: object
   AddKnowledgeBaseFilesRequest:
     properties:
       fileIDs:
@@ -2615,8 +2637,6 @@ definitions:
         type: string
       icon:
         type: string
-      id:
-        type: integer
       mcpDefaultMode:
         type: string
       name:
@@ -2639,7 +2659,6 @@ definitions:
     - defaultSkillIDs
     - description
     - icon
-    - id
     - mcpDefaultMode
     - name
     - publicID
@@ -14507,7 +14526,7 @@ paths:
             $ref: '#/definitions/Envelope'
       security:
       - BearerAuth: []
-      summary: 触发向量重建（重索引所有 stale/failed 文件）
+      summary: 触发向量重建（后台异步重索引所有 stale/failed 文件）
       tags:
       - admin/settings
   /admin/settings/embedding/runtime:

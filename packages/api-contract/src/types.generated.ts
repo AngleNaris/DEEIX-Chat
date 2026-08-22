@@ -49,6 +49,16 @@ export interface ActiveSessionResponse {
   updatedAt: string;
 }
 
+export interface AddAgentGroupMemberRequest {
+  /** @maxLength 4000 */
+  dutyInstruction?: string;
+  /** @maxLength 128 */
+  modelOverride?: string;
+  reasoningEffort?: "low" | "medium" | "high" | "xhigh" | "max";
+  /** @maxLength 32 */
+  rolePublicID: string;
+}
+
 export interface AddKnowledgeBaseFilesRequest {
   /**
    * @maxItems 100
@@ -1078,7 +1088,6 @@ export interface ConversationProjectResponse {
   defaultSkillIDs: number[];
   description: string;
   icon: string;
-  id: number;
   mcpDefaultMode: string;
   name: string;
   publicID: string;
@@ -1262,7 +1271,6 @@ export interface CreateConversationProjectRequest {
   color?: string;
   /** @maxItems 8 */
   defaultKnowledgeBaseIDs: string[];
-  /** @maxItems 128 */
   defaultMCPToolIDs?: number[];
   /** @maxItems 128 */
   defaultSkillIDs?: number[];
@@ -3742,7 +3750,6 @@ export interface UpdateConversationProjectRequest {
   color?: string;
   /** @maxItems 8 */
   defaultKnowledgeBaseIDs: string[];
-  /** @maxItems 128 */
   defaultMCPToolIDs?: number[];
   /** @maxItems 128 */
   defaultSkillIDs?: number[];
@@ -6992,7 +6999,7 @@ export namespace Admin {
    * No description
    * @tags admin/settings
    * @name SettingsEmbeddingReindexCreate
-   * @summary 触发向量重建（重索引所有 stale/failed 文件）
+   * @summary 触发向量重建（后台异步重索引所有 stale/failed 文件）
    * @request POST:/admin/settings/embedding/reindex
    * @secure
    */

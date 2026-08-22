@@ -861,18 +861,24 @@ func conversationImageRefs(messages []domainconversation.Message, attachments []
 
 // injectHistoricalImageHints 将历史图片引用降级为文本路径标记，按消息归组追加到对应
 // user 消息正文（非 vision 模型专用，避免上游对像素内容返回 400）。
-func injectHistoricalImageHints(messages []llm.Message, refs []conversationImageRef, attachments []AttachmentInput) []llm.Message {
+func injectHistoricalImageHints(messages []llm.Message, refs []conversationImageRef, attachments []AttachmentInput, historicalArtifacts []domainconversation.ContextArtifact) []llm.Message {
 	attachmentByFileID := make(map[string]AttachmentInput, len(attachments))
 	for _, att := range attachments {
 		attachmentByFileID[strings.TrimSpace(att.FileID)] = att
 	}
+	analysisByFileID := latestImageAnalysisByFileID(historicalArtifacts)
 	hintsByMessage := make(map[int][]string)
 	for _, ref := range refs {
 		att, ok := attachmentByFileID[ref.fileID]
 		if !ok {
 			continue
 		}
-		hintsByMessage[ref.messageIndex] = append(hintsByMessage[ref.messageIndex], buildImageAttachmentHint(att.FileName, att.FileID))
+		hint := buildImageAttachmentHint(att.FileName, att.FileID)
+		if analysis := strings.TrimSpace(analysisByFileID[ref.fileID]); analysis != "" {
+			hint += "\n[已有图片识别结果]：" + analysis
+		}
+		hint += "\n如需从新的角度核验或修正理解，可调用 system_multimodal_analyze，并传入该 fileID。"
+		hintsByMessage[ref.messageIndex] = append(hintsByMessage[ref.messageIndex], hint)
 	}
 	if len(hintsByMessage) == 0 {
 		return messages
@@ -893,6 +899,25 @@ func injectHistoricalImageHints(messages []llm.Message, refs []conversationImage
 	return result
 }
 
+func latestImageAnalysisByFileID(artifacts []domainconversation.ContextArtifact) map[string]string {
+	result := make(map[string]string)
+	for _, item := range artifacts {
+		if item.Kind != domainconversation.ContextArtifactImageAnalysis {
+			continue
+		}
+		fileID := imageArtifactFileID(item)
+		content := strings.TrimSpace(item.Content)
+		if fileID == "" || content == "" {
+			continue
+		}
+		if _, exists := result[fileID]; exists {
+			continue
+		}
+		result[fileID] = content
+	}
+	return result
+}
+
 func (s *Service) injectConversationImageContext(
 	ctx context.Context,
 	messages []llm.Message,
@@ -900,7 +925,12 @@ func (s *Service) injectConversationImageContext(
 	attachments []AttachmentInput,
 	cfg config.Config,
 	supportsVision bool,
+	historicalArtifacts ...[]domainconversation.ContextArtifact,
 ) ([]llm.Message, error) {
+	var artifacts []domainconversation.ContextArtifact
+	if len(historicalArtifacts) > 0 {
+		artifacts = historicalArtifacts[0]
+	}
 	refs := conversationImageRefs(domainMessages, attachments, maxConversationImageContextCount)
 	if len(refs) == 0 {
 		return messages, nil
@@ -909,7 +939,7 @@ func (s *Service) injectConversationImageContext(
 	// 非 vision 模型：历史图片同样不注入像素，降级为路径标记（Hermes text 模式），
 	// 附加到对应历史用户消息正文，模型知道历史里存在哪些图（含 fileID 供工具引用）。
 	if !supportsVision {
-		return injectHistoricalImageHints(messages, refs, attachments), nil
+		return injectHistoricalImageHints(messages, refs, attachments, artifacts), nil
 	}
 
 	attachmentByFileID := make(map[string]AttachmentInput, len(attachments))
@@ -1178,6 +1208,7 @@ func formatAttachmentFileContext(fileName string, text string) string {
 type userContextXML struct {
 	summary   string
 	memory    []string
+	cards     string
 	files     []string
 	images    []string
 	evidence  []string
@@ -1202,6 +1233,7 @@ func buildUserContextXML(input userContextInput) userContextXML {
 	return userContextXML{
 		summary:   formatSnapshotContext(input.Snapshot),
 		memory:    formatMemoryContext(input.Memory),
+		cards:     formatDocCardsContext(input.DocCards, docCardContentLimit),
 		images:    formatImageAnalysisContext(input.ImageAnalyses),
 		evidence:  formatHistoricalEvidenceContext(input.HistoricalArtifacts),
 		rag:       formatRAGFileContext(input.RAGChunks),

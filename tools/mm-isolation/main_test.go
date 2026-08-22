@@ -2,11 +2,14 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
@@ -39,6 +42,66 @@ func TestMMOutputRetentionDurationOverrides(t *testing.T) {
 	if got := durationEnv("MM_OUTPUT_TTL_SEC", defaultMMSweepTTL); got != 2*time.Minute {
 		t.Fatalf("overridden output TTL = %v", got)
 	}
+}
+
+func TestUpstreamTimeoutDurationOverride(t *testing.T) {
+	t.Setenv("MM_META_HMAC_KEY", "secret")
+	t.Setenv("MM_UPSTREAM_TIMEOUT_SEC", "")
+	p, err := newProxy()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.upstreamTimeout != 10*time.Minute {
+		t.Fatalf("default upstream timeout = %v", p.upstreamTimeout)
+	}
+	t.Setenv("MM_UPSTREAM_TIMEOUT_SEC", "45")
+	p, err = newProxy()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.upstreamTimeout != 45*time.Second {
+		t.Fatalf("overridden upstream timeout = %v", p.upstreamTimeout)
+	}
+}
+
+func TestProxyReturnsGatewayTimeoutOnHungUpstream(t *testing.T) {
+	root := t.TempDir()
+	shared := filepath.Join(root, "shared")
+	staging := filepath.Join(root, "staging")
+	scopeDir := filepath.Join(shared, "deeix-4-9")
+	if err := os.MkdirAll(scopeDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(scopeDir, "input.txt"), []byte("input"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	release := make(chan struct{})
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		<-release
+	}))
+	defer upstream.Close()
+	defer close(release)
+
+	u, _ := url.Parse(upstream.URL)
+	p := &proxy{
+		upstream: u,
+		shared:   shared,
+		imports:  filepath.Join(root, "imports"),
+		staging:  staging,
+		key:      []byte("secret"),
+		replays:  replayCache{values: map[string]time.Time{}},
+
+		upstreamTimeout: 50 * time.Millisecond,
+	}
+	p.transport = newIsolationTransport(u)
+
+	recorder := httptest.NewRecorder()
+	p.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewReader(toolCallBody(4, 9, "request", "call-hung"))))
+	if recorder.Code != http.StatusGatewayTimeout {
+		t.Fatalf("hung upstream returned %d: %s", recorder.Code, recorder.Body.String())
+	}
+	assertDirectoryEmpty(t, staging)
 }
 
 func TestParseMetaAndReplay(t *testing.T) {
@@ -624,8 +687,28 @@ func newTestProxy(t *testing.T, upstreamURL, shared, staging string) *proxy {
 		key:      []byte("secret"),
 		replays:  replayCache{values: map[string]time.Time{}},
 	}
-	p.transport = &httputil.ReverseProxy{Rewrite: func(r *httputil.ProxyRequest) { r.SetURL(u) }}
+	p.transport = newIsolationTransport(u)
 	return p
+}
+
+// newIsolationTransport mirrors the transport built in newProxy so tests exercise
+// the same timeout/error-mapping behavior without environment setup.
+func newIsolationTransport(u *url.URL) http.Handler {
+	return &httputil.ReverseProxy{
+		Rewrite: func(r *httputil.ProxyRequest) { r.SetURL(u); r.Out.Host = u.Host },
+		Transport: &http.Transport{
+			DialContext:         (&net.Dialer{Timeout: 10 * time.Second}).DialContext,
+			IdleConnTimeout:     90 * time.Second,
+			MaxIdleConnsPerHost: 4,
+		},
+		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
+			if errors.Is(err, context.DeadlineExceeded) {
+				http.Error(w, "upstream timed out", http.StatusGatewayTimeout)
+				return
+			}
+			http.Error(w, "upstream unavailable", http.StatusBadGateway)
+		},
+	}
 }
 
 func producerToolCallBody(toolName, callID string, arguments map[string]any) []byte {

@@ -220,6 +220,75 @@ func TestBuildToolContextArtifactsRecordsLocalAndNativeTools(t *testing.T) {
 	}
 }
 
+func TestBuildToolContextArtifactsRecordsImageAnalysisByFileID(t *testing.T) {
+	items := buildToolContextArtifacts(toolContextArtifactInput{
+		ConversationID: 7,
+		UserID:         11,
+		MessageID:      13,
+		RunID:          "run_image",
+		Rows: []model.ToolCall{{
+			ToolCallID: "call_system",
+			ToolType:   "function",
+			ToolName:   systemMultimodalAnalyzeToolName,
+			Status:     "success",
+			OutputJSON: `{"status":"success","analyses":[{"file_ids":["image-1","image-2","image-1"],"analysis":"screen shows a terminal"}]}`,
+		}, {
+			ToolCallID: "call_mcp",
+			ToolType:   "mcp_attachment",
+			ToolName:   "vision_tool",
+			Status:     "success",
+			InputJSON:  `{"file_id":"image-3"}`,
+			OutputJSON: `{"content":[{"type":"text","text":"a chart is visible"}]}`,
+		}},
+	})
+
+	if len(items) != 3 {
+		t.Fatalf("expected three image analysis artifacts, got %#v", items)
+	}
+	for _, item := range items {
+		if item.Kind != model.ContextArtifactImageAnalysis {
+			t.Fatalf("expected image analysis kind, got %#v", item)
+		}
+		if !strings.Contains(item.MetadataJSON, `"file_id"`) || item.Content == "" {
+			t.Fatalf("expected file-linked analysis metadata and content, got %#v", item)
+		}
+	}
+	if !hasContextArtifact(items, model.ContextArtifactImageAnalysis, "call_system:image-1") ||
+		!hasContextArtifact(items, model.ContextArtifactImageAnalysis, "call_system:image-2") ||
+		!hasContextArtifact(items, model.ContextArtifactImageAnalysis, "call_mcp:image-3") {
+		t.Fatalf("expected one artifact per analyzed file, got %#v", items)
+	}
+}
+
+func TestSelectHistoricalContextArtifactsUsesNewestImageAnalysisPerFile(t *testing.T) {
+	newest := model.ContextArtifact{
+		MessageID:     8,
+		Kind:          model.ContextArtifactImageAnalysis,
+		Content:       "new angle: the button is disabled",
+		TokenEstimate: 10,
+		MetadataJSON:  `{"file_id":"image-1"}`,
+	}
+	older := model.ContextArtifact{
+		MessageID:     7,
+		Kind:          model.ContextArtifactImageAnalysis,
+		Content:       "old angle: the button is enabled",
+		TokenEstimate: 10,
+		MetadataJSON:  `{"file_id":"image-1"}`,
+	}
+	items := selectHistoricalContextArtifacts(historicalContextArtifactInput{
+		CurrentMessageID: 9,
+		Query:            "继续分析图片",
+		ImageFileIDs:     []string{"image-1"},
+		Candidates:       []model.ContextArtifact{newest, older},
+	})
+
+	if len(items) != 1 {
+		t.Fatalf("expected one latest image artifact, got %#v", items)
+	}
+	if items[0].Content != newest.Content {
+		t.Fatalf("expected newest image analysis, got %#v", items[0])
+	}
+}
 func TestBuildToolContextArtifactsKeepsHeadAndTailForLargeResults(t *testing.T) {
 	items := buildToolContextArtifacts(toolContextArtifactInput{
 		ConversationID: 7,

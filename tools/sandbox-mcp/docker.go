@@ -9,6 +9,7 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/docker/docker/api/types/container"
@@ -22,7 +23,8 @@ import (
 // dockerClient 封装宿主机 Docker API 的最小操作面（容器创建/执行/销毁/卷）。
 // 沙箱 MCP 服务需要挂载宿主 /var/run/docker.sock，且仅本服务持有该权限。
 type dockerClient struct {
-	cli *client.Client
+	cli         *client.Client
+	execCounter atomic.Uint64
 }
 
 func newDockerClient() (*dockerClient, error) {
@@ -289,18 +291,80 @@ type execResult struct {
 	ExitCode int
 }
 
+type cappedBuffer struct {
+	buffer bytes.Buffer
+	limit  int
+}
+
+func (b *cappedBuffer) Write(p []byte) (int, error) {
+	originalLen := len(p)
+	remaining := b.limit - b.buffer.Len()
+	if remaining > 0 {
+		if len(p) > remaining {
+			p = p[:remaining]
+		}
+		_, _ = b.buffer.Write(p)
+	}
+	return originalLen, nil
+}
+
+func (b *cappedBuffer) String() string {
+	return b.buffer.String()
+}
+
+const execWrapperScript = `pid_file=$1
+shift
+setsid "$@" &
+child=$!
+printf '%s' "$child" > "$pid_file"
+wait "$child"
+status=$?
+rm -f "$pid_file"
+exit "$status"`
+
+const terminateExecScript = `pid_file=$1
+# 等待 wrapper 写入 PID：上限 4s，避免命令刚启动即超时时清理脚本抢跑。
+i=0
+while [ "$i" -lt 80 ] && [ ! -s "$pid_file" ]; do
+  i=$((i + 1))
+  sleep 0.05
+done
+if [ -s "$pid_file" ]; then
+  pid=$(cat "$pid_file")
+  kill -TERM -- "-$pid" 2>/dev/null || true
+  sleep 1
+  kill -KILL -- "-$pid" 2>/dev/null || true
+fi
+rm -f "$pid_file"`
+
 // execInContainer 在容器内同步执行命令。
 // workingDir 经 Docker Exec 原生 WorkingDir 传递（不经 shell cd 拼接，P0-04）。
 // stdinData 非空时通过标准输入注入（用于 base64 写文件等大载荷场景）。
-func (d *dockerClient) execInContainer(ctx context.Context, name string, cmd []string, workingDir string, stdinData []byte, timeout time.Duration) (*execResult, error) {
+func (d *dockerClient) execInContainer(
+	ctx context.Context,
+	name string,
+	cmd []string,
+	workingDir string,
+	stdinData []byte,
+	timeout time.Duration,
+	outputLimit int,
+) (*execResult, error) {
 	if timeout <= 0 {
 		timeout = 120 * time.Second
+	}
+	if outputLimit <= 0 {
+		outputLimit = 64 << 10
+	}
+	if len(cmd) == 0 {
+		return nil, errors.New("exec command is empty")
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
+	pidFile := fmt.Sprintf("/tmp/.deeix-exec-%d-%d.pid", time.Now().UnixNano(), d.execCounter.Add(1))
+	wrappedCmd := append([]string{"/bin/sh", "-c", execWrapperScript, "deeix-exec", pidFile}, cmd...)
 	execCfg := container.ExecOptions{
-		Cmd:          cmd,
+		Cmd:          wrappedCmd,
 		AttachStdout: true,
 		AttachStderr: true,
 		AttachStdin:  stdinData != nil,
@@ -316,23 +380,28 @@ func (d *dockerClient) execInContainer(ctx context.Context, name string, cmd []s
 	}
 	defer resp.Close()
 
-	var stdoutBuf, stderrBuf bytes.Buffer
+	stdoutBuf := &cappedBuffer{limit: outputLimit + 1}
+	stderrBuf := &cappedBuffer{limit: outputLimit + 1}
 	writeErr := make(chan error, 1)
 	go func() {
 		if stdinData != nil {
 			_, _ = resp.Conn.Write(stdinData)
-			_ = resp.CloseWrite() // 通知容器 stdin EOF
+			_ = resp.CloseWrite()
 		}
-		_, err := stdcopy.StdCopy(&stdoutBuf, &stderrBuf, resp.Reader)
+		_, err := stdcopy.StdCopy(stdoutBuf, stderrBuf, resp.Reader)
 		writeErr <- err
 	}()
 
 	select {
 	case <-ctx.Done():
-		// 超时：关闭连接终止流读取，避免 goroutine 泄漏；容器内的 exec 进程由
-		// docker 在连接关闭后清理，不会继续占用沙箱资源。
 		resp.Close()
 		<-writeErr
+		terminateCtx, terminateCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		terminateErr := d.terminateExecProcessGroup(terminateCtx, name, pidFile)
+		terminateCancel()
+		if terminateErr != nil {
+			return nil, fmt.Errorf("exec timeout after %s: %w; terminate process group: %v", timeout, ctx.Err(), terminateErr)
+		}
 		return nil, fmt.Errorf("exec timeout after %s: %w", timeout, ctx.Err())
 	case err := <-writeErr:
 		if err != nil {
@@ -348,6 +417,35 @@ func (d *dockerClient) execInContainer(ctx context.Context, name string, cmd []s
 		Stderr:   stderrBuf.String(),
 		ExitCode: inspect.ExitCode,
 	}, nil
+}
+
+func (d *dockerClient) terminateExecProcessGroup(ctx context.Context, name string, pidFile string) error {
+	execID, err := d.cli.ContainerExecCreate(ctx, name, container.ExecOptions{
+		Cmd:          []string{"/bin/sh", "-c", terminateExecScript, "deeix-kill", pidFile},
+		AttachStdout: true,
+		AttachStderr: true,
+	})
+	if err != nil {
+		return err
+	}
+	resp, err := d.cli.ContainerExecAttach(ctx, execID.ID, container.ExecStartOptions{})
+	if err != nil {
+		return err
+	}
+	defer resp.Close()
+	copyDone := make(chan error, 1)
+	go func() {
+		_, copyErr := io.Copy(io.Discard, resp.Reader)
+		copyDone <- copyErr
+	}()
+	select {
+	case copyErr := <-copyDone:
+		return copyErr
+	case <-ctx.Done():
+		resp.Close()
+		<-copyDone
+		return ctx.Err()
+	}
 }
 
 // parseMemoryBytes 解析 docker --memory 风格字符串（"1g"/"512m"/"268435456"）。

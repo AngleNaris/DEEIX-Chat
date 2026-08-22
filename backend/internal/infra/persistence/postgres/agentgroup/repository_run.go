@@ -8,6 +8,7 @@ import (
 	models "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/models"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // CreateAgentGroupRun 创建运行（client_run_id 唯一，冲突返回 ErrDuplicate）。
@@ -18,6 +19,180 @@ func (r *Repo) CreateAgentGroupRun(ctx context.Context, run *domainagentgroup.Ru
 	}
 	run.ID = entity.ID
 	return nil
+}
+
+// CreateAgentGroupRunIfIdle 在会话无活跃运行时原子创建 pending 运行。
+// PostgreSQL：事务内先取会话级 advisory xact lock，再复查活跃运行并插入，
+// 保证多实例下同一会话至多创建一个活跃运行；SQLite（单实例部署）退化为
+// 事务内普通检查 + 插入。返回 created=false 表示已有活跃运行。
+func (r *Repo) CreateAgentGroupRunIfIdle(ctx context.Context, run *domainagentgroup.Run) (bool, error) {
+	var created bool
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if tx.Dialector != nil && tx.Dialector.Name() == "postgres" {
+			// 会话 ID 为自增主键，直接作为 advisory lock 键空间（int64 安全）。
+			if err := tx.Exec("SELECT pg_advisory_xact_lock(?)", agentGroupAdvisoryLockKey(run.ConversationID)).Error; err != nil {
+				return translateError(err)
+			}
+		}
+		var active int64
+		if err := tx.Model(&models.AgentGroupRun{}).
+			Where("conversation_id = ? AND status IN ?", run.ConversationID, []string{
+				domainagentgroup.RunStatusPending,
+				domainagentgroup.RunStatusRunning,
+				domainagentgroup.RunStatusPausedRetryable,
+				domainagentgroup.RunStatusBlocked,
+			}).
+			Count(&active).Error; err != nil {
+			return translateError(err)
+		}
+		if active > 0 {
+			return nil
+		}
+		entity := toRunModel(run)
+		if err := tx.Create(&entity).Error; err != nil {
+			return translateError(err)
+		}
+		run.ID = entity.ID
+		created = true
+		return nil
+	})
+	return created, translateError(err)
+}
+
+// agentGroupAdvisoryLockKey 把会话 ID 映射到 advisory lock 键（负数段，避开迁移锁）。
+func agentGroupAdvisoryLockKey(conversationID uint) int64 {
+	return -1 - int64(conversationID)
+}
+
+// BeginAgentGroupStepRetry 在单个事务内完成重试启动的三段写入：
+// run CAS（paused_retryable→running + 清除 retryable_step_id）、步骤回到 running、
+// 插入 Attempt N+1。任一步失败整体回滚，消除「run 已 running 但无 attempt」的
+// 崩溃窗口。返回 false 表示 run 状态 CAS 冲突（并发双击重试）。
+func (r *Repo) BeginAgentGroupStepRetry(
+	ctx context.Context,
+	runID uint,
+	expectedStateVersion int,
+	stepID uint,
+	attempt *domainagentgroup.Attempt,
+) (bool, error) {
+	var ok bool
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		runningResult := tx.Model(&models.AgentGroupRun{}).
+			Where("id = ? AND state_version = ? AND status = ?", runID, expectedStateVersion, domainagentgroup.RunStatusPausedRetryable).
+			Updates(map[string]interface{}{
+				"status":             domainagentgroup.RunStatusRunning,
+				"retryable_step_id":  nil,
+				"state_version":      gorm.Expr("state_version + 1"),
+				"error_code":         "",
+				"error_message":      "",
+				"ended_at":           nil,
+				"updated_at":         now(),
+			})
+		if runningResult.Error != nil {
+			return translateError(runningResult.Error)
+		}
+		if runningResult.RowsAffected == 0 {
+			return nil
+		}
+		stepResult := tx.Model(&models.AgentGroupStep{}).
+			Where("id = ?", stepID).
+			Updates(map[string]interface{}{
+				"status":     domainagentgroup.StepStatusRunning,
+				"updated_at": now(),
+			})
+		if stepResult.Error != nil {
+			return translateError(stepResult.Error)
+		}
+		entity := toAttemptModel(attempt)
+		if err := tx.Create(&entity).Error; err != nil {
+			return translateError(err)
+		}
+		attempt.ID = entity.ID
+		ok = true
+		return nil
+	})
+	return ok, translateError(err)
+}
+
+// RecoverStaleAgentGroupRuns 回收崩溃窗口遗留的僵尸运行（返回受影响运行数）：
+// - stale pending：创建后从未进入 running（进程在 CAS 前崩溃）；
+// - running 且没有任何 attempt（首个 attempt 创建前崩溃，租约恢复覆盖不到）。
+// 两者统一转为 blocked（放弃入口可用；不转 paused_retryable 以避免
+// UI 出现无可重试步骤的误导性重试入口）。有 attempt 的 running 由
+// RecoverExpiredAttemptLeases 处理。
+func (r *Repo) RecoverStaleAgentGroupRuns(ctx context.Context, now time.Time, cutoff time.Time) (int64, error) {
+	var affected int64
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var candidates []models.AgentGroupRun
+		query := tx.
+			Where("status IN ? AND updated_at < ?", []string{
+				domainagentgroup.RunStatusPending,
+				domainagentgroup.RunStatusRunning,
+			}, cutoff).
+			Order("id ASC")
+		if tx.Dialector.Name() != "sqlite" {
+			query = query.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"})
+		}
+		if err := query.Find(&candidates).Error; err != nil {
+			return translateError(err)
+		}
+		if len(candidates) == 0 {
+			return nil
+		}
+
+		runIDs := make([]uint, 0, len(candidates))
+		for i := range candidates {
+			runIDs = append(runIDs, candidates[i].ID)
+		}
+		var attemptCounts []struct {
+			RunID uint
+			Total int64
+		}
+		if err := tx.Model(&models.AgentGroupStepAttempt{}).
+			Select("chat_agent_group_steps.group_run_id AS run_id, COUNT(*) AS total").
+			Joins("JOIN chat_agent_group_steps ON chat_agent_group_steps.id = chat_agent_group_step_attempts.step_id").
+			Where("chat_agent_group_steps.group_run_id IN ?", runIDs).
+			Group("chat_agent_group_steps.group_run_id").
+			Scan(&attemptCounts).Error; err != nil {
+			return translateError(err)
+		}
+		attemptsByRun := make(map[uint]int64, len(attemptCounts))
+		for _, item := range attemptCounts {
+			attemptsByRun[item.RunID] = item.Total
+		}
+
+		for i := range candidates {
+			run := candidates[i]
+			switch run.Status {
+			case domainagentgroup.RunStatusPending:
+				// pending 一律回收。
+			case domainagentgroup.RunStatusRunning:
+				if attemptsByRun[run.ID] > 0 {
+					continue // 有 attempt 的 running 走租约恢复路径
+				}
+			default:
+				continue
+			}
+			result := tx.Model(&models.AgentGroupRun{}).
+				Where("id = ? AND status = ? AND state_version = ?", run.ID, run.Status, run.StateVersion).
+				Updates(map[string]interface{}{
+					"status":        domainagentgroup.RunStatusBlocked,
+					"state_version": gorm.Expr("state_version + 1"),
+					"error_code":    domainagentgroup.ErrorCodeInterrupted,
+					"error_message": "agent group run interrupted before execution started",
+					"ended_at":      now,
+					"updated_at":    now,
+				})
+			if result.Error != nil {
+				return translateError(result.Error)
+			}
+			if result.RowsAffected > 0 {
+				affected++
+			}
+		}
+		return nil
+	})
+	return affected, translateError(err)
 }
 
 // GetAgentGroupRunByPublicID 查询运行。
@@ -86,14 +261,18 @@ func (r *Repo) GetAgentGroupRunDetail(ctx context.Context, userID uint, publicID
 		Run:   *run,
 		Steps: make([]domainagentgroup.StepDetail, 0, len(steps)),
 	}
+	stepIDs := make([]uint, 0, len(steps))
 	for i := range steps {
-		attempts, err := r.ListAttemptsByStep(ctx, steps[i].ID)
-		if err != nil {
-			return nil, err
-		}
+		stepIDs = append(stepIDs, steps[i].ID)
+	}
+	attemptsByStep, err := r.ListAttemptsBySteps(ctx, stepIDs)
+	if err != nil {
+		return nil, err
+	}
+	for i := range steps {
 		detail.Steps = append(detail.Steps, domainagentgroup.StepDetail{
 			Step:     steps[i],
-			Attempts: attempts,
+			Attempts: attemptsByStep[steps[i].ID],
 		})
 	}
 	return detail, nil
@@ -284,15 +463,31 @@ func (r *Repo) CASUpdateAgentGroupStepAttempt(ctx context.Context, attemptID uin
 
 // ListAttemptsByStep 查询步骤的全部尝试（按 attempt_no 升序）。
 func (r *Repo) ListAttemptsByStep(ctx context.Context, stepID uint) ([]domainagentgroup.Attempt, error) {
+	grouped, err := r.ListAttemptsBySteps(ctx, []uint{stepID})
+	if err != nil {
+		return nil, err
+	}
+	return grouped[stepID], nil
+}
+
+// ListAttemptsBySteps 批量查询多个步骤的尝试。
+func (r *Repo) ListAttemptsBySteps(ctx context.Context, stepIDs []uint) (map[uint][]domainagentgroup.Attempt, error) {
+	grouped := make(map[uint][]domainagentgroup.Attempt, len(stepIDs))
+	if len(stepIDs) == 0 {
+		return grouped, nil
+	}
 	var entities []models.AgentGroupStepAttempt
-	if err := r.db.WithContext(ctx).Where("step_id = ?", stepID).Order("attempt_no ASC").Find(&entities).Error; err != nil {
+	if err := r.db.WithContext(ctx).
+		Where("step_id IN ?", stepIDs).
+		Order("step_id ASC, attempt_no ASC").
+		Find(&entities).Error; err != nil {
 		return nil, translateError(err)
 	}
-	attempts := make([]domainagentgroup.Attempt, 0, len(entities))
 	for i := range entities {
-		attempts = append(attempts, toAttemptDomain(entities[i]))
+		attempt := toAttemptDomain(entities[i])
+		grouped[attempt.StepID] = append(grouped[attempt.StepID], attempt)
 	}
-	return attempts, nil
+	return grouped, nil
 }
 
 // GetAgentGroupStepAttemptByPublicID 查询尝试（校验运行归属）。
@@ -318,63 +513,97 @@ func (r *Repo) CountAttemptsByStep(ctx context.Context, stepID uint) (int64, err
 	return count, translateError(err)
 }
 
+// RenewAgentGroupStepAttemptLease 仅为仍在 running 的尝试续租。
+func (r *Repo) RenewAgentGroupStepAttemptLease(ctx context.Context, attemptID uint, leaseExpiresAt time.Time) (bool, error) {
+	result := r.db.WithContext(ctx).Model(&models.AgentGroupStepAttempt{}).
+		Where("id = ? AND status = ?", attemptID, domainagentgroup.AttemptStatusRunning).
+		Updates(map[string]interface{}{
+			"lease_expires_at": leaseExpiresAt,
+			"updated_at":       now(),
+		})
+	if result.Error != nil {
+		return false, translateError(result.Error)
+	}
+	return result.RowsAffected > 0, nil
+}
+
 // RecoverExpiredAttemptLeases 将租约过期的 running 尝试转为 interrupted，
 // 并把对应运行转为 paused_retryable（返回受影响运行数）。
-// 事务内：先标记尝试，再逐个推进运行检查点（CAS 语义，冲突跳过）。
 func (r *Repo) RecoverExpiredAttemptLeases(ctx context.Context, now time.Time) (int64, error) {
 	var affected int64
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var expired []models.AgentGroupStepAttempt
-		if err := tx.Where("status = ? AND lease_expires_at IS NOT NULL AND lease_expires_at < ?",
-			domainagentgroup.AttemptStatusRunning, now).Find(&expired).Error; err != nil {
+		query := tx.Where("status = ? AND lease_expires_at IS NOT NULL AND lease_expires_at < ?",
+			domainagentgroup.AttemptStatusRunning, now).
+			Order("step_id ASC, id ASC")
+		if tx.Dialector.Name() != "sqlite" {
+			query = query.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"})
+		}
+		if err := query.Find(&expired).Error; err != nil {
 			return translateError(err)
 		}
-		if len(expired) == 0 {
-			return nil
-		}
-		attemptIDs := make([]uint, 0, len(expired))
-		stepIDs := make([]uint, 0, len(expired))
-		for _, a := range expired {
-			attemptIDs = append(attemptIDs, a.ID)
-			stepIDs = append(stepIDs, a.StepID)
-		}
-		if err := tx.Model(&models.AgentGroupStepAttempt{}).
-			Where("id IN ? AND status = ?", attemptIDs, domainagentgroup.AttemptStatusRunning).
-			Updates(map[string]interface{}{
-				"status":     domainagentgroup.AttemptStatusInterrupted,
-				"updated_at": now,
-			}).Error; err != nil {
-			return translateError(err)
-		}
-
-		var steps []models.AgentGroupStep
-		if err := tx.Where("id IN ?", stepIDs).Find(&steps).Error; err != nil {
-			return translateError(err)
-		}
-		// 每个运行取最先出现的步骤作为可重试步骤。
-		stepByRun := make(map[uint]uint, len(steps))
-		for _, s := range steps {
-			if _, ok := stepByRun[s.GroupRunID]; !ok {
-				stepByRun[s.GroupRunID] = s.ID
-			}
-		}
-		for runID, stepID := range stepByRun {
-			var runEntity models.AgentGroupRun
-			if err := tx.Where("id = ?", runID).First(&runEntity).Error; err != nil {
+		for i := range expired {
+			attempt := expired[i]
+			var step models.AgentGroupStep
+			if err := tx.Where("id = ?", attempt.StepID).First(&step).Error; err != nil {
 				return translateError(err)
 			}
-			if runEntity.Status != domainagentgroup.RunStatusRunning || runEntity.RetryableStepID != nil {
+			var run models.AgentGroupRun
+			runQuery := tx.Where("id = ?", step.GroupRunID)
+			if tx.Dialector.Name() != "sqlite" {
+				runQuery = runQuery.Clauses(clause.Locking{Strength: "UPDATE"})
+			}
+			if err := runQuery.First(&run).Error; err != nil {
+				return translateError(err)
+			}
+			if run.Status != domainagentgroup.RunStatusRunning || run.RetryableStepID != nil || step.Status != domainagentgroup.StepStatusRunning {
 				continue
 			}
-			if err := tx.Model(&models.AgentGroupRun{}).
-				Where("id = ? AND state_version = ? AND status = ?", runID, runEntity.StateVersion, domainagentgroup.RunStatusRunning).
+
+			attemptResult := tx.Model(&models.AgentGroupStepAttempt{}).
+				Where("id = ? AND status = ? AND lease_expires_at < ?", attempt.ID, domainagentgroup.AttemptStatusRunning, now).
+				Updates(map[string]interface{}{
+					"status":           domainagentgroup.AttemptStatusInterrupted,
+					"error_code":       domainagentgroup.ErrorCodeInterrupted,
+					"error_message":    "agent group attempt lease expired",
+					"lease_expires_at": nil,
+					"ended_at":         now,
+					"updated_at":       now,
+				})
+			if attemptResult.Error != nil {
+				return translateError(attemptResult.Error)
+			}
+			if attemptResult.RowsAffected == 0 {
+				continue
+			}
+			stepResult := tx.Model(&models.AgentGroupStep{}).
+				Where("id = ? AND status = ?", step.ID, domainagentgroup.StepStatusRunning).
+				Updates(map[string]interface{}{
+					"status":     domainagentgroup.StepStatusInterrupted,
+					"updated_at": now,
+				})
+			if stepResult.Error != nil {
+				return translateError(stepResult.Error)
+			}
+			if stepResult.RowsAffected == 0 {
+				return repository.ErrConflict
+			}
+			runResult := tx.Model(&models.AgentGroupRun{}).
+				Where("id = ? AND state_version = ? AND status = ? AND retryable_step_id IS NULL", run.ID, run.StateVersion, domainagentgroup.RunStatusRunning).
 				Updates(map[string]interface{}{
 					"status":            domainagentgroup.RunStatusPausedRetryable,
-					"retryable_step_id": stepID,
+					"retryable_step_id": step.ID,
 					"state_version":     gorm.Expr("state_version + 1"),
+					"error_code":        domainagentgroup.ErrorCodeInterrupted,
+					"error_message":     "agent group attempt lease expired",
+					"ended_at":          now,
 					"updated_at":        now,
-				}).Error; err != nil {
-				return translateError(err)
+				})
+			if runResult.Error != nil {
+				return translateError(runResult.Error)
+			}
+			if runResult.RowsAffected == 0 {
+				return repository.ErrConflict
 			}
 			affected++
 		}

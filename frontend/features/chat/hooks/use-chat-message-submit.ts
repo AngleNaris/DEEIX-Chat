@@ -477,6 +477,7 @@ export function useChatMessageSubmit({
   modelOptions,
   selectedToolIDs,
   selectedSkills,
+  selectedPrompts,
   selectedKnowledgeBaseIDs,
   htmlVisualPromptEnabled,
   options,
@@ -526,6 +527,7 @@ export function useChatMessageSubmit({
   modelOptions: ChatModelOption[];
   selectedToolIDs: number[];
   selectedSkills: SkillSummaryDTO[];
+  selectedPrompts: PromptPresetDTO[];
   selectedKnowledgeBaseIDs: string[];
   htmlVisualPromptEnabled: boolean;
   options: ConversationOptions;
@@ -1461,7 +1463,7 @@ export function useChatMessageSubmit({
             ? activeConversationRef.current
             : targetConversation;
         const shouldUpdateConversationModel =
-          !targetIsAgentGroupConversation &&
+          !isAgentGroupTarget &&
           modelRunSequence > (latestCompletedModelRunSequenceRef.current.get(targetConversationScopeKey) ?? 0);
         if (shouldUpdateConversationModel) {
           latestCompletedModelRunSequenceRef.current.set(targetConversationScopeKey, modelRunSequence);

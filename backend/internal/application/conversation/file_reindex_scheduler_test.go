@@ -9,8 +9,9 @@ import (
 func newTestScheduler(delay time.Duration) *fileReindexScheduler {
 	scheduler := newFileReindexScheduler(
 		time.Hour, // 测试不依赖 ticker 循环，手动调用 dueItems
-		func() time.Duration { return delay },
+		func(context.Context) time.Duration { return delay },
 		func(ctx context.Context, userID uint, fileID string) error { return nil },
+		nil,
 		nil,
 	)
 	return scheduler
@@ -72,11 +73,12 @@ func TestReindexSchedulerRespectsRuntimeDelay(t *testing.T) {
 	// delayFn 返回 0 或负值时回落到 60s 默认。
 	scheduler := newFileReindexScheduler(
 		time.Hour,
-		func() time.Duration { return 0 },
+		func(context.Context) time.Duration { return 0 },
 		func(ctx context.Context, userID uint, fileID string) error { return nil },
 		nil,
+		nil,
 	)
-	if got := scheduler.resolveDelay(); got != 60*time.Second {
+	if got := scheduler.resolveDelay(context.Background()); got != 60*time.Second {
 		t.Fatalf("expected fallback 60s, got %v", got)
 	}
 }

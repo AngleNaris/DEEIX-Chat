@@ -3,6 +3,15 @@
 import { ChevronDown, CircleAlert, Film, GalleryHorizontalEnd } from "lucide-react";
 import { useTranslations } from "next-intl";
 import * as React from "react";
+import { MessageAgentGroupTrace } from "@/features/agent-groups/components/message-agent-group-trace";
+import { useAgentGroupStepActions } from "@/features/agent-groups/hooks/use-agent-group-step-actions";
+import {
+  clearLiveGroupRun,
+  type GroupRunState,
+  readLiveGroupRun,
+  resolveRetryableGroupStep,
+  useLiveGroupRun,
+} from "@/features/agent-groups/model/group-run-store";
 import { GrainientBackground } from "@/components/reactbits/backgrounds/grainient";
 import {
   Accordion,
@@ -22,6 +31,7 @@ import { MessageKnowledgeSources } from "@/features/chat/components/message/mess
 import type { AssistantReaction } from "@/features/chat/components/message/message-meta";
 import { AssistantMessageMeta } from "@/features/chat/components/message/message-meta";
 import { MessageProcessTrace, MessageTraceEventBlocks } from "@/features/chat/components/message/message-process-trace";
+import { PlatformToolApprovalCard } from "@/features/chat/components/message/platform-tool-approval-card";
 import { resolveLeadingImagePreview } from "@/features/chat/model/media-image-preview";
 import {
   clearLiveUpstreamThinkTrace,
@@ -66,6 +76,17 @@ function isVideoAttachment(attachment: MessageAttachment): boolean {
     attachment.fileCategory === "video" ||
     mimeType.startsWith("video/") ||
     detectedMime.startsWith("video/")
+  );
+}
+
+function isAudioAttachment(attachment: MessageAttachment): boolean {
+  const mimeType = attachment.mimeType.toLowerCase();
+  const detectedMime = attachment.detectedMime?.toLowerCase() || "";
+  return (
+    attachment.kind === "audio" ||
+    attachment.fileCategory === "audio" ||
+    mimeType.startsWith("audio/") ||
+    detectedMime.startsWith("audio/")
   );
 }
 

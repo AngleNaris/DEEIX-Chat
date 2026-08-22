@@ -480,7 +480,7 @@ func (s *Service) sendMessageInternal(
 		retErr = err
 		return nil, err
 	}
-	toolRuntime.bindMultimodalAnalyzer(cfg, route, currentAttachments)
+	toolRuntime.bindMultimodalAnalyzerWithHistory(cfg, route, conversationAttachments, true)
 	toolRuntime.bindCredentialSecretRefs(input.UserID, input.ConversationID, runID)
 	toolRuntime = toolRuntime.visibleRuntime()
 	var attachmentImports []attachmentImportPath
@@ -509,7 +509,7 @@ func (s *Service) sendMessageInternal(
 	imageAttachmentRoutingActive := false
 	processorAttachments := currentAttachments
 	imageProcessing := imageAttachmentProcessingResult{}
-	if toolRuntime.multimodalAnalyzer == nil {
+	if !toolRuntime.multimodalAnalyzerHandlesCurrentAttachments() {
 		imageProcessing, err = s.processImageAttachments(ctx, imageAttachmentProcessingInput{
 			UserID:                 input.UserID,
 			ConversationID:         input.ConversationID,
@@ -552,7 +552,7 @@ func (s *Service) sendMessageInternal(
 
 	contextAssembler := NewContextAssembler(int64(cfg.ContextMaxInputTokens))
 	var nonVisionExtractReader func(context.Context, uint, string) string
-	if toolRuntime.multimodalAnalyzer == nil {
+	if !toolRuntime.multimodalAnalyzerHandlesCurrentAttachments() {
 		nonVisionExtractReader = s.nonVisionImageExtractText
 	}
 	userCtx := userContextInput{
@@ -742,6 +742,7 @@ func (s *Service) sendMessageInternal(
 		historicalScope,
 		promptScope.Snapshot != nil,
 		input.Content,
+		collectConversationImageFileIDs(promptScope.activeMessages()),
 		ragContextChunks,
 		ragFallbackEvidenceAttachments(ragFallbacks),
 		userCtx.RecallChunks,
@@ -1524,7 +1525,7 @@ func (s *Service) sendMessageInternal(
 			}
 			if toolResult.MCPActivationChanged {
 				toolRuntime = toolRuntime.visibleRuntime()
-				if toolRuntime.multimodalAnalyzer == nil && toolRuntime.attachmentProcessorActive() {
+				if !toolRuntime.multimodalAnalyzerHandlesCurrentAttachments() && toolRuntime.attachmentProcessorActive() {
 					// 激活后的自动附件处理属于系统配套动作，不消耗模型显式工具调用预算。
 					attachmentToolCallLimit := len(processorAttachments)
 					activatedProcessing, processingErr := s.processImageAttachments(toolCtx, imageAttachmentProcessingInput{

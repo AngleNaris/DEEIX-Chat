@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/admin"
+	agentgroup "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/agentgroup"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/announcement"
+	appartifact "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/artifact"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/audit"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/auth"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/billing"
@@ -18,6 +20,9 @@ import (
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/compact"
 	appcontentmoderation "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/contentmoderation"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/conversation"
+	appcredentials "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/credentials"
+	appdoccard "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/doccard"
+	appdynamicprompt "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/dynamicprompt"
 	appembedding "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/embedding"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/extraction"
 	appknowledgebase "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/knowledgebase"
@@ -29,17 +34,12 @@ import (
 	apppromptpreset "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/promptpreset"
 	apprag "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/rag"
 	appruntime "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/runtime"
-	appartifact "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/artifact"
-	agentgroup "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/agentgroup"
-	appdoccard "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/doccard"
-	appdynamicprompt "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/dynamicprompt"
-	appcredentials "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/credentials"
-	domainagentgroup "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/agentgroup"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/settings"
 	appskill "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/skill"
 	appsystemevent "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/systemevent"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/user"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/usersettings"
+	domainagentgroup "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/agentgroup"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
 	moderationclient "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/contentmoderation"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/embedding"
@@ -55,22 +55,22 @@ import (
 	epaypayment "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/payment/epay"
 	stripepayment "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/payment/stripe"
 	filecache "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/filecache"
-	announcementrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/announcement"
 	agentgrouprepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/agentgroup"
+	announcementrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/announcement"
+	artifactrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/artifact"
 	auditrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/audit"
 	billingrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/billing"
 	channelrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/channel"
 	contentmoderationrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/contentmoderation"
 	conversationrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/conversation"
+	credentialsrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/credentials"
+	doccardrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/doccard"
+	dynamicpromptrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/dynamicprompt"
 	knowledgebaserepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/knowledgebase"
 	logcleanuprepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/logcleanup"
 	mcprepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/mcp"
 	memoryrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/memory"
 	promptpresetrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/promptpreset"
-	artifactrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/artifact"
-	doccardrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/doccard"
-	dynamicpromptrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/dynamicprompt"
-	credentialsrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/credentials"
 	settingsrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/settings"
 	skillrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/skill"
 	systemeventrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/systemevent"
@@ -79,25 +79,26 @@ import (
 	platformruntime "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/runtime"
 	platformhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http"
 	adminhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/admin"
+	agentgrouphttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/agentgroup"
 	announcementhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/announcement"
+	artifacthttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/artifact"
 	authhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/auth"
 	billinghttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/billing"
 	channelhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/channel"
 	contentmoderationhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/contentmoderation"
 	conversationhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/conversation"
+	credentialsh "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/credentials"
+	doccardhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/doccard"
+	dynamicprompthttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/dynamicprompt"
 	knowledgebasehttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/knowledgebase"
 	mcphttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/mcp"
 	memoryhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/memory"
+	platformtoolshttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/platformtools"
 	promptpresethttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/promptpreset"
-	artifacthttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/artifact"
-	doccardhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/doccard"
-	dynamicprompthttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/dynamicprompt"
-	credentialsh "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/credentials"
 	settingshttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/settings"
 	skillhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/skill"
 	userhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/user"
 	usersettingshttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/usersettings"
-	platformtoolshttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/platformtools"
 	"github.com/gin-gonic/gin"
 	"github.com/go-redis/redis/v8"
 	"go.uber.org/zap"
@@ -132,7 +133,7 @@ func (a agentGroupWriterAdapter) CreateAgentGroup(ctx context.Context, userID ui
 		Name:               input.Name,
 		Description:        input.Description,
 		CoordinationPrompt: input.CoordinationPrompt,
-		Supervisor:         agentgroup.MemberCreateInput{
+		Supervisor: agentgroup.MemberCreateInput{
 			RolePublicID:    input.Supervisor.RolePublicID,
 			MemberType:      input.Supervisor.MemberType,
 			ModelOverride:   input.Supervisor.ModelOverride,
@@ -468,6 +469,29 @@ func NewApp() (*App, error) {
 	conversationService.SetKnowledgeBaseResolver(knowledgeBaseService)
 	knowledgeBaseHandler := knowledgebasehttp.NewHandler(knowledgeBaseService, runtimeCfg)
 	knowledgeBaseModule := knowledgebasehttp.NewModule(knowledgeBaseHandler)
+	artifactRepo := artifactrepo.NewRepo(db)
+	artifactService := appartifact.NewService(artifactRepo)
+	artifactHandler := artifacthttp.NewHandler(artifactService)
+	artifactModule := artifacthttp.NewModule(artifactHandler)
+	conversationService.SetArtifactService(artifactService)
+	docCardRepo := doccardrepo.NewRepo(db)
+	docCardService := appdoccard.NewService(docCardRepo)
+	docCardService.SetCacheInvalidator(conversationService.InvalidateDocCardCache)
+	docCardHandler := doccardhttp.NewHandler(docCardService)
+	docCardModule := doccardhttp.NewModule(docCardHandler)
+	conversationService.SetDocCardReader(docCardService)
+	dynamicPromptRepo := dynamicpromptrepo.NewRepo(db)
+	dynamicPromptService := appdynamicprompt.NewService(dynamicPromptRepo)
+	dynamicPromptService.SetCacheInvalidator(conversationService.InvalidateDynamicPromptCache)
+	dynamicPromptHandler := dynamicprompthttp.NewHandler(dynamicPromptService)
+	dynamicPromptModule := dynamicprompthttp.NewModule(dynamicPromptHandler)
+	conversationService.SetDynamicPromptReader(dynamicPromptService)
+	credentialRepo := credentialsrepo.NewRepo(db)
+	credentialService := appcredentials.NewService(credentialRepo, cfg.DataEncryptionKey)
+	credentialHandler := credentialsh.NewHandler(credentialService)
+	credentialModule := credentialsh.NewModule(credentialHandler)
+	conversationService.SetCredentialReader(credentialService)
+	conversationService.SetPromptPresetResolver(promptPresetService)
 
 	hc := newHealthChecker(db, cfg.CacheDriver, redisClient)
 	rateLimiter := buildRateLimiter(cfg, redisClient, memoryCache)

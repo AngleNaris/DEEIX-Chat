@@ -48,6 +48,7 @@
     "files": "文件",
     "knowledgeBases": "知识库",
     "skillsPrompt": "Skills & Prompts",
+    "agentGroups": "智能体群组",
     "searchTitle": "搜索",
     "searchDescription": "搜索对话标题、标签、项目和消息正文",
     "searchPlaceholder": "搜索对话或消息内容",

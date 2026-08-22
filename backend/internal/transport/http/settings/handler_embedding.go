@@ -91,7 +91,7 @@ func (h *Handler) GetEmbeddingStatus(c *gin.Context) {
 }
 
 // TriggerReindex godoc
-// @Summary 触发向量重建（重索引所有 stale/failed 文件）
+// @Summary 触发向量重建（后台异步重索引所有 stale/failed 文件）
 // @Tags admin/settings
 // @Produce json
 // @Security BearerAuth
@@ -104,7 +104,8 @@ func (h *Handler) TriggerReindex(c *gin.Context) {
 	}
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
 	defer cancel()
-	submitted, err := h.embeddingSvc.ReindexStaleFiles(ctx)
+	// accepted=1 表示后台任务已接受（分页扫描与重建均在后台执行，不阻塞本请求）。
+	accepted, err := h.embeddingSvc.ReindexStaleFiles(ctx)
 	if err != nil {
 		if errors.Is(err, appembedding.ErrEmbeddingServiceNotConfigured) {
 			response.ErrorFrom(c, http.StatusBadRequest, err)
@@ -113,5 +114,5 @@ func (h *Handler) TriggerReindex(c *gin.Context) {
 		response.Error(c, http.StatusInternalServerError, "reindex failed")
 		return
 	}
-	response.Success(c, EmbeddingReindexResponse{Submitted: submitted, Message: "reindex jobs submitted"})
+	response.Success(c, EmbeddingReindexResponse{Submitted: accepted, Message: "reindex task accepted"})
 }

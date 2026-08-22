@@ -15,7 +15,7 @@ type CreateConversationProjectRequest struct {
 	Description             string   `json:"description,omitempty" binding:"max=255"`
 	SystemPrompt            string   `json:"systemPrompt,omitempty" binding:"max=12000"`
 	MCPDefaultMode          string   `json:"mcpDefaultMode,omitempty" binding:"omitempty,oneof=inherit custom"`
-	DefaultMCPToolIDs       []uint   `json:"defaultMCPToolIDs,omitempty" binding:"max=128"`
+	DefaultMCPToolIDs       []uint   `json:"defaultMCPToolIDs,omitempty"`
 	DefaultSkillIDs         []uint   `json:"defaultSkillIDs,omitempty" binding:"max=128"`
 	DefaultKnowledgeBaseIDs []string `json:"defaultKnowledgeBaseIDs,omitempty" binding:"max=8,dive,required,max=32"`
 	Color                   string   `json:"color,omitempty" binding:"max=32"`
@@ -28,7 +28,7 @@ type UpdateConversationProjectRequest struct {
 	Description             *string   `json:"description,omitempty" binding:"omitempty,max=255"`
 	SystemPrompt            *string   `json:"systemPrompt,omitempty" binding:"omitempty,max=12000"`
 	MCPDefaultMode          *string   `json:"mcpDefaultMode,omitempty" binding:"omitempty,oneof=inherit custom"`
-	DefaultMCPToolIDs       *[]uint   `json:"defaultMCPToolIDs,omitempty" binding:"omitempty,max=128"`
+	DefaultMCPToolIDs       *[]uint   `json:"defaultMCPToolIDs,omitempty" binding:"omitempty"`
 	DefaultSkillIDs         *[]uint   `json:"defaultSkillIDs,omitempty" binding:"omitempty,max=128"`
 	DefaultKnowledgeBaseIDs *[]string `json:"defaultKnowledgeBaseIDs,omitempty" binding:"omitempty,max=8,dive,required,max=32"`
 	Color                   *string   `json:"color,omitempty" binding:"omitempty,max=32"`

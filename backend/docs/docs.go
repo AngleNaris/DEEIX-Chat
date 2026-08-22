@@ -6677,7 +6677,7 @@ const docTemplate = `{
                 "tags": [
                     "admin/settings"
                 ],
-                "summary": "触发向量重建（重索引所有 stale/failed 文件）",
+                "summary": "触发向量重建（后台异步重索引所有 stale/failed 文件）",
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -15800,6 +15800,36 @@ const docTemplate = `{
                 }
             }
         },
+        "AddAgentGroupMemberRequest": {
+            "type": "object",
+            "required": [
+                "rolePublicID"
+            ],
+            "properties": {
+                "dutyInstruction": {
+                    "type": "string",
+                    "maxLength": 4000
+                },
+                "modelOverride": {
+                    "type": "string",
+                    "maxLength": 128
+                },
+                "reasoningEffort": {
+                    "type": "string",
+                    "enum": [
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh",
+                        "max"
+                    ]
+                },
+                "rolePublicID": {
+                    "type": "string",
+                    "maxLength": 32
+                }
+            }
+        },
         "AddKnowledgeBaseFilesRequest": {
             "type": "object",
             "required": [
@@ -19329,7 +19359,6 @@ const docTemplate = `{
                 "defaultSkillIDs",
                 "description",
                 "icon",
-                "id",
                 "mcpDefaultMode",
                 "name",
                 "publicID",
@@ -19368,9 +19397,6 @@ const docTemplate = `{
                 },
                 "icon": {
                     "type": "string"
-                },
-                "id": {
-                    "type": "integer"
                 },
                 "mcpDefaultMode": {
                     "type": "string"

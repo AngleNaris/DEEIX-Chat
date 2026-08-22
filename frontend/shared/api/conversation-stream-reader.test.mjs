@@ -91,6 +91,28 @@ test("an idle stream is canceled and recovered without consuming the rapid recon
   assert.deepEqual(completed, { status: "done" });
 });
 
+test("a permanently idle stream exhausts the idle budget and disconnects", async () => {
+  let recoveries = 0;
+
+  const reading = readRecoverableSequencedJSONStream(
+    readerOptions(
+      new Response(
+        new ReadableStream({}),
+        { status: 200 },
+      ),
+      async () => {
+        recoveries += 1;
+        return new Response(new ReadableStream({}), { status: 200 });
+      },
+      { idleTimeoutMS: 5, maxIdleReconnects: 3 },
+    ),
+  );
+
+  await assert.rejects(reading, (error) => error instanceof ConversationStreamDisconnectedError);
+  // 初始连接 + 每次重连都 idle：达到上限后不再继续（1 initial + 3 recovery）。
+  assert.ok(recoveries <= 4, `expected bounded recoveries, got ${recoveries}`);
+});
+
 test("an abort immediately cancels a pending read and releases the response body", async () => {
   let canceled = false;
   const controller = new AbortController();

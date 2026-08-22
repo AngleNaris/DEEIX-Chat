@@ -54,6 +54,9 @@ type AgentGroupWriteRepository interface {
 type AgentGroupRunRepository interface {
 	// CreateAgentGroupRun 创建运行（client_run_id 唯一）。
 	CreateAgentGroupRun(ctx context.Context, run *domainagentgroup.Run) error
+	// CreateAgentGroupRunIfIdle 在会话无活跃运行时原子创建 pending 运行；
+	// created=false 表示该会话已存在活跃运行（多实例 admission 守卫）。
+	CreateAgentGroupRunIfIdle(ctx context.Context, run *domainagentgroup.Run) (bool, error)
 	// GetAgentGroupRunByPublicID 查询运行。
 	GetAgentGroupRunByPublicID(ctx context.Context, userID uint, publicID string) (*domainagentgroup.Run, error)
 	// GetAgentGroupRunByClientRunID 按父流式运行 ID 查询。
@@ -86,11 +89,21 @@ type AgentGroupRunRepository interface {
 	CASUpdateAgentGroupStepAttempt(ctx context.Context, attemptID uint, expectedStatus string, patch domainagentgroup.AttemptPatch) (bool, error)
 	// ListAttemptsByStep 查询步骤的全部尝试（按 attempt_no 升序）。
 	ListAttemptsByStep(ctx context.Context, stepID uint) ([]domainagentgroup.Attempt, error)
+	// ListAttemptsBySteps 批量查询多个步骤的尝试，结果按 step_id 分组且组内按 attempt_no 升序。
+	ListAttemptsBySteps(ctx context.Context, stepIDs []uint) (map[uint][]domainagentgroup.Attempt, error)
 	// GetAgentGroupStepAttemptByPublicID 查询尝试。
 	GetAgentGroupStepAttemptByPublicID(ctx context.Context, userID uint, runPublicID string, attemptPublicID string) (*domainagentgroup.Attempt, error)
 	// CountAttemptsByStep 统计步骤累计尝试数量。
 	CountAttemptsByStep(ctx context.Context, stepID uint) (int64, error)
+	// BeginAgentGroupStepRetry 在单事务内完成重试启动：run CAS（paused_retryable→running
+	// + 清除可重试标记）、步骤回 running、插入 Attempt N+1；false 表示 run 状态 CAS 冲突。
+	BeginAgentGroupStepRetry(ctx context.Context, runID uint, expectedStateVersion int, stepID uint, attempt *domainagentgroup.Attempt) (bool, error)
+	// RenewAgentGroupStepAttemptLease 仅为仍在 running 的尝试续租。
+	RenewAgentGroupStepAttemptLease(ctx context.Context, attemptID uint, leaseExpiresAt time.Time) (bool, error)
 	// RecoverExpiredAttemptLeases 将租约过期的 running 尝试转为 interrupted，
 	// 并把对应运行转为 paused_retryable（返回受影响运行数）。
 	RecoverExpiredAttemptLeases(ctx context.Context, now time.Time) (int64, error)
+	// RecoverStaleAgentGroupRuns 回收崩溃窗口遗留的僵尸运行：stale pending 与
+	// 无 attempt 的 stale running 统一转 blocked（返回受影响运行数）。
+	RecoverStaleAgentGroupRuns(ctx context.Context, now time.Time, cutoff time.Time) (int64, error)
 }

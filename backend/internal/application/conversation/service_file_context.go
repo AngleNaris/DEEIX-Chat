@@ -64,6 +64,31 @@ func collectConversationFileIDs(messages []model.Message, currentFileIDs []strin
 	return result
 }
 
+func collectConversationImageFileIDs(messages []model.Message) []string {
+	result := make([]string, 0)
+	seen := make(map[string]struct{})
+	for _, message := range messages {
+		if !strings.EqualFold(strings.TrimSpace(message.Status), "success") && strings.TrimSpace(message.Status) != "" {
+			continue
+		}
+		if message.Role != "user" {
+			continue
+		}
+		for _, item := range parseAttachmentSnapshotRefs(message.Attachments) {
+			fileID := strings.TrimSpace(item.FileID)
+			if fileID == "" || normalizeAttachmentKind(item.Kind, firstNonEmptyString(item.DetectedMIME, item.MimeType)) != "image" {
+				continue
+			}
+			if _, ok := seen[fileID]; ok {
+				continue
+			}
+			seen[fileID] = struct{}{}
+			result = append(result, fileID)
+		}
+	}
+	return result
+}
+
 func parseAttachmentSnapshotFileIDs(raw string) []string {
 	items := parseAttachmentSnapshotRefs(raw)
 	result := make([]string, 0, len(items))

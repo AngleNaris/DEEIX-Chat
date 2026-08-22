@@ -120,19 +120,28 @@ type FileProcessingRepository interface {
 	// ReplaceFileObjectContent 覆盖文件对象内容元数据并重置处理/提取/向量状态，
 	// 返回事务内计算的旧对象物理清理判定。
 	ReplaceFileObjectContent(ctx context.Context, userID uint, fileID string, storagePath string, sha256 string, sizeBytes int64) (ReplaceFileObjectContentResult, error)
+	// ClaimFileProcessingQueue 将指定 pending 文件原子推进到 queued，避免多副本重复提交。
+	ClaimFileProcessingQueue(ctx context.Context, userID uint, fileID string, expectedStoragePath string) (bool, error)
+	// ReleaseFileProcessingQueueClaim 在队列提交失败时把本次 queued 占用释放回 pending。
+	ReleaseFileProcessingQueueClaim(ctx context.Context, userID uint, fileID string, expectedStoragePath string) error
+	// ClaimFileProcessingExecution 将 queued/failed 文件原子推进到 extracting。
+	ClaimFileProcessingExecution(ctx context.Context, userID uint, fileID string, expectedStoragePath string, extractorVersion string, processingStartedAt time.Time) (bool, error)
+	// ClaimRecoverableFilesForProcessing 批量占用需要补提交的 pending/queued/stale extracting 文件。
+	ClaimRecoverableFilesForProcessing(ctx context.Context, pendingCutoff time.Time, queuedCutoff time.Time, extractingCutoff time.Time, limit int) ([]domainconversation.FileObject, error)
 }
 
 // UpdateFileObjectProcessingInput 定义文件处理状态更新字段。
 type UpdateFileObjectProcessingInput struct {
-	ExpectedStoragePath    string
-	ProcessingStatus       *string
-	ProcessingReady        *bool
-	ProcessingErrorCode    *string
-	ProcessingErrorMessage *string
-	ExtractStatus          *string
-	PageCount              *int
-	ExtractorVersion       *string
-	ExtractedAt            **time.Time
+	ExpectedStoragePath         string
+	ExpectedProcessingStartedAt *time.Time
+	ProcessingStatus            *string
+	ProcessingReady             *bool
+	ProcessingErrorCode         *string
+	ProcessingErrorMessage      *string
+	ExtractStatus               *string
+	PageCount                   *int
+	ExtractorVersion            *string
+	ExtractedAt                 **time.Time
 }
 
 // IsZero 判断是否没有任何文件处理状态更新字段。

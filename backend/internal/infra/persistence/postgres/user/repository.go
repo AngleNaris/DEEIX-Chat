@@ -886,7 +886,28 @@ func (r *Repo) ListLatestSessionActivityByUserIDs(ctx context.Context, userIDs [
 
 // DeleteAccountHard 删除用户主记录及主要用户域数据。
 func (r *Repo) DeleteAccountHard(ctx context.Context, userID uint) error {
-	return translateError(r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	_, err := r.DeleteAccountHardWithStoragePaths(ctx, userID)
+	return err
+}
+
+// DeleteAccountHardWithStoragePaths 原子硬删除账号，并返回提交后可安全清理的对象存储路径。
+func (r *Repo) DeleteAccountHardWithStoragePaths(ctx context.Context, userID uint) ([]string, error) {
+	var storagePaths []string
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		userLockQuery := tx.Model(&model.User{}).Select("id").Where("id = ?", userID)
+		if tx.Dialector != nil && tx.Dialector.Name() != "sqlite" {
+			userLockQuery = userLockQuery.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		var lockedUser model.User
+		if err := userLockQuery.First(&lockedUser).Error; err != nil {
+			return err
+		}
+
+		candidates, err := listAccountStoragePathCandidates(tx, userID)
+		if err != nil {
+			return fmt.Errorf("list account storage paths: %w", err)
+		}
+
 		var builtinFileReferences int64
 		if err := tx.Table("knowledge_base_files AS kbf").
 			Joins("JOIN knowledge_bases AS kb ON kb.id = kbf.knowledge_base_id").

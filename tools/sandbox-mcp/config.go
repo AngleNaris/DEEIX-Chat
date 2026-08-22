@@ -64,6 +64,9 @@ type Config struct {
 	NetworkMode string
 	// MaxTasksPerSession 单会话并行后台任务上限。
 	MaxTasksPerSession int
+	// TaskTTL 后台任务最长存活时间：超时的任务会被回收 goroutine 杀掉进程组
+	// 并从会话移除（防止永不退出的任务把容器永久钉住）。<=0 表示禁用。
+	TaskTTL time.Duration
 }
 
 func envStr(key, def string) string {
@@ -147,6 +150,7 @@ func Load() *Config {
 		AllowedCIDRs:        splitEnvList("SANDBOX_ALLOWED_CIDRS"),
 		NetworkMode:         envStr("SANDBOX_NETWORK_MODE", "deeix-sandbox-egress"),
 		MaxTasksPerSession:  envInt("SANDBOX_MAX_TASKS_PER_SESSION", 4),
+		TaskTTL:             envDurationSeconds("SANDBOX_TASK_TTL_SEC", 24*time.Hour),
 	}
 }
 

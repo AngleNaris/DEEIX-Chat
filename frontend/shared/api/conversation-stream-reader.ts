@@ -1,5 +1,8 @@
 export const DEFAULT_CONVERSATION_STREAM_IDLE_TIMEOUT_MS = 45_000;
 export const DEFAULT_CONVERSATION_STREAM_MAX_RAPID_RECONNECTS = 5;
+// 空闲断连的独立上限：连接从未产出事件即 idle 超时视为无进展，
+// 避免永久空闲流被「idle 清零计数」逻辑无限重连（约 45s×6 ≈ 4.5 分钟封顶）。
+export const DEFAULT_CONVERSATION_STREAM_MAX_IDLE_RECONNECTS = 5;
 
 export type ConversationStreamSequenceCursor = {
   lastSeq: number;
@@ -70,6 +73,7 @@ type RecoverableSequencedJSONStreamOptions<TEvent, TResult> =
     openRecovery: (afterSeq: number, signal?: AbortSignal) => Promise<Response>;
     shouldRetryOpenError?: (error: unknown) => boolean;
     maxRapidReconnects?: number;
+    maxIdleReconnects?: number;
   };
 
 type SequencedJSONStreamResult<TResult> = {
@@ -312,8 +316,11 @@ export async function readRecoverableSequencedJSONStream<TEvent, TResult>(
   let response = options.initialResponse;
   let lastSeq = normalizeConversationStreamSequence(options.afterSeq);
   let rapidReconnects = 0;
+  let rapidIdleStreak = 0;
   const maxRapidReconnects =
     options.maxRapidReconnects ?? DEFAULT_CONVERSATION_STREAM_MAX_RAPID_RECONNECTS;
+  const maxIdleReconnects =
+    options.maxIdleReconnects ?? DEFAULT_CONVERSATION_STREAM_MAX_IDLE_RECONNECTS;
 
   while (true) {
     const beforeReadSeq = lastSeq;
@@ -342,8 +349,17 @@ export async function readRecoverableSequencedJSONStream<TEvent, TResult>(
     }
 
     const madeProgress = lastSeq > beforeReadSeq;
-    if (madeProgress || readError instanceof ConversationStreamIdleError) {
+    if (madeProgress) {
+      // 真实推进（含 idle 前已产出事件）：两类计数都视为健康。
       rapidReconnects = 0;
+      rapidIdleStreak = 0;
+    } else if (readError instanceof ConversationStreamIdleError) {
+      // idle 且本次连接从未产出事件：与无进展传输错误同等对待。
+      // 用独立预算限制，避免永久空闲流被无限重连。
+      rapidIdleStreak += 1;
+      if (rapidIdleStreak > maxIdleReconnects) {
+        throw new ConversationStreamDisconnectedError(readError);
+      }
     } else {
       rapidReconnects += 1;
     }

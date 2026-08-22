@@ -13,6 +13,7 @@ import (
 	"io"
 	"log/slog"
 	"mime"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
@@ -37,6 +38,9 @@ const (
 	maxOutputTotal = 64 << 20
 	maxOutputFiles = 32
 	replayWindow   = 5 * time.Minute
+	// defaultMMUpstreamTimeout 单次 tools/call 上游调用的超时上限：防止 hung 住的
+	// 上游无限期占用全局 callMu 锁，阻塞后续所有多媒体调用。
+	defaultMMUpstreamTimeout = 10 * time.Minute
 )
 
 var scopeRE = regexp.MustCompile(`^deeix-[0-9]+-[0-9]+$`)
@@ -71,6 +75,7 @@ type proxy struct {
 	key                              []byte
 	replays                          replayCache
 	callMu                           sync.Mutex
+	upstreamTimeout                  time.Duration
 	transport                        http.Handler
 }
 
@@ -123,14 +128,30 @@ func newProxy() (*proxy, error) {
 		output:   filepath.Clean(strings.TrimSpace(os.Getenv("MM_OUTPUT_SHARED"))),
 		key:      []byte(key),
 		replays:  replayCache{values: map[string]time.Time{}},
+
+		upstreamTimeout: durationEnv("MM_UPSTREAM_TIMEOUT_SEC", defaultMMUpstreamTimeout),
 	}
 	if p.shared == "." || p.imports == "." || p.staging == "." {
 		return nil, fmt.Errorf("invalid filesystem roots")
 	}
-	p.transport = &httputil.ReverseProxy{Rewrite: func(r *httputil.ProxyRequest) { r.SetURL(u); r.Out.Host = u.Host }, ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
-		http.Error(w, "upstream unavailable", http.StatusBadGateway)
-		slog.Warn("MM upstream failed", "error", err)
-	}}
+	p.transport = &httputil.ReverseProxy{
+		Rewrite: func(r *httputil.ProxyRequest) { r.SetURL(u); r.Out.Host = u.Host },
+		Transport: &http.Transport{
+			Proxy:                 http.ProxyFromEnvironment,
+			DialContext:           (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+			ResponseHeaderTimeout: p.upstreamTimeout,
+			IdleConnTimeout:       90 * time.Second,
+			MaxIdleConnsPerHost:   4,
+		},
+		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
+			if errors.Is(err, context.DeadlineExceeded) {
+				http.Error(w, "upstream timed out", http.StatusGatewayTimeout)
+				return
+			}
+			http.Error(w, "upstream unavailable", http.StatusBadGateway)
+			slog.Warn("MM upstream failed", "error", err)
+		},
+	}
 	return p, nil
 }
 func (p *proxy) startSweeper(ctx context.Context) {
@@ -251,6 +272,13 @@ func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		r.Body = io.NopCloser(bytes.NewReader(body))
 		r.ContentLength = int64(len(body))
 		r.Header.Del("Accept-Encoding")
+
+		// Bound the upstream call so a hung upstream cannot hold callMu forever.
+		if p.upstreamTimeout > 0 {
+			ctx, cancel := context.WithTimeout(r.Context(), p.upstreamTimeout)
+			defer cancel()
+			r = r.WithContext(ctx)
+		}
 
 		recorder := httptest.NewRecorder()
 		p.transport.ServeHTTP(recorder, r)

@@ -344,7 +344,8 @@
   },
   "data": {
     "signInRequired": "Sign in before loading conversation messages.",
-    "loadFailed": "Failed to load conversation messages"
+    "loadFailed": "Failed to load conversation messages",
+    "resumeFailedInterrupted": "Generation was interrupted. Please try again later."
   },
   "models": {
     "signInRequired": "Sign in before loading models.",

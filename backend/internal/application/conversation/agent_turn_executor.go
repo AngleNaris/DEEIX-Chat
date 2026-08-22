@@ -157,7 +157,8 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 		fileMode = strings.TrimSpace(fm)
 	}
 	capability := s.resolveChatFileCapability(ctx)
-	conversationAttachments, err := s.resolveConversationFileContext(ctx, input.UserID, input.FileIDs, input.FileIDs)
+	conversationFileIDs := collectConversationFileIDs(input.DomainMessages, input.FileIDs)
+	conversationAttachments, err := s.resolveConversationFileContext(ctx, input.UserID, conversationFileIDs, input.FileIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -169,7 +170,8 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 	if err != nil {
 		return nil, err
 	}
-	toolRuntime.bindMultimodalAnalyzer(cfg, route, conversationAttachments)
+	currentAttachments := filterCurrentAttachments(conversationAttachments)
+	toolRuntime.bindMultimodalAnalyzerWithHistory(cfg, route, conversationAttachments, true)
 	toolRuntime.bindCredentialSecretRefs(input.UserID, input.ConversationID, input.ClientRunID)
 	toolRuntime = toolRuntime.visibleRuntime()
 	var attachmentImports []attachmentImportPath
@@ -179,7 +181,7 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 			ctx,
 			input.UserID,
 			input.ConversationID,
-			conversationAttachments,
+			currentAttachments,
 		)
 		if cleanupAttachmentImports != nil {
 			defer cleanupAttachmentImports()
@@ -196,9 +198,9 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 		}
 	}
 	imageAttachmentRoutingActive := false
-	processorAttachments := conversationAttachments
+	processorAttachments := currentAttachments
 	imageProcessing := imageAttachmentProcessingResult{}
-	if toolRuntime.multimodalAnalyzer == nil {
+	if !toolRuntime.multimodalAnalyzerHandlesCurrentAttachments() {
 		imageProcessing, err = s.processImageAttachments(ctx, imageAttachmentProcessingInput{
 			UserID:                 input.UserID,
 			ConversationID:         input.ConversationID,
@@ -290,7 +292,7 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 	stableFullContextAttachments := append([]AttachmentInput{}, fileContextPlan.FullAttachments...)
 	stableFullContextAttachments = append(stableFullContextAttachments, ragFallbackEvidenceAttachments(retrievalRAGFallbacks)...)
 	var nonVisionExtractReader func(context.Context, uint, string) string
-	if toolRuntime.multimodalAnalyzer == nil {
+	if !toolRuntime.multimodalAnalyzerHandlesCurrentAttachments() {
 		nonVisionExtractReader = s.nonVisionImageExtractText
 	}
 	userCtx := userContextInput{
@@ -793,7 +795,7 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 			}
 			if toolResult.MCPActivationChanged {
 				toolRuntime = toolRuntime.visibleRuntime()
-				if toolRuntime.multimodalAnalyzer == nil && toolRuntime.attachmentProcessorActive() {
+				if !toolRuntime.multimodalAnalyzerHandlesCurrentAttachments() && toolRuntime.attachmentProcessorActive() {
 					// 激活后的自动附件处理属于系统配套动作，不消耗模型显式工具调用预算。
 					attachmentToolCallLimit := len(processorAttachments)
 					activatedProcessing, processingErr := s.processImageAttachments(toolCtx, imageAttachmentProcessingInput{

@@ -212,6 +212,45 @@ func TestInjectConversationImageContextRejectsMissingAndOversizedContext(t *test
 	}
 }
 
+func TestInjectConversationImageContextForTextModelUsesHistoricalAnalysisHint(t *testing.T) {
+	domainMessages := []model.Message{
+		{Role: "user", Content: "请看这张图", Attachments: `[{"file_id":"image-1","kind":"image","mime_type":"image/png"}]`},
+		{Role: "assistant", Content: "上一轮回答"},
+		{Role: "user", Content: "继续判断按钮状态"},
+	}
+	attachments := []AttachmentInput{{
+		FileID:      "image-1",
+		FileName:    "screen.png",
+		Kind:        "image",
+		MimeType:    "image/png",
+		ContextMode: fileContextModeDirectImage,
+	}}
+	artifacts := []model.ContextArtifact{{
+		Kind:         model.ContextArtifactImageAnalysis,
+		Content:      "按钮当前为禁用状态",
+		MetadataJSON: `{"file_id":"image-1"}`,
+	}}
+	history := historyMessagesFromDomain(domainMessages, historyMessageOptions{})
+	got, err := (&Service{}).injectConversationImageContext(t.Context(), history, domainMessages, attachments, config.Config{}, false, artifacts)
+	if err != nil {
+		t.Fatalf("inject text-only historical image hint: %v", err)
+	}
+	if len(got) != len(history) || len(got[0].Parts) != 0 {
+		t.Fatalf("expected text-only historical context, got %#v", got)
+	}
+	for _, want := range []string{"fileID: image-1", "已有图片识别结果", "按钮当前为禁用状态", "system_multimodal_analyze"} {
+		if !strings.Contains(got[0].Content, want) {
+			t.Fatalf("historical hint missing %q: %s", want, got[0].Content)
+		}
+	}
+	for _, message := range got {
+		for _, part := range message.Parts {
+			if part.Kind == llm.ContentPartImage {
+				t.Fatalf("text-only historical prompt must not contain image parts: %#v", got)
+			}
+		}
+	}
+}
 func TestResizeImageIfNeededReturnsActualMIME(t *testing.T) {
 	img := image.NewRGBA(image.Rect(0, 0, 4, 4))
 	for y := 0; y < 4; y++ {

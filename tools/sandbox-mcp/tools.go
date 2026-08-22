@@ -170,7 +170,7 @@ func (s *sandboxServer) exec(ctx context.Context, req execRequest) (*execResult,
 	if limit <= 0 {
 		limit = s.cfg.OutputLimitBytes
 	}
-	res, err := s.d.execInContainer(ctx, session.Container, req.cmd, req.cwd, req.stdin, req.timeout)
+	res, err := s.d.execInContainer(ctx, session.Container, req.cmd, req.cwd, req.stdin, req.timeout, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -249,7 +249,7 @@ func (s *sandboxServer) handleTaskStart(ctx context.Context, req mcp.CallToolReq
 	session.mu.Unlock()
 
 	cmd := fmt.Sprintf("nohup setsid /bin/sh -c %s > %s 2>&1 & echo $!", shellQuote(command), shellQuote(out))
-	res, err := s.d.execInContainer(ctx, session.Container, []string{"/bin/sh", "-c", cmd}, "", nil, 30*time.Second)
+	res, err := s.d.execInContainer(ctx, session.Container, []string{"/bin/sh", "-c", cmd}, "", nil, 30*time.Second, s.cfg.OutputLimitBytes)
 	if err != nil || res.ExitCode != 0 {
 		session.mu.Lock()
 		delete(session.tasks, taskID)
@@ -291,9 +291,9 @@ func (s *sandboxServer) handleTaskPoll(ctx context.Context, req mcp.CallToolRequ
 		return resultJSON(map[string]any{"ok": false, "error": "unknown task_id (session 可能已重建)"}), nil
 	}
 	// 判断任务是否结束：检查容器内进程是否仍存活。
-	alive, err := s.d.execInContainer(ctx, session.Container, []string{"/bin/sh", "-c", fmt.Sprintf("kill -0 %s 2>/dev/null", task.PID)}, "", nil, 20*time.Second)
+	alive, err := s.d.execInContainer(ctx, session.Container, []string{"/bin/sh", "-c", fmt.Sprintf("kill -0 %s 2>/dev/null", task.PID)}, "", nil, 20*time.Second, s.cfg.OutputLimitBytes)
 	done := err != nil || alive.ExitCode != 0
-	output, outErr := s.d.execInContainer(ctx, session.Container, []string{"/bin/sh", "-c", fmt.Sprintf("cat %s 2>/dev/null", task.Output)}, "", nil, 20*time.Second)
+	output, outErr := s.d.execInContainer(ctx, session.Container, []string{"/bin/sh", "-c", fmt.Sprintf("tail -c %d %s 2>/dev/null", s.cfg.OutputLimitBytes*2, task.Output)}, "", nil, 20*time.Second, s.cfg.OutputLimitBytes*2)
 	// P1-03：第二次 exec 的错误不得忽略（容器消失/Docker 断开时 output 为 nil，直接访问会 panic）。
 	if outErr != nil || output == nil {
 		result := map[string]any{"ok": false, "error": "task output unavailable (session container lost?)"}
@@ -340,7 +340,7 @@ func (s *sandboxServer) handleTaskCancel(ctx context.Context, req mcp.CallToolRe
 	if !ok {
 		return resultJSON(map[string]any{"ok": false, "error": "unknown task_id"}), nil
 	}
-	_, _ = s.d.execInContainer(ctx, session.Container, []string{"/bin/sh", "-c", fmt.Sprintf("kill -TERM -- -%s 2>/dev/null; sleep 1; kill -KILL -- -%s 2>/dev/null; rm -f %s", shellQuote(task.PID), shellQuote(task.PID), shellQuote(task.Output))}, "", nil, 20*time.Second)
+	_, _ = s.d.execInContainer(ctx, session.Container, []string{"/bin/sh", "-c", fmt.Sprintf("kill -TERM -- -%s 2>/dev/null; sleep 1; kill -KILL -- -%s 2>/dev/null; rm -f %s", shellQuote(task.PID), shellQuote(task.PID), shellQuote(task.Output))}, "", nil, 20*time.Second, s.cfg.OutputLimitBytes)
 
 	return resultJSON(map[string]any{"ok": true, "task_id": taskID, "cancelled": true}), nil
 }

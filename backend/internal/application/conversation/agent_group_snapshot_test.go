@@ -115,6 +115,12 @@ func (r *agentGroupRunStoreStub) CreateAgentGroupRun(context.Context, *domainage
 	return nil
 }
 
+func (r *agentGroupRunStoreStub) CreateAgentGroupRunIfIdle(_ context.Context, run *domainagentgroup.Run) (bool, error) {
+	r.createCalls++
+	run.ID = uint(r.createCalls)
+	return true, nil
+}
+
 func newAgentGroupSnapshotService(conversationModel string, members []domainagentgroup.Member, roles map[string]*domainconversation.ConversationRole, resolver *agentGroupRouteResolverStub) (*Service, *domainconversation.Conversation) {
 	groupID := uint(7)
 	conversation := &domainconversation.Conversation{

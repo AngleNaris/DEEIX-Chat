@@ -478,8 +478,9 @@ func (s *Service) ReconcileIndex(ctx context.Context) (int64, error) {
 	return s.MarkFilesStale(ctx, configuredModelSignature(s.snapshot()))
 }
 
-// ReindexStaleFiles 提交一次去重的后台重建任务，返回本次纳入重建的文件数。
-// 后台任务通过固定 worker 数执行，不会按文件数量无限创建 goroutine。
+// ReindexStaleFiles 提交一次去重的后台重建任务，返回 1 表示任务已接受。
+// 只做配置/可用性检查与互斥标记，实际分页扫描在后台执行（runReindex），
+// 避免大库全量扫描撞 HTTP 超时导致任务根本不启动。
 func (s *Service) ReindexStaleFiles(ctx context.Context) (int, error) {
 	if s.repo == nil {
 		return 0, nil
@@ -510,43 +511,18 @@ func (s *Service) ReindexStaleFiles(ctx context.Context) (int, error) {
 		s.reindexMu.Unlock()
 	}()
 
-	const pageSize = 100
-	submitted := 0
-	var afterID uint
-	for {
-		files, err := s.repo.ListFilesForReindex(ctx, pageSize, afterID)
-		if err != nil {
-			return submitted, err
-		}
-		if len(files) == 0 {
-			break
-		}
-		for _, f := range files {
-			if canEmbedFile(cfg, f) {
-				submitted++
-			}
-		}
-		if len(files) < pageSize {
-			break
-		}
-		afterID = files[len(files)-1].ID
-	}
-	if submitted == 0 {
-		return 0, nil
-	}
-
 	s.lifecycleMu.RLock()
 	workerCtx := s.lifecycle
 	s.lifecycleMu.RUnlock()
 	if workerCtx == nil {
 		workerCtx = context.Background()
 	}
-	if err := workerCtx.Err(); err != nil {
-		return 0, err
+	if workerCtx.Err() != nil {
+		return 0, workerCtx.Err()
 	}
 	started = true
 	go s.runReindex(workerCtx, configuredModelSignature(cfg))
-	return submitted, nil
+	return 1, nil
 }
 
 func (s *Service) runReindex(ctx context.Context, expectedSignature string) {

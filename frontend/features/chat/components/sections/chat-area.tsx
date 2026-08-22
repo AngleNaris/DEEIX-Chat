@@ -14,6 +14,7 @@ import {
   useMessageScroller,
 } from "@/components/ui/message-scroller";
 import { Skeleton } from "@/components/ui/skeleton";
+import { AgentGroupConfigButton } from "@/features/agent-groups/components/agent-group-config-button";
 import {
   AssistantMessageSkeleton,
   ChatInlineAlertCard,
@@ -626,7 +627,24 @@ export function ChatArea({
     }
     pruneScreenshotSelection?.(selectableMessagePublicIDs);
   }, [pruneScreenshotSelection, selectableMessagePublicIDs, selectionMode]);
+  const hasLiveMessage = React.useMemo(
+    () => messages.some((item) => item.isPending || item.isStreaming),
+    [messages],
+  );
   const messageViewportBoundaryRef = React.useRef<HTMLDivElement | null>(null);
+  const liveAnchorMessageKey = React.useMemo(() => {
+    if (!hasLiveMessage) {
+      return "";
+    }
+    const liveMessageIndex = messages.findIndex((item) => item.isPending || item.isStreaming);
+    for (let index = liveMessageIndex - 1; index >= 0; index -= 1) {
+      const item = messages[index];
+      if (item?.role === "user") {
+        return item.key;
+      }
+    }
+    return "";
+  }, [hasLiveMessage, messages]);
   const pendingUserScrollKey = React.useMemo(
     () => [...messages].reverse().find((item) => item.role === "user" && item.isPending)?.key ?? "",
     [messages],
@@ -831,6 +849,7 @@ export function ChatArea({
                     <MessageScrollerItem
                       key={item.key}
                       messageId={chatMessageScrollerID(item)}
+                      scrollAnchor={item.key === liveAnchorMessageKey}
                       className={spacingClass}
                       data-chat-message-id={chatMessageScrollerID(item)}
                       data-chat-message-role={item.role}

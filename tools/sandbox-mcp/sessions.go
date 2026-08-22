@@ -534,12 +534,58 @@ func sessionReclaimable(s *Session, now time.Time, leaseTTL time.Duration) bool 
 	return !s.reclaiming && s.activeOps == 0 && len(s.tasks) == 0 && now.Sub(s.LastUsedAt) > leaseTTL
 }
 
+// reapExpiredTasksLocked 杀掉超过 TTL 的后台任务并从会话移除（调用方持有 s.mu）。
+// 永不退出的任务会把容器永久钉住（sessionReclaimable 要求 tasks 为空），
+// 因此在闲置回收扫描的同一 tick 内做 TTL 清理。持锁段只做快照与移除，
+// Docker exec 杀进程组在锁外执行，避免阻塞同会话请求。返回被清理的任务数。
+func (m *SessionManager) reapExpiredTasksLocked(ctx context.Context, s *Session, now time.Time) int {
+	ttl := m.cfg.TaskTTL
+	if ttl <= 0 {
+		return 0
+	}
+	type expiredTask struct {
+		id  string
+		pid string
+	}
+	expired := make([]expiredTask, 0)
+	for id, task := range s.tasks {
+		if task != nil && now.Sub(task.StartedAt) > ttl {
+			expired = append(expired, expiredTask{id: id, pid: task.PID})
+			delete(s.tasks, id)
+		}
+	}
+	s.mu.Unlock()
+	defer s.mu.Lock()
+	for _, task := range expired {
+		if task.pid != "" {
+			_, _ = m.d.execInContainer(
+				ctx,
+				s.Container,
+				[]string{"/bin/sh", "-c", fmt.Sprintf("kill -TERM -- -%s 2>/dev/null; sleep 1; kill -KILL -- -%s 2>/dev/null; rm -f %s", shellQuote(task.pid), shellQuote(task.pid), shellQuote(taskOutputPathFor(task.id)))},
+				"",
+				nil,
+				20*time.Second,
+				m.cfg.OutputLimitBytes,
+			)
+		}
+		slog.Info("reap expired background task", "container", s.Container, "task_id", task.id)
+	}
+	return len(expired)
+}
+
+// taskOutputPathFor 复现 handleTaskStart 的后台任务输出文件命名。
+func taskOutputPathFor(taskID string) string {
+	return "/tmp/" + taskID + ".out"
+}
+
 func (m *SessionManager) reclaimOnce(ctx context.Context) {
 	now := time.Now()
 	m.mu.Lock()
 	expired := make([]*Session, 0)
 	for _, s := range m.live {
 		s.mu.Lock()
+		// 先做任务 TTL 清理：僵尸任务清掉后容器才可能满足闲置回收条件。
+		m.reapExpiredTasksLocked(ctx, s, now)
 		if sessionReclaimable(s, now, m.cfg.LeaseTTL) {
 			s.reclaiming = true
 			s.reclaimed = make(chan struct{})

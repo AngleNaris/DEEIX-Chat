@@ -209,8 +209,81 @@ func TestReplaceFileObjectContentReturnsReferenceSafeCleanupDecisions(t *testing
 	if updated.StoragePath != "objects/replaced.txt" || updated.SHA256 != "sha-replaced" || updated.SizeBytes != 42 {
 		t.Fatalf("updated content metadata = %+v", updated)
 	}
-	if updated.ExtractStoragePath != "" || updated.ProcessingStatus != "pending" || updated.ProcessingReady || updated.ChunkCount != 0 {
+	if updated.ExtractStoragePath != "" || updated.ProcessingStatus != "pending" || updated.ProcessingReady || updated.EmbedStatus != "none" || updated.ChunkCount != 0 {
 		t.Fatalf("updated processing state was not reset: %+v", updated)
+	}
+
+	pendingCutoff := updated.UpdatedAt.Add(-time.Second)
+	queuedCutoff := updated.UpdatedAt.Add(-time.Second)
+	extractingCutoff := updated.UpdatedAt.Add(-time.Second)
+	claimed, err := repo.ClaimRecoverableFilesForProcessing(
+		context.Background(), pendingCutoff, queuedCutoff, extractingCutoff, 10,
+	)
+	if err != nil {
+		t.Fatalf("claim fresh pending files: %v", err)
+	}
+	if len(claimed) != 0 {
+		t.Fatalf("fresh pending file was recovered before debounce: %+v", claimed)
+	}
+
+	claimed, err = repo.ClaimRecoverableFilesForProcessing(
+		context.Background(), updated.UpdatedAt.Add(time.Second), queuedCutoff, extractingCutoff, 10,
+	)
+	if err != nil {
+		t.Fatalf("claim stale pending files: %v", err)
+	}
+	if len(claimed) != 2 {
+		t.Fatalf("claimed pending file count = %d, want 2: %+v", len(claimed), claimed)
+	}
+	var claimedTarget *domainconversation.FileObject
+	for i := range claimed {
+		if claimed[i].FileID == files[0].FileID {
+			claimedTarget = &claimed[i]
+			break
+		}
+	}
+	if claimedTarget == nil || claimedTarget.ProcessingStatus != "queued" {
+		t.Fatalf("target pending file was not queued: %+v", claimed)
+	}
+	claimedAgain, err := repo.ClaimRecoverableFilesForProcessing(
+		context.Background(), time.Now().Add(time.Hour), time.Now().Add(-time.Hour), time.Now().Add(-time.Hour), 10,
+	)
+	if err != nil {
+		t.Fatalf("claim queued files again: %v", err)
+	}
+	if len(claimedAgain) != 0 {
+		t.Fatalf("fresh queued file was claimed twice: %+v", claimedAgain)
+	}
+
+	executing, err := repo.ClaimFileProcessingExecution(
+		context.Background(), users[0].ID, files[0].FileID, "objects/replaced.txt", "test-v1",
+		updated.UpdatedAt.Add(time.Second),
+	)
+	if err != nil || !executing {
+		t.Fatalf("claim processing execution: claimed=%v err=%v", executing, err)
+	}
+	executingAgain, err := repo.ClaimFileProcessingExecution(
+		context.Background(), users[0].ID, files[0].FileID, "objects/replaced.txt", "test-v1",
+		time.Now(),
+	)
+	if err != nil || executingAgain {
+		t.Fatalf("duplicate processing execution claim: claimed=%v err=%v", executingAgain, err)
+	}
+
+	var extractingRow model.FileObject
+	if err = db.Where("id = ?", files[0].ID).First(&extractingRow).Error; err != nil {
+		t.Fatalf("load extracting row: %v", err)
+	}
+	staleToken := extractingRow.ProcessingStartedAt.Add(-time.Minute)
+	failureStatus := "failed"
+	failureReady := false
+	if err = repo.UpdateFileObjectProcessing(context.Background(), users[0].ID, files[0].FileID, repository.UpdateFileObjectProcessingInput{
+		ExpectedStoragePath:         "objects/replaced.txt",
+		ExpectedProcessingStartedAt: &staleToken,
+		ProcessingStatus:            &failureStatus,
+		ProcessingReady:             &failureReady,
+	}); !errors.Is(err, repository.ErrConflict) {
+		t.Fatalf("stale worker commit was accepted: err=%v", err)
 	}
 
 	attachmentCleanup, err := repo.ReplaceFileObjectContent(
@@ -368,7 +441,7 @@ func TestStaleFileVersionCannotRestoreProcessingOrEmbeddingState(t *testing.T) {
 	ctx := context.Background()
 	stalePath := "objects/stale-version.txt"
 	ready := "ready"
-	for name, update := range map[string]func() error{
+	conflictUpdates := map[string]func() error{
 		"processing state": func() error {
 			return repo.UpdateFileObjectProcessingState(ctx, &domainconversation.FileObjectProcessing{
 				FileObjectID:        file.ID,
@@ -383,13 +456,23 @@ func TestStaleFileVersionCannotRestoreProcessingOrEmbeddingState(t *testing.T) {
 				ProcessingStatus:    &ready,
 			})
 		},
-		"embedding status": func() error {
+	}
+	for name, update := range conflictUpdates {
+		t.Run(name, func(t *testing.T) {
+			if err := update(); !errors.Is(err, repository.ErrConflict) {
+				t.Fatalf("stale update error = %v, want ErrConflict", err)
+			}
+		})
+	}
+
+	publishUpdates := map[string]func() (bool, error){
+		"embedding status": func() (bool, error) {
 			return repo.UpdateFileObjectEmbedStatus(ctx, file.UserID, file.FileID, stalePath, ready, "")
 		},
-		"chunk count": func() error {
+		"chunk count": func() (bool, error) {
 			return repo.UpdateFileObjectChunkCount(ctx, file.ID, stalePath, 99)
 		},
-		"chunks": func() error {
+		"chunks": func() (bool, error) {
 			return repo.ReplaceFileChunks(ctx, file.ID, stalePath, []domainconversation.FileChunk{{
 				FileObjID:  file.ID,
 				UserID:     file.UserID,
@@ -398,10 +481,15 @@ func TestStaleFileVersionCannotRestoreProcessingOrEmbeddingState(t *testing.T) {
 				TokenCount: 2,
 			}}, [][]float32{{1, 0, 0}})
 		},
-	} {
+	}
+	for name, update := range publishUpdates {
 		t.Run(name, func(t *testing.T) {
-			if err := update(); !errors.Is(err, repository.ErrConflict) {
-				t.Fatalf("stale update error = %v, want ErrConflict", err)
+			updated, err := update()
+			if err != nil {
+				t.Fatalf("stale publish error = %v, want nil", err)
+			}
+			if updated {
+				t.Fatal("stale publish unexpectedly updated the current file version")
 			}
 		})
 	}
@@ -1977,7 +2065,7 @@ func openConversationRepositoryTestDB(t *testing.T) *gorm.DB {
 			_ = sqlDB.Close()
 		}
 	})
-	if err := db.AutoMigrate(&model.Conversation{}, &model.ConversationProject{}, &model.ConversationProjectMCPTool{}, &model.ConversationProjectSkill{}, &model.KnowledgeBase{}, &model.ConversationProjectKnowledgeBase{}, &model.ConversationShare{}, &model.Message{}, &model.Attachment{}, &model.FileObject{}, &model.ConversationRun{}, &model.ChatRunEvent{}); err != nil {
+	if err := db.AutoMigrate(&model.Conversation{}, &model.ConversationProject{}, &model.ConversationProjectMCPTool{}, &model.ConversationProjectSkill{}, &model.KnowledgeBase{}, &model.KnowledgeBaseFile{}, &model.ConversationProjectKnowledgeBase{}, &model.ConversationShare{}, &model.Message{}, &model.Attachment{}, &model.FileObject{}, &model.FileChunk{}, &model.ConversationRun{}, &model.ChatRunEvent{}); err != nil {
 		t.Fatalf("migrate models: %v", err)
 	}
 	return db

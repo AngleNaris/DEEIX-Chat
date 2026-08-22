@@ -4,6 +4,7 @@ import { PlusIcon } from "@/components/ui/plus";
 import { Search } from "@/components/animate-ui/icons/search";
 import { Blend } from "@/components/animate-ui/icons/blend";
 import { BookOpen } from "@/components/animate-ui/icons/book-open";
+import { Users } from "@/components/animate-ui/icons/users";
 import type { NavigationItem } from "@/features/layouts/types/navigation";
 
 export const NAVIGATION_ITEMS = [

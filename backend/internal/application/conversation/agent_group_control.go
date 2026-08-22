@@ -55,9 +55,8 @@ func (s *Service) RetryAgentGroupRunStep(
 	}
 
 	// 同会话串行：与首次执行共享同一把互斥锁。
-	runLock := s.agentGroupRunMutex(run.ConversationID)
-	runLock.Lock()
-	defer runLock.Unlock()
+	unlockRun := s.lockAgentGroupRun(run.ConversationID)
+	defer unlockRun()
 
 	// 状态守卫：仅 paused_retryable 且存在可重试步骤时可重试。
 	if run.Status != domainagentgroup.RunStatusPausedRetryable || run.RetryableStepID == nil {
@@ -116,13 +115,18 @@ func (s *Service) RetryAgentGroupRunStep(
 		s.generationStreams.register(ctx, st.runID, input.UserID, cancel)
 	}
 
-	// CAS paused_retryable → running + 清除可重试标记。
+	// 重试启动三段写收敛为单事务（run CAS + 步骤回 running + 插入 Attempt N+1），
+	// 崩溃不再留下「run 已 running 但无 attempt」的中间态。
 	// 双击重试：第二个请求读到旧状态，CAS 冲突 → 409，绝不创建重复 Attempt。
 	running := domainagentgroup.RunStatusRunning
-	ok, err := s.agentGroupRunStore.CASUpdateAgentGroupRun(ctx, run.ID, st.stateVersion,
-		domainagentgroup.RunStatusPausedRetryable,
-		domainagentgroup.RunPatch{Status: &running, ClearRetryableStep: true})
+	attempt, err := st.buildAgentGroupStepRetryAttempt(retryStep, member, int(attempts)+1)
 	if err != nil {
+		return st.failedResult(), err
+	}
+	ok, err := s.agentGroupRunStore.BeginAgentGroupStepRetry(ctx, run.ID, st.stateVersion, retryStep.ID, attempt)
+	if err != nil {
+		_ = st.blockAgentGroupRun(ctx, retryStep, domainagentgroup.ErrorCodeUpstreamFatal,
+			genericAgentGroupErrorMessage(domainagentgroup.ErrorCodeUpstreamFatal))
 		return st.failedResult(), err
 	}
 	if !ok {
@@ -130,23 +134,8 @@ func (s *Service) RetryAgentGroupRunStep(
 	}
 	st.stateVersion++
 	st.run.Status = running
-
-	// 步骤回到 running，追加 Attempt N+1。
-	if err := s.agentGroupRunStore.UpdateAgentGroupStep(ctx, retryStep.ID, map[string]interface{}{
-		"status": domainagentgroup.StepStatusRunning,
-	}); err != nil {
-		_ = st.blockAgentGroupRun(ctx, retryStep, domainagentgroup.ErrorCodeUpstreamFatal,
-			genericAgentGroupErrorMessage(domainagentgroup.ErrorCodeUpstreamFatal))
-		return st.failedResult(), err
-	}
 	retryStep.Status = domainagentgroup.StepStatusRunning
-
-	attempt, err := st.createAgentGroupStepRetryAttempt(ctx, retryStep, member, int(attempts)+1)
-	if err != nil {
-		_ = st.blockAgentGroupRun(ctx, retryStep, domainagentgroup.ErrorCodeUpstreamFatal,
-			genericAgentGroupErrorMessage(domainagentgroup.ErrorCodeUpstreamFatal))
-		return st.failedResult(), err
-	}
+	st.emitAgentGroupStepRetryStarted(ctx, retryStep, attempt, member)
 
 	execErr := st.executeRetryableStep(ctx, retryStep, attempt, member)
 	st.updateTopLevelRun(ctx, execErr)
@@ -429,6 +418,10 @@ func (s *Service) rebuildAgentGroupRunSummaries(
 ) ([]agentGroupContextSummary, int, error) {
 	summaries := make([]agentGroupContextSummary, 0)
 	completed := 0
+	attemptsByStep, err := s.agentGroupRunStore.ListAttemptsBySteps(ctx, agentGroupStepIDs(steps))
+	if err != nil {
+		return nil, 0, err
+	}
 	for _, step := range steps {
 		if step.Status == domainagentgroup.StepStatusSuccess {
 			completed++
@@ -436,12 +429,8 @@ func (s *Service) rebuildAgentGroupRunSummaries(
 		if step.SuccessfulAttemptID == nil {
 			continue
 		}
-		attempts, err := s.agentGroupRunStore.ListAttemptsByStep(ctx, step.ID)
-		if err != nil {
-			return nil, 0, err
-		}
 		output := ""
-		for _, attempt := range attempts {
+		for _, attempt := range attemptsByStep[step.ID] {
 			if attempt.ID == *step.SuccessfulAttemptID {
 				output = attempt.OutputMarkdown
 				break
@@ -483,6 +472,14 @@ func (s *Service) rebuildAgentGroupRunSummaries(
 	return summaries, completed, nil
 }
 
+func agentGroupStepIDs(steps []domainagentgroup.Step) []uint {
+	ids := make([]uint, 0, len(steps))
+	for i := range steps {
+		ids = append(ids, steps[i].ID)
+	}
+	return ids
+}
+
 // agentGroupSnapshotMemberForStep 按步骤的 Actor 引用解析快照成员（主管优先匹配）。
 func agentGroupSnapshotMemberForStep(snapshot *domainagentgroup.RunSnapshot, step *domainagentgroup.Step) *domainagentgroup.RunSnapshotMember {
 	if snapshot == nil || step == nil || strings.TrimSpace(step.ActorMemberPublicID) == "" {
@@ -494,18 +491,16 @@ func agentGroupSnapshotMemberForStep(snapshot *domainagentgroup.RunSnapshot, ste
 	return agentGroupSnapshotMemberByID(snapshot, step.ActorMemberPublicID)
 }
 
-// createAgentGroupStepRetryAttempt 为被暂停步骤追加一次新尝试（Attempt N+1）。
-// 与 createAgentGroupStepAndAttempt 的差异：不新建 Step，也不 CAS 更新 CurrentStepID
-// （重试步骤仍是最新检查点），仅在 DB 中追加一次 Attempt 并发布重试事件。
-func (st *agentGroupRunState) createAgentGroupStepRetryAttempt(
-	ctx context.Context,
+// buildAgentGroupStepRetryAttempt 构造被暂停步骤的新尝试（Attempt N+1，尚未落库）。
+// 落库由 BeginAgentGroupStepRetry 事务完成；事件发布在事务提交成功后进行。
+func (st *agentGroupRunState) buildAgentGroupStepRetryAttempt(
 	step *domainagentgroup.Step,
 	member *domainagentgroup.RunSnapshotMember,
 	attemptNo int,
 ) (*domainagentgroup.Attempt, error) {
 	now := time.Now()
 	leaseExpiresAt := now.Add(st.attemptLease)
-	attempt := &domainagentgroup.Attempt{
+	return &domainagentgroup.Attempt{
 		PublicID:          normalizePublicID(uuid.NewString()),
 		StepID:            step.ID,
 		AttemptNo:         attemptNo,
@@ -517,12 +512,7 @@ func (st *agentGroupRunState) createAgentGroupStepRetryAttempt(
 		BillingRef:        domainagentgroup.BillingRef(st.run.ID, step.ID, attemptNo),
 		LeaseExpiresAt:    &leaseExpiresAt,
 		StartedAt:         now,
-	}
-	if err := st.service.agentGroupRunStore.CreateAgentGroupStepAttempt(ctx, attempt); err != nil {
-		return nil, err
-	}
-	st.emitAgentGroupStepRetryStarted(ctx, step, attempt, member)
-	return attempt, nil
+	}, nil
 }
 
 // executeRetryableStep 执行被暂停步骤的新尝试（attempt N+1）。
@@ -534,7 +524,6 @@ func (st *agentGroupRunState) executeRetryableStep(
 	attempt *domainagentgroup.Attempt,
 	member *domainagentgroup.RunSnapshotMember,
 ) error {
-	s := st.service
 	switch step.StepType {
 	case domainagentgroup.StepTypeSupervisorDecide:
 		// 主管步骤重试走与首次执行相同的决策路径（含自动纠错），保证重试不重复失败。
@@ -569,7 +558,7 @@ func (st *agentGroupRunState) executeRetryableStep(
 			MemberID:    step.ActorMemberPublicID,
 			Instruction: step.Instruction,
 		}
-		output, err := s.ExecuteAgentTurn(ctx, st.agentTurnInput(
+		output, err := st.executeAgentTurn(ctx, attempt, st.agentTurnInput(
 			step, attempt, member,
 			agentGroupMemberSystemPrompt(st.snapshot, member),
 			agentGroupMemberUserContent(st.input.Content, &decision, agentGroupContextBrief(st.summaries)),
@@ -597,14 +586,13 @@ func (st *agentGroupRunState) executeMemberStepAfterSupervisor(
 	member *domainagentgroup.RunSnapshotMember,
 	decision agentGroupSupervisorDecision,
 ) error {
-	s := st.service
 	memberStep, memberAttempt, err := st.createAgentGroupStepAndAttempt(
 		ctx, member, domainagentgroup.StepTypeMemberExecute, decision.Instruction)
 	if err != nil {
 		return err
 	}
 	st.emitAgentGroupStepStarted(ctx, memberStep, memberAttempt, member)
-	memberOutput, err := s.ExecuteAgentTurn(ctx, st.agentTurnInput(
+	memberOutput, err := st.executeAgentTurn(ctx, memberAttempt, st.agentTurnInput(
 		memberStep, memberAttempt, member,
 		agentGroupMemberSystemPrompt(st.snapshot, member),
 		agentGroupMemberUserContent(st.input.Content, &decision, agentGroupContextBrief(st.summaries)),
@@ -730,9 +718,8 @@ func (s *Service) AbandonAgentGroupRun(ctx context.Context, userID uint, runPubl
 		}
 		return nil, err
 	}
-	runLock := s.agentGroupRunMutex(run.ConversationID)
-	runLock.Lock()
-	defer runLock.Unlock()
+	unlockRun := s.lockAgentGroupRun(run.ConversationID)
+	defer unlockRun()
 
 	if run.Status != domainagentgroup.RunStatusPausedRetryable && run.Status != domainagentgroup.RunStatusBlocked {
 		return nil, ErrAgentGroupRunNotAbandonable
@@ -839,7 +826,8 @@ func (s *Service) startAgentGroupLeaseRecoveryWorker(ctx context.Context) {
 }
 
 // recoverExpiredAgentGroupLeases 将租约过期的 running Attempt 转为 interrupted，
-// 并把对应运行转为 paused_retryable（返回受影响运行数）。
+// 并把对应运行转为 paused_retryable；同一 tick 内回收崩溃窗口遗留的僵尸运行
+// （stale pending / 无 attempt 的 stale running → blocked）。
 func (s *Service) recoverExpiredAgentGroupLeases(ctx context.Context) {
 	recoverCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
@@ -857,6 +845,26 @@ func (s *Service) recoverExpiredAgentGroupLeases(ctx context.Context) {
 		s.logger.Info("agent_group_lease_recovery_recovered",
 			zap.String("trace_id", traceid.FromContext(ctx)),
 			zap.Int64("runs_recovered", recovered),
+		)
+	}
+
+	// 僵尸运行回收：pending/running 超过 10 分钟未推进即视为进程崩溃遗留。
+	// 正常执行中每个 turn 都会经 attempt CAS 续写 updated_at，不会误伤。
+	staleCutoff := time.Now().Add(-10 * time.Minute)
+	blockedRuns, err := s.agentGroupRunStore.RecoverStaleAgentGroupRuns(recoverCtx, time.Now(), staleCutoff)
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Warn("agent_group_stale_run_recovery_failed",
+				zap.String("trace_id", traceid.FromContext(ctx)),
+				zap.Error(err),
+			)
+		}
+		return
+	}
+	if blockedRuns > 0 && s.logger != nil {
+		s.logger.Info("agent_group_stale_run_recovery_recovered",
+			zap.String("trace_id", traceid.FromContext(ctx)),
+			zap.Int64("runs_blocked", blockedRuns),
 		)
 	}
 }

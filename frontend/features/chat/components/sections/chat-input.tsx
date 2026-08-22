@@ -1,6 +1,37 @@
 "use client";
 
-import { Box, CornerDownRight, Eye, EyeOff, Film, Image, ImageOff, ImagePlus, LoaderCircle, PencilLine, Trash2 } from "lucide-react";
+import {
+  closestCenter,
+  DndContext,
+  type DragEndEvent,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import {
+  horizontalListSortingStrategy,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import {
+  Box,
+  CornerDownRight,
+  Eye,
+  EyeOff,
+  Film,
+  Image,
+  ImageOff,
+  ImagePlus,
+  LoaderCircle,
+  PencilLine,
+  RefreshCw,
+  ScrollText,
+  Trash2,
+  WandSparkles,
+} from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import dynamic from "next/dynamic";
 import { useLocale, useTranslations } from "next-intl";
@@ -72,13 +103,49 @@ import type { FileObjectDTO } from "@/shared/api/file.types";
 import type { MCPToolDTO } from "@/shared/api/mcp.types";
 import type { PromptPresetDTO } from "@/shared/api/prompt-presets.types";
 import type { SkillSummaryDTO } from "@/shared/api/skills.types";
+import { ImageAspectRatioSelector } from "@/shared/components/image-aspect-ratio-selector";
+import { ImageQualitySelector } from "@/shared/components/image-quality-selector";
+import { ImageResolutionSelector } from "@/shared/components/image-resolution-selector";
 import { StreamdownRender } from "@/shared/components/markdown/streamdown-render";
+import { ReasoningEffortSelector } from "@/shared/components/reasoning-effort-selector";
 import { useDialogSnapshot } from "@/shared/hooks/use-dialog-snapshot";
 import type { BillingDisplayCurrency } from "@/shared/lib/billing-display";
 import { formatBytes, resolveFileExtension, resolveFileIcon } from "@/shared/lib/file-display";
 import { resolveFileProcessingBadge } from "@/shared/lib/file-processing";
+import {
+  deriveRatioString,
+  IMAGE_CUSTOM_ASPECT_RATIO,
+  type ImageResolutionLevel,
+  inferAspectRatio,
+  inferResolutionLevel,
+  resolveImageSize,
+} from "@/shared/lib/image-size";
 import type { ModelOptionPolicy } from "@/shared/lib/model-option-policy";
 import { isSendShortcutEvent } from "@/shared/lib/platform-shortcuts";
+import {
+  getReasoningEffortOptionValue,
+  resolveReasoningEffortProtocol,
+  setModelOptionNestedValue,
+  setReasoningEffortOptionValue,
+} from "@/shared/lib/reasoning-effort";
+
+const COMPOSER_MENTION_KINDS_WITHOUT_MODEL: readonly ChatMentionMenuKind[] = [
+  "file",
+  "tool",
+  "skill",
+  "prompt",
+  "script",
+  "group",
+];
+
+const COMPOSER_MENTION_KINDS_WITHOUT_GROUP: readonly ChatMentionMenuKind[] = [
+  "model",
+  "file",
+  "tool",
+  "skill",
+  "prompt",
+  "script",
+];
 
 const FilePreviewDialog = dynamic(
   () => import("@/shared/components/file-preview/preview-dialog").then((module) => module.FilePreviewDialog),

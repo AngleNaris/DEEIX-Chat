@@ -939,6 +939,60 @@ func TestAgentGroupRunResumeSeedsToolLedgerFromRetryableStepOnly(t *testing.T) {
 
 // 验收 8：租约恢复——崩溃/重启后，租约过期的 running Attempt 转为 interrupted，
 // 对应运行回到 paused_retryable 并指向被中断步骤；未过期的 Attempt 不受影响。
+func TestAgentGroupRunLockSerializesAndReleases(t *testing.T) {
+	service := &Service{}
+	unlockFirst := service.lockAgentGroupRun(42)
+
+	acquiredSame := make(chan struct{})
+	releaseSame := make(chan struct{})
+	go func() {
+		unlock := service.lockAgentGroupRun(42)
+		close(acquiredSame)
+		<-releaseSame
+		unlock()
+	}()
+
+	select {
+	case <-acquiredSame:
+		t.Fatal("same conversation acquired lock before current holder released it")
+	case <-time.After(25 * time.Millisecond):
+	}
+
+	acquiredOther := make(chan struct{})
+	go func() {
+		unlock := service.lockAgentGroupRun(43)
+		close(acquiredOther)
+		unlock()
+	}()
+	select {
+	case <-acquiredOther:
+	case <-time.After(time.Second):
+		t.Fatal("different conversation did not acquire lock independently")
+	}
+
+	unlockFirst()
+	select {
+	case <-acquiredSame:
+	case <-time.After(time.Second):
+		t.Fatal("waiting conversation did not acquire lock after release")
+	}
+	close(releaseSame)
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		service.agentGroupRunLocks.mu.Lock()
+		remaining := len(service.agentGroupRunLocks.entries)
+		service.agentGroupRunLocks.mu.Unlock()
+		if remaining == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("idle Agent Group locks retained: %d", remaining)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 func TestAgentGroupLeaseRecoveryPausesRunAtInterruptedStep(t *testing.T) {
 	db := openAgentGroupRetryTestDB(t)
 	now := time.Now()
@@ -983,9 +1037,14 @@ func TestAgentGroupLeaseRecoveryPausesRunAtInterruptedStep(t *testing.T) {
 
 	expired := now.Add(-time.Hour)
 	expiredRun := createRunningRun("run-lease-expired", expired)
+	renewedRun := createRunningRun("run-lease-renewed", expired)
 	liveRun := createRunningRun("run-lease-live", now.Add(time.Hour))
 
 	store := postgresagentgroup.NewRepo(db)
+	renewed, err := store.RenewAgentGroupStepAttemptLease(context.Background(), renewedRun.attemptID, now.Add(time.Hour))
+	if err != nil || !renewed {
+		t.Fatalf("renew attempt lease: updated=%v err=%v", renewed, err)
+	}
 	recovered, err := store.RecoverExpiredAttemptLeases(context.Background(), now)
 	if err != nil {
 		t.Fatalf("recover leases: %v", err)
@@ -1010,6 +1069,21 @@ func TestAgentGroupLeaseRecoveryPausesRunAtInterruptedStep(t *testing.T) {
 	}
 	if expiredRunRow.RetryableStepID == nil || *expiredRunRow.RetryableStepID != expiredRun.stepID {
 		t.Fatalf("expired run retryable step = %v, want %d", expiredRunRow.RetryableStepID, expiredRun.stepID)
+	}
+	var expiredStep persistencemodels.AgentGroupStep
+	if err := db.First(&expiredStep, expiredRun.stepID).Error; err != nil {
+		t.Fatalf("load expired step: %v", err)
+	}
+	if expiredStep.Status != domainagentgroup.StepStatusInterrupted {
+		t.Fatalf("expired step status = %q, want interrupted", expiredStep.Status)
+	}
+
+	var renewedAttempt persistencemodels.AgentGroupStepAttempt
+	if err := db.First(&renewedAttempt, renewedRun.attemptID).Error; err != nil {
+		t.Fatalf("load renewed attempt: %v", err)
+	}
+	if renewedAttempt.Status != domainagentgroup.AttemptStatusRunning || renewedAttempt.LeaseExpiresAt == nil || !renewedAttempt.LeaseExpiresAt.After(now) {
+		t.Fatalf("renewed attempt = %#v, want running with future lease", renewedAttempt)
 	}
 
 	var liveAttempt persistencemodels.AgentGroupStepAttempt

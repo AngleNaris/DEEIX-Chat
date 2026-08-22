@@ -98,6 +98,7 @@ func resolveStreamIdleTimeout(ms int) time.Duration {
 const (
 	ContentPartText  = "text"  // 纯文本
 	ContentPartImage = "image" // 图片（原始字节，序列化时 base64 编码）
+	ContentPartAudio = "audio" // 音频（原始字节，序列化时 base64 编码）
 	ContentPartVideo = "video" // 视频（原始字节，仅供支持视频输入的 adapter 使用）
 	ContentPartFile  = "file"  // 文件提取文本（前端解析后注入）
 )

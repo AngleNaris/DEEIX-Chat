@@ -29,6 +29,7 @@ import type { MCPToolDTO } from "@/shared/api/mcp.types";
 import { listVisibleSkills } from "@/shared/api/skills";
 import type { SkillSummaryDTO } from "@/shared/api/skills.types";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
+import { getMCPPolicy } from "@/shared/api/settings";
 import { useDialogSnapshot } from "@/shared/hooks/use-dialog-snapshot";
 import { PromptVarToolbar } from "@/features/prompts/components/prompt-var-toolbar";
 import {
@@ -267,6 +268,7 @@ export function ProjectDialog({
                       detail: tool.serverName,
                     }))}
                     selectedIDs={stableDraft?.defaultMCPToolIDs ?? []}
+                    selectionLimit={selectionLimit}
                     loading={catalogLoading}
                     disabled={submitting}
                     onChange={(defaultMCPToolIDs) => {
@@ -356,7 +358,7 @@ async function listAllVisibleSkills(accessToken: string): Promise<SkillSummaryDT
   return results;
 }
 
-function ProjectDefaultSelector<T extends string | number>({
+export function ProjectDefaultSelector<T extends string | number>({
   icon: Icon,
   label,
   description,

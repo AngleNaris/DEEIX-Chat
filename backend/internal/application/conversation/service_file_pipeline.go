@@ -30,6 +30,9 @@ func (s *Service) StartBackgroundWorkers(ctx context.Context) {
 	if s.processingSvc != nil {
 		s.processingSvc.StartBackgroundWorkers(ctx)
 	}
+	if s.reindexScheduler != nil {
+		s.reindexScheduler.Start(ctx)
+	}
 	s.startInMemoryCacheCleanupWorker(ctx)
 	s.startContextArtifactCleanupWorker(ctx)
 	s.startAgentGroupLeaseRecoveryWorker(ctx)

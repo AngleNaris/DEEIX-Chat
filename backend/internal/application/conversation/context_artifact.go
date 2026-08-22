@@ -57,6 +57,7 @@ type historicalContextArtifactInput struct {
 	HasCurrentSnapshot bool
 	Query              string
 	Candidates         []domainconversation.ContextArtifact
+	ImageFileIDs       []string
 	CurrentRAGChunks   []domainconversation.RAGChunk
 	CurrentFallbacks   []AttachmentInput
 	CurrentRecall      []domainconversation.MessageChunk
@@ -168,6 +169,7 @@ func (s *Service) recallHistoricalContextArtifacts(
 	scope repository.HistoricalMessageScope,
 	hasCurrentSnapshot bool,
 	query string,
+	imageFileIDs []string,
 	currentRAGChunks []domainconversation.RAGChunk,
 	currentFallbacks []AttachmentInput,
 	currentRecall []domainconversation.MessageChunk,
@@ -205,6 +207,7 @@ func (s *Service) recallHistoricalContextArtifacts(
 		HasCurrentSnapshot: hasCurrentSnapshot,
 		Query:              query,
 		Candidates:         candidates,
+		ImageFileIDs:       imageFileIDs,
 		CurrentRAGChunks:   currentRAGChunks,
 		CurrentFallbacks:   currentFallbacks,
 		CurrentRecall:      currentRecall,
@@ -337,6 +340,10 @@ func buildPromptContextArtifacts(input promptContextArtifactInput) []domainconve
 func buildToolContextArtifacts(input toolContextArtifactInput) []domainconversation.ContextArtifact {
 	items := make([]domainconversation.ContextArtifact, 0, len(input.Rows))
 	for _, row := range input.Rows {
+		if imageItems := buildImageAnalysisArtifacts(input, row); len(imageItems) > 0 {
+			items = append(items, imageItems...)
+			continue
+		}
 		rawContent := toolArtifactContent(row)
 		content, truncated := toolArtifactEvidenceContent(rawContent, contextArtifactExcerptChars)
 		if strings.TrimSpace(content) == "" {
@@ -373,6 +380,106 @@ func buildToolContextArtifacts(input toolContextArtifactInput) []domainconversat
 		})
 	}
 	return items
+}
+
+// buildImageAnalysisArtifacts 将图片工具调用结果按 file_id 转换为可召回的图片分析证据。
+func buildImageAnalysisArtifacts(input toolContextArtifactInput, row domainconversation.ToolCall) []domainconversation.ContextArtifact {
+	if strings.EqualFold(strings.TrimSpace(row.ToolName), systemMultimodalAnalyzeToolName) {
+		var output systemMultimodalAnalysisOutput
+		if err := json.Unmarshal([]byte(row.OutputJSON), &output); err != nil {
+			return nil
+		}
+		items := make([]domainconversation.ContextArtifact, 0)
+		for _, analysis := range output.Analyses {
+			content := strings.TrimSpace(analysis.Analysis)
+			if content == "" {
+				continue
+			}
+			for _, fileID := range uniqueNonEmptyStrings(analysis.FileIDs) {
+				items = append(items, newImageAnalysisArtifact(input, row, fileID, content, map[string]interface{}{
+					"file_ids": analysis.FileIDs,
+				}))
+			}
+		}
+		return items
+	}
+	if !strings.EqualFold(strings.TrimSpace(row.ToolType), "mcp_attachment") {
+		return nil
+	}
+	var inputPayload struct {
+		FileID string `json:"file_id"`
+	}
+	if err := json.Unmarshal([]byte(row.InputJSON), &inputPayload); err != nil {
+		return nil
+	}
+	fileID := strings.TrimSpace(inputPayload.FileID)
+	content := imageAttachmentAnalysisText(row.OutputJSON)
+	if fileID == "" || content == "" {
+		return nil
+	}
+	return []domainconversation.ContextArtifact{newImageAnalysisArtifact(input, row, fileID, content, nil)}
+}
+
+type systemMultimodalAnalysisArtifact struct {
+	FileIDs  []string `json:"file_ids"`
+	Analysis string   `json:"analysis"`
+}
+
+type systemMultimodalAnalysisOutput struct {
+	Analyses []systemMultimodalAnalysisArtifact `json:"analyses"`
+}
+
+func newImageAnalysisArtifact(input toolContextArtifactInput, row domainconversation.ToolCall, fileID string, content string, extraMetadata map[string]interface{}) domainconversation.ContextArtifact {
+	fileID = strings.TrimSpace(fileID)
+	content = strings.TrimSpace(content)
+	sourceID := strings.TrimSpace(row.ToolCallID)
+	if sourceID == "" {
+		sourceID = strings.TrimSpace(row.ToolName)
+	}
+	sourceID += ":" + fileID
+	metadata := map[string]interface{}{
+		"file_id":      fileID,
+		"tool_call_id": strings.TrimSpace(row.ToolCallID),
+		"tool_type":    strings.TrimSpace(row.ToolType),
+		"tool_name":    strings.TrimSpace(row.ToolName),
+		"status":       strings.TrimSpace(row.Status),
+		"latency_ms":   row.LatencyMS,
+	}
+	for key, value := range extraMetadata {
+		metadata[key] = value
+	}
+	return domainconversation.ContextArtifact{
+		ConversationID: input.ConversationID,
+		MessageID:      input.MessageID,
+		UserID:         input.UserID,
+		RunID:          input.RunID,
+		Kind:           domainconversation.ContextArtifactImageAnalysis,
+		SourceType:     "tool_call",
+		SourceID:       sourceID,
+		SourceTitle:    strings.TrimSpace(row.ToolName),
+		Content:        contextArtifactExcerpt(content, contextArtifactExcerptChars),
+		ContentHash:    contextArtifactHash(domainconversation.ContextArtifactImageAnalysis, sourceID, content),
+		TokenEstimate:  estimateTokens(content),
+		Score:          1,
+		MetadataJSON:   contextArtifactMetadata(metadata),
+	}
+}
+
+func uniqueNonEmptyStrings(items []string) []string {
+	seen := make(map[string]struct{}, len(items))
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		if _, ok := seen[item]; ok {
+			continue
+		}
+		seen[item] = struct{}{}
+		result = append(result, item)
+	}
+	return result
 }
 
 // buildSnapshotContextArtifact 将压缩快照转换为历史 evidence。
@@ -432,7 +539,15 @@ func selectHistoricalContextArtifacts(input historicalContextArtifactInput) []do
 	terms := artifactQueryTerms(input.Query)
 	followUp := isFollowUpArtifactQuery(input.Query)
 	seen := currentArtifactContentFingerprints(input)
+	requestedImageIDs := make(map[string]struct{}, len(input.ImageFileIDs))
+	for _, fileID := range input.ImageFileIDs {
+		if fileID = strings.TrimSpace(fileID); fileID != "" {
+			requestedImageIDs[fileID] = struct{}{}
+		}
+	}
 
+	priority := make([]historicalScoredArtifact, 0, len(requestedImageIDs))
+	seenImageIDs := make(map[string]struct{}, len(requestedImageIDs))
 	scored := make([]historicalScoredArtifact, 0, len(input.Candidates))
 	for index, item := range input.Candidates {
 		if input.HasCurrentSnapshot && item.Kind == domainconversation.ContextArtifactSummary {
@@ -441,6 +556,17 @@ func selectHistoricalContextArtifacts(input historicalContextArtifactInput) []do
 		content := strings.TrimSpace(item.Content)
 		if content == "" || item.MessageID == input.CurrentMessageID {
 			continue
+		}
+		if item.Kind == domainconversation.ContextArtifactImageAnalysis {
+			if fileID := imageArtifactFileID(item); fileID != "" {
+				if _, requested := requestedImageIDs[fileID]; requested {
+					if _, exists := seenImageIDs[fileID]; !exists {
+						priority = append(priority, historicalScoredArtifact{item: item, score: 1000, index: index})
+						seenImageIDs[fileID] = struct{}{}
+					}
+					continue
+				}
+			}
 		}
 		fingerprint := normalizedContentFingerprint(content)
 		if fingerprint == "" {
@@ -463,7 +589,10 @@ func selectHistoricalContextArtifacts(input historicalContextArtifactInput) []do
 
 	results := make([]domainconversation.ContextArtifact, 0, maxItems)
 	var usedTokens int64
-	for _, candidate := range scored {
+	appendCandidate := func(candidate historicalScoredArtifact) {
+		if len(results) >= maxItems {
+			return
+		}
 		item := candidate.item
 		content := compactSnippet(strings.TrimSpace(item.Content), 500)
 		tokenEstimate := estimateTokens(content)
@@ -474,17 +603,30 @@ func selectHistoricalContextArtifacts(input historicalContextArtifactInput) []do
 			tokenEstimate = 1
 		}
 		if usedTokens+tokenEstimate > maxTokens {
-			continue
+			return
 		}
 		item.Content = content
 		item.TokenEstimate = tokenEstimate
 		results = append(results, item)
 		usedTokens += tokenEstimate
-		if len(results) >= maxItems {
-			break
-		}
+	}
+	for _, candidate := range priority {
+		appendCandidate(candidate)
+	}
+	for _, candidate := range scored {
+		appendCandidate(candidate)
 	}
 	return results
+}
+
+func imageArtifactFileID(item domainconversation.ContextArtifact) string {
+	var metadata struct {
+		FileID string `json:"file_id"`
+	}
+	if err := json.Unmarshal([]byte(item.MetadataJSON), &metadata); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(metadata.FileID)
 }
 
 func contextArtifactHash(kind domainconversation.ContextArtifactKind, sourceID string, content string) string {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"time"
 
 	domainconversation "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
@@ -62,6 +63,40 @@ func (r *ocrReprocessRepo) CanRemoveExtractStoragePath(context.Context, uint, ui
 
 func (r *ocrReprocessRepo) ReplaceFileObjectContent(context.Context, uint, string, string, string, int64) (repository.ReplaceFileObjectContentResult, error) {
 	return repository.ReplaceFileObjectContentResult{}, nil
+}
+
+func (r *ocrReprocessRepo) ClaimFileProcessingQueue(context.Context, uint, string, string) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.file.ProcessingStatus != "pending" {
+		return false, nil
+	}
+	r.file.ProcessingStatus = "queued"
+	return true, nil
+}
+
+func (r *ocrReprocessRepo) ReleaseFileProcessingQueueClaim(context.Context, uint, string, string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.file.ProcessingStatus == "queued" {
+		r.file.ProcessingStatus = "pending"
+	}
+	return nil
+}
+
+func (r *ocrReprocessRepo) ClaimFileProcessingExecution(_ context.Context, _ uint, _ string, _ string, _ string, processingStartedAt time.Time) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.file.ProcessingStatus != "queued" && r.file.ProcessingStatus != "failed" {
+		return false, nil
+	}
+	r.file.ProcessingStatus = "extracting"
+	r.file.ProcessingStartedAt = &processingStartedAt
+	return true, nil
+}
+
+func (r *ocrReprocessRepo) ClaimRecoverableFilesForProcessing(context.Context, time.Time, time.Time, time.Time, int) ([]domainconversation.FileObject, error) {
+	return nil, nil
 }
 
 type ocrReprocessQueue struct {
