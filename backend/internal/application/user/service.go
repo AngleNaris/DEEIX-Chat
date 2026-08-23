@@ -3,14 +3,17 @@ package user
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"mime"
 	"net/url"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 	"unicode"
 
+	appstorage "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/objectstorage"
 	domainbilling "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/billing"
 	domainuser "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/user"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
@@ -25,6 +28,7 @@ type Service struct {
 	repo                repository.UserRepository
 	avatarContentOpener avatarContentOpener
 	avatarFileValidator avatarFileValidator
+	storeProvider       appstorage.Provider
 }
 
 type avatarContentOpener interface {
@@ -53,6 +57,11 @@ func (s *Service) SetAvatarContentOpener(opener avatarContentOpener) {
 // SetAvatarFileValidator 注入头像文件校验能力。
 func (s *Service) SetAvatarFileValidator(validator avatarFileValidator) {
 	s.avatarFileValidator = validator
+}
+
+// SetObjectStoreProvider 注入账户删除所需的对象存储。
+func (s *Service) SetObjectStoreProvider(provider appstorage.Provider) {
+	s.storeProvider = provider
 }
 
 // AvatarFileContent 描述用户域读取到的头像源文件内容。
@@ -422,13 +431,51 @@ func (s *Service) ResetPasswordByAdmin(ctx context.Context, userID uint, newPass
 
 // DeleteAccountHard 删除用户主记录及主要用户域数据。
 func (s *Service) DeleteAccountHard(ctx context.Context, userID uint) error {
+	storagePaths, err := s.repo.ListDistinctFileStoragePathsByUserID(ctx, userID)
+	if err != nil {
+		return err
+	}
 	if err := s.repo.DeleteAccountHard(ctx, userID); err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
 			return ErrUserNotFound
 		}
 		return err
 	}
+	failedPaths := s.cleanupDeletedAccountFiles(ctx, storagePaths)
+	if len(failedPaths) > 0 {
+		return fmt.Errorf("account deleted but %d storage objects could not be cleaned", len(failedPaths))
+	}
 	return nil
+}
+
+func (s *Service) cleanupDeletedAccountFiles(ctx context.Context, storagePaths []string) []string {
+	if len(storagePaths) == 0 {
+		return nil
+	}
+	if s.storeProvider == nil {
+		return append([]string(nil), storagePaths...)
+	}
+	store, err := s.storeProvider.Open(ctx)
+	if err != nil {
+		return append([]string(nil), storagePaths...)
+	}
+	seen := make(map[string]struct{}, len(storagePaths))
+	failed := make([]string, 0)
+	for _, rawPath := range storagePaths {
+		normalizedPath := strings.TrimSpace(rawPath)
+		if normalizedPath == "" {
+			continue
+		}
+		if _, ok := seen[normalizedPath]; ok {
+			continue
+		}
+		seen[normalizedPath] = struct{}{}
+		if err := store.Delete(ctx, normalizedPath); err != nil {
+			failed = append(failed, normalizedPath)
+		}
+	}
+	sort.Strings(failed)
+	return failed
 }
 
 // ListAuthEvents 查询认证事件列表。

@@ -13,7 +13,7 @@ func (m *Module) RegisterRoutes(authRequired *gin.RouterGroup) {
 	authRequired.PATCH("/skills/mine/:id", m.Handler.PatchMySkill)
 	authRequired.DELETE("/skills/mine/:id", m.Handler.DeleteMySkill)
 	authRequired.GET("/skills/:id", m.Handler.GetVisibleSkill)
-	authRequired.GET("/skills/:id/files/*filepath", m.Handler.GetSkillPackageFile)
+	authRequired.GET("/skills/:id/package-file", m.Handler.GetSkillPackageFile)
 }
 
 // RegisterAdminRoutes 注册技能管理路由。

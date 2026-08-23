@@ -418,19 +418,19 @@ func (h *Handler) ReplaceMySkillPackage(c *gin.Context) {
 // @Produce json
 // @Security BearerAuth
 // @Param id path int true "技能ID"
-// @Param filepath path string true "包内相对路径，如 scripts/roll.py"
+// @Param path query string true "包内相对路径，如 scripts/roll.py"
 // @Success 200 {object} SkillPackageFileResponseDoc
 // @Failure 400 {object} ErrorDoc
 // @Failure 404 {object} ErrorDoc
 // @Failure 415 {object} ErrorDoc
 // @Failure 500 {object} ErrorDoc
-// @Router /skills/{id}/files/{filepath} [get]
+// @Router /skills/{id}/package-file [get]
 func (h *Handler) GetSkillPackageFile(c *gin.Context) {
 	id, ok := idParam(c)
 	if !ok {
 		return
 	}
-	filePath := strings.TrimPrefix(c.Param("filepath"), "/")
+	filePath := strings.TrimSpace(c.Query("path"))
 	if filePath == "" {
 		response.Error(c, http.StatusBadRequest, "invalid file path")
 		return

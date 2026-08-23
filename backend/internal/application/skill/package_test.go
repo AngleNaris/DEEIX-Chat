@@ -3,6 +3,7 @@ package skill
 import (
 	"archive/zip"
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -43,9 +44,9 @@ func buildZip(t *testing.T, files map[string]string, symlinkNames ...string) []b
 
 func TestParsePackageRootSkillMarkdownWithFrontmatter(t *testing.T) {
 	data := buildZip(t, map[string]string{
-		"SKILL.md": "---\nname: Dice Roller\ndescription: Rolls dice with a script\n---\n\nRoll the dice using the helper script.\n",
+		"SKILL.md":        "---\nname: Dice Roller\ndescription: Rolls dice with a script\n---\n\nRoll the dice using the helper script.\n",
 		"scripts/roll.py": "import random\nprint(random.randint(1, 6))\n",
-		"assets/icon.png":  "\x89PNG\r\n\x1a\nbinary-content",
+		"assets/icon.png": "\x89PNG\r\n\x1a\nbinary-content",
 	})
 	preview, contents, err := ParsePackage(data)
 	if err != nil {
@@ -83,7 +84,7 @@ func TestParsePackageRootSkillMarkdownWithFrontmatter(t *testing.T) {
 
 func TestParsePackageStripsSingleTopLevelDirectory(t *testing.T) {
 	data := buildZip(t, map[string]string{
-		"dice-skill/SKILL.md":       "Roll dice.",
+		"dice-skill/SKILL.md":        "Roll dice.",
 		"dice-skill/scripts/roll.py": "print('dice')",
 	})
 	preview, contents, err := ParsePackage(data)
@@ -119,6 +120,31 @@ func TestParsePackageRejectsZipSlipAndAbsolutePaths(t *testing.T) {
 	}
 }
 
+func TestParsePackageRejectsCanonicalPathCollisions(t *testing.T) {
+	for name, files := range map[string]map[string]string{
+		"cleaned path": {
+			"SKILL.md":   "test",
+			"a/../x.txt": "first",
+			"x.txt":      "second",
+		},
+		"slash normalization": {
+			"SKILL.md":      "test",
+			"dir/file.txt":  "first",
+			"dir\\file.txt": "second",
+		},
+		"duplicate skill markdown": {
+			"SKILL.md":         "first",
+			"docs/../SKILL.md": "second",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, _, err := ParsePackage(buildZip(t, files)); !errors.Is(err, ErrInvalidPackage) {
+				t.Fatalf("expected ErrInvalidPackage, got %v", err)
+			}
+		})
+	}
+}
+
 func TestParsePackageRejectsSymlink(t *testing.T) {
 	data := buildZip(t, map[string]string{"SKILL.md": "test"}, "link.txt")
 	if _, _, err := ParsePackage(data); err != ErrInvalidPackage {
@@ -146,7 +172,7 @@ func TestParsePackageRejectsMissingSkillMarkdown(t *testing.T) {
 
 func TestParsePackageRejectsMultipleTopLevelDirectories(t *testing.T) {
 	data := buildZip(t, map[string]string{
-		"skill-a/SKILL.md": "one",
+		"skill-a/SKILL.md":  "one",
 		"skill-b/readme.md": "two",
 	})
 	if _, _, err := ParsePackage(data); err != ErrInvalidPackage {
@@ -198,7 +224,7 @@ func TestSanitizeZipPath(t *testing.T) {
 
 func TestIsLikelyTextSniffsUnknownExtension(t *testing.T) {
 	data := buildZip(t, map[string]string{
-		"SKILL.md":   "test",
+		"SKILL.md":    "test",
 		"data.custom": "hello text content",
 	})
 	preview, _, err := ParsePackage(data)

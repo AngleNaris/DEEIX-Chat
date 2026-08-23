@@ -141,14 +141,6 @@ function packageUploadForm(file: File): FormData {
   return formData;
 }
 
-// packageFilePathParam 将包内相对路径编码为 URL 路径段（保留斜杠层级）。
-function packageFilePathParam(path: string): string {
-  return path
-    .split("/")
-    .map((segment) => encodeURIComponent(segment))
-    .join("/");
-}
-
 export async function previewMySkillPackage(accessToken: string, file: File): Promise<SkillPackagePreview> {
   // 响应为 {preview: ...} 信封（PackagePreviewDataResponse），需解包一层。
   const data = await authedRequest<PackagePreviewDataResponse>(
@@ -204,7 +196,7 @@ export async function replaceAdminSkillPackage(accessToken: string, id: number, 
 export async function getSkillPackageFile(accessToken: string, id: number, path: string): Promise<SkillPackageFile> {
   // 响应为 {file: ...} 信封（SkillPackageFileDataResponse），需解包一层。
   const data = await authedRequest<SkillPackageFileDataResponse>(
-    `/api/v1/skills/${pathParam(id)}/files/${packageFilePathParam(path)}`,
+    `/api/v1/skills/${pathParam(id)}/package-file?${new URLSearchParams({ path }).toString()}`,
     { accessToken },
     true,
   );

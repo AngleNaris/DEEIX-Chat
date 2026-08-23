@@ -3,8 +3,12 @@ package user
 import (
 	"context"
 	"crypto/subtle"
+	"encoding/json"
 	"errors"
 	"fmt"
+	pathpkg "path"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -1111,7 +1115,7 @@ func (r *Repo) DeleteAccountHard(ctx context.Context, userID uint) error {
 	}))
 }
 
-// ListDistinctFileStoragePathsByUserID 查询用户文件去重后的存储路径。
+// ListDistinctFileStoragePathsByUserID 查询账户删除时需要清理的对象存储路径。
 func (r *Repo) ListDistinctFileStoragePathsByUserID(ctx context.Context, userID uint) ([]string, error) {
 	paths := make([]string, 0)
 	if err := r.db.WithContext(ctx).
@@ -1121,7 +1125,58 @@ func (r *Repo) ListDistinctFileStoragePathsByUserID(ctx context.Context, userID 
 		Pluck("storage_path", &paths).Error; err != nil {
 		return nil, translateError(err)
 	}
-	return paths, nil
+	var skills []model.Skill
+	if err := r.db.WithContext(ctx).
+		Select("id", "scope", "package_storage_version", "package_files_json").
+		Where("scope = ? AND owner_user_id = ? AND package_type = ?", domainskill.ScopeUser, userID, domainskill.PackageTypePackage).
+		Find(&skills).Error; err != nil {
+		return nil, translateError(err)
+	}
+	for _, item := range skills {
+		var files []struct {
+			Path string `json:"path"`
+		}
+		rawFiles := strings.TrimSpace(item.PackageFilesJSON)
+		if rawFiles == "" {
+			continue
+		}
+		if err := json.Unmarshal([]byte(rawFiles), &files); err != nil {
+			return nil, fmt.Errorf("decode skill %d package files: %w", item.ID, err)
+		}
+		prefix := "skills/" + strings.TrimSpace(item.Scope) + "/" + strconv.FormatUint(uint64(item.ID), 10)
+		if version := strings.TrimSpace(item.PackageStorageVersion); version != "" {
+			prefix += "/versions/" + version
+		}
+		for _, file := range files {
+			if relPath := normalizeSkillPackagePath(file.Path); relPath != "" {
+				paths = append(paths, prefix+"/"+relPath)
+			}
+		}
+	}
+	seen := make(map[string]struct{}, len(paths))
+	distinct := make([]string, 0, len(paths))
+	for _, rawPath := range paths {
+		path := strings.TrimSpace(rawPath)
+		if path == "" {
+			continue
+		}
+		if _, exists := seen[path]; exists {
+			continue
+		}
+		seen[path] = struct{}{}
+		distinct = append(distinct, path)
+	}
+	sort.Strings(distinct)
+	return distinct, nil
+}
+
+func normalizeSkillPackagePath(value string) string {
+	normalized := strings.ReplaceAll(strings.TrimSpace(value), "\\", "/")
+	cleanName := pathpkg.Clean(normalized)
+	if cleanName == "." || cleanName == "" || strings.HasPrefix(cleanName, "../") || strings.HasPrefix(cleanName, "/") {
+		return ""
+	}
+	return cleanName
 }
 
 // RecordAuthEvent 写入认证事件。

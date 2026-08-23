@@ -503,10 +503,7 @@ export function ConversationPromptPresetsSection() {
                   fileName={skills.packageFile?.name ?? null}
                   importing={skills.packageImporting}
                   onImport={() => void skills.importPackage()}
-                  onReset={() => {
-                    skills.setPackageFile(null);
-                    skills.setPackagePreview(null);
-                  }}
+                  onReset={skills.resetPackageSelection}
                   onSelectFile={(file) => void skills.selectPackageFile(file)}
                   preview={skills.packagePreview}
                   previewing={skills.packagePreviewing}

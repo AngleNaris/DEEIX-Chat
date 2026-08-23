@@ -965,6 +965,120 @@ func TestConsumeChatStreamAngleBracketTextStillEmits(t *testing.T) {
 	}
 }
 
+func TestParseChatCompletionsDisableToolsDropsNativeToolCalls(t *testing.T) {
+	body := []byte(`{
+		"id":"chatcmpl_disabled",
+		"choices":[{"message":{
+			"role":"assistant",
+			"content":"final answer",
+			"tool_calls":[{"id":"call_1","type":"function","function":{"name":"dangerous","arguments":"{}"}}]
+		}}]
+	}`)
+	output, err := parseOpenAIGenerateOutputWithToolPolicy(
+		EndpointChatCompletions,
+		AdapterOpenAIChatCompletions,
+		body,
+		textEncodedToolCallsStripOnly,
+		false,
+	)
+	if err != nil {
+		t.Fatalf("parse output: %v", err)
+	}
+	if output.Text != "final answer" || len(output.ToolCalls) != 0 {
+		t.Fatalf("expected text without native tool calls, got text=%q calls=%#v", output.Text, output.ToolCalls)
+	}
+}
+
+func TestChatStreamDisableToolsDropsNativeToolCalls(t *testing.T) {
+	rawStream := strings.Join([]string{
+		`data: {"id":"chatcmpl_disabled","choices":[{"delta":{"content":"final ","tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"dangerous","arguments":"{"}}]}}]}`,
+		`data: {"id":"chatcmpl_disabled","choices":[{"delta":{"content":"answer","tool_calls":[{"index":0,"function":{"arguments":"}"}}]}}]}`,
+		`data: [DONE]`,
+		``,
+	}, "\n\n")
+	result := &GenerateOutput{ToolCalls: make([]ToolCall, 0)}
+	if err := consumeOpenAIGenerateStreamWithToolPolicy(
+		EndpointChatCompletions,
+		AdapterOpenAIChatCompletions,
+		strings.NewReader(rawStream),
+		result,
+		nil,
+		textEncodedToolCallsStripOnly,
+		false,
+	); err != nil {
+		t.Fatalf("consume stream: %v", err)
+	}
+	if result.Text != "final answer" || len(result.ToolCalls) != 0 {
+		t.Fatalf("expected text without native tool calls, got text=%q calls=%#v", result.Text, result.ToolCalls)
+	}
+}
+
+func TestParseResponsesDisableToolsDropsNativeToolCalls(t *testing.T) {
+	body := []byte(`{
+		"id":"resp_disabled",
+		"output_text":"final answer",
+		"output":[
+			{"type":"function_call","call_id":"call_1","name":"dangerous","arguments":"{}"},
+			{"type":"web_search_call","id":"search_1","status":"completed"}
+		],
+		"tool_calls":[{"type":"function_call","call_id":"call_2","name":"dangerous","arguments":"{}"}]
+	}`)
+	output, err := parseOpenAIGenerateOutputWithToolPolicy(
+		EndpointResponses,
+		AdapterOpenAIResponses,
+		body,
+		textEncodedToolCallsInactive,
+		false,
+	)
+	if err != nil {
+		t.Fatalf("parse output: %v", err)
+	}
+	if output.Text != "final answer" || len(output.ToolCalls) != 0 || len(output.ServerToolCalls) != 0 {
+		t.Fatalf("expected text without native tools, got %#v", output)
+	}
+}
+
+func TestResponsesStreamDisableToolsDropsNativeToolEvents(t *testing.T) {
+	result := &GenerateOutput{
+		ToolCalls:       make([]ToolCall, 0),
+		ServerToolCalls: make([]ToolCall, 0),
+	}
+	toolEvent := map[string]interface{}{
+		"type": "response.output_item.added",
+		"item": map[string]interface{}{
+			"type":      "function_call",
+			"call_id":   "call_1",
+			"name":      "dangerous",
+			"arguments": "{}",
+		},
+	}
+	if err := applyResponsesStreamEventWithToolPolicy(
+		AdapterOpenAIResponses,
+		"response.output_item.added",
+		toolEvent,
+		"",
+		result,
+		nil,
+		false,
+	); err != nil {
+		t.Fatalf("apply tool event: %v", err)
+	}
+	if err := applyResponsesStreamEventWithToolPolicy(
+		AdapterOpenAIResponses,
+		"response.output_text.delta",
+		map[string]interface{}{"type": "response.output_text.delta", "delta": "final answer"},
+		"",
+		result,
+		nil,
+		false,
+	); err != nil {
+		t.Fatalf("apply text event: %v", err)
+	}
+	if result.Text != "final answer" || len(result.ToolCalls) != 0 || len(result.ServerToolCalls) != 0 {
+		t.Fatalf("expected text without native tools, got %#v", result)
+	}
+}
+
 func TestConsumeChatStreamErrorPayloadReturnsUpstreamError(t *testing.T) {
 	result := &GenerateOutput{ToolCalls: make([]ToolCall, 0)}
 	stream := bytes.NewBufferString("data: {\"error\":{\"message\":\"Param Incorrect\",\"code\":400}}\n\n")

@@ -617,7 +617,24 @@ export function ChatArea({
     }
     pruneScreenshotSelection?.(selectableMessagePublicIDs);
   }, [pruneScreenshotSelection, selectableMessagePublicIDs, selectionMode]);
+  const hasLiveMessage = React.useMemo(
+    () => messages.some((item) => item.isPending || item.isStreaming),
+    [messages],
+  );
   const messageViewportBoundaryRef = React.useRef<HTMLDivElement | null>(null);
+  const liveAnchorMessageKey = React.useMemo(() => {
+    if (!hasLiveMessage) {
+      return "";
+    }
+    const liveMessageIndex = messages.findIndex((item) => item.isPending || item.isStreaming);
+    for (let index = liveMessageIndex - 1; index >= 0; index -= 1) {
+      const item = messages[index];
+      if (item?.role === "user") {
+        return item.key;
+      }
+    }
+    return "";
+  }, [hasLiveMessage, messages]);
   const pendingUserScrollKey = React.useMemo(
     () => [...messages].reverse().find((item) => item.role === "user" && item.isPending)?.key ?? "",
     [messages],

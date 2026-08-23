@@ -13984,7 +13984,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/skills/{id}/files/{filepath}": {
+        "/skills/{id}/package-file": {
             "get": {
                 "security": [
                     {
@@ -14013,8 +14013,8 @@ const docTemplate = `{
                     {
                         "type": "string",
                         "description": "包内相对路径，如 scripts/roll.py",
-                        "name": "filepath",
-                        "in": "path",
+                        "name": "path",
+                        "in": "query",
                         "required": true
                     }
                 ],

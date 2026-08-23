@@ -12,7 +12,7 @@ type SkillRepository interface {
 	GetSkill(ctx context.Context, id uint) (*domainskill.Skill, error)
 	CreateSkill(ctx context.Context, item *domainskill.Skill) (*domainskill.Skill, error)
 	PatchSkill(ctx context.Context, id uint, patch SkillPatch) (*domainskill.Skill, error)
-	DeleteSkill(ctx context.Context, id uint) error
+	DeleteSkill(ctx context.Context, id uint) (*domainskill.Skill, error)
 }
 
 // SkillListFilter 描述技能列表筛选条件。
@@ -28,15 +28,17 @@ type SkillListFilter struct {
 
 // SkillPatch 描述可更新的技能字段。
 type SkillPatch struct {
-	Title              *string
-	Trigger            *string
-	Description        *string
-	Markdown           *string
-	PackageType        *string
-	PackageRootDir     *string
-	PackageFilesJSON   *string
-	Enabled            *bool
-	SortOrder          *int
-	UpdatedByUserIDSet bool
-	UpdatedByUserID    uint
+	Title                         *string
+	Trigger                       *string
+	Description                   *string
+	Markdown                      *string
+	PackageType                   *string
+	PackageRootDir                *string
+	PackageStorageVersion         *string
+	PackageFilesJSON              *string
+	ExpectedPackageStorageVersion *string
+	Enabled                       *bool
+	SortOrder                     *int
+	UpdatedByUserIDSet            bool
+	UpdatedByUserID               uint
 }

@@ -59,13 +59,15 @@ export function SkillPackageUploader({
       setInvalidFile(false);
       if (!file) return;
       if (!isZipFile(file)) {
+        setPickedName(null);
         setInvalidFile(true);
+        onReset();
         return;
       }
       setPickedName(file.name);
       onSelectFile(file);
     },
-    [onSelectFile],
+    [onReset, onSelectFile],
   );
 
   const resetSelection = React.useCallback(() => {

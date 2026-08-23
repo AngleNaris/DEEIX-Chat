@@ -44,6 +44,55 @@ func TestListUsersSearchesBeforePagination(t *testing.T) {
 	}
 }
 
+func TestListDistinctFileStoragePathsIncludesSkillPackageObjects(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:list_user_storage_paths?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err = db.AutoMigrate(&model.FileObject{}, &model.Skill{}); err != nil {
+		t.Fatalf("migrate storage models: %v", err)
+	}
+	if err = db.Create(&model.FileObject{
+		FileID:      "file-storage-path",
+		UserID:      7,
+		FileName:    "notes.txt",
+		StoragePath: "files/7/notes.txt",
+		Status:      "active",
+	}).Error; err != nil {
+		t.Fatalf("seed file object: %v", err)
+	}
+	if err = db.Create(&model.Skill{
+		Scope:                 "user",
+		OwnerUserID:           7,
+		Title:                 "Package",
+		Trigger:               "package",
+		PackageType:           "package",
+		PackageStorageVersion: "storage-v1",
+		PackageFilesJSON:      `[{"path":"SKILL.md","size":12,"kind":"text"},{"path":"scripts/run.py","size":8,"kind":"text"}]`,
+		Enabled:               true,
+	}).Error; err != nil {
+		t.Fatalf("seed package skill: %v", err)
+	}
+
+	paths, err := NewRepo(db).ListDistinctFileStoragePathsByUserID(context.Background(), 7)
+	if err != nil {
+		t.Fatalf("ListDistinctFileStoragePathsByUserID() error = %v", err)
+	}
+	want := []string{
+		"files/7/notes.txt",
+		"skills/user/1/versions/storage-v1/SKILL.md",
+		"skills/user/1/versions/storage-v1/scripts/run.py",
+	}
+	if len(paths) != len(want) {
+		t.Fatalf("storage paths = %#v, want %#v", paths, want)
+	}
+	for index := range want {
+		if paths[index] != want[index] {
+			t.Fatalf("storage paths = %#v, want %#v", paths, want)
+		}
+	}
+}
+
 func TestListUsersFiltersByIdentityProviderAndSubscriptionStatus(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:list_users_filters?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {

@@ -883,8 +883,10 @@ func (s *Service) sendMessageInternal(
 			traceRecorder.completeProcess()
 			traceRecorder.completeUpstreamThink()
 		}
-		if err := onDelta(delta); err != nil {
-			return err
+		if onDelta != nil {
+			if err := onDelta(delta); err != nil {
+				return err
+			}
 		}
 		streamedText.WriteString(delta)
 		return nil
@@ -1069,7 +1071,7 @@ func (s *Service) sendMessageInternal(
 				}})
 				traceRecorder.syncToolSection(summary, markdown, payload, traceStatusFromToolStatus(toolStatus))
 			}
-			if onDelta == nil || event.Delta == "" {
+			if event.Delta == "" {
 				return nil
 			}
 			visibleDelta, thinkDelta := thinkingRouter.consume(event.Delta)

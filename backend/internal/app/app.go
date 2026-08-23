@@ -222,6 +222,7 @@ func NewApp() (*App, error) {
 	billingHandler := billinghttp.NewHandler(billingService, settingsService, runtimeCfg, officialPricingService, paymentCheckoutService, log)
 	billingModule := billinghttp.NewModule(billingHandler)
 	objectStoreProvider := appstorage.NewRuntimeProvider(runtimeCfg, nil)
+	userService.SetObjectStoreProvider(objectStoreProvider)
 	geoResolver := geoip.New(runtimeCfg.Snapshot())
 	identityProviderClient := identityprovider.New(cfg.StrictOutboundPolicy())
 	authService := auth.NewServiceWithRuntime(

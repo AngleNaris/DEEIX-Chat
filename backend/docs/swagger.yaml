@@ -17943,7 +17943,7 @@ paths:
       summary: 查询当前用户可用技能详情
       tags:
       - skills
-  /skills/{id}/files/{filepath}:
+  /skills/{id}/package-file:
     get:
       consumes:
       - application/json
@@ -17955,8 +17955,8 @@ paths:
         required: true
         type: integer
       - description: 包内相对路径，如 scripts/roll.py
-        in: path
-        name: filepath
+        in: query
+        name: path
         required: true
         type: string
       produces:

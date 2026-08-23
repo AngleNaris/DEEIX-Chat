@@ -9440,19 +9440,20 @@ export namespace Skills {
   /**
    * @description 读取当前用户可用的包技能内文本文件内容（仅文本文件）
    * @tags skills
-   * @name FilesDetail
+   * @name PackageFileList
    * @summary 读取技能包内文件内容
-   * @request GET:/skills/{id}/files/{filepath}
+   * @request GET:/skills/{id}/package-file
    * @secure
    */
-  export namespace FilesDetail {
+  export namespace PackageFileList {
     export type RequestParams = {
-      /** 包内相对路径，如 scripts/roll.py */
-      filepath: string;
       /** 技能ID */
       id: number;
     };
-    export type RequestQuery = {};
+    export type RequestQuery = {
+      /** 包内相对路径，如 scripts/roll.py */
+      path: string;
+    };
     export type RequestBody = never;
     export type RequestHeaders = {};
     export type ResponseBody = SkillPackageFileResponseDoc;

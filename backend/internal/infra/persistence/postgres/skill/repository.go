@@ -74,19 +74,20 @@ func (r *Repo) CreateSkill(ctx context.Context, item *domainskill.Skill) (*domai
 		return nil, repository.ErrInvalidInput
 	}
 	record := model.Skill{
-		Scope:            strings.TrimSpace(item.Scope),
-		OwnerUserID:      item.OwnerUserID,
-		Title:            strings.TrimSpace(item.Title),
-		Trigger:          strings.TrimSpace(item.Trigger),
-		Description:      strings.TrimSpace(item.Description),
-		Markdown:         strings.TrimSpace(item.Markdown),
-		PackageType:      strings.TrimSpace(item.PackageType),
-		PackageRootDir:   strings.TrimSpace(item.PackageRootDir),
-		PackageFilesJSON: encodePackageFiles(item.PackageFiles),
-		Enabled:          item.Enabled,
-		SortOrder:        item.SortOrder,
-		CreatedByUserID:  item.CreatedByUserID,
-		UpdatedByUserID:  item.UpdatedByUserID,
+		Scope:                 strings.TrimSpace(item.Scope),
+		OwnerUserID:           item.OwnerUserID,
+		Title:                 strings.TrimSpace(item.Title),
+		Trigger:               strings.TrimSpace(item.Trigger),
+		Description:           strings.TrimSpace(item.Description),
+		Markdown:              strings.TrimSpace(item.Markdown),
+		PackageType:           strings.TrimSpace(item.PackageType),
+		PackageRootDir:        strings.TrimSpace(item.PackageRootDir),
+		PackageStorageVersion: strings.TrimSpace(item.PackageStorageVersion),
+		PackageFilesJSON:      encodePackageFiles(item.PackageFiles),
+		Enabled:               item.Enabled,
+		SortOrder:             item.SortOrder,
+		CreatedByUserID:       item.CreatedByUserID,
+		UpdatedByUserID:       item.UpdatedByUserID,
 	}
 	var result domainskill.Skill
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -125,6 +126,10 @@ func (r *Repo) PatchSkill(ctx context.Context, id uint, patch repository.SkillPa
 			First(&record).Error; err != nil {
 			return translateError(err)
 		}
+		if patch.ExpectedPackageStorageVersion != nil &&
+			strings.TrimSpace(record.PackageStorageVersion) != strings.TrimSpace(*patch.ExpectedPackageStorageVersion) {
+			return repository.ErrConflict
+		}
 
 		updates := map[string]interface{}{}
 		if patch.Title != nil {
@@ -144,6 +149,9 @@ func (r *Repo) PatchSkill(ctx context.Context, id uint, patch repository.SkillPa
 		}
 		if patch.PackageRootDir != nil {
 			updates["package_root_dir"] = strings.TrimSpace(*patch.PackageRootDir)
+		}
+		if patch.PackageStorageVersion != nil {
+			updates["package_storage_version"] = strings.TrimSpace(*patch.PackageStorageVersion)
 		}
 		if patch.PackageFilesJSON != nil {
 			updates["package_files_json"] = strings.TrimSpace(*patch.PackageFilesJSON)
@@ -174,24 +182,35 @@ func (r *Repo) PatchSkill(ctx context.Context, id uint, patch repository.SkillPa
 	return &result, nil
 }
 
-// DeleteSkill 删除技能。
-func (r *Repo) DeleteSkill(ctx context.Context, id uint) error {
+// DeleteSkill 删除技能并返回事务内实际删除的记录。
+func (r *Repo) DeleteSkill(ctx context.Context, id uint) (*domainskill.Skill, error) {
 	if id == 0 {
-		return repository.ErrInvalidInput
+		return nil, repository.ErrInvalidInput
 	}
+	var deleted domainskill.Skill
 	if err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		result := tx.Delete(&model.Skill{}, id)
+		var record model.Skill
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ?", id).
+			First(&record).Error; err != nil {
+			return err
+		}
+		result := tx.Delete(&record)
 		if result.Error != nil {
 			return result.Error
 		}
 		if result.RowsAffected == 0 {
 			return repository.ErrNotFound
 		}
-		return tx.Where("skill_id = ?", id).Delete(&model.ConversationProjectSkill{}).Error
+		if err := tx.Where("skill_id = ?", id).Delete(&model.ConversationProjectSkill{}).Error; err != nil {
+			return err
+		}
+		deleted = toDomain(record)
+		return nil
 	}); err != nil {
-		return translateError(err)
+		return nil, translateError(err)
 	}
-	return nil
+	return &deleted, nil
 }
 
 func applySkillFilter(query *gorm.DB, filter repository.SkillListFilter) *gorm.DB {
@@ -250,22 +269,23 @@ func skillOrderClause(filter repository.SkillListFilter) string {
 
 func toDomain(item model.Skill) domainskill.Skill {
 	return domainskill.Skill{
-		ID:              item.ID,
-		Scope:           item.Scope,
-		OwnerUserID:     item.OwnerUserID,
-		Title:           item.Title,
-		Trigger:         item.Trigger,
-		Description:     item.Description,
-		Markdown:        item.Markdown,
-		PackageType:     item.PackageType,
-		PackageRootDir:  item.PackageRootDir,
-		PackageFiles:    decodePackageFiles(item.PackageFilesJSON),
-		Enabled:         item.Enabled,
-		SortOrder:       item.SortOrder,
-		CreatedByUserID: item.CreatedByUserID,
-		UpdatedByUserID: item.UpdatedByUserID,
-		CreatedAt:       item.CreatedAt,
-		UpdatedAt:       item.UpdatedAt,
+		ID:                    item.ID,
+		Scope:                 item.Scope,
+		OwnerUserID:           item.OwnerUserID,
+		Title:                 item.Title,
+		Trigger:               item.Trigger,
+		Description:           item.Description,
+		Markdown:              item.Markdown,
+		PackageType:           item.PackageType,
+		PackageRootDir:        item.PackageRootDir,
+		PackageStorageVersion: item.PackageStorageVersion,
+		PackageFiles:          decodePackageFiles(item.PackageFilesJSON),
+		Enabled:               item.Enabled,
+		SortOrder:             item.SortOrder,
+		CreatedByUserID:       item.CreatedByUserID,
+		UpdatedByUserID:       item.UpdatedByUserID,
+		CreatedAt:             item.CreatedAt,
+		UpdatedAt:             item.UpdatedAt,
 	}
 }
 

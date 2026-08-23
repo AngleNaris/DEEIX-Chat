@@ -56,6 +56,7 @@ func ParsePackage(data []byte) (*PackagePreview, map[string][]byte, error) {
 	}
 
 	entries := make([]*zip.File, 0, len(reader.File))
+	seenPaths := make(map[string]struct{}, len(reader.File))
 	var totalBytes int64
 	for _, file := range reader.File {
 		name := strings.TrimSpace(file.Name)
@@ -69,6 +70,10 @@ func ParsePackage(data []byte) (*PackagePreview, map[string][]byte, error) {
 		if !ok {
 			return nil, nil, ErrInvalidPackage
 		}
+		if _, exists := seenPaths[cleanName]; exists {
+			return nil, nil, ErrInvalidPackage
+		}
+		seenPaths[cleanName] = struct{}{}
 		if file.UncompressedSize64 > maxPackageTotalBytes || totalBytes+int64(file.UncompressedSize64) > maxPackageTotalBytes {
 			return nil, nil, ErrInvalidPackage
 		}

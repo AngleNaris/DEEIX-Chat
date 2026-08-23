@@ -28,22 +28,23 @@ type PackageFile struct {
 
 // Skill 表示可在会话中按需加载的 SKILL.md 能力包。
 type Skill struct {
-	ID              uint
-	Scope           string
-	OwnerUserID     uint
-	Title           string
-	Trigger         string
-	Description     string
-	Markdown        string
-	PackageType     string
-	PackageRootDir  string
-	PackageFiles    []PackageFile
-	Enabled         bool
-	SortOrder       int
-	CreatedByUserID uint
-	UpdatedByUserID uint
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	ID                    uint
+	Scope                 string
+	OwnerUserID           uint
+	Title                 string
+	Trigger               string
+	Description           string
+	Markdown              string
+	PackageType           string
+	PackageRootDir        string
+	PackageStorageVersion string
+	PackageFiles          []PackageFile
+	Enabled               bool
+	SortOrder             int
+	CreatedByUserID       uint
+	UpdatedByUserID       uint
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
 }
 
 // IsPackage 返回技能是否为文件包类型。
