@@ -335,12 +335,27 @@ func applyResponsesStreamEvent(
 	result *GenerateOutput,
 	onEvent func(GenerateStreamEvent) error,
 ) error {
+	return applyResponsesStreamEventWithToolPolicy(adapter, eventName, parsed, rawBody, result, onEvent, true)
+}
+
+func applyResponsesStreamEventWithToolPolicy(
+	adapter string,
+	eventName string,
+	parsed map[string]interface{},
+	rawBody string,
+	result *GenerateOutput,
+	onEvent func(GenerateStreamEvent) error,
+	allowNativeTools bool,
+) error {
 	eventType := strings.TrimSpace(getString(parsed["type"]))
 	if eventType == "" {
 		eventType = strings.TrimSpace(eventName)
 	}
 
 	if call, ok := parseResponsesServerToolStatusEvent(eventType, parsed); ok {
+		if !allowNativeTools {
+			return nil
+		}
 		appendUniqueToolCall(&result.ServerToolCalls, call)
 		if onEvent != nil {
 			return onEvent(GenerateStreamEvent{
@@ -365,10 +380,13 @@ func applyResponsesStreamEvent(
 		}
 		return eventErr
 	case "response.output_item.added", "response.output_item.in_progress":
-		return mergeResponsesStreamOutputItem(result, asMap(parsed["item"]), onEvent)
+		return mergeResponsesStreamOutputItemWithToolPolicy(result, asMap(parsed["item"]), onEvent, allowNativeTools)
 	case "response.output_item.done":
-		return mergeResponsesStreamOutputItem(result, asMap(parsed["item"]), onEvent)
+		return mergeResponsesStreamOutputItemWithToolPolicy(result, asMap(parsed["item"]), onEvent, allowNativeTools)
 	case "response.custom_tool_call_input.delta", "response.custom_tool_call_input.done":
+		if !allowNativeTools {
+			return nil
+		}
 		return mergeResponsesCustomToolInputEvent(result, parsed, onEvent)
 	case "response.output_text.delta":
 		delta := getString(parsed["delta"])
@@ -436,7 +454,13 @@ func applyResponsesStreamEvent(
 			mergeReasoningDeltaOutput(&result.Reasoning, reasoning)
 		}
 	case "response.completed":
-		output := buildGenerateOutputFromParsedForAdapter(EndpointResponses, adapter, asMap(parsed["response"]), textEncodedToolCallsInactive)
+		output := buildGenerateOutputFromParsedForAdapterWithToolPolicy(
+			EndpointResponses,
+			adapter,
+			asMap(parsed["response"]),
+			textEncodedToolCallsInactive,
+			allowNativeTools,
+		)
 		if result.Reasoning == nil && output.Reasoning != nil && onEvent != nil {
 			if text := firstNonEmptyString(output.Reasoning.Text, output.Reasoning.Summary); text != "" {
 				if err := onEvent(GenerateStreamEvent{
@@ -514,11 +538,23 @@ func mergeResponsesStreamOutputItem(
 	item map[string]interface{},
 	onEvent func(GenerateStreamEvent) error,
 ) error {
+	return mergeResponsesStreamOutputItemWithToolPolicy(result, item, onEvent, true)
+}
+
+func mergeResponsesStreamOutputItemWithToolPolicy(
+	result *GenerateOutput,
+	item map[string]interface{},
+	onEvent func(GenerateStreamEvent) error,
+	allowNativeTools bool,
+) error {
 	if result == nil || len(item) == 0 {
 		return nil
 	}
 	if !isResponsesServerToolCallItem(item) {
-		mergeResponsesOutputItem(result, item, false)
+		mergeResponsesOutputItemWithToolPolicy(result, item, false, allowNativeTools)
+		return nil
+	}
+	if !allowNativeTools {
 		return nil
 	}
 	call := parseResponseServerToolCall(item)
@@ -580,13 +616,22 @@ func parseResponsesStreamErrorEvent(parsed map[string]interface{}, rawBody strin
 }
 
 func parseResponsesOutput(adapter string, parsed map[string]interface{}, result *GenerateOutput) {
+	parseResponsesOutputWithToolPolicy(adapter, parsed, result, true)
+}
+
+func parseResponsesOutputWithToolPolicy(
+	adapter string,
+	parsed map[string]interface{},
+	result *GenerateOutput,
+	allowNativeTools bool,
+) {
 	result.Text = getString(parsed["output_text"])
 	outputItems := asSlice(parsed["output"])
 	textChunks := make([]string, 0, len(outputItems))
 
 	for _, raw := range outputItems {
 		item := asMap(raw)
-		if chunk := mergeResponsesOutputItem(result, item, true); chunk != "" {
+		if chunk := mergeResponsesOutputItemWithToolPolicy(result, item, true, allowNativeTools); chunk != "" {
 			textChunks = append(textChunks, chunk)
 		}
 	}
@@ -595,7 +640,9 @@ func parseResponsesOutput(adapter string, parsed map[string]interface{}, result 
 		result.Text = strings.Join(textChunks, "")
 	}
 
-	mergeResponsesTopLevelToolCalls(result, parsed["tool_calls"])
+	if allowNativeTools {
+		mergeResponsesTopLevelToolCalls(result, parsed["tool_calls"])
+	}
 
 	result.Usage = parseOpenAICompatibleUsageForAdapter(adapter, parsed)
 	result.ServerSideToolUsage = parseServerSideToolUsage(parsed)
@@ -774,6 +821,15 @@ func mergeReasoningOutput(dst **ReasoningOutput, src *ReasoningOutput) {
 }
 
 func mergeResponsesOutputItem(result *GenerateOutput, item map[string]interface{}, collectText bool) string {
+	return mergeResponsesOutputItemWithToolPolicy(result, item, collectText, true)
+}
+
+func mergeResponsesOutputItemWithToolPolicy(
+	result *GenerateOutput,
+	item map[string]interface{},
+	collectText bool,
+	allowNativeTools bool,
+) string {
 	if result == nil || len(item) == 0 {
 		return ""
 	}
@@ -782,13 +838,18 @@ func mergeResponsesOutputItem(result *GenerateOutput, item map[string]interface{
 	case itemType == "reasoning":
 		mergeReasoningOutput(&result.Reasoning, parseReasoningOutputItem(item))
 	case isResponsesServerToolCallItem(item):
+		if !allowNativeTools {
+			return ""
+		}
 		if image, ok := parseResponsesGeneratedImage(item); ok {
 			result.GeneratedImages = appendUniqueGeneratedImage(result.GeneratedImages, image)
 		}
 		appendUniqueToolCall(&result.ServerToolCalls, parseResponseServerToolCall(item))
 		result.Citations = appendUniqueStrings(result.Citations, parseResponseCitations(item)...)
 	case isResponsesClientToolCallType(itemType):
-		appendUniqueToolCall(&result.ToolCalls, parseResponseToolCall(item))
+		if allowNativeTools {
+			appendUniqueToolCall(&result.ToolCalls, parseResponseToolCall(item))
+		}
 	default:
 		result.Citations = appendUniqueStrings(result.Citations, parseResponseCitations(item)...)
 		if collectText {

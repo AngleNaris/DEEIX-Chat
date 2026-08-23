@@ -209,6 +209,7 @@ export const SkillsSection = React.forwardRef<SkillsSectionHandle, { query: stri
   const [packagePreview, setPackagePreview] = React.useState<SkillPackagePreview | null>(null);
   const [packagePreviewing, setPackagePreviewing] = React.useState(false);
   const [packageImporting, setPackageImporting] = React.useState(false);
+  const packagePreviewSeqRef = React.useRef(0);
   const [viewTarget, setViewTarget] = React.useState<SkillDTO | null>(null);
   const [deleteTarget, setDeleteTarget] = React.useState<SkillDTO | null>(null);
   const stableViewTarget = useDialogSnapshot(viewTarget);
@@ -243,6 +244,7 @@ export const SkillsSection = React.forwardRef<SkillsSectionHandle, { query: stri
   }, [reload]);
 
   const openCreate = React.useCallback(() => {
+    packagePreviewSeqRef.current += 1;
     setForm(EMPTY_SKILL_FORM);
     setCreateMode("text");
     setPackageSkill(null);
@@ -257,6 +259,7 @@ export const SkillsSection = React.forwardRef<SkillsSectionHandle, { query: stri
     if (item.scope === "user") {
       if (hasSkillMarkdown(item)) {
         if (isPackageSkill(item)) {
+          packagePreviewSeqRef.current += 1;
           setForm(EMPTY_SKILL_FORM);
           setCreateMode("package");
           setPackageSkill(item);
@@ -354,17 +357,26 @@ export const SkillsSection = React.forwardRef<SkillsSectionHandle, { query: stri
 
   const selectPackageFile = React.useCallback(
     async (file: File) => {
+      const requestSeq = packagePreviewSeqRef.current + 1;
+      packagePreviewSeqRef.current = requestSeq;
       setPackageFile(file);
       setPackagePreview(null);
       setPackagePreviewing(true);
       try {
         const token = await resolveAccessToken();
         if (!token) return;
-        setPackagePreview(await previewMySkillPackage(token, file));
+        const preview = await previewMySkillPackage(token, file);
+        if (packagePreviewSeqRef.current === requestSeq) {
+          setPackagePreview(preview);
+        }
       } catch (error) {
-        toast.error(t("skillPackagePreviewFailed"), { description: resolveErrorMessage(error) });
+        if (packagePreviewSeqRef.current === requestSeq) {
+          toast.error(t("skillPackagePreviewFailed"), { description: resolveErrorMessage(error) });
+        }
       } finally {
-        setPackagePreviewing(false);
+        if (packagePreviewSeqRef.current === requestSeq) {
+          setPackagePreviewing(false);
+        }
       }
     },
     [resolveErrorMessage, t],
@@ -456,8 +468,10 @@ export const SkillsSection = React.forwardRef<SkillsSectionHandle, { query: stri
                   importing={packageImporting}
                   onImport={() => void importPackage()}
                   onReset={() => {
+                    packagePreviewSeqRef.current += 1;
                     setPackageFile(null);
                     setPackagePreview(null);
+                    setPackagePreviewing(false);
                   }}
                   onSelectFile={(file) => void selectPackageFile(file)}
                   preview={packagePreview}

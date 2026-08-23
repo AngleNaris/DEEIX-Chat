@@ -54,6 +54,7 @@ export function useAdminSkills() {
   const [packageImporting, setPackageImporting] = React.useState(false);
   const [, startTableTransition] = React.useTransition();
   const requestSeqRef = React.useRef(0);
+  const packagePreviewSeqRef = React.useRef(0);
 
   React.useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -101,6 +102,7 @@ export function useAdminSkills() {
   }, []);
 
   const openCreate = React.useCallback(() => {
+    packagePreviewSeqRef.current += 1;
     setForm(EMPTY_SKILL_FORM);
     setCreateMode("text");
     setPackageSkill(null);
@@ -111,6 +113,7 @@ export function useAdminSkills() {
 
   const openEdit = React.useCallback((item: SkillDTO) => {
     if (item.packageType === "package") {
+      packagePreviewSeqRef.current += 1;
       setForm(EMPTY_SKILL_FORM);
       setCreateMode("package");
       setPackageSkill(item);
@@ -180,19 +183,35 @@ export function useAdminSkills() {
 
   const selectPackageFile = React.useCallback(
     async (file: File) => {
+      const requestSeq = packagePreviewSeqRef.current + 1;
+      packagePreviewSeqRef.current = requestSeq;
       setPackageFile(file);
       setPackagePreview(null);
       setPackagePreviewing(true);
       try {
-        setPackagePreview(await previewAdminSkillPackage(accessToken, file));
+        const preview = await previewAdminSkillPackage(accessToken, file);
+        if (packagePreviewSeqRef.current === requestSeq) {
+          setPackagePreview(preview);
+        }
       } catch (error) {
-        toast.error(t("toast.skillPackagePreviewFailed"), { description: resolveAdminErrorMessage(error) });
+        if (packagePreviewSeqRef.current === requestSeq) {
+          toast.error(t("toast.skillPackagePreviewFailed"), { description: resolveAdminErrorMessage(error) });
+        }
       } finally {
-        setPackagePreviewing(false);
+        if (packagePreviewSeqRef.current === requestSeq) {
+          setPackagePreviewing(false);
+        }
       }
     },
     [accessToken, t],
   );
+
+  const resetPackageSelection = React.useCallback(() => {
+    packagePreviewSeqRef.current += 1;
+    setPackageFile(null);
+    setPackagePreview(null);
+    setPackagePreviewing(false);
+  }, []);
 
   const importPackage = React.useCallback(async () => {
     if (!packageFile) {
@@ -269,6 +288,7 @@ export function useAdminSkills() {
     confirmDelete,
     fetchPackageFile,
     selectPackageFile,
+    resetPackageSelection,
     importPackage,
   };
 }

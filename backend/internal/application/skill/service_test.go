@@ -432,3 +432,24 @@ func TestResolveAvailableEnforcesVisibility(t *testing.T) {
 		t.Fatalf("expected id 2, got %d", item.ID)
 	}
 }
+
+func TestGetPackageFileRejectsBinaryFiles(t *testing.T) {
+	service := NewService(&fakeSkillRepo{items: map[uint]domainskill.Skill{
+		1: {
+			ID:          1,
+			Scope:       domainskill.ScopeUser,
+			OwnerUserID: 7,
+			Enabled:     true,
+			PackageType: domainskill.PackageTypePackage,
+			PackageFiles: []domainskill.PackageFile{{
+				Path: "assets/icon.png",
+				Kind: domainskill.FileKindBinary,
+			}},
+		},
+	}})
+
+	_, err := service.GetPackageFile(context.Background(), 7, 1, "assets/icon.png")
+	if !errors.Is(err, ErrPackageFileUnreadable) {
+		t.Fatalf("expected ErrPackageFileUnreadable, got %v", err)
+	}
+}

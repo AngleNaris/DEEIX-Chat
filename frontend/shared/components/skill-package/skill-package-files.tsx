@@ -25,20 +25,38 @@ export function SkillPackageFilesViewer({
   const [content, setContent] = React.useState("");
   const [loading, setLoading] = React.useState(false);
   const [loadFailed, setLoadFailed] = React.useState(false);
+  const requestSeqRef = React.useRef(0);
+
+  React.useEffect(() => {
+    requestSeqRef.current += 1;
+    setActivePath(null);
+    setContent("");
+    setLoading(false);
+    setLoadFailed(false);
+  }, [fetchFile, files]);
 
   const openFile = React.useCallback(
     async (file: PackageFile) => {
       if (file.kind === "binary") return;
+      const requestSeq = requestSeqRef.current + 1;
+      requestSeqRef.current = requestSeq;
       setActivePath(file.path);
       setContent("");
       setLoadFailed(false);
       setLoading(true);
       try {
-        setContent(await fetchFile(file.path));
+        const nextContent = await fetchFile(file.path);
+        if (requestSeqRef.current === requestSeq) {
+          setContent(nextContent);
+        }
       } catch {
-        setLoadFailed(true);
+        if (requestSeqRef.current === requestSeq) {
+          setLoadFailed(true);
+        }
       } finally {
-        setLoading(false);
+        if (requestSeqRef.current === requestSeq) {
+          setLoading(false);
+        }
       }
     },
     [fetchFile],

@@ -298,6 +298,17 @@ func applyChatStreamEvent(
 	onEvent func(GenerateStreamEvent) error,
 	mode textEncodedToolCallMode,
 ) error {
+	return applyChatStreamEventWithToolPolicy(adapter, parsed, result, onEvent, mode, true)
+}
+
+func applyChatStreamEventWithToolPolicy(
+	adapter string,
+	parsed map[string]interface{},
+	result *GenerateOutput,
+	onEvent func(GenerateStreamEvent) error,
+	mode textEncodedToolCallMode,
+	allowNativeTools bool,
+) error {
 	if responseID := strings.TrimSpace(getString(parsed["id"])); responseID != "" {
 		result.ResponseID = responseID
 	}
@@ -323,7 +334,9 @@ func applyChatStreamEvent(
 			}
 		}
 	}
-	mergeChatStreamToolCalls(parsed, result)
+	if allowNativeTools {
+		mergeChatStreamToolCalls(parsed, result)
+	}
 	if serviceTier := strings.TrimSpace(getString(parsed["service_tier"])); serviceTier != "" {
 		result.Usage.ServiceTier = serviceTier
 	}
@@ -389,6 +402,16 @@ func mergeChatStreamToolCalls(parsed map[string]interface{}, result *GenerateOut
 }
 
 func parseChatCompletionsOutput(adapter string, parsed map[string]interface{}, result *GenerateOutput, mode textEncodedToolCallMode) {
+	parseChatCompletionsOutputWithToolPolicy(adapter, parsed, result, mode, true)
+}
+
+func parseChatCompletionsOutputWithToolPolicy(
+	adapter string,
+	parsed map[string]interface{},
+	result *GenerateOutput,
+	mode textEncodedToolCallMode,
+	allowNativeTools bool,
+) {
 	choice := firstMapItem(asSlice(parsed["choices"]))
 	message := asMap(choice["message"])
 	result.Text = extractChatVisibleContentText(message["content"])
@@ -396,9 +419,11 @@ func parseChatCompletionsOutput(adapter string, parsed map[string]interface{}, r
 
 	result.Usage = parseOpenAICompatibleUsageForAdapter(adapter, parsed)
 
-	toolCalls := parseChatToolCalls(message["tool_calls"])
-	if len(toolCalls) > 0 {
-		result.ToolCalls = append(result.ToolCalls, toolCalls...)
+	if allowNativeTools {
+		toolCalls := parseChatToolCalls(message["tool_calls"])
+		if len(toolCalls) > 0 {
+			result.ToolCalls = append(result.ToolCalls, toolCalls...)
+		}
 	}
 	if mode != textEncodedToolCallsInactive {
 		applyTextEncodedToolCalls(result, mode)

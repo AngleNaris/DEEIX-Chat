@@ -311,8 +311,11 @@ func (s *Service) GetPackageFile(ctx context.Context, userID uint, skillID uint,
 			break
 		}
 	}
-	if target == nil || target.Kind != domainskill.FileKindText {
+	if target == nil {
 		return nil, ErrPackageFileNotFound
+	}
+	if target.Kind != domainskill.FileKindText {
+		return nil, ErrPackageFileUnreadable
 	}
 	if s.storeProvider == nil {
 		return nil, ErrInvalidSkill
