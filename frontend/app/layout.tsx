@@ -1,5 +1,4 @@
 import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono, JetBrains_Mono } from "next/font/google";
 
 import { AppVersionGuard } from "@/features/layouts";
 import { AppearancePreferencesProvider } from "@/features/settings";
@@ -13,21 +12,6 @@ import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
 import "katex/dist/katex.min.css";
 import "streamdown/styles.css";
-
-const geistSans = Geist({
-  variable: "--font-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-mono",
-  subsets: ["latin"],
-});
-
-const jetBrainsMono = JetBrains_Mono({
-  variable: "--font-jetbrains-mono",
-  subsets: ["latin"],
-});
 
 export const metadata: Metadata = {
   appleWebApp: {
@@ -55,7 +39,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} ${jetBrainsMono.variable} h-full`}
+      className="h-full"
       data-branding-pending="true"
       suppressHydrationWarning
     >
