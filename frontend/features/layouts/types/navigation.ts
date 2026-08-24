@@ -23,7 +23,14 @@ type NavigationCommandItem = NavigationItemBase & {
 };
 
 type NavigationLinkItem = NavigationItemBase & {
-  id: "recent" | "files" | "knowledgeBases" | "skillsPrompt" | "agentGroups";
+  id:
+    | "recent"
+    | "files"
+    | "docCards"
+    | "artifacts"
+    | "knowledgeBases"
+    | "skillsPrompt"
+    | "agentGroups";
   kind: "link";
   href: string;
 };
