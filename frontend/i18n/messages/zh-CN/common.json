@@ -82,8 +82,8 @@
     "today": "今天",
     "archived": "已归档",
     "yesterday": "昨天",
-    "docCards": "文档卡片",
-    "artifacts": "产物"
+    "docCards": "卡片",
+    "artifacts": "制品"
   },
   "time": {
     "todayTime": "{time}",

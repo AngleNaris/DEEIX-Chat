@@ -69,14 +69,22 @@ func (r *Repo) UpdateArtifact(ctx context.Context, item *domainartifact.Artifact
 	if item == nil {
 		return nil
 	}
-	return translateError(r.db.WithContext(ctx).Model(&model.Artifact{}).
-		Where("id = ? AND user_id = ?", item.ID, item.UserID).
-		Updates(map[string]interface{}{
-			"title":     item.Title,
-			"kind":      item.Kind,
-			"code":      item.Code,
-			"thumbnail": item.Thumbnail,
-		}).Error)
+	return translateError(r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&model.Artifact{}).
+			Where("id = ? AND user_id = ?", item.ID, item.UserID).
+			Updates(map[string]interface{}{
+				"title":     item.Title,
+				"kind":      item.Kind,
+				"code":      item.Code,
+				"thumbnail": item.Thumbnail,
+			}).Error; err != nil {
+			return err
+		}
+		return tx.Model(&model.ArtifactShare{}).
+			Where("artifact_id = ? AND user_id = ? AND status = 'active'", item.ID, item.UserID).
+			Update("title_snapshot", item.Title).
+			Error
+	}))
 }
 
 func (r *Repo) GetArtifactByPublicID(ctx context.Context, userID uint, publicID string) (*domainartifact.Artifact, error) {

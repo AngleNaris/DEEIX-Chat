@@ -136,8 +136,8 @@
     "invalidJson": "配置 JSON 无效。"
   },
   "contextArtifact": {
-    "invalidId": "上下文产物 ID 无效。",
-    "notFound": "上下文产物不存在。"
+    "invalidId": "上下文制品 ID 无效。",
+    "notFound": "上下文制品不存在。"
   },
   "conversation": {
     "agentGroupConstraintViolated": "对话不符合群组约束。",

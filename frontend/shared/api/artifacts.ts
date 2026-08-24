@@ -51,6 +51,8 @@ export type CreateArtifactInput = {
   thumbnail?: string;
 };
 
+export type UpdateArtifactInput = Omit<CreateArtifactInput, "artifactId">;
+
 export async function listArtifacts(
   accessToken: string,
   page = 1,
@@ -81,6 +83,17 @@ export async function createArtifact(accessToken: string, input: CreateArtifactI
     method: "POST",
     accessToken,
     body,
+  });
+}
+
+export async function updateArtifact(
+  accessToken: string,
+  artifactId: string,
+  input: UpdateArtifactInput,
+): Promise<ArtifactDetailDTO> {
+  return createArtifact(accessToken, {
+    artifactId,
+    ...input,
   });
 }
 

@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { ArtifactEditorDialog } from "@/shared/components/artifact-editor-dialog";
 import { ArtifactShareLink } from "@/shared/components/artifact-share-link";
 import {
   ARTIFACT_IFRAME_PERMISSIONS,
@@ -603,6 +604,7 @@ export function ArtifactsSection() {
   const [loading, setLoading] = React.useState(true);
   const [busy, setBusy] = React.useState<string | null>(null);
   const [shareDialog, setShareDialog] = React.useState<ArtifactListItemDTO | null>(null);
+  const [editTarget, setEditTarget] = React.useState<ArtifactListItemDTO | null>(null);
   const [copiedArtifactID, setCopiedArtifactID] = React.useState<string | null>(null);
   const [previewTarget, setPreviewTarget] = React.useState<{
     artifact_id: string;
@@ -700,6 +702,45 @@ export function ArtifactsSection() {
     });
   };
 
+  const handleArtifactSaved = (artifact: ArtifactDetailDTO) => {
+    setItems((prev) => prev.map((entry) => {
+      if (entry.artifact_id !== artifact.artifact_id) {
+        return entry;
+      }
+      return {
+        ...entry,
+        title: artifact.title,
+        kind: artifact.kind,
+        thumbnail: artifact.thumbnail,
+        updated_at: artifact.updated_at,
+        share: entry.share
+          ? { ...entry.share, title_snapshot: artifact.title }
+          : entry.share,
+      };
+    }));
+    setPreviewTarget((current) => current?.artifact_id === artifact.artifact_id
+      ? { ...current, title: artifact.title }
+      : current);
+    setShareDialog((current) => current?.artifact_id === artifact.artifact_id
+      ? {
+          ...current,
+          title: artifact.title,
+          kind: artifact.kind,
+          thumbnail: artifact.thumbnail,
+          updated_at: artifact.updated_at,
+          share: current.share
+            ? { ...current.share, title_snapshot: artifact.title }
+            : current.share,
+        }
+      : current);
+  };
+
+  const handleEditorOpenChange = React.useCallback((next: boolean) => {
+    if (!next) {
+      setEditTarget(null);
+    }
+  }, []);
+
   const copyLink = async (item: ArtifactListItemDTO) => {
     const url = shareLink(item);
     if (!url) return;
@@ -766,6 +807,20 @@ export function ArtifactsSection() {
                         </button>
                       </TooltipTrigger>
                       <TooltipContent side="bottom">{t("view")}</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                          onClick={() => setEditTarget(item)}
+                          disabled={busy === item.artifact_id}
+                          aria-label={t("edit")}
+                        >
+                          <Pencil className="h-3 w-3" />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom">{t("edit")}</TooltipContent>
                     </Tooltip>
                     {item.share ? (
                       <>
@@ -870,6 +925,13 @@ export function ArtifactsSection() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ArtifactEditorDialog
+        open={Boolean(editTarget)}
+        artifactId={editTarget?.artifact_id ?? null}
+        onOpenChange={handleEditorOpenChange}
+        onSaved={handleArtifactSaved}
+      />
 
       <ArtifactPreviewDialog
         open={Boolean(previewTarget)}
