@@ -47,8 +47,8 @@
     "recent": "对话",
     "files": "文件",
     "knowledgeBases": "知识库",
-    "skillsPrompt": "Skills & Prompts",
-    "agentGroups": "智能体群组",
+    "skillsPrompt": "技能",
+    "agentGroups": "群组",
     "searchTitle": "搜索",
     "searchDescription": "搜索对话标题、标签、项目和消息正文",
     "searchPlaceholder": "搜索对话或消息内容",
@@ -82,8 +82,8 @@
     "today": "今天",
     "archived": "已归档",
     "yesterday": "昨天",
-    "docCards": "卡片",
-    "artifacts": "制品"
+    "docCards": "文档卡片",
+    "artifacts": "产物"
   },
   "time": {
     "todayTime": "{time}",

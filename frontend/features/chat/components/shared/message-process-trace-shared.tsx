@@ -1,8 +1,8 @@
 "use client";
 
-import * as React from "react";
+import { BookOpen, Brain, FileImage, FileText, MessageSquareText, Wrench } from "lucide-react";
 import Link from "next/link";
-import { Brain, FileText, MessageSquareText, Wrench } from "lucide-react";
+import * as React from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -14,11 +14,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import type { ChatPromptTrace, ChatTraceBlock, RAGCitation } from "@/features/chat/types/messages";
 import type { ProcessTraceLabels } from "@/features/chat/hooks/use-process-trace-labels";
 import {
   displayTraceStageLabel,
   displayTraceTrigger,
+  type FileContextBadge,
   filterProcessTraceStages,
   isFileContextTraceStage,
   isRAGTraceStage,
@@ -28,16 +28,16 @@ import {
   normalizeTraceListItem,
   parseStructuredTraceStages,
   parseTraceStages,
-  type FileContextBadge,
   type RecalledEvidenceItem,
   type TraceStage,
 } from "@/features/chat/model/message-process-trace";
+import type { ChatPromptTrace, ChatTraceBlock, RAGCitation } from "@/features/chat/types/messages";
 import { useLocalizedErrorMessage } from "@/i18n/use-localized-error";
+import { cn } from "@/lib/utils";
 import { getContextArtifact } from "@/shared/api/conversation";
 import type { ContextArtifactDTO } from "@/shared/api/conversation.types";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 import { StreamdownRender } from "@/shared/components/markdown/streamdown-render";
-import { cn } from "@/lib/utils";
 
 export const TRACE_ROOT_CLASS = "chat-screenshot-omit mb-2 w-full pr-4 sm:pr-6";
 
@@ -215,12 +215,21 @@ export function RAGCitationList({
   );
 }
 
-function recalledSourceIcon(sourceType: string) {
-  const type = sourceType.trim().toLowerCase();
-  if (type.includes("memory")) return MessageSquareText;
-  if (type.includes("semantic") || type.includes("recall")) return Brain;
-  if (type.includes("tool")) return Wrench;
-  return FileText;
+function recalledSourceIcon(kind: RecalledEvidenceItem["kind"]) {
+  switch (kind) {
+    case "skill":
+      return BookOpen;
+    case "tool":
+      return Wrench;
+    case "memory":
+      return MessageSquareText;
+    case "recall":
+      return Brain;
+    case "image":
+      return FileImage;
+    default:
+      return FileText;
+  }
 }
 
 type RecalledEvidenceDialogState =
@@ -324,17 +333,23 @@ function RecalledEvidenceCard({
   onClick?: () => void;
   labels: ProcessTraceLabels;
 }) {
-  const Icon = recalledSourceIcon(item.sourceType);
+  const Icon = recalledSourceIcon(item.kind);
+  const typeLabel = labels.recalled.types[item.kind];
   const className = cn(
-    "inline-flex min-w-0 max-w-[200px] items-center gap-1.5 rounded-lg border border-border/35 bg-background/45 px-1.5 py-0.5 text-[11px] leading-5 text-muted-foreground/76 transition-colors",
-    onClick ? "cursor-pointer hover:border-border hover:text-foreground" : "",
+    "inline-flex min-w-0 max-w-[220px] items-center gap-2 rounded-md border border-border/45 bg-background/60 px-2 py-1.5 text-left text-[11px] leading-4 text-muted-foreground transition-colors",
+    onClick ? "cursor-pointer hover:border-border hover:bg-accent/35 hover:text-foreground" : "",
   );
   const content = (
     <>
-      <Icon className="size-3 shrink-0 text-muted-foreground/50" />
-      <span className="truncate font-medium">{item.title}</span>
+      <span className="flex size-6 shrink-0 items-center justify-center rounded-sm bg-muted/70 text-muted-foreground">
+        <Icon className="size-3.5" />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-[10px] leading-3 text-muted-foreground/60">{typeLabel}</span>
+        <span className="block truncate font-medium text-foreground/85">{item.title}</span>
+      </span>
       {item.score != null ? (
-        <span className="shrink-0 text-muted-foreground/50">{Math.round(item.score * 100)}%</span>
+        <span className="shrink-0 text-[10px] text-muted-foreground/55">{Math.round(item.score * 100)}%</span>
       ) : null}
     </>
   );

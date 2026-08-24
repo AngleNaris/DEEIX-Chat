@@ -465,6 +465,41 @@ export function PreviewMedia({
     </div>
   );
 
+  if (kind === "image" && inline) {
+    return (
+      <div className="w-full max-w-full overflow-hidden rounded-xl bg-muted/20">
+        {isSVG ? (
+          <object
+            data={source}
+            type="image/svg+xml"
+            aria-label={alt || tPreview("svgPreview")}
+            className="block h-auto max-h-[min(72vh,900px)] w-full object-contain"
+          >
+            <Image
+              src={source}
+              alt={alt || tPreview("svgPreview")}
+              className="block h-auto max-h-[min(72vh,900px)] w-full object-contain"
+              width={imageSize.width}
+              height={imageSize.height}
+              sizes="(max-width: 768px) 100vw, 640px"
+              unoptimized
+            />
+          </object>
+        ) : (
+          <Image
+            src={source}
+            alt={alt || tPreview("imagePreview")}
+            className="block h-auto max-h-[min(72vh,900px)] w-full object-contain"
+            width={imageSize.width}
+            height={imageSize.height}
+            sizes="(max-width: 768px) 100vw, 640px"
+            unoptimized
+          />
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-full min-h-0 w-full flex-col">
       {kind === "image" ? (

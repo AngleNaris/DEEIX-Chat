@@ -1,8 +1,8 @@
 "use client";
 
-import * as React from "react";
-import { useTranslations } from "next-intl";
 import { ExternalLink, FileCode2, Loader2 } from "lucide-react";
+import { useTranslations } from "next-intl";
+import * as React from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -12,23 +12,23 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { useLocalizedErrorMessage } from "@/i18n/use-localized-error";
-import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 import {
-  getArtifact,
-  type ArtifactDetailDTO,
-} from "@/shared/api/artifacts";
-import {
-  buildArtifactPreviewDocument,
   type ArtifactPreviewKind,
+  buildArtifactPreviewDocument,
 } from "@/features/chat/model/chat-artifacts";
+import { useLocalizedErrorMessage } from "@/i18n/use-localized-error";
+import {
+  type ArtifactDetailDTO,
+  getArtifact,
+} from "@/shared/api/artifacts";
+import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
+import { CopyActionButton } from "@/shared/components/copy-action";
+import { useTheme } from "@/shared/components/theme-provider";
+import { resolveStoredArtifactPreviewKind } from "@/shared/lib/artifact-preview";
 import {
   captureHTMLVisualThemeSnapshot,
   type HTMLVisualThemeSnapshot,
 } from "@/shared/lib/html-visual-theme";
-import { resolveStoredArtifactPreviewKind } from "@/shared/lib/artifact-preview";
-import { useTheme } from "@/shared/components/theme-provider";
-import { CopyActionButton } from "@/shared/components/copy-action";
 
 // 与 chat-artifact.tsx 的 ARTIFACT_IFRAME_PERMISSIONS 保持一致：沙箱 iframe 的 allow 属性。
 export const ARTIFACT_IFRAME_PERMISSIONS = [
@@ -143,7 +143,7 @@ export function ArtifactPreviewDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[calc(100svh-2rem)] w-[min(920px,calc(100%-2rem))] flex-col gap-0 overflow-hidden p-0 sm:max-w-[920px]">
+      <DialogContent className="flex h-[calc(100svh-2rem)] max-h-none w-[min(920px,calc(100%-2rem))] flex-col gap-0 overflow-hidden p-0 sm:max-w-[920px]">
         <DialogHeader className="shrink-0 gap-1 border-b border-border/60 px-5 py-4">
           <div className="flex min-w-0 items-center gap-2">
             <DialogTitle className="min-w-0 flex-1 truncate">{title}</DialogTitle>
@@ -185,7 +185,7 @@ export function ArtifactPreviewDialog({
               sandbox="allow-scripts"
               referrerPolicy="no-referrer"
               srcDoc={previewHTML}
-              className="h-[60vh] w-full bg-background"
+              className="h-full min-h-0 w-full bg-background"
             />
           ) : isText ? (
             <pre className="min-h-full whitespace-pre-wrap p-5 font-mono text-xs leading-5 text-foreground">

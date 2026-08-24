@@ -38,12 +38,15 @@ export type RAGTraceCounts = {
 
 // 被召回的上下文证据（promptTrace.sourceRefs 中有标题的来源）。
 export type RecalledEvidenceItem = {
+  kind: RecalledEvidenceKind;
   sourceType: string;
   sourceID: string;
   title: string;
   artifactID?: number;
   score?: number;
 };
+
+export type RecalledEvidenceKind = "skill" | "tool" | "memory" | "recall" | "summary" | "image";
 
 export type CompactionTracePayload = {
   fromTurn: number;
@@ -77,20 +80,32 @@ export function parseRAGCitations(payloadJson: string | undefined): RAGCitation[
   }
 }
 
-// 召回证据卡片展示的证据类型：文件 RAG 命中（file_rag_chunk/file_rag_fallback）已在
-// 检索引用区单独渲染，skill/tool 等能力声明不属于"被召回的证据"，这里只展示
-// 历史召回/记忆/工具结果等证据类型，避免与检索引用区重复。
-const RECALLED_EVIDENCE_SOURCE_TYPES = new Set([
-  "semantic_recall",
-  "user_memory",
-  "tool_result",
-  "native_tool_result",
-  "image_analysis",
-  "conversation_summary",
-]);
+// 文件 RAG 命中已在检索引用区单独渲染，这里只把其余 prompt 来源归类成用户可读证据。
+export function resolveRecalledEvidenceKind(sourceType: string): RecalledEvidenceKind | null {
+  switch (sourceType.trim().toLowerCase()) {
+    case "skill":
+      return "skill";
+    case "tool":
+    case "tool_result":
+    case "native_tool_result":
+      return "tool";
+    case "user_memory":
+      return "memory";
+    case "semantic_recall":
+      return "recall";
+    case "summary":
+    case "conversation_summary":
+      return "summary";
+    case "image":
+    case "image_analysis":
+      return "image";
+    default:
+      return null;
+  }
+}
 
 // 提取本轮被召回的上下文证据：promptTrace 各块的 sourceRefs 中有标题的条目，
-// 按 (sourceType, sourceID, title) 去重，避免同一来源重复渲染。
+// 按 (kind, sourceID, title) 去重，避免同一来源的别名重复渲染。
 export function parseRecalledEvidence(trace: ChatPromptTrace | undefined): RecalledEvidenceItem[] {
   if (!trace?.blocks || trace.blocks.length === 0) {
     return [];
@@ -104,16 +119,18 @@ export function parseRecalledEvidence(trace: ChatPromptTrace | undefined): Recal
         continue;
       }
       const sourceType = ref.sourceType?.trim() ?? "";
-      if (!RECALLED_EVIDENCE_SOURCE_TYPES.has(sourceType)) {
+      const kind = resolveRecalledEvidenceKind(sourceType);
+      if (!kind) {
         continue;
       }
       const sourceID = ref.sourceID?.trim() ?? "";
-      const dedupeKey = JSON.stringify([sourceType, sourceID, title]);
+      const dedupeKey = JSON.stringify([kind, sourceID, title]);
       if (seen.has(dedupeKey)) {
         continue;
       }
       seen.add(dedupeKey);
       items.push({
+        kind,
         sourceType,
         sourceID,
         title,

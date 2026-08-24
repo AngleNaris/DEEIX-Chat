@@ -754,6 +754,14 @@
     "recalled": {
       "title": "Recalled evidence",
       "count": "{count, plural, one {# item} other {# items}}",
+      "types": {
+        "skill": "Skill",
+        "tool": "Tool",
+        "memory": "Memory",
+        "recall": "Semantic recall",
+        "summary": "Conversation summary",
+        "image": "Image analysis"
+      },
       "loading": "Loading…",
       "close": "Close",
       "loadFailed": "Failed to load the evidence, please try again later",

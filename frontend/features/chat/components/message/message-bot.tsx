@@ -3,15 +3,6 @@
 import { ChevronDown, CircleAlert, Film, GalleryHorizontalEnd } from "lucide-react";
 import { useTranslations } from "next-intl";
 import * as React from "react";
-import { MessageAgentGroupTrace } from "@/features/agent-groups/components/message-agent-group-trace";
-import { useAgentGroupStepActions } from "@/features/agent-groups/hooks/use-agent-group-step-actions";
-import {
-  clearLiveGroupRun,
-  type GroupRunState,
-  readLiveGroupRun,
-  resolveRetryableGroupStep,
-  useLiveGroupRun,
-} from "@/features/agent-groups/model/group-run-store";
 import { GrainientBackground } from "@/components/reactbits/backgrounds/grainient";
 import {
   Accordion,
@@ -26,6 +17,15 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { MessageAgentGroupTrace } from "@/features/agent-groups/components/message-agent-group-trace";
+import { useAgentGroupStepActions } from "@/features/agent-groups/hooks/use-agent-group-step-actions";
+import {
+  clearLiveGroupRun,
+  type GroupRunState,
+  readLiveGroupRun,
+  resolveRetryableGroupStep,
+  useLiveGroupRun,
+} from "@/features/agent-groups/model/group-run-store";
 import { MessageAttachmentRow } from "@/features/chat/components/message/message-attachment";
 import { MessageKnowledgeSources } from "@/features/chat/components/message/message-knowledge-sources";
 import type { AssistantReaction } from "@/features/chat/components/message/message-meta";
@@ -90,6 +90,13 @@ function isAudioAttachment(attachment: MessageAttachment): boolean {
   );
 }
 
+function resolveInlineMediaKind(attachment: MessageAttachment): "image" | "audio" | "video" | null {
+  if (isEditableImageAttachment(attachment)) return "image";
+  if (isVideoAttachment(attachment)) return "video";
+  if (isAudioAttachment(attachment)) return "audio";
+  return null;
+}
+
 function isMP4VideoAttachment(attachment: MessageAttachment): boolean {
   const mimeType = attachment.mimeType.toLowerCase();
   const detectedMime = attachment.detectedMime?.toLowerCase() || "";
@@ -101,12 +108,9 @@ function isMP4VideoAttachment(attachment: MessageAttachment): boolean {
 }
 
 function resolveFileIDFromImageSrc(src: string): string | null {
-  if (typeof window === "undefined") {
-    return null;
-  }
   try {
-    const url = new URL(src, window.location.origin);
-    const match = url.pathname.match(/\/api\/v1\/files\/([^/]+)\/content$/);
+    const pathname = src.startsWith("http://") || src.startsWith("https://") ? new URL(src).pathname : src;
+    const match = pathname.match(/\/api\/v1\/files\/([^/?#]+)\/content(?:[?#].*)?$/);
     return match?.[1] ? decodeURIComponent(match[1]) : null;
   } catch {
     return null;
@@ -297,46 +301,46 @@ export function ChatMessageBot({
   const toolTrace = processTrace?.tools;
   const traceEvents = processTrace?.events ?? EMPTY_TRACE_EVENTS;
   const messageStreaming = Boolean(item.isStreaming);
-  const inlineVideoAttachment = React.useMemo(
+  const renderableMediaAttachments = React.useMemo(
     () =>
-      !item.isStreaming && item.contentType === "video"
-        ? (item.attachments ?? []).find(isVideoAttachment) ?? null
-        : null,
-    [item.attachments, item.contentType, item.isStreaming],
-  );
-  const inlineAudioAttachment = React.useMemo(
-    () =>
-      !item.isStreaming
-        ? (item.attachments ?? []).find(isAudioAttachment) ?? null
-        : null,
+      item.isStreaming
+        ? []
+        : (item.attachments ?? []).filter(
+            (attachment) => resolveInlineMediaKind(attachment) !== null,
+          ),
     [item.attachments, item.isStreaming],
   );
-  const visibleAttachments = React.useMemo(
-    () =>
-      (inlineVideoAttachment || inlineAudioAttachment
-        ? (item.attachments ?? []).filter(
-            (attachment) =>
-              attachment.fileID !== inlineVideoAttachment?.fileID &&
-              attachment.fileID !== inlineAudioAttachment?.fileID,
-          )
-        : item.attachments ?? []),
-    [inlineAudioAttachment, inlineVideoAttachment, item.attachments],
-  );
-  const extendableVideoAttachment =
-    inlineVideoAttachment && isMP4VideoAttachment(inlineVideoAttachment)
-      ? inlineVideoAttachment
-      : null;
-  const onExtendVideo = React.useCallback(() => {
-    if (extendableVideoAttachment) {
-      onExtendVideoAttachment?.(extendableVideoAttachment, item.platformModelName);
-    }
-  }, [extendableVideoAttachment, item.platformModelName, onExtendVideoAttachment]);
-  const hideGeneratedVideoMarkdown = inlineVideoAttachment
+  const primaryVideoAttachment =
+    renderableMediaAttachments.find(isVideoAttachment) ?? null;
+  const hideGeneratedVideoMarkdown = primaryVideoAttachment
     ? isGeneratedVideoMarkdownContent(item.content, item.attachments ?? [])
     : false;
   const renderableContent = hideGeneratedVideoMarkdown ? "" : item.content;
   const hasStreamdownContent = renderableContent.trim().length > 0;
   const leadingImagePreview = React.useMemo(() => resolveLeadingImagePreview(renderableContent), [renderableContent]);
+  const leadingImageFileID = React.useMemo(
+    () => (leadingImagePreview?.source ? resolveFileIDFromImageSrc(leadingImagePreview.source) : null),
+    [leadingImagePreview?.source],
+  );
+  const inlineMediaAttachments = React.useMemo(
+    () =>
+      renderableMediaAttachments.filter(
+        (attachment) =>
+          !(
+            leadingImageFileID &&
+            isEditableImageAttachment(attachment) &&
+            attachment.fileID === leadingImageFileID
+          ),
+      ),
+    [leadingImageFileID, renderableMediaAttachments],
+  );
+  const visibleAttachments = React.useMemo(() => {
+    if (inlineMediaAttachments.length === 0) {
+      return item.attachments ?? [];
+    }
+    const inlineFileIDs = new Set(inlineMediaAttachments.map((attachment) => attachment.fileID));
+    return (item.attachments ?? []).filter((attachment) => !inlineFileIDs.has(attachment.fileID));
+  }, [inlineMediaAttachments, item.attachments]);
   const leadingImageAlt = React.useMemo(
     () => leadingImagePreview?.alt || submitT("imagePreviewAlt"),
     [leadingImagePreview?.alt, submitT],
@@ -487,21 +491,27 @@ export function ChatMessageBot({
         ) : null}
       </div>
 
-      {inlineVideoAttachment ? (
-        <MessageInlineVideoPreview
-          attachment={inlineVideoAttachment}
-          loadContent={attachmentContentLoader}
-          onExtend={
-            onExtendVideoAttachment && extendableVideoAttachment
-              ? onExtendVideo
-              : undefined
-          }
-        />
-      ) : null}
-
-      {inlineAudioAttachment ? (
-        <MessageInlineAudioPreview attachment={inlineAudioAttachment} loadContent={attachmentContentLoader} />
-      ) : null}
+      {inlineMediaAttachments.map((attachment) => {
+        const kind = resolveInlineMediaKind(attachment);
+        if (!kind) return null;
+        const canExtend =
+          kind === "video" &&
+          isMP4VideoAttachment(attachment) &&
+          Boolean(onExtendVideoAttachment);
+        return (
+          <MessageInlineMediaPreview
+            key={attachment.fileID}
+            attachment={attachment}
+            kind={kind}
+            loadContent={attachmentContentLoader}
+            onExtend={
+              canExtend
+                ? () => onExtendVideoAttachment?.(attachment, item.platformModelName)
+                : undefined
+            }
+          />
+        );
+      })}
 
       {item.inlineAlert ? (
         <ChatInlineAlertCard alert={item.inlineAlert} className={hasStreamdownContent ? "my-4" : "mb-4"} />
@@ -795,12 +805,15 @@ export function AssistantVideoGenerationSkeleton({ label }: { label?: string }) 
   );
 }
 
-type InlineVideoPreviewState =
+type InlineMediaPreviewState =
   | { status: "loading" }
   | { status: "error"; message: string }
   | { status: "ready"; source: string; contentType: string };
 
-function InlineVideoLoadingPlaceholder() {
+function InlineMediaLoadingPlaceholder({ kind }: { kind: "image" | "audio" | "video" }) {
+  if (kind === "audio") {
+    return <div className="my-4 h-10 w-full max-w-[36rem] animate-pulse rounded-md bg-muted/40" />;
+  }
   return (
     <div className="my-4 flex aspect-video w-full max-w-[40rem] items-center justify-center overflow-hidden rounded-xl bg-muted/20">
       <span className="size-4 animate-spin rounded-full border-2 border-muted-foreground/20 border-t-muted-foreground/55" />
@@ -808,17 +821,16 @@ function InlineVideoLoadingPlaceholder() {
   );
 }
 
-function MessageInlineVideoPreview({
-  attachment,
-  loadContent,
-  onExtend,
-}: {
-  attachment: MessageAttachment;
-  loadContent?: (file: PreviewDialogFile) => Promise<FileContentResult>;
-  onExtend?: () => void;
-}) {
+function useInlineMediaPreview(
+  {
+    attachment,
+    loadContent,
+  }: {
+    attachment: MessageAttachment;
+    loadContent?: (file: PreviewDialogFile) => Promise<FileContentResult>;
+  },
+) {
   const tPreview = useTranslations("files.previewDialog");
-  const tMessages = useTranslations("chat.messages");
   const resolveErrorMessage = useLocalizedErrorMessage();
   const objectURLRef = React.useRef<string | null>(null);
   const fileID = attachment.fileID;
@@ -827,7 +839,7 @@ function MessageInlineVideoPreview({
   const detectedMime = attachment.detectedMime;
   const previewURL = attachment.previewURL;
   const sizeBytes = attachment.sizeBytes;
-  const [state, setState] = React.useState<InlineVideoPreviewState>(() =>
+  const [state, setState] = React.useState<InlineMediaPreviewState>(() =>
     previewURL
       ? {
           status: "ready",
@@ -916,8 +928,25 @@ function MessageInlineVideoPreview({
     tPreview,
   ]);
 
+  return state;
+}
+
+function MessageInlineMediaPreview({
+  attachment,
+  kind,
+  loadContent,
+  onExtend,
+}: {
+  attachment: MessageAttachment;
+  kind: "image" | "audio" | "video";
+  loadContent?: (file: PreviewDialogFile) => Promise<FileContentResult>;
+  onExtend?: () => void;
+}) {
+  const tMessages = useTranslations("chat.messages");
+  const state = useInlineMediaPreview({ attachment, loadContent });
+
   if (state.status === "loading") {
-    return <InlineVideoLoadingPlaceholder />;
+    return <InlineMediaLoadingPlaceholder kind={kind} />;
   }
 
   if (state.status === "error") {
@@ -926,149 +955,38 @@ function MessageInlineVideoPreview({
         <CircleAlert className="size-4" />
         <AlertDescription>{state.message}</AlertDescription>
       </Alert>
+    );
+  }
+
+  if (kind === "audio") {
+    return (
+      <div className="my-4 w-full max-w-[36rem]">
+        {/* biome-ignore lint/a11y/useMediaCaption: generated audio has no transcript track available. */}
+        <audio controls preload="metadata" className="w-full" src={state.source}>
+          <a href={state.source} download={attachment.fileName}>
+            {attachment.fileName}
+          </a>
+        </audio>
+      </div>
     );
   }
 
   return (
     <div className="group relative my-4 w-full max-w-[40rem]">
       <PreviewMedia
-        kind="video"
+        kind={kind}
         source={state.source}
         alt={attachment.fileName}
         contentType={state.contentType}
         inline
       />
-      {onExtend ? (
+      {kind === "video" && onExtend ? (
         <MediaActionBar className="absolute right-2 top-2">
           <MediaActionButton label={tMessages("extendVideo")} onClick={onExtend}>
             <GalleryHorizontalEnd className="size-3.5" />
           </MediaActionButton>
         </MediaActionBar>
       ) : null}
-    </div>
-  );
-}
-
-// MessageInlineAudioPreview 内联渲染消息中的音频附件（工具产物/上传的音频），
-// 复用视频预览的加载状态机（objectURL + accessToken），渲染原生 <audio> 播放器。
-function MessageInlineAudioPreview({
-  attachment,
-  loadContent,
-}: {
-  attachment: MessageAttachment;
-  loadContent?: (file: PreviewDialogFile) => Promise<FileContentResult>;
-}) {
-  const tPreview = useTranslations("files.previewDialog");
-  const resolveErrorMessage = useLocalizedErrorMessage();
-  const objectURLRef = React.useRef<string | null>(null);
-  const [state, setState] = React.useState<InlineVideoPreviewState>({ status: "loading" });
-  const fileID = attachment.fileID;
-  const fileName = attachment.fileName;
-  const mimeType = attachment.mimeType;
-  const detectedMime = attachment.detectedMime;
-  const previewURL = attachment.previewURL;
-  const sizeBytes = attachment.sizeBytes;
-  const revokeObjectURL = React.useCallback(() => {
-    if (!objectURLRef.current) {
-      return;
-    }
-    URL.revokeObjectURL(objectURLRef.current);
-    objectURLRef.current = null;
-  }, []);
-
-  React.useEffect(() => {
-    let cancelled = false;
-    revokeObjectURL();
-
-    if (previewURL) {
-      setState({
-        status: "ready",
-        source: previewURL,
-        contentType: detectedMime || mimeType,
-      });
-      return undefined;
-    }
-
-    setState({ status: "loading" });
-    void (async () => {
-      try {
-        const file = {
-          fileID,
-          fileName,
-          mimeType,
-          sizeBytes,
-        };
-        const result = loadContent
-          ? await loadContent(file)
-          : await (async () => {
-              const token = await resolveAccessToken();
-              if (!token) {
-                throw new Error(tPreview("sessionExpired"));
-              }
-              return fetchFileContent(token, fileID);
-            })();
-        const objectURL = URL.createObjectURL(result.blob);
-        objectURLRef.current = objectURL;
-
-        if (cancelled) {
-          URL.revokeObjectURL(objectURL);
-          if (objectURLRef.current === objectURL) {
-            objectURLRef.current = null;
-          }
-          return;
-        }
-
-        setState({
-          status: "ready",
-          source: objectURL,
-          contentType: result.contentType || detectedMime || mimeType,
-        });
-      } catch (error) {
-        if (cancelled) {
-          return;
-        }
-        setState({ status: "error", message: resolveErrorMessage(error, tPreview("loadFailed")) });
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-      revokeObjectURL();
-    };
-  }, [
-    detectedMime,
-    fileID,
-    fileName,
-    loadContent,
-    mimeType,
-    previewURL,
-    resolveErrorMessage,
-    revokeObjectURL,
-    sizeBytes,
-    tPreview,
-  ]);
-
-  if (state.status === "loading") {
-    return <div className="my-4 h-10 w-full max-w-[36rem] animate-pulse rounded-md bg-muted/40" />;
-  }
-
-  if (state.status === "error") {
-    return (
-      <Alert className="my-4 max-w-[36rem]" variant="destructive">
-        <CircleAlert className="size-4" />
-        <AlertDescription>{state.message}</AlertDescription>
-      </Alert>
-    );
-  }
-
-  return (
-    <div className="my-4 w-full max-w-[36rem]">
-      {/* biome-ignore lint/a11y/useMediaCaption: generated audio has no transcript track available. */}
-      <audio controls preload="metadata" className="w-full" src={state.source}>
-        <a href={state.source} download={fileName}>
-          {fileName}
-        </a>
-      </audio>
     </div>
   );
 }

@@ -10,15 +10,12 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import { Marker, MarkerContent } from "@/components/ui/marker";
-import type { ChatMessageProcessTrace } from "@/features/chat/types/messages";
-import { useProcessTraceLabels } from "@/features/chat/hooks/use-process-trace-labels";
-import { cn } from "@/lib/utils";
 import {
   RAGCitationList,
   TRACE_ROOT_CLASS,
   TraceContent,
 } from "@/features/chat/components/shared/message-process-trace-shared";
-import { useAutoScrollFollow } from "@/shared/hooks/use-scroll-follow";
+import { useProcessTraceLabels } from "@/features/chat/hooks/use-process-trace-labels";
 import {
   filterProcessTraceStages,
   isRAGTraceStage,
@@ -30,6 +27,9 @@ import {
   parseStructuredTraceStages,
   parseTraceStages,
 } from "@/features/chat/model/message-process-trace";
+import type { ChatMessageProcessTrace } from "@/features/chat/types/messages";
+import { cn } from "@/lib/utils";
+import { useAutoScrollFollow } from "@/shared/hooks/use-scroll-follow";
 
 export { MessageTraceEventBlocks, MessageUpstreamThink } from "@/features/chat/components/message/message-thinking-trace";
 
@@ -52,8 +52,18 @@ export function MessageProcessTrace({
   const labels = useProcessTraceLabels();
   const processStreaming = Boolean(active && trace?.process?.status === "streaming");
   const [accordionValue, setAccordionValue] = React.useState(() => (processStreaming ? "message-process-trace" : ""));
+  const processContentKey = React.useMemo(
+    () =>
+      JSON.stringify([
+        trace?.process?.contentMarkdown,
+        trace?.process?.payloadJson,
+        trace?.promptTrace,
+      ]),
+    [trace?.process?.contentMarkdown, trace?.process?.payloadJson, trace?.promptTrace],
+  );
   // 过程轨迹内容与思考/工具调用保持一致：固定高度 + 跟随最新内容（用户上滚暂停、回底恢复）。
-  const { ref: processContentRef, onScroll: onProcessContentScroll } = useAutoScrollFollow<HTMLDivElement>(trace?.process?.contentMarkdown);
+  const { ref: processContentRef, onScroll: onProcessContentScroll } =
+    useAutoScrollFollow<HTMLDivElement>(processContentKey);
 
   React.useEffect(() => {
     if (processStreaming) {

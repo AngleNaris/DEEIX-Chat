@@ -1,7 +1,7 @@
 "use client";
 
-import * as React from "react";
 import { useTranslations } from "next-intl";
+import * as React from "react";
 
 export type ProcessTraceLabels = {
   fileBadges: {
@@ -155,6 +155,14 @@ export type ProcessTraceLabels = {
   recalled: {
     title: string;
     count: (count: number) => string;
+    types: {
+      skill: string;
+      tool: string;
+      memory: string;
+      recall: string;
+      summary: string;
+      image: string;
+    };
     loading: string;
     close: string;
     loadFailed: string;
@@ -320,6 +328,14 @@ export function useProcessTraceLabels(): ProcessTraceLabels {
       recalled: {
         title: t("recalled.title"),
         count: (count: number) => t("recalled.count", { count }),
+        types: {
+          skill: t("recalled.types.skill"),
+          tool: t("recalled.types.tool"),
+          memory: t("recalled.types.memory"),
+          recall: t("recalled.types.recall"),
+          summary: t("recalled.types.summary"),
+          image: t("recalled.types.image"),
+        },
         loading: t("recalled.loading"),
         close: t("recalled.close"),
         loadFailed: t("recalled.loadFailed"),
