@@ -70,11 +70,11 @@ export function PublicArtifactPage() {
   return (
     <main
       className={cn(
-        "flex min-h-screen w-full flex-col gap-4 p-4 md:p-8",
+        "flex h-full min-h-0 w-full flex-col gap-4 overflow-hidden p-4 md:p-8",
         previewWidth === "fixed" && "mx-auto max-w-4xl",
       )}
     >
-      <header className="flex flex-wrap items-center gap-2">
+      <header className="flex shrink-0 flex-wrap items-center gap-2">
         <FileCode2 className="size-4 text-muted-foreground" />
         <h1 className="min-w-0 flex-1 truncate text-base font-semibold">{data.title}</h1>
         <span className="rounded-sm bg-muted/70 px-1.5 py-0.5 text-[11px] font-medium uppercase text-muted-foreground">
@@ -84,8 +84,8 @@ export function PublicArtifactPage() {
       </header>
 
       {data.kind === "html" ? (
-        <Tabs defaultValue="preview" className="flex min-h-0 flex-1 flex-col">
-          <div className="flex items-center justify-between gap-2">
+        <Tabs defaultValue="preview" className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <div className="flex shrink-0 items-center justify-between gap-2">
             <TabsList className="w-fit">
               <TabsTrigger value="preview">{t("preview")}</TabsTrigger>
               <TabsTrigger value="source">{t("source")}</TabsTrigger>
@@ -110,26 +110,26 @@ export function PublicArtifactPage() {
               </TooltipContent>
             </Tooltip>
           </div>
-          <TabsContent value="preview" className="min-h-0 flex-1">
+          <TabsContent value="preview" className="min-h-0 flex-1 overflow-hidden">
             <iframe
               title={data.title}
               sandbox="allow-scripts"
               srcDoc={data.code}
               className={
                 previewWidth === "fixed"
-                  ? "mx-auto block h-[70vh] w-full max-w-3xl rounded-lg border border-border/60 bg-white"
-                  : "h-[70vh] w-full rounded-lg border border-border/60 bg-white"
+                  ? "mx-auto block h-full min-h-0 w-full max-w-3xl rounded-lg border border-border/60 bg-white"
+                  : "block h-full min-h-0 w-full rounded-lg border border-border/60 bg-white"
               }
             />
           </TabsContent>
-          <TabsContent value="source" className="min-h-0 flex-1">
-            <pre className="h-[70vh] w-full overflow-auto rounded-lg border border-border/60 bg-muted/30 p-4 text-xs leading-relaxed">
+          <TabsContent value="source" className="min-h-0 flex-1 overflow-hidden">
+            <pre className="h-full min-h-0 w-full overflow-auto rounded-lg border border-border/60 bg-muted/30 p-4 text-xs leading-relaxed">
               {data.code}
             </pre>
           </TabsContent>
         </Tabs>
       ) : (
-        <pre className="h-[70vh] w-full overflow-auto rounded-lg border border-border/60 bg-muted/30 p-4 text-xs leading-relaxed">
+        <pre className="min-h-0 w-full flex-1 overflow-auto rounded-lg border border-border/60 bg-muted/30 p-4 text-xs leading-relaxed">
           {data.code}
         </pre>
       )}
