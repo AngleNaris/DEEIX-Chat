@@ -367,10 +367,12 @@ func platformToolRegistry() map[string]platformToolEntry {
 					"type":"object","properties":{
 						"card_id":{"type":"string","description":"Optional card id to update (from list_doc_cards)"},
 						"title":{"type":"string","description":"Card title (max 128 chars)"},
-						"category":{"type":"string","description":"Optional category label (max 64 chars)"},
+						"category":{"type":"string","description":"Optional category label (max 64 chars); omit to preserve it when updating"},
+						"project_id":{"type":"integer","minimum":0,"description":"Optional project binding; omit to preserve it when updating, use 0 to clear it"},
+						"role_id":{"type":"integer","minimum":0,"description":"Optional role binding; omit to preserve it when updating, use 0 to clear it"},
 						"content":{"type":"string","description":"Card content injected on keyword match (max 20000 chars)"},
-						"keywords":{"type":"array","items":{"type":"string"},"description":"Trigger keywords (max 20); card activates when the user message contains any of them"},
-						"enabled":{"type":"boolean","description":"Whether the card is active (default true)"}
+						"keywords":{"type":"array","items":{"type":"string"},"description":"Trigger keywords (max 20); omit to preserve them when updating"},
+						"enabled":{"type":"boolean","description":"Whether the card is active; omit to preserve it when updating (default true for new cards)"}
 					},"required":["title","content"]
 				}`),
 			},
@@ -381,7 +383,7 @@ func platformToolRegistry() map[string]platformToolEntry {
 		"list_doc_cards": {
 			definition: llm.ToolDefinition{
 				Name: "list_doc_cards",
-				Description: "List the user's document cards (title, content, keywords, enabled) " +
+				Description: "List the user's document cards (title, content, keywords, enabled, project and role bindings) " +
 					"to see which lorebook entries exist and find a card_id.",
 				InputSchema: json.RawMessage(`{
 					"type":"object","properties":{},"required":[]

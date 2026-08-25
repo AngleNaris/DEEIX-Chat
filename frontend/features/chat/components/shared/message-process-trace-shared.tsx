@@ -1,6 +1,6 @@
 "use client";
 
-import { BookOpen, Brain, FileImage, FileText, MessageSquareText, Wrench } from "lucide-react";
+import { BookOpen, Brain, FileImage, FileText, LibraryBig, MessageSquareText, Wrench } from "lucide-react";
 import Link from "next/link";
 import * as React from "react";
 
@@ -221,6 +221,8 @@ function recalledSourceIcon(kind: RecalledEvidenceItem["kind"]) {
       return BookOpen;
     case "tool":
       return Wrench;
+    case "card":
+      return LibraryBig;
     case "memory":
       return MessageSquareText;
     case "recall":

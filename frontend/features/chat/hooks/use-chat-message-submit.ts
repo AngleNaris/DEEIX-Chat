@@ -1401,13 +1401,10 @@ export function useChatMessageSubmit({
             ),
             assistantReasoningTokens: completed.assistantMessage.reasoningTokens,
             assistantLatencyMS: completed.assistantMessage.latencyMS,
-            assistantProcessTrace:
-              assistantMessageStatus === "interrupted"
-                ? preserveRicherLiveUpstreamThinkTrace(
-                    toPendingProcessTrace(completed.assistantMessage.processTrace),
-                    readLiveUpstreamThinkTrace(clientRunID),
-                  )
-                : toPendingProcessTrace(completed.assistantMessage.processTrace),
+            assistantProcessTrace: preserveRicherLiveUpstreamThinkTrace(
+              toPendingProcessTrace(completed.assistantMessage.processTrace),
+              readLiveUpstreamThinkTrace(clientRunID),
+            ),
             assistantStatus: assistantMessageStatus,
             assistantErrorCode: completed.assistantMessage.errorCode,
             assistantErrorMessage: completed.assistantMessage.errorMessage,

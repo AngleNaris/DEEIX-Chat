@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	appdoccard "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/doccard"
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/llm"
@@ -153,6 +154,29 @@ func TestStableAttachmentSourceRefsUsesFallbackArtifactID(t *testing.T) {
 	}
 	if refs[0].SourceType != "file_rag_fallback" || refs[0].SourceID != "file_b" || refs[0].ArtifactID != 88 {
 		t.Fatalf("expected fallback source ref to carry artifact id, got %#v", refs[0])
+	}
+}
+
+func TestBuildPromptPlanIncludesDocCardSourceRef(t *testing.T) {
+	plan := buildPromptPlan(t.Context(), promptPlanInput{
+		BaseMessages: []llm.Message{{Role: "user", Content: "介绍魔法森林"}},
+		DynamicContext: userContextInput{
+			DocCards: []appdoccard.CardView{{
+				CardPublicID: "card-world",
+				Title:        "世界设定",
+				Content:      "魔法森林由精灵守护。",
+			}},
+		},
+		Config: config.Config{},
+	})
+
+	block := promptTraceBlock(plan.Trace, PromptBlockDynamicContext)
+	if block == nil || len(block.SourceRefs) != 1 {
+		t.Fatalf("expected doc card dynamic source ref, got %#v", block)
+	}
+	ref := block.SourceRefs[0]
+	if ref.SourceType != "doc_card" || ref.SourceID != "card-world" || ref.Title != "世界设定" {
+		t.Fatalf("unexpected doc card source ref: %#v", ref)
 	}
 }
 

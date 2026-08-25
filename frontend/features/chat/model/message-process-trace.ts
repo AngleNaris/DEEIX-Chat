@@ -46,7 +46,7 @@ export type RecalledEvidenceItem = {
   score?: number;
 };
 
-export type RecalledEvidenceKind = "skill" | "tool" | "memory" | "recall" | "summary" | "image";
+export type RecalledEvidenceKind = "skill" | "tool" | "card" | "memory" | "recall" | "summary" | "image";
 
 export type CompactionTracePayload = {
   fromTurn: number;
@@ -89,6 +89,8 @@ export function resolveRecalledEvidenceKind(sourceType: string): RecalledEvidenc
     case "tool_result":
     case "native_tool_result":
       return "tool";
+    case "doc_card":
+      return "card";
     case "user_memory":
       return "memory";
     case "semantic_recall":

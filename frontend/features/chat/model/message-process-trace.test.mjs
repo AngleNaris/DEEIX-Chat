@@ -12,6 +12,7 @@ test("recalled source types map to user-facing evidence kinds", () => {
     ["tool", "tool"],
     ["tool_result", "tool"],
     ["native_tool_result", "tool"],
+    ["doc_card", "card"],
     ["user_memory", "memory"],
     ["semantic_recall", "recall"],
     ["summary", "summary"],
@@ -35,6 +36,7 @@ test("recalled evidence keeps supported sources, trims values, and filters RAG d
         sourceRefs: [
           { sourceType: " skill ", sourceID: " skill-1 ", title: " Image skill ", artifactID: 12 },
           { sourceType: "tool", sourceID: "tool-1", title: "Browser" },
+          { sourceType: "doc_card", sourceID: "card-1", title: "World setting" },
           { sourceType: "user_memory", sourceID: "memory-1", title: "User preference" },
           { sourceType: "semantic_recall", sourceID: "recall-1", title: "Earlier decision" },
           { sourceType: "summary", sourceID: "summary-1", title: "Conversation summary" },
@@ -52,6 +54,7 @@ test("recalled evidence keeps supported sources, trims values, and filters RAG d
     [
       { kind: "skill", sourceID: "skill-1", title: "Image skill", artifactID: 12 },
       { kind: "tool", sourceID: "tool-1", title: "Browser", artifactID: undefined },
+      { kind: "card", sourceID: "card-1", title: "World setting", artifactID: undefined },
       { kind: "memory", sourceID: "memory-1", title: "User preference", artifactID: undefined },
       { kind: "recall", sourceID: "recall-1", title: "Earlier decision", artifactID: undefined },
       { kind: "summary", sourceID: "summary-1", title: "Conversation summary", artifactID: undefined },

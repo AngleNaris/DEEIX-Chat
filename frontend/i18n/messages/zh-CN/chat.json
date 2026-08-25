@@ -757,6 +757,7 @@
       "types": {
         "skill": "技能",
         "tool": "工具",
+        "card": "卡片",
         "memory": "记忆",
         "recall": "语义召回",
         "summary": "对话摘要",

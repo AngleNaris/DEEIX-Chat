@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	appdoccard "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/doccard"
+	domainmemory "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/memory"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/llm"
 )
@@ -124,6 +125,59 @@ func TestFormatDocCardsContext(t *testing.T) {
 	}, 0)
 	if !strings.Contains(out, `k="a&#34;b"`) || !strings.Contains(out, "x&lt;y&amp;z") {
 		t.Fatalf("xml escaping missing: %q", out)
+	}
+}
+
+func TestInjectUserContextIncludesDocCardsWhenCardsAreOnlyContext(t *testing.T) {
+	messages := []llm.Message{{Role: "user", Content: "介绍魔法森林"}}
+	out := injectUserContext(context.Background(), messages, userContextInput{
+		DocCards: []appdoccard.CardView{docCard("world", true, "魔法森林")},
+	}, config.Config{}, nil)
+	if len(out) != 1 || !strings.Contains(out[0].Content, "<cards>") {
+		t.Fatalf("expected card-only context to be injected, got %#v", out)
+	}
+	if !strings.Contains(out[0].Content, `<card k="world">content of world</card>`) {
+		t.Fatalf("expected matched card content, got %q", out[0].Content)
+	}
+}
+
+func TestFormatMemoryContextRespectsAggregateBudget(t *testing.T) {
+	memories := []domainmemory.UserMemory{
+		{MemoryKey: "profile", Value: strings.Repeat("长期记忆", 2000)},
+		{MemoryKey: "custom", Value: strings.Repeat("补充记忆", 2000)},
+	}
+	items := formatMemoryContext(memories)
+	if len(items) == 0 {
+		t.Fatal("expected at least one bounded memory item")
+	}
+	if tokens := estimateTokens(strings.Join(items, "\n")); tokens > userMemoryContextMaxTokens {
+		t.Fatalf("memory context exceeded budget: got %d, want <= %d", tokens, userMemoryContextMaxTokens)
+	}
+}
+
+func TestEscapedDynamicContextRemainsWithinBudget(t *testing.T) {
+	special := strings.Repeat("<&", 5000)
+	cardOutput := formatDocCardsContext([]appdoccard.CardView{{
+		CardPublicID: "special-card",
+		Title:        "特殊字符",
+		Content:      special,
+	}}, docCardContentLimit)
+	if cardOutput == "" || !strings.Contains(cardOutput, "&lt;&amp;") {
+		t.Fatalf("expected escaped card context, got %q", cardOutput)
+	}
+	if tokens := estimateTokens(strings.TrimSpace(cardOutput)); tokens > docCardContextMaxTokens {
+		t.Fatalf("escaped card context exceeded budget: got %d, want <= %d", tokens, docCardContextMaxTokens)
+	}
+
+	memoryItems := formatMemoryContext([]domainmemory.UserMemory{{
+		MemoryKey: "special-memory",
+		Value:     special,
+	}})
+	if len(memoryItems) != 1 || !strings.Contains(memoryItems[0], "&lt;&amp;") {
+		t.Fatalf("expected escaped memory context, got %#v", memoryItems)
+	}
+	if tokens := estimateTokens(memoryItems[0]); tokens > userMemoryContextMaxTokens {
+		t.Fatalf("escaped memory context exceeded budget: got %d, want <= %d", tokens, userMemoryContextMaxTokens)
 	}
 }
 

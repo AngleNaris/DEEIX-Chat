@@ -4,6 +4,11 @@ import * as React from "react";
 
 import { toPendingProcessTrace } from "@/features/chat/model/message-submit";
 import { mergeUpstreamThinkContent } from "@/features/chat/model/upstream-think-content";
+export {
+  mergeLiveUpstreamThinkTrace,
+  preserveRicherLiveUpstreamThinkTrace,
+  shouldClearLiveUpstreamThinkTrace,
+} from "@/features/chat/model/upstream-think-trace";
 import type { ChatMessageProcessTrace, ChatTraceBlock } from "@/features/chat/types/messages";
 import type { StreamMessageEvent } from "@/shared/api/conversation.types";
 
@@ -104,36 +109,6 @@ export function clearLiveUpstreamThinkTrace(runID: string | null | undefined) {
     return;
   }
   notify(key);
-}
-
-export function mergeLiveUpstreamThinkTrace(
-  base: ChatMessageProcessTrace | undefined,
-  live: ChatMessageProcessTrace | undefined,
-) {
-  if (!live?.upstreamThink) {
-    return base;
-  }
-  return {
-    enabled: true,
-    status: live.status || base?.status || "streaming",
-    process: base?.process,
-    tools: base?.tools,
-    upstreamThink: live.upstreamThink,
-    promptTrace: base?.promptTrace,
-    events: base?.events,
-  };
-}
-
-export function preserveRicherLiveUpstreamThinkTrace(
-  base: ChatMessageProcessTrace | undefined,
-  live: ChatMessageProcessTrace | undefined,
-) {
-  const baseContent = base?.upstreamThink?.contentMarkdown ?? "";
-  const liveContent = live?.upstreamThink?.contentMarkdown ?? "";
-  if (!live?.upstreamThink || liveContent.length <= baseContent.length) {
-    return base ?? live;
-  }
-  return mergeLiveUpstreamThinkTrace(base, live);
 }
 
 export function useLiveUpstreamThinkTrace(runID: string | null | undefined) {

@@ -36,6 +36,7 @@ import { resolveLeadingImagePreview } from "@/features/chat/model/media-image-pr
 import {
   clearLiveUpstreamThinkTrace,
   mergeLiveUpstreamThinkTrace,
+  shouldClearLiveUpstreamThinkTrace,
   useLiveUpstreamThinkTrace,
 } from "@/features/chat/model/upstream-think-store";
 import type {
@@ -250,14 +251,14 @@ export function ChatMessageBot({
   }, [isEditing, item.content]);
   const liveProcessTrace = useLiveUpstreamThinkTrace(item.runID);
   const processTrace =
-    liveProcessTrace && (item.isStreaming || !item.processTrace)
+    liveProcessTrace
       ? mergeLiveUpstreamThinkTrace(item.processTrace, liveProcessTrace)
       : item.processTrace;
   React.useEffect(() => {
-    if (!item.isStreaming && item.processTrace?.upstreamThink) {
+    if (shouldClearLiveUpstreamThinkTrace(item.isStreaming, item.processTrace, liveProcessTrace)) {
       clearLiveUpstreamThinkTrace(item.runID);
     }
-  }, [item.isStreaming, item.processTrace?.upstreamThink, item.runID]);
+  }, [item.isStreaming, item.processTrace, item.runID, liveProcessTrace]);
   // 实时流优先；分享页等无流场景回退静态时间线（后端分享快照重建）。
   const liveGroupRun = useLiveGroupRun(item.runID) ?? staticGroupRun ?? undefined;
   // 群组会话（§16.10）：运行暂停可重试时，meta 重试按钮原地重试失败步骤；

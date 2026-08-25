@@ -27,6 +27,17 @@ func (legacyMCPTool) TableName() string {
 	return "mcp_tools"
 }
 
+type legacyUserMemory struct {
+	ID        uint   `gorm:"primaryKey"`
+	UserID    uint   `gorm:"not null"`
+	MemoryKey string `gorm:"size:128;not null;uniqueIndex:idx_user_memories_user_key"`
+	Value     string
+}
+
+func (legacyUserMemory) TableName() string {
+	return "user_memories"
+}
+
 func TestMigrateLeavesLegacyMCPToolMetadataPendingConfirmation(t *testing.T) {
 	dbName := strings.NewReplacer("/", "_", " ", "_").Replace(t.Name())
 	db, err := gorm.Open(sqlite.Open("file:"+dbName+"?mode=memory&cache=shared"), &gorm.Config{})
@@ -63,6 +74,38 @@ func TestMigrateLeavesLegacyMCPToolMetadataPendingConfirmation(t *testing.T) {
 	}
 	if !migrated.UpdatedAt.Equal(updatedAt) {
 		t.Fatalf("legacy updated_at = %s, want %s", migrated.UpdatedAt, updatedAt)
+	}
+}
+
+func TestMigrateUserMemoryUniqueIndexScopesKeysByUser(t *testing.T) {
+	dbName := strings.NewReplacer("/", "_", " ", "_").Replace(t.Name())
+	db, err := gorm.Open(sqlite.Open("file:"+dbName+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err = db.AutoMigrate(&legacyUserMemory{}); err != nil {
+		t.Fatalf("migrate legacy user memory: %v", err)
+	}
+	if err = db.Create(&legacyUserMemory{UserID: 1, MemoryKey: "language", Value: "zh-CN"}).Error; err != nil {
+		t.Fatalf("create legacy memory: %v", err)
+	}
+	if err = db.AutoMigrate(&model.UserMemory{}); err != nil {
+		t.Fatalf("migrate current user memory model: %v", err)
+	}
+	if err = migrateUserMemoryUniqueIndex(db); err != nil {
+		t.Fatalf("migrate user memory unique index: %v", err)
+	}
+	if db.Migrator().HasIndex(&model.UserMemory{}, "idx_user_memories_user_key") {
+		t.Fatal("legacy global memory key index still exists")
+	}
+	if !db.Migrator().HasIndex(&model.UserMemory{}, "idx_user_memories_user_key_v2") {
+		t.Fatal("scoped user memory key index was not created")
+	}
+	if err = db.Create(&model.UserMemory{UserID: 2, MemoryKey: "language", Value: "en-US"}).Error; err != nil {
+		t.Fatalf("same key for another user must be allowed: %v", err)
+	}
+	if err = db.Create(&model.UserMemory{UserID: 1, MemoryKey: "language", Value: "duplicate"}).Error; err == nil {
+		t.Fatal("duplicate key for the same user must be rejected")
 	}
 }
 

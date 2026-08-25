@@ -46,6 +46,10 @@ import (
 const (
 	// semanticRecallDeadline：语义召回截止时限，超时后优雅跳过，不阻塞 LLM 关键路径。
 	semanticRecallDeadline = 200 * time.Millisecond
+	// userMemoryRecallDeadline 包含远程 embedding 与数据库检索，给予比消息召回更合理的窗口。
+	userMemoryRecallDeadline = 800 * time.Millisecond
+	// userMemoryContextMaxTokens 限制动态长期记忆绕过主历史预算后的最大占用。
+	userMemoryContextMaxTokens int64 = 1200
 )
 
 type routeResolver interface {
@@ -123,6 +127,7 @@ type userProfileReader interface {
 // 发送路径用 ListDocCards 做关键字触发注入；平台工具 save/delete_doc_card 走读写方法。
 type docCardReader interface {
 	ListDocCards(ctx context.Context, userID uint) ([]appdoccard.CardView, error)
+	GetDocCard(ctx context.Context, userID uint, publicID string) (*domaindoccard.DocCard, error)
 	UpsertDocCard(ctx context.Context, userID uint, publicID string, input appdoccard.UpsertInput, updatedBy string) (*domaindoccard.DocCard, error)
 	DeleteDocCard(ctx context.Context, userID uint, publicID string) error
 }

@@ -303,6 +303,29 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 		UserID:                 input.UserID,
 		NonVisionExtractReader: nonVisionExtractReader,
 	}
+	preferencePrompt := ""
+	if s.memoryRecorder != nil {
+		userMemories, _ := s.getCachedUserMemories(ctx, input.UserID)
+		if len(userMemories) > 0 {
+			preferenceMemories := filterMemoriesByScope(userMemories, "preference")
+			preferencePrompt = buildPreferencePrompt(preferenceMemories, 400)
+			otherMemories := filterMemoriesByScope(userMemories, "profile", "custom")
+			if len(otherMemories) > 0 {
+				userCtx.Memory = s.selectRelevantUserMemories(ctx, input.UserID, ragQuery, otherMemories, 5)
+			}
+		}
+	}
+	docCards := s.getCachedDocCards(ctx, input.UserID)
+	if len(docCards) > 0 {
+		var projectID, roleID uint
+		if conversation.ProjectID != nil {
+			projectID = *conversation.ProjectID
+		}
+		if conversation.RoleID != nil {
+			roleID = *conversation.RoleID
+		}
+		userCtx.DocCards = matchDocCards(input.UserContent, docCards, projectID, roleID, docCardMaxMatched)
+	}
 
 	// 4. Skill：与普通消息同口径（按用户级最大可选数收敛）。
 	skillPrompts, err := s.resolveSkillPrompts(ctx, SendMessageInput{
@@ -325,7 +348,7 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 		StableAttachments:       stableFullContextAttachments,
 		AttachmentImports:       attachmentImports,
 		DynamicContext:          userCtx,
-		PreferencePrompt:        "",
+		PreferencePrompt:        preferencePrompt,
 		SkillPrompts:            skillPrompts,
 		ToolRuntime:             toolRuntime,
 		SkipImageAttachments:    imageAttachmentRoutingActive,

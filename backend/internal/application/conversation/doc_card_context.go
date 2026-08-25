@@ -21,6 +21,8 @@ const (
 	docCardMaxMatched = 5
 	// docCardContentLimit 单张卡片注入的内容上限（按 rune）。
 	docCardContentLimit = 2000
+	// docCardContextMaxTokens 限制命中卡片绕过主历史预算后的聚合占用。
+	docCardContextMaxTokens int64 = 1600
 )
 
 type cachedDocCards struct {
@@ -107,7 +109,10 @@ func formatDocCardsContext(cards []appdoccard.CardView, contentLimit int) string
 	if contentLimit <= 0 {
 		contentLimit = docCardContentLimit
 	}
+	const wrapperPrefix = "\n<cards>\n"
+	const wrapperSuffix = "\n</cards>"
 	items := make([]string, 0, len(cards))
+	usedTokens := estimateTokens(wrapperPrefix + wrapperSuffix)
 	for _, card := range cards {
 		title := strings.TrimSpace(card.Title)
 		content := strings.TrimSpace(card.Content)
@@ -117,10 +122,30 @@ func formatDocCardsContext(cards []appdoccard.CardView, contentLimit int) string
 		if runes := []rune(content); len(runes) > contentLimit {
 			content = string(runes[:contentLimit]) + "…"
 		}
-		items = append(items, `<card k="`+xmlEscapeAttr(title)+`">`+xmlEscapeText(content)+`</card>`)
+		remainingTokens := docCardContextMaxTokens - usedTokens
+		if remainingTokens <= 0 {
+			break
+		}
+		prefix := `<card k="` + xmlEscapeAttr(title) + `">`
+		suffix := `</card>`
+		overheadTokens := estimateTokens(prefix + suffix)
+		if overheadTokens >= remainingTokens {
+			break
+		}
+		escapedContent := fitXMLTextToTokenBudget(content, remainingTokens-overheadTokens)
+		if escapedContent == "" {
+			break
+		}
+		item := prefix + escapedContent + suffix
+		itemTokens := estimateTokens(item)
+		if itemTokens > remainingTokens {
+			break
+		}
+		items = append(items, item)
+		usedTokens += itemTokens
 	}
 	if len(items) == 0 {
 		return ""
 	}
-	return "\n<cards>\n" + strings.Join(items, "\n") + "\n</cards>"
+	return wrapperPrefix + strings.Join(items, "\n") + wrapperSuffix
 }

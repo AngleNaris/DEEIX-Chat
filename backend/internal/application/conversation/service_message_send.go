@@ -10,6 +10,7 @@ import (
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/channel"
 	appcompact "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/compact"
 	appcm "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/contentmoderation"
+	appdoccard "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/doccard"
 	apprag "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/rag"
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 	domainmemory "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/memory"
@@ -413,10 +414,11 @@ func (s *Service) sendMessageInternal(
 	cfg := s.cfg.Snapshot()
 	compactPolicy := s.resolveContextCompactionPolicy(ctx, cfg, input.UserID)
 
-	// 并行预取：Snapshot + UserMemory 提前加载，隐藏 DB 延迟。
+	// 并行预取：Snapshot + UserMemory + DocCards 提前加载，隐藏 DB 延迟。
 	type prefetchData struct {
 		snapshot     *model.ContextSnapshot
 		userMemories []domainmemory.UserMemory
+		docCards     []appdoccard.CardView
 	}
 	prefetchCh := make(chan prefetchData, 1)
 	go func() {
@@ -427,6 +429,7 @@ func (s *Service) sendMessageInternal(
 		if s.memoryRecorder != nil {
 			r.userMemories, _ = s.getCachedUserMemories(ctx, input.UserID)
 		}
+		r.docCards = s.getCachedDocCards(ctx, input.UserID)
 		prefetchCh <- r
 	}()
 
@@ -581,8 +584,18 @@ func (s *Service) sendMessageInternal(
 		}
 		otherMems := filterMemoriesByScope(prefetch.userMemories, "profile", "custom")
 		if len(otherMems) > 0 {
-			userCtx.Memory = s.selectRelevantUserMemories(ctx, input.UserID, input.Content, otherMems, 5)
+			userCtx.Memory = s.selectRelevantUserMemories(ctx, input.UserID, ragQuery, otherMems, 5)
 		}
+	}
+	if len(prefetch.docCards) > 0 {
+		var projectID, roleID uint
+		if conversation.ProjectID != nil {
+			projectID = *conversation.ProjectID
+		}
+		if conversation.RoleID != nil {
+			roleID = *conversation.RoleID
+		}
+		userCtx.DocCards = matchDocCards(input.Content, prefetch.docCards, projectID, roleID, docCardMaxMatched)
 	}
 	processTraceAttachments := attachmentProcessTraceItems(fileContextPlan.Attachments)
 	if traceRecorder != nil && shouldShowAttachmentProcessTrace(processTraceAttachments) {

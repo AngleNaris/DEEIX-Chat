@@ -259,7 +259,7 @@ func stableAttachmentSourceRefs(attachments []AttachmentInput, currentArtifacts 
 
 // dynamicContextSourceRefs 提取本轮动态上下文的来源引用。
 func dynamicContextSourceRefs(input userContextInput) []PromptSourceRef {
-	refs := make([]PromptSourceRef, 0, len(input.RAGChunks)+len(input.RecallChunks)+len(input.Memory)+len(input.Attachments)+1)
+	refs := make([]PromptSourceRef, 0, len(input.RAGChunks)+len(input.RecallChunks)+len(input.Memory)+len(input.DocCards)+len(input.Attachments)+1)
 	ragArtifacts := contextArtifactsByKindAndSourceID(input.CurrentArtifacts, domainconversation.ContextArtifactFileRAGChunk)
 	recallArtifacts := contextArtifactsByKindAndSourceID(input.CurrentArtifacts, domainconversation.ContextArtifactSemanticRecall)
 	memoryArtifacts := contextArtifactsByKindAndSourceID(input.CurrentArtifacts, domainconversation.ContextArtifactUserMemory)
@@ -276,6 +276,9 @@ func dynamicContextSourceRefs(input userContextInput) []PromptSourceRef {
 		sourceID := strings.TrimSpace(memory.MemoryKey)
 		artifact := memoryArtifacts[sourceID]
 		refs = appendPromptSourceRefWithArtifactID(refs, string(domainconversation.ContextArtifactUserMemory), sourceID, memory.Scope, artifact.ID)
+	}
+	for _, card := range input.DocCards {
+		refs = appendPromptSourceRef(refs, "doc_card", strings.TrimSpace(card.CardPublicID), card.Title)
 	}
 	if input.Snapshot != nil && strings.TrimSpace(input.Snapshot.Summary) != "" {
 		refs = appendPromptSourceRef(refs, "summary", input.Snapshot.Strategy, "上下文摘要")

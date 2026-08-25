@@ -158,6 +158,7 @@ export type ProcessTraceLabels = {
     types: {
       skill: string;
       tool: string;
+      card: string;
       memory: string;
       recall: string;
       summary: string;
@@ -331,6 +332,7 @@ export function useProcessTraceLabels(): ProcessTraceLabels {
         types: {
           skill: t("recalled.types.skill"),
           tool: t("recalled.types.tool"),
+          card: t("recalled.types.card"),
           memory: t("recalled.types.memory"),
           recall: t("recalled.types.recall"),
           summary: t("recalled.types.summary"),

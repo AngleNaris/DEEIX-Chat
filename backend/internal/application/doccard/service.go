@@ -92,6 +92,20 @@ func normalizeKeywords(raw []string) []string {
 // publicID 为空时新建；非空时更新已有卡片（不存在返回 ErrCardNotFound）。
 func (s *Service) UpsertDocCard(ctx context.Context, userID uint, publicID string, input UpsertInput, updatedBy string) (*domaindoccard.DocCard, error) {
 	publicID = strings.TrimSpace(publicID)
+	enabled := true
+	if publicID != "" {
+		existing, err := s.repo.GetDocCardByPublicID(ctx, userID, publicID)
+		if err != nil {
+			if errors.Is(err, repository.ErrNotFound) {
+				return nil, ErrCardNotFound
+			}
+			return nil, err
+		}
+		enabled = existing.Enabled
+	}
+	if input.Enabled != nil {
+		enabled = *input.Enabled
+	}
 	if strings.TrimSpace(input.Title) == "" {
 		input.Title = "untitled"
 	}
@@ -104,7 +118,7 @@ func (s *Service) UpsertDocCard(ctx context.Context, userID uint, publicID strin
 		Content:   strings.TrimSpace(input.Content),
 		Keywords:  normalizeKeywords(input.Keywords),
 		UpdatedBy: strings.TrimSpace(updatedBy),
-		Enabled:   true,
+		Enabled:   enabled,
 	}
 	if item.UpdatedBy == "" {
 		item.UpdatedBy = "user"
@@ -113,9 +127,6 @@ func (s *Service) UpsertDocCard(ctx context.Context, userID uint, publicID strin
 		item.CardPublicID = conv.NormalizePublicID(uuid.NewString())
 	} else {
 		item.CardPublicID = publicID
-	}
-	if input.Enabled != nil {
-		item.Enabled = *input.Enabled
 	}
 	if err := s.repo.UpsertDocCard(ctx, item); err != nil {
 		return nil, err

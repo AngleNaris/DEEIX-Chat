@@ -142,6 +142,9 @@ func Migrate(db *gorm.DB) error {
 	if err := db.AutoMigrate(Models()...); err != nil {
 		return err
 	}
+	if err := migrateUserMemoryUniqueIndex(db); err != nil {
+		return err
+	}
 	if err := invalidateUnsignedFileEmbeddings(db); err != nil {
 		return err
 	}
@@ -149,6 +152,25 @@ func Migrate(db *gorm.DB) error {
 		return err
 	}
 	return backfillUsageLedgerBillingAt(db)
+}
+
+func migrateUserMemoryUniqueIndex(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&model.UserMemory{}) {
+		return nil
+	}
+	const (
+		legacyIndex = "idx_user_memories_user_key"
+		scopedIndex = "idx_user_memories_user_key_v2"
+	)
+	if !db.Migrator().HasIndex(&model.UserMemory{}, scopedIndex) {
+		if err := db.Migrator().CreateIndex(&model.UserMemory{}, scopedIndex); err != nil {
+			return err
+		}
+	}
+	if db.Migrator().HasIndex(&model.UserMemory{}, legacyIndex) {
+		return db.Migrator().DropIndex(&model.UserMemory{}, legacyIndex)
+	}
+	return nil
 }
 
 // invalidateUnsignedFileEmbeddings makes legacy vectors enter the existing reindex flow.

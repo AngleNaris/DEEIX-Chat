@@ -757,6 +757,7 @@
       "types": {
         "skill": "Skill",
         "tool": "Tool",
+        "card": "Card",
         "memory": "Memory",
         "recall": "Semantic recall",
         "summary": "Conversation summary",

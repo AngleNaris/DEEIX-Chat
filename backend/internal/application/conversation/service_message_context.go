@@ -1062,6 +1062,7 @@ func injectUserContext(
 		len(input.HistoricalArtifacts) == 0 &&
 		input.Snapshot == nil &&
 		len(input.Memory) == 0 &&
+		len(input.DocCards) == 0 &&
 		len(input.RecallChunks) == 0 {
 		return messages
 	}
@@ -1276,13 +1277,34 @@ func formatMemoryContext(memories []domainmemory.UserMemory) []string {
 		return nil
 	}
 	items := make([]string, 0, len(memories))
+	var usedTokens int64
 	for _, memory := range memories {
 		key := strings.TrimSpace(memory.MemoryKey)
 		value := strings.TrimSpace(memory.Value)
 		if key == "" || value == "" {
 			continue
 		}
-		items = append(items, `<mem k="`+xmlEscapeAttr(key)+`">`+xmlEscapeText(value)+`</mem>`)
+		remainingTokens := userMemoryContextMaxTokens - usedTokens
+		if remainingTokens <= 0 {
+			break
+		}
+		prefix := `<mem k="` + xmlEscapeAttr(key) + `">`
+		suffix := `</mem>`
+		overheadTokens := estimateTokens(prefix + suffix)
+		if overheadTokens >= remainingTokens {
+			break
+		}
+		escapedValue := fitXMLTextToTokenBudget(value, remainingTokens-overheadTokens)
+		if escapedValue == "" {
+			break
+		}
+		item := prefix + escapedValue + suffix
+		itemTokens := estimateTokens(item)
+		if itemTokens > remainingTokens {
+			break
+		}
+		items = append(items, item)
+		usedTokens += itemTokens
 	}
 	return items
 }
@@ -1436,6 +1458,32 @@ func xmlEscapeText(value string) string {
 	return xmlTextReplacer.Replace(value)
 }
 
+func fitXMLTextToTokenBudget(value string, maxTokens int64) string {
+	if maxTokens <= 0 {
+		return ""
+	}
+	escaped := xmlEscapeText(value)
+	if estimateTokens(escaped) <= maxTokens {
+		return escaped
+	}
+	const truncationSuffix = "…"
+	if estimateTokens(truncationSuffix) > maxTokens {
+		return ""
+	}
+	runes := []rune(value)
+	low, high := 0, len(runes)
+	for low < high {
+		mid := (low + high + 1) / 2
+		candidate := xmlEscapeText(string(runes[:mid])) + truncationSuffix
+		if estimateTokens(candidate) <= maxTokens {
+			low = mid
+		} else {
+			high = mid - 1
+		}
+	}
+	return xmlEscapeText(string(runes[:low])) + truncationSuffix
+}
+
 // filterMemoriesByScope 按 scope 过滤记忆列表。
 func filterMemoriesByScope(memories []domainmemory.UserMemory, scopes ...string) []domainmemory.UserMemory {
 	scopeSet := make(map[string]struct{}, len(scopes))
@@ -1509,7 +1557,7 @@ func (s *Service) selectRelevantUserMemories(ctx context.Context, userID uint, q
 	if !cfg.EmbeddingEnabled {
 		return fallback
 	}
-	searchCtx, cancel := context.WithTimeout(ctx, semanticRecallDeadline)
+	searchCtx, cancel := context.WithTimeout(ctx, userMemoryRecallDeadline)
 	defer cancel()
 	embeddings, embeddingSignature, err := s.embeddingSvc.EmbedTextsWithSignature(searchCtx, []string{query})
 	if err != nil || len(embeddings) == 0 {

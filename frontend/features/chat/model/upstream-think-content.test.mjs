@@ -6,6 +6,11 @@ import {
   enqueueUpstreamThinkSegment,
 } from "./upstream-think-buffer.ts";
 import { mergeUpstreamThinkContent } from "./upstream-think-content.ts";
+import {
+  mergeLiveUpstreamThinkTrace,
+  preserveRicherLiveUpstreamThinkTrace,
+  shouldClearLiveUpstreamThinkTrace,
+} from "./upstream-think-trace.ts";
 
 test("thinking deltas append within the same round", () => {
   assert.equal(
@@ -78,4 +83,73 @@ test("thinking snapshots do not discard queued deltas", () => {
     roundID: "round_1",
     status: "completed",
   });
+});
+
+test("a richer live reasoning trace survives a stale completion snapshot", () => {
+  const base = {
+    enabled: true,
+    status: "completed",
+    upstreamThink: { contentMarkdown: "partial", status: "completed" },
+  };
+  const live = {
+    enabled: true,
+    status: "streaming",
+    upstreamThink: { contentMarkdown: "partial and still streaming", status: "streaming" },
+  };
+
+  assert.equal(
+    preserveRicherLiveUpstreamThinkTrace(base, live)?.upstreamThink?.contentMarkdown,
+    "partial and still streaming",
+  );
+  assert.equal(shouldClearLiveUpstreamThinkTrace(false, base, live), false);
+});
+
+test("live reasoning is cleared only after the persisted trace catches up", () => {
+  const persisted = {
+    enabled: true,
+    status: "completed",
+    upstreamThink: { contentMarkdown: "complete reasoning", status: "completed" },
+  };
+  const live = {
+    enabled: true,
+    status: "completed",
+    upstreamThink: { contentMarkdown: "complete reasoning", status: "completed" },
+  };
+
+  assert.equal(shouldClearLiveUpstreamThinkTrace(true, persisted, live), false);
+  assert.equal(shouldClearLiveUpstreamThinkTrace(false, persisted, live), true);
+});
+
+test("a richer persisted trace wins immediately over stale live reasoning", () => {
+  const persisted = {
+    enabled: true,
+    status: "completed",
+    upstreamThink: { roundID: "round_1", contentMarkdown: "complete reasoning", status: "completed" },
+  };
+  const live = {
+    enabled: true,
+    status: "streaming",
+    upstreamThink: { roundID: "round_1", contentMarkdown: "partial", status: "streaming" },
+  };
+
+  assert.equal(
+    mergeLiveUpstreamThinkTrace(persisted, live)?.upstreamThink?.contentMarkdown,
+    "complete reasoning",
+  );
+});
+
+test("a different live reasoning round replaces the previous persisted round", () => {
+  const persisted = {
+    enabled: true,
+    status: "completed",
+    upstreamThink: { roundID: "round_1", contentMarkdown: "long previous round", status: "completed" },
+  };
+  const live = {
+    enabled: true,
+    status: "streaming",
+    upstreamThink: { roundID: "round_2", contentMarkdown: "new", status: "streaming" },
+  };
+
+  assert.equal(mergeLiveUpstreamThinkTrace(persisted, live)?.upstreamThink?.roundID, "round_2");
+  assert.equal(preserveRicherLiveUpstreamThinkTrace(persisted, live)?.upstreamThink?.roundID, "round_1");
 });
