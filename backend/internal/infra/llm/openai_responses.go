@@ -380,9 +380,9 @@ func applyResponsesStreamEventWithToolPolicy(
 		}
 		return eventErr
 	case "response.output_item.added", "response.output_item.in_progress":
-		return mergeResponsesStreamOutputItemWithToolPolicy(result, asMap(parsed["item"]), onEvent, allowNativeTools)
+		return mergeResponsesStreamOutputItemWithToolPolicy(result, eventType, asMap(parsed["item"]), onEvent, allowNativeTools)
 	case "response.output_item.done":
-		return mergeResponsesStreamOutputItemWithToolPolicy(result, asMap(parsed["item"]), onEvent, allowNativeTools)
+		return mergeResponsesStreamOutputItemWithToolPolicy(result, eventType, asMap(parsed["item"]), onEvent, allowNativeTools)
 	case "response.custom_tool_call_input.delta", "response.custom_tool_call_input.done":
 		if !allowNativeTools {
 			return nil
@@ -538,17 +538,21 @@ func mergeResponsesStreamOutputItem(
 	item map[string]interface{},
 	onEvent func(GenerateStreamEvent) error,
 ) error {
-	return mergeResponsesStreamOutputItemWithToolPolicy(result, item, onEvent, true)
+	return mergeResponsesStreamOutputItemWithToolPolicy(result, "response.output_item", item, onEvent, true)
 }
 
 func mergeResponsesStreamOutputItemWithToolPolicy(
 	result *GenerateOutput,
+	eventType string,
 	item map[string]interface{},
 	onEvent func(GenerateStreamEvent) error,
 	allowNativeTools bool,
 ) error {
 	if result == nil || len(item) == 0 {
 		return nil
+	}
+	if strings.TrimSpace(getString(item["type"])) == "reasoning" {
+		return mergeResponsesStreamReasoningItem(result, eventType, item, onEvent)
 	}
 	if !isResponsesServerToolCallItem(item) {
 		mergeResponsesOutputItemWithToolPolicy(result, item, false, allowNativeTools)
@@ -567,6 +571,60 @@ func mergeResponsesStreamOutputItemWithToolPolicy(
 		ServerToolCall: &call,
 		ResponseID:     result.ResponseID,
 	})
+}
+
+func mergeResponsesStreamReasoningItem(
+	result *GenerateOutput,
+	eventType string,
+	item map[string]interface{},
+	onEvent func(GenerateStreamEvent) error,
+) error {
+	var previous ReasoningOutput
+	if result.Reasoning != nil {
+		previous = *result.Reasoning
+	}
+
+	incoming := parseReasoningOutputItem(item)
+	mergeReasoningOutput(&result.Reasoning, incoming)
+	if incoming == nil || result.Reasoning == nil || onEvent == nil {
+		return nil
+	}
+
+	previousText := firstNonEmptyString(previous.Text, previous.Summary)
+	currentText := firstNonEmptyString(result.Reasoning.Text, result.Reasoning.Summary)
+	delta := appendedSnapshotDelta(previousText, currentText)
+	if delta == "" {
+		return nil
+	}
+
+	kind := "summary_text"
+	if strings.TrimSpace(result.Reasoning.Text) != "" {
+		kind = "content_text"
+	}
+	return onEvent(GenerateStreamEvent{
+		Reasoning: &ReasoningDelta{
+			EventType:        eventType,
+			ItemID:           result.Reasoning.ItemID,
+			Status:           result.Reasoning.Status,
+			Kind:             kind,
+			Text:             delta,
+			EncryptedContent: result.Reasoning.EncryptedContent,
+		},
+		ResponseID: result.ResponseID,
+	})
+}
+
+func appendedSnapshotDelta(previous string, current string) string {
+	if current == "" || current == previous {
+		return ""
+	}
+	if previous == "" {
+		return current
+	}
+	if strings.HasPrefix(current, previous) {
+		return strings.TrimPrefix(current, previous)
+	}
+	return ""
 }
 
 func mergeResponsesCustomToolInputEvent(
@@ -756,14 +814,14 @@ func parseReasoningOutputItem(item map[string]interface{}) *ReasoningOutput {
 	}
 
 	summaryParts := make([]string, 0)
-	for _, raw := range asSlice(item["summary"]) {
+	for _, raw := range asSliceOrSingleton(item["summary"]) {
 		if text := extractReasoningDeltaText(raw); text != "" {
 			summaryParts = append(summaryParts, text)
 		}
 	}
 
 	contentParts := make([]string, 0)
-	for _, raw := range asSlice(item["content"]) {
+	for _, raw := range asSliceOrSingleton(item["content"]) {
 		if text := extractReasoningDeltaText(raw); text != "" {
 			contentParts = append(contentParts, text)
 		}

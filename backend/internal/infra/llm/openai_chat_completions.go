@@ -437,6 +437,7 @@ func parseChatReasoningOutput(message map[string]interface{}) *ReasoningOutput {
 	text := firstNonEmptyString(
 		extractReasoningDeltaText(message["reasoning"]),
 		extractReasoningDeltaText(message["reasoning_content"]),
+		extractReasoningDeltaText(message["reasoning_details"]),
 		extractChatReasoningContentText(message["content"]),
 	)
 	if text == "" {
@@ -470,7 +471,14 @@ func extractChatStreamReasoningDelta(parsed map[string]interface{}) *ReasoningDe
 			Text:      think,
 		}
 	}
-	for _, raw := range asSlice(delta["content"]) {
+	if think := extractReasoningDeltaText(delta["reasoning_details"]); think != "" {
+		return &ReasoningDelta{
+			EventType: "chat.completion.chunk",
+			Kind:      "content_text",
+			Text:      think,
+		}
+	}
+	for _, raw := range asSliceOrSingleton(delta["content"]) {
 		item := asMap(raw)
 		itemType := strings.ToLower(strings.TrimSpace(getString(item["type"])))
 		if strings.Contains(itemType, "reason") || strings.Contains(itemType, "think") {

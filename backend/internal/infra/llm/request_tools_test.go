@@ -164,6 +164,77 @@ func TestApplyChatStreamEventSeparatesReasoningContentParts(t *testing.T) {
 	}
 }
 
+func TestApplyChatStreamEventEmitsSingletonReasoningContentPart(t *testing.T) {
+	result := &GenerateOutput{}
+	var visible string
+	var reasoning string
+	err := applyChatStreamEvent(AdapterOpenAIChatCompletions, map[string]interface{}{
+		"choices": []interface{}{
+			map[string]interface{}{
+				"delta": map[string]interface{}{
+					"content": map[string]interface{}{
+						"type": "reasoning",
+						"text": "singleton reasoning",
+					},
+				},
+			},
+		},
+	}, result, func(event GenerateStreamEvent) error {
+		visible += event.Delta
+		if event.Reasoning != nil {
+			reasoning += event.Reasoning.Text
+		}
+		return nil
+	}, textEncodedToolCallsInactive)
+	if err != nil {
+		t.Fatalf("apply chat stream event: %v", err)
+	}
+	if visible != "" || result.Text != "" {
+		t.Fatalf("expected singleton reasoning content to stay hidden, visible=%q result=%q", visible, result.Text)
+	}
+	if reasoning != "singleton reasoning" {
+		t.Fatalf("expected singleton reasoning content to be emitted, got %q", reasoning)
+	}
+	if result.Reasoning == nil || result.Reasoning.Text != reasoning {
+		t.Fatalf("expected singleton reasoning content to be stored, got %#v", result.Reasoning)
+	}
+}
+
+func TestApplyChatStreamEventEmitsAxonHubReasoningDetails(t *testing.T) {
+	result := &GenerateOutput{}
+	reasoning := ""
+	err := applyChatStreamEvent(AdapterOpenAIChatCompletions, map[string]interface{}{
+		"choices": []interface{}{
+			map[string]interface{}{
+				"delta": map[string]interface{}{
+					"reasoning_details": []interface{}{
+						map[string]interface{}{
+							"type":   "reasoning.text",
+							"format": "unknown",
+							"index":  0,
+							"text":   "gateway reasoning delta",
+						},
+					},
+				},
+			},
+		},
+	}, result, func(event GenerateStreamEvent) error {
+		if event.Reasoning != nil {
+			reasoning += event.Reasoning.Text
+		}
+		return nil
+	}, textEncodedToolCallsInactive)
+	if err != nil {
+		t.Fatalf("apply chat stream event: %v", err)
+	}
+	if reasoning != "gateway reasoning delta" {
+		t.Fatalf("expected AxonHub reasoning_details to be emitted, got %q", reasoning)
+	}
+	if result.Reasoning == nil || result.Reasoning.Text != reasoning {
+		t.Fatalf("expected AxonHub reasoning_details to be stored, got %#v", result.Reasoning)
+	}
+}
+
 func TestBuildChatCompletionsCustomToolMessages(t *testing.T) {
 	payload := mustBuildRequestBody(t, AdapterOpenAIChatCompletions, "gpt-5", EndpointChatCompletions, GenerateInput{
 		Messages: []Message{
@@ -1242,6 +1313,43 @@ func TestResponsesCompletedReasoningSummaryIsEmittedWhenNoDeltaArrived(t *testin
 	}
 	if result.Reasoning == nil || result.Reasoning.Summary != reasoningText {
 		t.Fatalf("expected completed reasoning summary to be stored, got %#v", result.Reasoning)
+	}
+}
+
+func TestResponsesReasoningOutputItemsEmitOnlyAppendedText(t *testing.T) {
+	result := &GenerateOutput{ToolCalls: make([]ToolCall, 0)}
+	rawStream := strings.Join([]string{
+		`event: response.output_item.added`,
+		`data: {"type":"response.output_item.added","item":{"id":"rs_1","type":"reasoning","status":"in_progress","summary":[{"type":"summary_text","text":"先梳理"}]}}`,
+		``,
+		`event: response.output_item.in_progress`,
+		`data: {"type":"response.output_item.in_progress","item":{"id":"rs_1","type":"reasoning","status":"in_progress","summary":[{"type":"summary_text","text":"先梳理问题"}]}}`,
+		``,
+		`event: response.output_item.done`,
+		`data: {"type":"response.output_item.done","item":{"id":"rs_1","type":"reasoning","status":"completed","summary":[{"type":"summary_text","text":"先梳理问题，再给出答案。"}]}}`,
+		``,
+	}, "\n")
+
+	reasoningText := ""
+	eventCount := 0
+	err := consumeOpenAIGenerateStream(EndpointResponses, AdapterOpenAIResponses, strings.NewReader(rawStream), result, func(event GenerateStreamEvent) error {
+		if event.Reasoning != nil {
+			eventCount++
+			reasoningText += event.Reasoning.Text
+		}
+		return nil
+	}, textEncodedToolCallsInactive)
+	if err != nil {
+		t.Fatalf("consume stream: %v", err)
+	}
+	if reasoningText != "先梳理问题，再给出答案。" {
+		t.Fatalf("expected appended reasoning output item text, got %q", reasoningText)
+	}
+	if eventCount != 3 {
+		t.Fatalf("expected one reasoning event per appended snapshot, got %d", eventCount)
+	}
+	if result.Reasoning == nil || result.Reasoning.Summary != reasoningText || result.Reasoning.Status != "completed" {
+		t.Fatalf("expected final reasoning output item to be stored, got %#v", result.Reasoning)
 	}
 }
 

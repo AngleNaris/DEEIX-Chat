@@ -1748,6 +1748,16 @@ func asSlice(raw interface{}) []interface{} {
 	return []interface{}{}
 }
 
+func asSliceOrSingleton(raw interface{}) []interface{} {
+	if payload, ok := raw.([]interface{}); ok {
+		return payload
+	}
+	if raw == nil {
+		return []interface{}{}
+	}
+	return []interface{}{raw}
+}
+
 func getString(raw interface{}) string {
 	switch value := raw.(type) {
 	case string:
