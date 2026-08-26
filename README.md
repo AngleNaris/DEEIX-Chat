@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <b>X-DEEIX</b> —— 基于 <a href="https://github.com/DEEIX-AI/DEEIX-Chat">DEEIX-Chat</a> 的定制分支：AI 自主记忆 · 平台工具 · Artifact 制品 · 文档卡片 · 动态提示词
+  <b>X-DEEIX</b> —— 基于 <a href="https://github.com/DEEIX-AI/DEEIX-Chat">DEEIX-Chat</a> 的定制分支：角色协作 · 长期记忆 · 卡片与制品 · AI 工作空间操作 · 多模态工具
 </p>
 
 <p align="center">
@@ -22,39 +22,78 @@
 
 ```
 ghcr.io/anglenaris/x-deeix:latest     # 最新构建
-ghcr.io/anglenaris/x-deeix:0.3.4      # 版本标签
+ghcr.io/anglenaris/x-deeix:0.3.6      # 版本标签
 ```
 
 ## 本定制版的新增功能
 
+X-DEEIX 在标准版的对话、模型路由、知识库和账户能力之上，增加了以下面向个人创作者、专业用户与小型协作团队的产品能力。
+
+> 部分能力受管理员运行时开关、已授权工具、模型协议或专用模型配置影响。Agent Groups、MCP、语义记忆召回和多模态委托在新部署中默认不会全部自动开启，实际可用范围以管理后台与当前模型能力为准。
+
+### 角色、协作与工作空间
+
 | 功能 | 说明 |
 | --- | --- |
-| **平台工具（Platform Tools）** | AI 可直接调用系统工具：记忆管理（`save_memory` / `delete_memory` / `list_memories`）、JavaScript 执行（`execute_js`，goja 纯计算沙箱）、文档卡片、Artifact 制品、文件/技能/角色/项目/会话管理等 35+ 个工具；写操作默认自动执行，可切换为每次询问审批，全程审计留痕 |
-| **AI 自主记忆** | AI 自己管理长期记忆（保存/删除/列出），用户也可以在设置页手动维护，双向打通 |
-| **会话系统提示词模板变量** | 系统提示词支持 `{{date}}` / `{{time}}` / `{{datetime}}` / `{{weekday}}` / `{{language}}` / `{{username}}` / `{{js: 代码}}` 等变量，时间按**用户时区**渲染（浏览器时区自动同步） |
-| **Artifact 制品** | 把 AI 生成的 HTML/JS 保存为制品并一键生成公开分享链接（`/share/artifact`，sandbox iframe 渲染）；保存时自动捕获预览截图作为缩略图；预览支持全宽 / 固定宽度（768px 居中）切换，分享时可设置默认宽度 |
-| **文档卡片（lorebook）** | 用户或 AI 创建的关键字触发卡片，命中时自动注入 AI 上下文（`<cards>` 段）；支持分类、按项目 / 角色绑定触发、停用 |
-| **动态提示词** | 命名 JS / 文本片段，在提示词中通过 `{{script: name}}` 引用（3 分钟缓存，沙箱执行）；设置页可视化管理 |
-| **提示词标签插入** | 角色 / 项目提示词编辑器内置标签工具栏：系统变量 + 动态提示词选单，一键插入光标处 |
-| **侧边栏与页面** | 卡片、制品与文件同级入口（路由页面模式），卡片 / 制品管理页为卡片网格 UI |
-| **Skills & Prompts 管理** | 技能包（skill package）功能：后端服务 + 前端管理 / 提示词面板 |
-| **配套 MCP 服务（沙箱 + 多模态）** | 自建多用户沙箱 MCP（`tools/sandbox-mcp`）：Agent 在按 (user, conversation) 隔离的 Docker 容器里执行 shell/Python、处理文件（ffmpeg/数据分析）、抓取网络、按需拉取环境；Qwen-MM-Plugins 桥接（mm-core / mm-omni-av）提供 22 个多模态工具（读图/读视频/OCR/ASR/语音合成/视觉定位/音视频理解），经共享卷 `/shared/<scope>` 与沙箱文件互通；MCP 工具产出的 image/audio 自动附件化进消息流，前端轨迹卡内联渲染 |
+| **角色管理与快捷对话** | 创建、编辑、复制和删除角色；为角色设置专属指令、默认模型、技能、工具与思考强度，并从角色入口直接开始继承完整配置的新对话 |
+| **角色分组、排序与置顶** | 角色可分组、折叠、拖拽排序和置顶，布局持久保存，适合管理大量专业角色 |
+| **Agent Groups 多角色协作** | 一个统筹角色与最多 31 个执行成员在同一会话中串行协作；支持成员职责、模型覆盖、配置快照、实时步骤轨迹、取消、失败步骤原地重试与刷新后恢复。功能由管理员开关控制，默认关闭；详细说明见 [`docs/AGENT_GROUPS.md`](./docs/AGENT_GROUPS.md) |
+| **技能与技能包** | 创建和管理普通技能；导入 ZIP 技能包前可预览 `SKILL.md` 元数据与文件清单，并支持导入、替换和重新导入 |
+| **动态提示词与脚本** | 管理命名文本或 JavaScript 片段，通过 `{{script: name}}` 复用；角色与项目提示词编辑器可快捷插入系统变量、动态提示词和脚本 |
+| **系统提示词变量** | 支持 `{{date}}`、`{{time}}`、`{{datetime}}`、`{{weekday}}`、`{{language}}`、`{{username}}`、`{{js: 代码}}` 等变量，时间按用户时区渲染 |
+| **定制导航与管理页面** | 侧边栏提供文件、卡片、制品、知识库、技能和群组等稳定入口，并为长期资产提供独立管理页面 |
+| **主题、显示与时区偏好** | 保留定制主题、模型列表样式与排序等个人偏好，并自动同步浏览器时区，让提示词变量和界面时间按用户所在地显示 |
+
+### 上下文、记忆与可交付资产
+
+| 功能 | 说明 |
+| --- | --- |
+| **AI 长期记忆** | AI 可保存、列出和删除 `preference`、`profile`、`custom` 三类长期记忆，用户也可手动维护；偏好记忆固定注入，其他记忆按相关性召回 |
+| **记忆相关性召回** | 默认可使用关键词相关性选择记忆；启用 Embedding 后可使用向量召回，并在服务不可用、超时或失败时回退到关键词路径 |
+| **历史消息语义召回** | 启用 Embedding 与语义上下文后，可从当前对话的有效历史分支补充相关消息；召回超时或不可用时会跳过，不阻塞正常回答 |
+| **卡片** | 用户或 AI 创建可分类、启用/停用并绑定项目或角色的背景卡片。卡片由最新用户消息中的关键词触发，匹配不区分大小写；项目与角色同时绑定时按交集生效，每轮最多注入 5 张。卡片召回不依赖向量服务 |
+| **上下文来源展示** | 对话过程区以独立卡片标记技能、工具、记忆和语义召回来源，帮助用户判断本轮回答使用了哪些背景信息 |
+| **制品** | 将 HTML、JavaScript、CSS 或文本成果保存为独立制品；支持预览、修改名称/类型/源码、自动缩略图、固定宽度或全宽展示、公开分享与撤销分享 |
+| **文件与媒体交付** | AI 与工具生成的文件可直接回传当前对话；图片、视频和音频在消息流或工具轨迹中内联预览，其他文件以可打开或下载的附件卡片展示 |
+
+### AI 执行、工具与安全
+
+| 功能 | 说明 |
+| --- | --- |
+| **平台工具（Platform Tools）** | AI 可在用户权限范围内管理文件、技能、角色、项目、群组、会话、记忆、卡片、制品、提示词与设置，也可运行纯计算 JavaScript、生成图片；管理员可整体关闭、设为只读或开放写入 |
+| **写操作审批与审计** | 普通写操作支持“自动允许”或“每次询问”；询问模式会展示批准/拒绝卡片，拒绝后不修改目标内容。操作过程保留审计记录 |
+| **凭据管理** | 在“设置”中保存和轮换 SSH、API Key 等命名凭据；密钥加密存储且不会在列表、确认卡、会话轨迹或公开分享中回显。模型使用名称与占位符选择凭据，执行时才在内存中解析 |
+| **管理员能力控制** | 管理员可控制 Agent Groups、平台工具读写、写操作默认审批方式、模型能力与展示顺序等运行时边界；关闭功能不会删除用户已有资产 |
+| **工具按需启用** | 仅向 AI 暴露用户已授权且当前激活的 MCP 服务和工具；任务需要新服务时可在同一轮完成激活并继续执行，恢复或群组重试可保持已确认的工具状态 |
+| **隔离任务空间** | 配套沙箱按用户与会话建立独立容器、工作区、导入目录和导出范围，可运行 shell、Python、ffmpeg、数据分析及依赖安装，并通过标准附件链把结果文件交回对话 |
+| **多模态委托与降级** | 主模型无法直接处理媒体时，可将用户授权的当前或历史图片、音频、视频委托给专用模型或 MCP 工具，完成读图、OCR、ASR、视频理解等任务；需要管理员配置对应路由或工具 |
+
+### 生成控制、过程展示与连续性
+
+| 功能 | 说明 |
+| --- | --- |
+| **思考强度控制** | 统一提供默认、低、中、高、超高和最大档位，并按 OpenAI、Anthropic、Gemini 等协议映射到当前模型可接受的参数 |
+| **图片生成与连续改图** | 支持画面比例、1K/2K/4K 分辨率及模型可用的质量参数；使用图片编辑模型时，可在下一轮用纯文字继续修改上一张生成图 |
+| **实时思考与工具轨迹** | 当上游协议返回流式 reasoning 事件时，思考内容会在生成过程中实时增长，不必等待最终回答完成；工具调用、群组步骤和媒体结果使用统一过程卡展示 |
+| **生成流恢复** | 生成事件支持快照、增量订阅、短期回放、取消和终态保存，刷新或短暂断线后可恢复已接收内容，避免重复显示事件 |
+| **中断续写与任务恢复** | 普通对话可从未完成回复继续生成；群组任务持久化步骤和尝试记录，可从失败步骤恢复而不重复已完成阶段 |
+| **分享脱敏** | Agent Groups 的公开分享和默认导出仅保留用户消息、统筹角色最终结果及必要元数据，不公开成员内部指令、推理、工具输入、凭据或调试信息 |
 
 ## 配套 MCP 服务（沙箱 / 多模态）
 
-三个 MCP 服务部署在 VPS（`/opt/deeix-mcp`，只绑 127.0.0.1，DEEIX 后端经 1panel-network 服务名访问），在管理后台「工具」页注册为 MCP server 后即可在对话中勾选：
+仓库包含一个多用户隔离沙箱和两个 Qwen 多模态隔离代理。部署后在管理后台“工具”页注册为 MCP Server，并由用户或项目/角色授权后使用。工具数量可能随上游插件版本变化，应以部署环境的 `tools/list` 结果为准。
 
-| 服务 | 端点 | 工具 | 说明 |
-| --- | --- | --- | --- |
-| `deeix-sandbox-mcp` | `:8081/mcp` | 12 个 | 多用户隔离沙箱（自建 Go，`tools/sandbox-mcp/`）：`sandbox_exec` / `sandbox_task_start\|poll\|cancel` / `sandbox_write_file` / `sandbox_read_file` / `sandbox_list_files` / `sandbox_download` / `sandbox_spawn` / `sandbox_ps` / `sandbox_kill` / `sandbox_reset`；会话按 `_meta{user_id, conversation_id}` 隔离，租约 TTL 默认 900s 闲置回收，pip 缓存卷跨会话保留（环境拉取秒级命中） |
-| `qwen-mm-core` | `:8082/mcp` | 15 个 | Qwen-MM-Plugins core（stdio 经 supergateway 桥接为 Streamable HTTP）：`read_image` / `read_video` / `media_info` / `visualize` / `save_view` / `crop` / `draw_bbox`（纯本地）；`ocr` / `grounding` / `vision_chat` / `transcribe_audio`（阿里云百炼）；`web_search` / `web_extractor` / `image_search`（需 SERPER_API_KEY） |
-| `qwen-mm-omni-av` | `:8083/mcp` | 7 个 | Qwen-MM-Plugins omni-av（音视频理解，百炼）：`omni_asr` / `omni_asr_timestamped` / `omni_multi_speaker_asr` / `omni_av_caption` / `omni_av_grounding` / `omni_av_counting` / `omni_music_caption` |
+| 服务 | 默认端点 | 主要能力 |
+| --- | --- | --- |
+| `deeix-sandbox-mcp` | `:8081/mcp` | 13 个沙箱工具：同步命令、后台任务、文件读写与列表、安全下载、文件导出、会话镜像切换、进程查看/终止和工作区重置 |
+| `qwen-mm-core` | `:8082/mcp` | 图片/视频读取、媒体信息、OCR、视觉问答与定位、裁切/标注、语音转写、搜索等核心多模态能力 |
+| `qwen-mm-omni-av` | `:8083/mcp` | 音频和视频的 ASR、时间戳、多说话人识别、描述、定位、计数和音乐理解 |
 
-**沙箱 ↔ 多模态文件互通（共享卷桥接）**：沙箱与 mm 容器挂同一 named volume（`deeix-mcp-shared`）。Agent 需要多模态工具处理文件时，把沙箱文件复制到 `shared_dir`（每次 `sandbox_exec` 结果返回，形如 `/shared/deeix-<uid>-<cid>`，按会话隔离），再把 mm 工具的 `file_path`/`image_path` 填为该路径。典型闭环：上传音频 → 附件注入沙箱 → ffmpeg/Python 分析 → 复制到 `/shared/<scope>/` → `transcribe_audio`/`ocr` 处理 → 结果回 DEEIX。
+**沙箱与多模态文件互通**：应用、沙箱 MCP 与多模态代理使用部署机上的受控目录，通过 `/shared/deeix-<user>-<conversation>` 范围交换文件。每次调用携带后端签名的用户、会话、请求与调用信息；代理只允许访问当前签名范围，不会把完整租户目录挂载进会话容器。
 
-**DEEIX 侧配套改动**：上传白名单支持 `audio/*`；MCP 工具附件处理支持 image/audio/file 模式（管理员在工具编辑里配置"附件 → 注入工具参数"）；MCP 工具返回的 image/audio/video content 块自动附件化落库为消息附件；前端工具轨迹卡内联渲染图片/音频，消息流支持音频内联播放。
+**DEEIX 侧配套能力**：上传支持音频；MCP 工具可按配置接收 image/audio/file 附件；工具返回的 image/audio/video 内容可进入消息附件链，前端过程卡和消息流支持对应媒体预览。
 
-**部署**：`tools/sandbox-mcp/deploy/`（compose + 镜像 Dockerfile + `.env.example` + 注册脚本 `register-mcp.sh`），沙箱镜像与 mm 桥接镜像本地构建后 `docker save/scp/load`；详细说明见 `tools/sandbox-mcp/README.md`。
+**部署与验收**：部署文件位于 `tools/sandbox-mcp/deploy/`。启用前必须完成网络隔离、跨范围访问拒绝、附件导入、`sandbox_export_file` 文件交付和多模态 `tools/list` 冒烟检查；详细说明见 [`tools/sandbox-mcp/README.md`](./tools/sandbox-mcp/README.md) 与 [`tools/mm-isolation/README.md`](./tools/mm-isolation/README.md)。
 
 ## 部署方式
 
