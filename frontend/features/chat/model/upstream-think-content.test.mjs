@@ -151,5 +151,21 @@ test("a different live reasoning round replaces the previous persisted round", (
   };
 
   assert.equal(mergeLiveUpstreamThinkTrace(persisted, live)?.upstreamThink?.roundID, "round_2");
-  assert.equal(preserveRicherLiveUpstreamThinkTrace(persisted, live)?.upstreamThink?.roundID, "round_1");
+  assert.equal(preserveRicherLiveUpstreamThinkTrace(persisted, live)?.upstreamThink?.roundID, "round_2");
+});
+
+test("an equal-length live reasoning update replaces stale persisted content", () => {
+  const persisted = {
+    enabled: true,
+    status: "completed",
+    upstreamThink: { roundID: "round_1", contentMarkdown: "old text", status: "completed" },
+  };
+  const live = {
+    enabled: true,
+    status: "streaming",
+    upstreamThink: { roundID: "round_1", contentMarkdown: "new text", status: "streaming" },
+  };
+
+  assert.equal(mergeLiveUpstreamThinkTrace(persisted, live)?.upstreamThink?.contentMarkdown, "new text");
+  assert.equal(preserveRicherLiveUpstreamThinkTrace(persisted, live)?.upstreamThink?.contentMarkdown, "new text");
 });

@@ -1072,7 +1072,7 @@ func (s *Service) sendMessageInternal(
 		}
 		thinkingRouter := &thinkingDeltaRouter{}
 		callStreamUsage := llm.Usage{}
-		bufferCredentialOutput := credentialAttemptedForRun || credentialWriteToolsAvailable(currentInput, &toolRuntime)
+		bufferCredentialOutput := shouldBufferCredentialStream(credentialAttemptedForRun)
 		credentialBuffer := credentialStreamBuffer{}
 		upstreamCallStarted = true
 		llmRequestCount++

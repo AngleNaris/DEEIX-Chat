@@ -531,7 +531,7 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 		}
 		thinkingRouter := &thinkingDeltaRouter{}
 		callStreamUsage := llm.Usage{}
-		bufferCredentialOutput := credentialAttemptedForTurn || credentialWriteToolsAvailable(currentInput, &toolRuntime)
+		bufferCredentialOutput := shouldBufferCredentialStream(credentialAttemptedForTurn)
 		credentialBuffer := credentialStreamBuffer{}
 		llmRequestCount++
 		handleStreamEvent := func(event llm.GenerateStreamEvent) error {

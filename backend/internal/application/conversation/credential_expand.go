@@ -483,6 +483,7 @@ func sanitizeGenerateStreamEventCredentialAttempts(event llm.GenerateStreamEvent
 		call.ArgumentsJSON, _ = applyCredentialReplacementsToJSON(call.ArgumentsJSON, attempts, nil)
 		call.OutputJSON, _ = applyCredentialReplacements(call.OutputJSON, attempts, nil)
 		call.ErrorJSON, _ = applyCredentialReplacements(call.ErrorJSON, attempts, nil)
+		call.ThoughtSignature, _ = applyCredentialReplacements(call.ThoughtSignature, attempts, nil)
 		event.ServerToolCall = &call
 	}
 	if event.GeneratedImage != nil {

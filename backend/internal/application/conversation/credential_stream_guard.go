@@ -11,6 +11,13 @@ const maxCredentialStreamBufferBytes = 8 * 1024 * 1024
 
 var errCredentialStreamBufferLimitExceeded = errors.New("credential-safe stream buffer limit exceeded")
 
+// Credential writes are only observable after the model returns a tool call.
+// Buffer follow-up generations after an observed attempt, but do not delay every
+// ordinary conversation merely because credential tools are available.
+func shouldBufferCredentialStream(credentialAttempted bool) bool {
+	return credentialAttempted
+}
+
 type credentialStreamBuffer struct {
 	events []llm.GenerateStreamEvent
 	bytes  int

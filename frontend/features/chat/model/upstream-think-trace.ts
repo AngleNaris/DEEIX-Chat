@@ -11,7 +11,7 @@ export function mergeLiveUpstreamThinkTrace(
   const liveThink = live.upstreamThink;
   const sameRound = !baseThink?.roundID || !liveThink.roundID || baseThink.roundID === liveThink.roundID;
   const upstreamThink =
-    sameRound && (baseThink?.contentMarkdown?.length ?? 0) >= (liveThink.contentMarkdown?.length ?? 0)
+    sameRound && (baseThink?.contentMarkdown?.length ?? 0) > (liveThink.contentMarkdown?.length ?? 0)
       ? baseThink
       : liveThink;
   return {
@@ -35,8 +35,11 @@ export function preserveRicherLiveUpstreamThinkTrace(
     !base?.upstreamThink?.roundID ||
     !live?.upstreamThink?.roundID ||
     base.upstreamThink.roundID === live.upstreamThink.roundID;
-  if (!live?.upstreamThink || !sameRound || liveContent.length <= baseContent.length) {
-    return base ?? live;
+  if (!live?.upstreamThink) {
+    return base;
+  }
+  if (sameRound && liveContent.length < baseContent.length) {
+    return base;
   }
   return mergeLiveUpstreamThinkTrace(base, live);
 }

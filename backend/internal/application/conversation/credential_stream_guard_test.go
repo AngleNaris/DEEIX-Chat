@@ -33,6 +33,65 @@ func TestFlushCredentialBufferedStreamEventsRedactsSpanningDeltas(t *testing.T) 
 	}
 }
 
+func TestCredentialStreamBuffersOnlyAfterObservedWriteAttempt(t *testing.T) {
+	const modelToolName = "credential_create_model"
+	runtime := selectedToolRuntime{
+		nameMap: map[string]string{modelToolName: "credential_create"},
+		platformEntries: map[string]platformToolEntry{
+			modelToolName: {
+				definition: llm.ToolDefinition{Name: "credential_create"},
+				kind:       platformToolWrite,
+			},
+		},
+	}
+	input := llm.GenerateInput{
+		Tools: []llm.ToolDefinition{{Name: modelToolName}},
+	}
+	if !credentialWriteToolsAvailable(input, &runtime) {
+		t.Fatal("credential write tool should be detected as available")
+	}
+	if shouldBufferCredentialStream(false) {
+		t.Fatal("tool availability alone must not delay an ordinary stream")
+	}
+	if !shouldBufferCredentialStream(true) {
+		t.Fatal("a follow-up generation after a credential attempt must remain guarded")
+	}
+}
+
+func TestFlushCredentialBufferedStreamEventsRedactsServerToolCallFields(t *testing.T) {
+	const secret = "server-tool-secret"
+	events := []llm.GenerateStreamEvent{{
+		ServerToolCall: &llm.ToolCall{
+			ArgumentsJSON:    `{"value":"` + secret + `"}`,
+			OutputJSON:       `{"result":"` + secret + `"}`,
+			ErrorJSON:        `{"error":"` + secret + `"}`,
+			ThoughtSignature: "signature-" + secret,
+		},
+	}}
+	var handled []llm.GenerateStreamEvent
+	err := flushCredentialBufferedStreamEvents(events, []credentialWrite{{Name: "key", Value: secret}}, func(event llm.GenerateStreamEvent) error {
+		handled = append(handled, event)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("flush buffered events: %v", err)
+	}
+	if len(handled) != 1 || handled[0].ServerToolCall == nil {
+		t.Fatalf("unexpected handled events: %#v", handled)
+	}
+	call := handled[0].ServerToolCall
+	for field, value := range map[string]string{
+		"arguments":         call.ArgumentsJSON,
+		"output":            call.OutputJSON,
+		"error":             call.ErrorJSON,
+		"thought_signature": call.ThoughtSignature,
+	} {
+		if strings.Contains(value, secret) {
+			t.Fatalf("%s leaked credential value: %q", field, value)
+		}
+	}
+}
+
 func TestCredentialStreamBufferSeparatesImmediateMetadata(t *testing.T) {
 	buffer := credentialStreamBuffer{}
 	original := llm.GenerateStreamEvent{
