@@ -23,6 +23,8 @@ SHORT_SHA="$(printf '%s' "$SHA" | cut -c1-12)"
 WORK="$(mktemp -d)"
 OUT="$(pwd)/release/$SHORT_SHA"
 IMAGE="deeix-chat:$SHORT_SHA"
+SANDBOX_IMAGE="deeix-sandbox-mcp:$SHORT_SHA"
+SANDBOX_BASE_IMAGE="deeix-sandbox-base:$SHORT_SHA"
 trap 'rm -rf "$WORK"' EXIT
 
 mkdir -p "$OUT"
@@ -38,15 +40,33 @@ docker buildx build \
   --load \
   "$WORK"
 
+docker buildx build \
+  --platform linux/amd64 \
+  --file "$WORK/tools/sandbox-mcp/docker/base.Dockerfile" \
+  --tag "$SANDBOX_BASE_IMAGE" \
+  --load \
+  "$WORK/tools/sandbox-mcp/docker"
+
+docker buildx build \
+  --platform linux/amd64 \
+  --file "$WORK/tools/sandbox-mcp/deploy/sandbox-mcp.Dockerfile" \
+  --tag "$SANDBOX_IMAGE" \
+  --load \
+  "$WORK/tools/sandbox-mcp"
+
 docker save "$IMAGE" -o "$OUT/deeix-chat-$SHORT_SHA-linux-amd64.tar"
-sha256sum "$OUT/deeix-chat-$SHORT_SHA-linux-amd64.tar" > "$OUT/SHA256SUMS"
+docker save "$SANDBOX_IMAGE" "$SANDBOX_BASE_IMAGE" -o "$OUT/deeix-sandbox-$SHORT_SHA-linux-amd64.tar"
+sha256sum "$OUT"/*.tar > "$OUT/SHA256SUMS"
 IMAGE_ID="$(docker image inspect "$IMAGE" --format '{{.Id}}')"
-printf 'commit=%s\nversion=%s\nimage=%s\nimage_id=%s\nplatform=linux/amd64\nbuild_time=%s\n' \
-  "$SHA" "$VERSION" "$IMAGE" "$IMAGE_ID" "$STAMP" > "$OUT/manifest.env"
+SANDBOX_IMAGE_ID="$(docker image inspect "$SANDBOX_IMAGE" --format '{{.Id}}')"
+SANDBOX_BASE_IMAGE_ID="$(docker image inspect "$SANDBOX_BASE_IMAGE" --format '{{.Id}}')"
+printf 'commit=%s\nversion=%s\nimage=%s\nimage_id=%s\nsandbox_image=%s\nsandbox_image_id=%s\nsandbox_base_image=%s\nsandbox_base_image_id=%s\nplatform=linux/amd64\nbuild_time=%s\n' \
+  "$SHA" "$VERSION" "$IMAGE" "$IMAGE_ID" "$SANDBOX_IMAGE" "$SANDBOX_IMAGE_ID" \
+  "$SANDBOX_BASE_IMAGE" "$SANDBOX_BASE_IMAGE_ID" "$STAMP" > "$OUT/manifest.env"
 sha256sum -c "$OUT/SHA256SUMS"
 ```
 
-提交 `tar`、`SHA256SUMS` 和 `manifest.env` 到 VPS 后，先在 VPS 再执行一次 `sha256sum -c SHA256SUMS`。制品目录和镜像标签都使用 SHA，不复用 `latest`。
+提交两个 `tar`、`SHA256SUMS` 和 `manifest.env` 到 VPS 后，先在 VPS 再执行一次 `sha256sum -c SHA256SUMS`。应用、Sandbox MCP 和 Sandbox Base 的目录及镜像标签都使用 SHA，不复用 `latest`。
 
 ## 3. VPS 预检与备份
 
@@ -55,6 +75,7 @@ sha256sum -c "$OUT/SHA256SUMS"
 ```bash
 set -euo pipefail
 APP_DIR="/opt/deeix-chat"
+MCP_DIR="/opt/deeix-mcp"
 RELEASE_DIR="/opt/deeix-chat/releases/<short-sha>"
 BACKUP_DIR="/opt/backups/deeix-chat-<short-sha>-$(date -u +%Y%m%dT%H%M%SZ)"
 APP_CONTAINER="deeix-chat-app"
@@ -65,9 +86,14 @@ cd "$APP_DIR"
 docker compose config > "$BACKUP_DIR/compose.rendered.yaml"
 docker inspect "$APP_CONTAINER" > "$BACKUP_DIR/app.inspect.json"
 docker inspect "$APP_CONTAINER" --format 'DEEIX_CHAT_IMAGE={{.Config.Image}}' > "$BACKUP_DIR/current-image.env"
+docker inspect deeix-sandbox-mcp > "$BACKUP_DIR/sandbox.inspect.json"
+docker inspect deeix-sandbox-mcp --format 'SANDBOX_MCP_IMAGE={{.Config.Image}}' > "$BACKUP_DIR/current-sandbox-image.env"
+docker inspect deeix-sandbox-mcp --format '{{range .Config.Env}}{{println .}}{{end}}' \
+  | grep '^SANDBOX_BASE_IMAGE=' >> "$BACKUP_DIR/current-sandbox-image.env"
 cp -a docker-compose.yml config.yaml "$BACKUP_DIR/"
 test ! -f .env.release || cp -a .env.release "$BACKUP_DIR/"
 docker compose config --images > "$BACKUP_DIR/images.txt"
+test ! -f "$MCP_DIR/.env.release" || cp -a "$MCP_DIR/.env.release" "$BACKUP_DIR/mcp.env.release"
 
 # 使用当前 PostgreSQL 运维方式生成一致性备份，并立即校验文件非空。
 <postgres-backup-command> > "$BACKUP_DIR/deeix_chat.sql"
@@ -84,11 +110,17 @@ set -euo pipefail
 cd "$RELEASE_DIR"
 sha256sum -c SHA256SUMS
 docker load -i deeix-chat-<short-sha>-linux-amd64.tar
+docker load -i deeix-sandbox-<short-sha>-linux-amd64.tar
 
 cd "$APP_DIR"
 printf 'DEEIX_CHAT_IMAGE=deeix-chat:<short-sha>\n' > .env.release.next
 mv .env.release.next .env.release
 docker compose --env-file .env.release up -d --no-deps app
+
+cd /opt/deeix-mcp
+printf 'SANDBOX_MCP_IMAGE=deeix-sandbox-mcp:<short-sha>\nSANDBOX_BASE_IMAGE=deeix-sandbox-base:<short-sha>\n' > .env.release.next
+mv .env.release.next .env.release
+docker compose --env-file .env --env-file .env.release up -d --no-deps sandbox-mcp
 ```
 
 单实例切换会有短暂重启窗口。迁移失败、健康失败或版本不匹配时不得继续浏览器验收，立即执行回滚。
@@ -110,8 +142,15 @@ VERSION_JSON="$(curl -fsS http://127.0.0.1:8080/api/v1/version)"
 printf '%s' "$VERSION_JSON" | jq -e --arg sha "$EXPECTED_SHA" --arg version "$EXPECTED_VERSION" \
   '.commit == $sha and .version == $version'
 test "$(docker inspect "$APP_CONTAINER" --format '{{.RestartCount}}')" = "0"
+test "$(docker inspect deeix-sandbox-mcp --format '{{.Config.Image}}')" = "deeix-sandbox-mcp:<short-sha>"
+test "$(docker inspect deeix-sandbox-mcp --format '{{.RestartCount}}')" = "0"
+curl -fsS http://127.0.0.1:8081/healthz
 if docker logs --since 15m "$APP_CONTAINER" 2>&1 | grep -Eai 'fatal|panic|segmentation|unhandled|(^|[^a-z])error([^a-z]|$)'; then
   echo "fatal/error log gate failed" >&2
+  exit 1
+fi
+if docker logs --since 15m deeix-sandbox-mcp 2>&1 | grep -Eai 'fatal|panic|segmentation|unhandled|(^|[^a-z])error([^a-z]|$)'; then
+  echo "Sandbox fatal/error log gate failed" >&2
   exit 1
 fi
 ```
@@ -128,6 +167,12 @@ mv .env.release.next .env.release
 docker compose --env-file .env.release up -d --no-deps app
 curl -fsS http://127.0.0.1:8080/readyz
 curl -fsS http://127.0.0.1:8080/api/v1/version
+
+cd /opt/deeix-mcp
+cp -a "$BACKUP_DIR/current-sandbox-image.env" .env.release.next
+mv .env.release.next .env.release
+docker compose --env-file .env --env-file .env.release up -d --no-deps sandbox-mcp
+curl -fsS http://127.0.0.1:8081/healthz
 ```
 
 若新版本已执行不兼容的数据迁移，仅回滚镜像不够；必须先停止应用，再按已演练流程恢复数据库备份。回滚后同样检查版本、RestartCount、最近日志和真实域名登录。

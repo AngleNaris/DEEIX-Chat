@@ -33,7 +33,7 @@ services:
   # 镜像由本地构建后 docker save/scp/load 到 VPS（tools/sandbox-mcp/deploy/sandbox-mcp.Dockerfile）；
   # 如需在 VPS 直接构建，取消下方 build 段注释并把 image 行移到 build 下方。
   sandbox-mcp:
-    image: deeix-sandbox-mcp:latest
+    image: "${SANDBOX_MCP_IMAGE:-deeix-sandbox-mcp:latest}"
     # build:
     #   context: ..
     #   dockerfile: deploy/sandbox-mcp.Dockerfile

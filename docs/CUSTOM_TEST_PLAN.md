@@ -2,14 +2,11 @@
 
 ## 1. 目标与基线
 
-本计划用于证明 DEEIX Chat `custom` 分支的自定义能力在受支持环境中可用、可恢复、可隔离并可发布。测试对象包括已提交的 `custom` 能力和进入候选版本的未提交改动。
+本计划用于证明 DEEIX Chat `custom` 分支的自定义能力在受支持环境中可用、可恢复、可隔离并可发布。发布证据只对应已提交的 exact SHA；未提交改动只能用于本地预检，不能形成发布候选。
 
-当前审查基线：
+每轮候选必须在 `verification.md` 和 release `manifest.env` 中记录 Custom HEAD、刷新后的 `upstream/dev`、Merge Base、分叉规模、镜像 ID 和制品校验和，避免测试计划因提交推进而保存过期 SHA。
 
-- Custom HEAD：`43c32e4e71848c0f4d697d276190c3a8bb30f1ad`
-- 对比上游：`upstream/dev`，`914d00fa39ca62cf1a817905eb47899eb0d03c67`
-- Merge Base：`b435a2fd84424ac1a0bb56f4e20a4fea8f391a49`
-- 分叉规模：Custom 独有 128 个提交，上游独有 75 个提交
+- 发布基线：`verification.md` 与 release `manifest.env`
 - 产品验收来源：`docs/CUSTOM_FEATURES_PRODUCT_SPEC.zh-CN.md`
 - 安全与历史风险来源：`docs/CUSTOM_MODIFICATION_REVIEW.md`
 
