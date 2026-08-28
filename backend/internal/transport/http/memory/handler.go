@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"errors"
 	"net/http"
 
 	appmemory "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/memory"
@@ -76,6 +77,10 @@ func (h *Handler) UpsertUserMemory(c *gin.Context) {
 		req.Scope,
 		"user",
 	); err != nil {
+		if errors.Is(err, appmemory.ErrMemoryLimitReached) {
+			response.Error(c, http.StatusConflict, err.Error())
+			return
+		}
 		response.Error(c, http.StatusInternalServerError, "upsert user memory failed")
 		return
 	}

@@ -9,6 +9,8 @@ import (
 	"time"
 )
 
+var removeSharedExport = os.Remove
+
 // sweepSharedExports 回收有效 scope 内过期的顶层普通导出文件，并回收无 live session
 // 且已为空的老 scope 目录。绝不跟随 symlink，也不删除 mm-* 目录或其他用户目录。
 // liveScopes 非 nil 时按 scope 判断是否存在活跃会话；存在活跃会话的 scope 不回收目录。
@@ -46,7 +48,7 @@ func sweepSharedExports(root string, now time.Time, ttl time.Duration, liveScope
 				nonEmpty = true
 				continue
 			}
-			if err := os.Remove(filepath.Join(scopePath, child.Name())); err != nil && !os.IsNotExist(err) {
+			if err := removeSharedExport(filepath.Join(scopePath, child.Name())); err != nil && !os.IsNotExist(err) {
 				sweepErr = errors.Join(sweepErr, fmt.Errorf("remove export %s: %w", child.Name(), err))
 				nonEmpty = true
 			}
@@ -65,7 +67,7 @@ func sweepSharedExports(root string, now time.Time, ttl time.Duration, liveScope
 			continue
 		}
 		if now.Sub(scopeInfo.ModTime()) > ttl {
-			if err := os.Remove(scopePath); err != nil && !os.IsNotExist(err) {
+			if err := removeSharedExport(scopePath); err != nil && !os.IsNotExist(err) {
 				sweepErr = errors.Join(sweepErr, fmt.Errorf("remove empty scope %s: %w", scopeEntry.Name(), err))
 			}
 		}

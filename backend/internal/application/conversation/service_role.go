@@ -96,7 +96,11 @@ func (s *Service) ListConversationRoles(ctx context.Context, userID uint, status
 
 // GetConversationRole 查询当前用户单个角色。
 func (s *Service) GetConversationRole(ctx context.Context, userID uint, publicID string) (*model.ConversationRole, error) {
-	return s.repo.GetConversationRoleByPublicID(ctx, userID, strings.TrimSpace(publicID))
+	role, err := s.repo.GetConversationRoleByPublicID(ctx, userID, strings.TrimSpace(publicID))
+	if err != nil {
+		return nil, translateConversationRoleError(err)
+	}
+	return role, nil
 }
 
 // UpdateConversationRole 更新当前用户角色。
@@ -121,7 +125,11 @@ func (s *Service) UpdateConversationRole(ctx context.Context, userID uint, publi
 		Pinned:            normalized.Pinned,
 		Status:            normalized.Status,
 	}
-	return s.repo.UpdateConversationRoleByPublicID(ctx, userID, strings.TrimSpace(publicID), domainPatch)
+	role, err := s.repo.UpdateConversationRoleByPublicID(ctx, userID, strings.TrimSpace(publicID), domainPatch)
+	if err != nil {
+		return nil, translateConversationRoleError(err)
+	}
+	return role, nil
 }
 
 // DeleteConversationRole 删除当前用户角色。
@@ -129,10 +137,7 @@ func (s *Service) UpdateConversationRole(ctx context.Context, userID uint, publi
 func (s *Service) DeleteConversationRole(ctx context.Context, userID uint, publicID string) error {
 	role, err := s.repo.GetConversationRoleByPublicID(ctx, userID, strings.TrimSpace(publicID))
 	if err != nil {
-		if errors.Is(err, repository.ErrNotFound) {
-			return ErrConversationProjectNotFound
-		}
-		return err
+		return translateConversationRoleError(err)
 	}
 	if s.agentGroupRepo != nil {
 		count, err := s.agentGroupRepo.CountAgentGroupReferencesByRole(ctx, role.ID)
@@ -148,7 +153,14 @@ func (s *Service) DeleteConversationRole(ctx context.Context, userID uint, publi
 
 // ReorderConversationRoles 更新当前用户角色展示顺序。
 func (s *Service) ReorderConversationRoles(ctx context.Context, userID uint, publicIDs []string) error {
-	return s.repo.ReorderConversationRoles(ctx, userID, publicIDs)
+	return translateConversationRoleError(s.repo.ReorderConversationRoles(ctx, userID, publicIDs))
+}
+
+func translateConversationRoleError(err error) error {
+	if errors.Is(err, repository.ErrNotFound) {
+		return ErrConversationRoleNotFound
+	}
+	return err
 }
 
 func normalizeConversationRoleInput(input ConversationRoleInput) (ConversationRoleInput, error) {

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/subtle"
+	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -25,6 +27,10 @@ func MetaFromContext(ctx context.Context) (*Meta, bool) {
 // _meta 从 POST body 的 params._meta 提取（不依赖 mcp-go 的 Meta 解析细节），
 // 提取时校验 HMAC 签名（P0-07：身份必须来自已验证声明），随后恢复请求体供 mcp-go 正常解析。
 func authMiddleware(cfg *Config, next http.Handler) http.Handler {
+	return authMiddlewareWithReplayCache(cfg, next, newRequestReplayCache(time.Now))
+}
+
+func authMiddlewareWithReplayCache(cfg *Config, next http.Handler, replay *requestReplayCache) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if cfg.APIKey == "" {
 			// 启动时 Validate 已拒绝空 key，此处是纵深防御。
@@ -46,11 +52,36 @@ func authMiddleware(cfg *Config, next http.Handler) http.Handler {
 			_ = r.Body.Close()
 			r.Body = io.NopCloser(bytes.NewReader(body))
 			if meta, err := ParseMeta(body, cfg.HmacKey()); err == nil {
+				method, requestID := parseRPCMethodAndID(body)
+				if method == "tools/call" && replay != nil && !replay.claim(meta) {
+					writeReplayRejected(w, requestID)
+					return
+				}
 				r = r.WithContext(context.WithValue(r.Context(), metaKey{}, meta))
 			}
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func parseRPCMethodAndID(body []byte) (string, json.RawMessage) {
+	var envelope struct {
+		Method string          `json:"method"`
+		ID     json.RawMessage `json:"id"`
+	}
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return "", nil
+	}
+	return envelope.Method, envelope.ID
+}
+
+func writeReplayRejected(w http.ResponseWriter, requestID json.RawMessage) {
+	if len(requestID) == 0 {
+		requestID = json.RawMessage("null")
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusConflict)
+	_, _ = fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%s,"error":{"code":-32009,"message":"duplicate signed tool call rejected"}}`, requestID)
 }
 
 // runServer 组装并启动 HTTP 服务。

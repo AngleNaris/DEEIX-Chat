@@ -80,6 +80,59 @@ func TestSQLiteVectorStoreSearchesAndDeletesUserMemories(t *testing.T) {
 	}
 }
 
+func TestUserMemoryDeleteAndLegacySoftDeleteAllowSameKeyRecreation(t *testing.T) {
+	db := openMemorySQLiteVectorTestDB(t)
+	repo := NewRepo(db)
+	ctx := context.Background()
+
+	item := &domainmemory.UserMemory{UserID: 7, MemoryKey: "reusable", Value: "first", Scope: "custom", UpdatedBy: "user"}
+	if err := repo.UpsertUserMemory(ctx, item); err != nil {
+		t.Fatalf("UpsertUserMemory(initial) error = %v", err)
+	}
+
+	if err := db.WithContext(ctx).
+		Where("user_id = ? AND memory_key = ?", item.UserID, item.MemoryKey).
+		Delete(&model.UserMemory{}).Error; err != nil {
+		t.Fatalf("create legacy soft-deleted row: %v", err)
+	}
+	item.Value = "restored"
+	if err := repo.UpsertUserMemory(ctx, item); err != nil {
+		t.Fatalf("UpsertUserMemory(restore soft-deleted) error = %v", err)
+	}
+	memories, err := repo.ListUserMemories(ctx, item.UserID)
+	if err != nil {
+		t.Fatalf("ListUserMemories(restored) error = %v", err)
+	}
+	if len(memories) != 1 || memories[0].Value != "restored" {
+		t.Fatalf("expected restored memory, got %#v", memories)
+	}
+
+	if err := repo.DeleteUserMemory(ctx, item.UserID, item.MemoryKey); err != nil {
+		t.Fatalf("DeleteUserMemory() error = %v", err)
+	}
+	var rows int64
+	if err := db.WithContext(ctx).Unscoped().Model(&model.UserMemory{}).
+		Where("user_id = ? AND memory_key = ?", item.UserID, item.MemoryKey).
+		Count(&rows).Error; err != nil {
+		t.Fatalf("count deleted memory: %v", err)
+	}
+	if rows != 0 {
+		t.Fatalf("expected physical delete, unscoped row count = %d", rows)
+	}
+
+	item.Value = "recreated"
+	if err := repo.UpsertUserMemory(ctx, item); err != nil {
+		t.Fatalf("UpsertUserMemory(recreate) error = %v", err)
+	}
+	memories, err = repo.ListUserMemories(ctx, item.UserID)
+	if err != nil {
+		t.Fatalf("ListUserMemories(recreated) error = %v", err)
+	}
+	if len(memories) != 1 || memories[0].Value != "recreated" {
+		t.Fatalf("expected recreated memory, got %#v", memories)
+	}
+}
+
 func openMemorySQLiteVectorTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	sqlitevec.Register()

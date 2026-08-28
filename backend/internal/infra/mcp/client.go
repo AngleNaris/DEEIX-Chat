@@ -52,6 +52,7 @@ type CallInput struct {
 	UserID         uint
 	ConversationID uint
 	RequestID      string
+	CallID         string
 }
 
 // Tool 定义 MCP 工具元数据。
@@ -115,11 +116,15 @@ func (c *Client) CallTool(ctx context.Context, cfg CallConfig, input CallInput) 
 	if err != nil {
 		return "", err
 	}
+	callID := strings.TrimSpace(input.CallID)
+	if callID == "" {
+		callID = uuid.NewString()
+	}
 	meta := map[string]interface{}{
 		"user_id":         input.UserID,
 		"conversation_id": input.ConversationID,
 		"request_id":      strings.TrimSpace(input.RequestID),
-		"call_id":         uuid.NewString(),
+		"call_id":         callID,
 	}
 	if c.metaHMACKey != "" {
 		// 沙箱 MCP 要求 _meta 附带短期 HMAC 签名（服务到服务身份，canonical 串与 sandbox-mcp 一致）。

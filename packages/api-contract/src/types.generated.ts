@@ -9910,6 +9910,25 @@ export namespace Models {
 
 export namespace PlatformTools {
   /**
+   * @description 查询当前单实例进程内、属于当前用户的批准记录；服务重启或记录过期后返回 404
+   * @tags platform-tools
+   * @name ApprovalsDetail
+   * @summary 查询平台工具写操作批准状态
+   * @request GET:/platform-tools/approvals/{approval_id}
+   * @secure
+   */
+  export namespace ApprovalsDetail {
+    export type RequestParams = {
+      /** 待批准记录 ID */
+      approvalId: string;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = never;
+    export type RequestHeaders = {};
+    export type ResponseBody = ApprovalResponse;
+  }
+
+  /**
    * @description 批准一条待确认的平台工具写操作（ask 批准模式），批准后异步执行
    * @tags platform-tools
    * @name ApprovalsApproveCreate

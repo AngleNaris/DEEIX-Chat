@@ -26,6 +26,8 @@ import {
   agentGroupDraftFromDTO,
   emptyAgentGroupDraft,
 } from "@/features/agent-groups/components/agent-group-dialog";
+import { useAgentGroupFeature } from "@/features/agent-groups/context/agent-group-feature-context";
+import { resolveAgentGroupFeatureAccess } from "@/features/agent-groups/model/agent-group-feature";
 import { useChatSession } from "@/features/chat/context/chat-session-context";
 import { deleteAgentGroup, listAgentGroups } from "@/shared/api/agent-groups";
 import type { AgentGroupDTO } from "@/shared/api/agent-groups.types";
@@ -143,6 +145,8 @@ function AgentGroupListSkeleton() {
 export function AgentGroupsPage() {
   const t = useTranslations("common.navigation");
   const router = useRouter();
+  const { enabled: agentGroupsEnabled, status: agentGroupFeatureStatus } = useAgentGroupFeature();
+  const featureAccess = resolveAgentGroupFeatureAccess(agentGroupFeatureStatus);
   const { lastChange } = useSidebarConversations();
   const { requestNewConversation } = useChatSession();
   const [groups, setGroups] = React.useState<AgentGroupDTO[]>([]);
@@ -153,6 +157,9 @@ export function AgentGroupsPage() {
   const [deletingGroupID, setDeletingGroupID] = React.useState<string | null>(null);
 
   const loadGroups = React.useCallback(async () => {
+    if (!agentGroupsEnabled) {
+      return;
+    }
     const token = await resolveAccessToken();
     if (!token) {
       setLoadFailed(true);
@@ -171,11 +178,19 @@ export function AgentGroupsPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [agentGroupsEnabled]);
 
   React.useEffect(() => {
-    void loadGroups();
-  }, [loadGroups]);
+    if (featureAccess.allowListRequests) {
+      void loadGroups();
+    }
+  }, [featureAccess.allowListRequests, loadGroups]);
+
+  React.useEffect(() => {
+    if (featureAccess.redirectDirectRoute) {
+      router.replace("/chat");
+    }
+  }, [featureAccess.redirectDirectRoute, router]);
 
   // 会话变化（新建/重命名）后刷新群组列表，保持成员数与配置同步。
   React.useEffect(() => {
@@ -221,6 +236,19 @@ export function AgentGroupsPage() {
       setDeletingGroupID(null);
     }
   }, [deleteTarget, loadGroups]);
+
+  if (!agentGroupsEnabled) {
+    if (agentGroupFeatureStatus !== "loading") {
+      return null;
+    }
+    return (
+      <div className="flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden">
+        <div className="mx-auto h-full min-h-0 w-full max-w-[912px] flex-1 overflow-y-auto px-3 pb-8 pt-6 md:pt-15">
+          <AgentGroupListSkeleton />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden">

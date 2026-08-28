@@ -2,6 +2,8 @@ package conversation
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 )
@@ -69,6 +71,10 @@ func (s *Service) hydrateMessageProcessTraces(ctx context.Context, items []model
 	if err != nil {
 		return err
 	}
+	toolRows, err := s.repo.ListConversationToolCallsByMessageIDs(ctx, messageIDs)
+	if err != nil {
+		return err
+	}
 	byMessageID := make(map[uint][]model.MessageTrace, len(messageIDs))
 	for _, row := range rows {
 		byMessageID[row.MessageID] = append(byMessageID[row.MessageID], row)
@@ -77,22 +83,41 @@ func (s *Service) hydrateMessageProcessTraces(ctx context.Context, items []model
 	for _, row := range eventRows {
 		eventsByMessageID[row.MessageID] = append(eventsByMessageID[row.MessageID], row)
 	}
+	toolRowsByMessageID := make(map[uint][]model.ToolCall, len(messageIDs))
+	for _, row := range toolRows {
+		toolRowsByMessageID[row.MessageID] = append(toolRowsByMessageID[row.MessageID], row)
+	}
 
 	for i := range items {
 		if items[i].Role != "assistant" {
 			continue
 		}
-		items[i].ProcessTrace = buildMessageProcessTraceDTO(byMessageID[items[i].ID], eventsByMessageID[items[i].ID])
+		items[i].ProcessTrace = buildMessageProcessTraceDTO(
+			byMessageID[items[i].ID],
+			eventsByMessageID[items[i].ID],
+			toolRowsByMessageID[items[i].ID],
+		)
 	}
 	return nil
 }
 
-func buildMessageProcessTraceDTO(rows []model.MessageTrace, eventRows []model.MessageTraceEventRow) *model.MessageProcessTrace {
+func buildMessageProcessTraceDTO(
+	rows []model.MessageTrace,
+	eventRows []model.MessageTraceEventRow,
+	toolRows []model.ToolCall,
+) *model.MessageProcessTrace {
 	if len(rows) == 0 && len(eventRows) == 0 {
 		return nil
 	}
+	terminalOutputs := platformApprovalTerminalOutputs(toolRows)
 	result := &model.MessageProcessTrace{Enabled: true}
 	for _, row := range rows {
+		row.Summary, row.ContentMarkdown, row.PayloadJSON = reconcilePlatformApprovalTrace(
+			row.Summary,
+			row.ContentMarkdown,
+			row.PayloadJSON,
+			terminalOutputs,
+		)
 		block := &model.MessageTraceBlock{
 			Title:           row.Title,
 			Summary:         row.Summary,
@@ -115,6 +140,12 @@ func buildMessageProcessTraceDTO(rows []model.MessageTrace, eventRows []model.Me
 		}
 	}
 	for _, row := range eventRows {
+		row.Summary, row.ContentMarkdown, row.PayloadJSON = reconcilePlatformApprovalTrace(
+			row.Summary,
+			row.ContentMarkdown,
+			row.PayloadJSON,
+			terminalOutputs,
+		)
 		result.Events = append(result.Events, model.MessageTraceEvent{
 			EventID:         row.EventID,
 			EventType:       row.EventType,
@@ -141,6 +172,73 @@ func buildMessageProcessTraceDTO(rows []model.MessageTrace, eventRows []model.Me
 		return nil
 	}
 	return result
+}
+
+func platformApprovalTerminalOutputs(rows []model.ToolCall) map[string]string {
+	result := make(map[string]string)
+	for _, row := range rows {
+		toolCallID := strings.TrimSpace(row.ToolCallID)
+		output := strings.TrimSpace(row.OutputJSON)
+		if toolCallID == "" || output == "" {
+			continue
+		}
+		var payload struct {
+			ApprovalID string `json:"approval_id"`
+			Status     string `json:"status"`
+		}
+		if err := json.Unmarshal([]byte(output), &payload); err != nil || strings.TrimSpace(payload.ApprovalID) == "" {
+			continue
+		}
+		switch strings.TrimSpace(payload.Status) {
+		case platformApprovalStatusApproved, platformApprovalStatusRejected, platformApprovalStatusFailed, platformApprovalStatusExpired:
+			result[toolCallID] = output
+		}
+	}
+	return result
+}
+
+func reconcilePlatformApprovalTrace(
+	summary string,
+	markdown string,
+	payloadJSON string,
+	terminalOutputs map[string]string,
+) (string, string, string) {
+	if len(terminalOutputs) == 0 || strings.TrimSpace(payloadJSON) == "" {
+		return summary, markdown, payloadJSON
+	}
+	var payload map[string]interface{}
+	if err := json.Unmarshal([]byte(payloadJSON), &payload); err != nil {
+		return summary, markdown, payloadJSON
+	}
+	toolCalls := normalizeTraceToolCalls(payload["tool_calls"])
+	changed := false
+	for _, call := range toolCalls {
+		output, ok := terminalOutputs[traceToolCallID(call)]
+		if !ok {
+			continue
+		}
+		detail, truncated := toolTraceDetail(output, toolTraceDetailMaxChars)
+		call["output_preview"] = toolOutputPreview(output)
+		call["output_detail"] = detail
+		call["output_size"] = len(output)
+		call["output_truncated"] = truncated
+		changed = true
+	}
+	if !changed {
+		return summary, markdown, payloadJSON
+	}
+	payload["tool_calls"] = toolCalls
+	raw, err := json.Marshal(payload)
+	if err != nil || len(raw) > maxTracePayloadBytes {
+		return summary, markdown, payloadJSON
+	}
+	if value := summarizeToolTracePayload(payload); value != "" {
+		summary = value
+	}
+	if value := renderToolTraceMarkdownFromPayload(payload); value != "" {
+		markdown = value
+	}
+	return summary, markdown, string(raw)
 }
 
 func aggregateTraceStatusFromEvents(events []model.MessageTraceEvent) string {

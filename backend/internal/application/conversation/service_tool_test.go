@@ -4,13 +4,91 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/llm"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/mcp"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/security"
 )
+
+func TestCallMCPWithRetryReusesLogicalCallID(t *testing.T) {
+	var mu sync.Mutex
+	callIDs := make([]string, 0, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			ID     interface{}            `json:"id"`
+			Method string                 `json:"method"`
+			Params map[string]interface{} `json:"params"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Errorf("decode request: %v", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		switch request.Method {
+		case "initialize":
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Mcp-Session-Id", "retry-session")
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"jsonrpc": "2.0",
+				"id":      request.ID,
+				"result":  map[string]interface{}{},
+			})
+		case "notifications/initialized":
+			w.WriteHeader(http.StatusAccepted)
+		case "tools/call":
+			meta, _ := request.Params["_meta"].(map[string]interface{})
+			callID, _ := meta["call_id"].(string)
+			mu.Lock()
+			callIDs = append(callIDs, callID)
+			attempt := len(callIDs)
+			mu.Unlock()
+			if attempt == 1 {
+				http.Error(w, "response lost after execution", http.StatusBadGateway)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"jsonrpc": "2.0",
+				"id":      request.ID,
+				"result": map[string]interface{}{
+					"content": []map[string]string{{"type": "text", "text": "ok"}},
+				},
+			})
+		default:
+			t.Errorf("unexpected method %q", request.Method)
+			w.WriteHeader(http.StatusBadRequest)
+		}
+	}))
+	defer server.Close()
+
+	client := mcp.NewClient(security.NewStrictOutboundPolicy(true), "retry-hmac-key")
+	service := &Service{mcpClient: client}
+	output, err := service.callMCPWithRetry(t.Context(), mcp.CallConfig{BaseURL: server.URL}, mcp.CallInput{
+		ToolName:       "sandbox_exec",
+		ArgumentsJSON:  `{"command":"true"}`,
+		UserID:         7,
+		ConversationID: 11,
+		RequestID:      "request-retry",
+	}, 1)
+	if err != nil {
+		t.Fatalf("retry MCP call: %v", err)
+	}
+	if !strings.Contains(output, `"text":"ok"`) {
+		t.Fatalf("unexpected retry output: %s", output)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(callIDs) != 2 || strings.TrimSpace(callIDs[0]) == "" || callIDs[0] != callIDs[1] {
+		t.Fatalf("logical call ID changed across retry: %#v", callIDs)
+	}
+}
 
 func TestExecuteToolCallRejectsToolsNotEnabledForRun(t *testing.T) {
 	svc := &Service{}
@@ -165,6 +243,61 @@ func TestExecuteAssistantToolCallsMasksAndReusesCredentialWrites(t *testing.T) {
 	}
 	if second.Rows[0].Status != "reused" {
 		t.Fatalf("expected second credential call to be marked reused, got %q", second.Rows[0].Status)
+	}
+}
+
+func TestExecuteAssistantToolCallsDoesNotTreatPendingCredentialApprovalAsWrite(t *testing.T) {
+	const secret = "pending-approval-secret"
+	resolver := &recordingCredentialResolver{}
+	service := newAskCredentialService(t, resolver)
+	runtime := selectedToolRuntime{}
+	runtime.bindCredentialSecretRefs(7, 11, "run-pending-approval")
+	entry := platformToolRegistry()["credential_create"]
+
+	ledger := newToolExecutionLedger()
+	execute := func(toolCallID string) executeAssistantToolCallsResult {
+		return service.executeAssistantToolCalls(t.Context(), executeAssistantToolCallsInput{
+			UserID:         7,
+			ConversationID: 11,
+			RunID:          "run-pending-approval",
+			RequestID:      "req-pending-approval",
+			ToolCalls: []llm.ToolCall{{
+				ToolCallID:    toolCallID,
+				ToolType:      "function",
+				ToolName:      "credential_create_model",
+				ArgumentsJSON: `{"name":"deploy-key","value":"` + secret + `"}`,
+			}},
+			ToolRuntime: &runtime,
+			ToolNameMap: map[string]string{"credential_create_model": "credential_create"},
+			PlatformTools: map[string]platformToolEntry{
+				"credential_create_model": entry,
+			},
+			Ledger:          ledger,
+			SkipPersistence: true,
+		})
+	}
+	result := execute("call-pending-approval-1")
+	reused := execute("call-pending-approval-2")
+
+	if resolver.totalWrites() != 0 {
+		t.Fatalf("pending approval executed credential handler: %d", resolver.totalWrites())
+	}
+	if len(result.CredentialWrites) != 0 {
+		t.Fatalf("pending approval was reported as a successful credential write: %#v", result.CredentialWrites)
+	}
+	if len(reused.CredentialWrites) != 0 || len(reused.Rows) != 1 || reused.Rows[0].Status != "reused" {
+		t.Fatalf("reused pending approval was treated as a successful write: %#v", reused)
+	}
+	if len(result.Rows) != 1 || result.Rows[0].Status != "success" || !strings.Contains(result.Rows[0].OutputJSON, "pending_approval") {
+		t.Fatalf("unexpected pending approval tool result: %#v", result.Rows)
+	}
+	serialized := result.Rows[0].InputJSON + result.Rows[0].OutputJSON + result.Rows[0].ErrorJSON +
+		result.ToolResults[0].OutputJSON + result.ToolResults[0].Error + result.ExecutedToolCalls[0].ArgumentsJSON
+	if strings.Contains(serialized, secret) {
+		t.Fatalf("pending approval result leaked plaintext: %s", serialized)
+	}
+	if !strings.Contains(result.ExecutedToolCalls[0].ArgumentsJSON, "{{secret_ref:") {
+		t.Fatalf("model-visible pending call lost its opaque secret ref: %s", result.ExecutedToolCalls[0].ArgumentsJSON)
 	}
 }
 

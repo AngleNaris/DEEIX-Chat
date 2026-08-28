@@ -510,7 +510,7 @@ func (s *Service) deleteFile(ctx context.Context, userID uint, fileID string, op
 		if errors.Is(err, repository.ErrConflict) {
 			return nil, false, s.errFileInUse()
 		}
-		return nil, false, err
+		return nil, false, s.mapRepositoryError(err)
 	}
 	if shouldRemovePhysical {
 		store, storeErr := s.openObjectStore(ctx)
@@ -544,7 +544,8 @@ func (s *Service) RenameFile(ctx context.Context, userID uint, fileID string, fi
 	if normalizedName == "" {
 		return nil, s.errInvalidFileName()
 	}
-	return s.repo.RenameFileObjectByID(ctx, userID, normalizedFileID, normalizedName)
+	item, err := s.repo.RenameFileObjectByID(ctx, userID, normalizedFileID, normalizedName)
+	return item, s.mapRepositoryError(err)
 }
 
 // UpdateFileRagOptOut 更新用户文件的 RAG 检索开关。
@@ -553,7 +554,8 @@ func (s *Service) UpdateFileRagOptOut(ctx context.Context, userID uint, fileID s
 	if normalizedFileID == "" {
 		return nil, s.errInvalidFileReference()
 	}
-	return s.repo.UpdateFileObjectRagOptOut(ctx, userID, normalizedFileID, ragOptOut)
+	item, err := s.repo.UpdateFileObjectRagOptOut(ctx, userID, normalizedFileID, ragOptOut)
+	return item, s.mapRepositoryError(err)
 }
 
 // ValidateImageFile 确认文件属于当前用户且可作为图片头像使用。
@@ -565,7 +567,7 @@ func (s *Service) ValidateImageFile(ctx context.Context, userID uint, fileID str
 
 	item, err := s.repo.GetActiveFileObjectByID(ctx, userID, normalizedFileID)
 	if err != nil {
-		return err
+		return s.mapRepositoryError(err)
 	}
 	if item.FileCategory == fileCategoryImage {
 		return nil
@@ -586,7 +588,7 @@ func (s *Service) OpenFileContent(ctx context.Context, userID uint, fileID strin
 
 	item, err := s.repo.GetActiveFileObjectByID(ctx, userID, normalizedFileID)
 	if err != nil {
-		return nil, err
+		return nil, s.mapRepositoryError(err)
 	}
 
 	store, err := s.openObjectStore(ctx)
@@ -692,6 +694,13 @@ func (s *Service) errInvalidFileName() error {
 
 func (s *Service) errFileNotFound() error {
 	return pickError(s.errors.FileNotFound, "file not found")
+}
+
+func (s *Service) mapRepositoryError(err error) error {
+	if errors.Is(err, repository.ErrNotFound) {
+		return s.errFileNotFound()
+	}
+	return err
 }
 
 func (s *Service) errFileInUse() error {

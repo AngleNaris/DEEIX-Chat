@@ -171,6 +171,7 @@ type ConversationTraceRepository interface {
 	CreateConversationToolCall(ctx context.Context, item *domainconversation.ToolCall) error
 	CreateConversationToolCalls(ctx context.Context, items []domainconversation.ToolCall) error
 	UpdateConversationToolCallPayload(ctx context.Context, userID uint, conversationID uint, runID string, item domainconversation.ToolCall) error
+	ListConversationToolCallsByMessageIDs(ctx context.Context, messageIDs []uint) ([]domainconversation.ToolCall, error)
 	ListConversationToolCallsByRunID(ctx context.Context, userID uint, conversationID uint, runID string) ([]domainconversation.ToolCall, error)
 	// ListConversationToolCallsByRunIDPrefix 按运行 ID 前缀查询工具调用行（EventScope=tool_call），
 	// 供群组重试时重建工具幂等账本（同一逻辑步骤的全部尝试共享前缀）。

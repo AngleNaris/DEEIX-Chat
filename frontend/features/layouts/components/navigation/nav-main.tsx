@@ -4,6 +4,8 @@ import * as React from "react";
 import { useTranslations } from "next-intl";
 
 import { SidebarGroup, SidebarMenu, useSidebar } from "@/components/ui/sidebar";
+import { useAgentGroupFeature } from "@/features/agent-groups/context/agent-group-feature-context";
+import { filterAgentGroupNavigationItems } from "@/features/agent-groups/model/agent-group-feature";
 import {
   useLayoutNavigationSearch,
   useLayoutNavigationShortcuts,
@@ -18,8 +20,10 @@ export function NavMain({
   onCreateConversation: () => void;
 }) {
   const t = useTranslations("common.navigation");
+  const { enabled: agentGroupsEnabled } = useAgentGroupFeature();
   const { state, isMobile, setOpenMobile } = useSidebar();
   const isCollapsed = !isMobile && state === "collapsed";
+  const navigationItems = filterAgentGroupNavigationItems(NAVIGATION_ITEMS, agentGroupsEnabled);
 
   const search = useLayoutNavigationSearch({
     untitled: t("newChat"),
@@ -38,7 +42,7 @@ export function NavMain({
     <>
       <SidebarGroup className="px-2 py-2">
         <SidebarMenu className="gap-0.5">
-          {NAVIGATION_ITEMS.filter((item) => item.group === "primary").map((item) => (
+          {navigationItems.filter((item) => item.group === "primary").map((item) => (
             <NavMainItem
               key={item.id}
               item={item}
@@ -53,7 +57,7 @@ export function NavMain({
         </SidebarMenu>
 
         <SidebarMenu className="mt-4 gap-0.5">
-          {NAVIGATION_ITEMS.filter((item) => item.group === "secondary").map((item) => (
+          {navigationItems.filter((item) => item.group === "secondary").map((item) => (
             <NavMainItem
               key={item.id}
               item={item}

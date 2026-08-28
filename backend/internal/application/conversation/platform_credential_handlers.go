@@ -12,8 +12,8 @@ import (
 )
 
 // 凭据平台工具处理器：用户凭据是系统级功能（与提示词插入一致），
-// 默认启用（不依赖 platform_tools.enabled 开关）；写操作不进入 ask 审批
-// （审批摘要会回显参数，避免密钥在确认卡片中明文展示），始终直接执行并记录审计。
+// 默认启用（不依赖 platform_tools.enabled 开关）；写操作遵循用户的 auto/ask 审批模式，
+// ask 记录只保留进程内 secret_ref，确认卡片永不展示密钥明文。
 // 模型上下文只见凭据描述；执行时通过 {{credential: name}} 占位符在工具调用层展开。
 
 // platformCredentialUnavailableError 凭据服务未注入时返回。

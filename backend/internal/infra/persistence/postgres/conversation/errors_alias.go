@@ -1,8 +1,12 @@
 package conversation
 
-import "errors"
+import (
+	"errors"
+
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
+)
 
 var (
-	ErrFileNotFound         = errors.New("file not found")
+	ErrFileNotFound         = repository.ErrNotFound
 	ErrStorageQuotaExceeded = errors.New("storage quota exceeded")
 )

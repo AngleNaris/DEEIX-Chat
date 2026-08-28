@@ -108,7 +108,7 @@ func (h *Handler) GetConversationRole(c *gin.Context) {
 	}
 	item, err := h.service.GetConversationRole(c.Request.Context(), userID, publicID)
 	if err != nil {
-		if errors.Is(err, appconversation.ErrConversationProjectNotFound) {
+		if errors.Is(err, appconversation.ErrConversationRoleNotFound) {
 			response.Error(c, http.StatusNotFound, "conversation role not found")
 			return
 		}
@@ -161,7 +161,7 @@ func (h *Handler) UpdateConversationRole(c *gin.Context) {
 		Pinned:            req.Pinned,
 	})
 	if err != nil {
-		if errors.Is(err, appconversation.ErrConversationProjectNotFound) {
+		if errors.Is(err, appconversation.ErrConversationRoleNotFound) {
 			response.Error(c, http.StatusNotFound, "conversation role not found")
 			return
 		}
@@ -191,7 +191,7 @@ func (h *Handler) DeleteConversationRole(c *gin.Context) {
 		return
 	}
 	if err = h.service.DeleteConversationRole(c.Request.Context(), userID, publicID); err != nil {
-		if errors.Is(err, appconversation.ErrConversationProjectNotFound) {
+		if errors.Is(err, appconversation.ErrConversationRoleNotFound) {
 			response.Error(c, http.StatusNotFound, "conversation role not found")
 			return
 		}
@@ -215,6 +215,7 @@ func (h *Handler) DeleteConversationRole(c *gin.Context) {
 // @Security BearerAuth
 // @Param body body ReorderConversationRolesRequest true "角色排序"
 // @Success 200 {object} ErrorDoc
+// @Failure 404 {object} ErrorDoc
 // @Failure 500 {object} ErrorDoc
 // @Router /conversation-roles/reorder [post]
 func (h *Handler) ReorderConversationRoles(c *gin.Context) {
@@ -225,6 +226,10 @@ func (h *Handler) ReorderConversationRoles(c *gin.Context) {
 		return
 	}
 	if err := h.service.ReorderConversationRoles(c.Request.Context(), userID, req.RoleIDs); err != nil {
+		if errors.Is(err, appconversation.ErrConversationRoleNotFound) {
+			response.Error(c, http.StatusNotFound, "conversation role not found")
+			return
+		}
 		response.Error(c, http.StatusInternalServerError, "reorder conversation roles failed")
 		return
 	}

@@ -17,6 +17,7 @@ func NewModule(handler *Handler) *Module {
 // RegisterRoutes 注册平台工具路由（需要登录）。
 func (m *Module) RegisterRoutes(authGroup *gin.RouterGroup) {
 	g := authGroup.Group("/platform-tools/approvals")
+	g.GET("/:approval_id", m.Handler.GetApproval)
 	g.POST("/:approval_id/approve", m.Handler.Approve)
 	g.POST("/:approval_id/reject", m.Handler.Reject)
 }

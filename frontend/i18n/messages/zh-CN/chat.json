@@ -1084,6 +1084,10 @@
     "rejected": "已拒绝",
     "approvedHint": "已批准并执行",
     "rejectedHint": "已拒绝，未执行",
+    "failedHint": "已批准，但执行失败，请重新发起操作",
+    "checkingHint": "正在确认批准状态",
+    "expiredHint": "已因超时或服务重启失效，请重新发起操作",
+    "expired": "该批准已失效，请重新发起操作",
     "authRequired": "请先登录",
     "approveFailed": "批准失败",
     "rejectFailed": "拒绝失败"

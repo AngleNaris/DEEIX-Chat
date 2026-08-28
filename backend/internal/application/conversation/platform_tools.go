@@ -64,7 +64,7 @@ type platformToolEntry struct {
 // platformToolRegistry 返回平台工具注册表（读 + 写）。
 func platformToolRegistry() map[string]platformToolEntry {
 	return map[string]platformToolEntry{
-		// ── 凭据管理（系统级，默认启用；写操作不走 ask 审批，避免密钥在确认卡片回显）──
+		// ── 凭据管理（系统级，默认启用；写操作走统一 auto/ask 流程，确认记录只保留密钥引用）──
 		"credential_list": {
 			definition: llm.ToolDefinition{
 				Name: "credential_list",
@@ -1045,13 +1045,39 @@ func (s *Service) executePlatformToolCall(ctx context.Context, entry platformToo
 	if entry.handler == nil {
 		return "", fmt.Errorf("platform tool %q has no handler", entry.definition.Name)
 	}
-	if entry.kind == platformToolWrite && !isCredentialPlatformTool(entry.definition.Name) {
+	executionToolName := strings.TrimSpace(input.ToolName)
+	if executionToolName == "" {
+		executionToolName = strings.TrimSpace(entry.definition.Name)
+	}
+	if entry.kind == platformToolWrite {
 		approval, err := s.resolveWriteApprovalMode(ctx, input.UserID)
 		if err != nil {
 			return "", err
 		}
 		if approval == platformToolsWriteApprovalAsk {
-			record := s.platformApprovals.create(input.UserID, input.ConversationID, input.RequestID, entry, input.ToolName, input.ArgumentsJSON)
+			argumentsJSON, credentialSecrets, credentialSecretRefs, protectErr := input.ToolRuntime.protectCredentialApprovalArguments(
+				input.UserID,
+				input.ConversationID,
+				input.RunID,
+				executionToolName,
+				input.ArgumentsJSON,
+			)
+			if protectErr != nil {
+				return "", protectErr
+			}
+			record := s.platformApprovals.createProtected(
+				input.UserID,
+				input.ConversationID,
+				input.MessageID,
+				input.RequestID,
+				input.RunID,
+				input.ToolCallID,
+				entry,
+				executionToolName,
+				argumentsJSON,
+				credentialSecrets,
+				credentialSecretRefs,
+			)
 			return fmt.Sprintf(
 				`{"status":"pending_approval","approval_id":%q,"message":"write operation submitted for user approval","tool":%q}`,
 				record.ID,
@@ -1062,7 +1088,20 @@ func (s *Service) executePlatformToolCall(ctx context.Context, entry platformToo
 
 	limit := s.resolvePlatformToolConcurrency()
 	return s.executeWithToolLimiter(ctx, limit, func() (string, error) {
-		argumentsJSON := s.expandCredentialRefsInJSON(ctx, input.UserID, input.ArgumentsJSON)
+		argumentsJSON := input.ArgumentsJSON
+		if isCredentialWritePlatformTool(executionToolName) {
+			var err error
+			argumentsJSON, err = input.ToolRuntime.expandCredentialSecretValueInJSON(
+				input.UserID,
+				input.ConversationID,
+				input.RunID,
+				argumentsJSON,
+			)
+			if err != nil {
+				return "", err
+			}
+		}
+		argumentsJSON = s.expandCredentialRefsInJSON(ctx, input.UserID, argumentsJSON)
 		return entry.handler(s, ctx, platformToolCallContext{
 			UserID:         input.UserID,
 			ConversationID: input.ConversationID,
@@ -1070,6 +1109,16 @@ func (s *Service) executePlatformToolCall(ctx context.Context, entry platformToo
 			Arguments:      json.RawMessage(strings.TrimSpace(argumentsJSON)),
 		})
 	})
+}
+
+func isPendingPlatformApprovalOutput(output string) bool {
+	var payload struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal([]byte(output), &payload); err != nil {
+		return false
+	}
+	return strings.TrimSpace(payload.Status) == "pending_approval"
 }
 
 func (s *Service) resolvePlatformToolConcurrency() int {
@@ -1096,7 +1145,7 @@ func (s *Service) resolveWriteApprovalMode(ctx context.Context, userID uint) (st
 	return mode, nil
 }
 
-// isCredentialPlatformTool 判断是否为凭据管理工具（系统级，始终直执行）。
+// isCredentialPlatformTool 判断是否为凭据管理工具（系统级，默认启用）。
 func isCredentialPlatformTool(toolName string) bool {
 	return strings.HasPrefix(strings.TrimSpace(toolName), "credential_")
 }

@@ -1084,6 +1084,10 @@
     "rejected": "Rejected",
     "approvedHint": "Approved and executed",
     "rejectedHint": "Rejected, not executed",
+    "failedHint": "Approved, but execution failed. Request the operation again.",
+    "checkingHint": "Checking approval status",
+    "expiredHint": "Expired after timeout or service restart. Request the operation again.",
+    "expired": "This approval has expired. Request the operation again.",
     "authRequired": "Sign in required",
     "approveFailed": "Approval failed",
     "rejectFailed": "Reject failed"

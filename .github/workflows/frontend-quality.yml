@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - dev
+      - custom
     paths:
       - "backend/**"
       - "frontend/**"
@@ -20,6 +21,7 @@ on:
     branches:
       - main
       - dev
+      - custom
     paths:
       - "backend/**"
       - "frontend/**"

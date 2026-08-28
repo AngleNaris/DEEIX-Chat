@@ -2,6 +2,7 @@ package conversation
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -62,6 +63,75 @@ func TestCanceledTraceSettlementPersistsCompleteReasoningForReload(t *testing.T)
 	}
 	if trace.UpstreamThink.Status != messageTraceStatusError {
 		t.Fatalf("reloaded reasoning status = %q, want %q", trace.UpstreamThink.Status, messageTraceStatusError)
+	}
+}
+
+func TestPlatformApprovalTerminalStateSurvivesServiceReload(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:trace_approval_reload?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := db.AutoMigrate(&persistencemodels.ChatRunEvent{}); err != nil {
+		t.Fatalf("migrate trace table: %v", err)
+	}
+
+	repo := persistenceconversation.NewRepo(db)
+	const pendingOutput = `{"status":"pending_approval","approval_id":"approval-reload","tool":"save_memory"}`
+	_, _, tracePayload := buildToolTrace([]model.ToolCall{{
+		ToolCallID: "call-reload",
+		ToolName:   "save_memory",
+		Status:     "success",
+		OutputJSON: pendingOutput,
+	}})
+	payloadJSON, err := json.Marshal(tracePayload)
+	if err != nil {
+		t.Fatalf("marshal trace payload: %v", err)
+	}
+	if err := repo.UpsertConversationMessageTrace(context.Background(), &model.MessageTrace{
+		MessageID:       71,
+		ConversationID:  37,
+		UserID:          19,
+		RunID:           "run-approval-reload",
+		TraceType:       messageTraceTypeTools,
+		Status:          messageTraceStatusCompleted,
+		ContentMarkdown: "pending",
+		PayloadJSON:     string(payloadJSON),
+	}); err != nil {
+		t.Fatalf("persist trace: %v", err)
+	}
+	toolRow := model.ToolCall{
+		MessageID:      71,
+		ConversationID: 37,
+		UserID:         19,
+		RunID:          "run-approval-reload",
+		ToolCallID:     "call-reload",
+		ToolName:       "save_memory",
+		Status:         "success",
+		OutputJSON:     `{"approval_id":"approval-reload","status":"approved","tool":"save_memory"}`,
+	}
+	if err := repo.CreateConversationToolCall(context.Background(), &toolRow); err != nil {
+		t.Fatalf("persist tool call: %v", err)
+	}
+
+	cfg := config.Config{ProcessTraceEnabled: true, ProcessTraceVisibleToUser: true}
+	reloaded := []model.Message{{ID: 71, Role: "assistant"}}
+	if err := (&Service{cfg: config.NewRuntime(cfg), repo: repo}).hydrateMessageProcessTraces(context.Background(), reloaded); err != nil {
+		t.Fatalf("hydrate persisted trace: %v", err)
+	}
+	if reloaded[0].ProcessTrace == nil || reloaded[0].ProcessTrace.Tools == nil {
+		t.Fatalf("missing reloaded tools trace: %#v", reloaded[0].ProcessTrace)
+	}
+	var hydrated struct {
+		ToolCalls []struct {
+			OutputDetail string `json:"output_detail"`
+		} `json:"tool_calls"`
+	}
+	if err := json.Unmarshal([]byte(reloaded[0].ProcessTrace.Tools.PayloadJSON), &hydrated); err != nil {
+		t.Fatalf("decode hydrated tools trace: %v", err)
+	}
+	if len(hydrated.ToolCalls) != 1 || !strings.Contains(hydrated.ToolCalls[0].OutputDetail, `"status":"approved"`) ||
+		strings.Contains(hydrated.ToolCalls[0].OutputDetail, "pending_approval") {
+		t.Fatalf("terminal approval was not reconciled after reload: %+v", hydrated.ToolCalls)
 	}
 }
 

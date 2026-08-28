@@ -19,6 +19,10 @@ import {
   toBranchKey,
 } from "@/features/chat/model/chat-thread";
 import { sanitizeConversationOptions } from "@/features/chat/model/conversation-options";
+import {
+  resolveAgentGroupSubmissionTarget,
+  resolveConversationSubmissionModels,
+} from "@/features/chat/model/conversation-request-model";
 import { resolveImageEditSubmissionAttachments } from "@/features/chat/model/image-edit-submit";
 import { buildMediaImagePreviewMarkdown } from "@/features/chat/model/media-image-preview";
 import {
@@ -218,6 +222,7 @@ type QueuedChatSubmission = BranchScope & {
   parentRunID: string | null;
   conversationPublicID: string | null;
   conversation: ConversationDTO | null;
+  isAgentGroupConversation: boolean;
   parentMessagePublicID: string | null;
   content: string;
   attachments: PendingAttachment[];
@@ -877,10 +882,16 @@ export function useChatMessageSubmit({
           description: t("attachmentsTruncatedDescription", { count: maxFilesPerMessage }),
         });
       }
-      const modelGuardConversation = queuedSubmission?.conversation ?? activeConversationRef.current;
-      const isAgentGroupTarget = modelGuardConversation
-        ? Boolean(modelGuardConversation.agentGroupID?.trim())
-        : isAgentGroupConversation;
+      const isAgentGroupTarget = queuedSubmission
+        ? queuedSubmission.isAgentGroupConversation
+        : resolveAgentGroupSubmissionTarget(
+            activeConversationRef.current,
+            isAgentGroupConversation,
+          );
+      const submissionModels = resolveConversationSubmissionModels(
+        requestPlatformModelName,
+        isAgentGroupTarget,
+      );
       const sanitizedOptions = sanitizeConversationOptions(requestOptions);
       // 连续改图（ChatGPT 式）：仅对支持 image_edit 的模型，把「上一张 AI 生成图」合成进提交附件。
       // 只影响本次提交载荷，不写入 composer 附件 state（不持久化、不参与清空/恢复逻辑）。
@@ -979,7 +990,7 @@ export function useChatMessageSubmit({
           tempUserPublicID,
           tempAssistantPublicID,
           runID: clientRunID,
-          platformModelName: isAgentGroupTarget ? "" : requestPlatformModelName,
+          platformModelName: submissionModels.optimisticMessageModel,
           parentPublicID: pendingParentPublicID,
           sourcePublicID: resolvedSourcePublicID,
           branchReason: resolvedBranchReason,
@@ -1050,7 +1061,7 @@ export function useChatMessageSubmit({
 
         if (!targetConversationID) {
           // 群组会话创建时不携带请求级模型：模型由群组成员配置推断（与发送消息一致），后端禁止请求级覆盖。
-          const created = await prependNewConversation(isAgentGroupTarget ? "" : requestPlatformModelName);
+          const created = await prependNewConversation(submissionModels.createConversationModel);
           if (streamAbortController.signal.aborted) {
             throw new DOMException("Aborted", "AbortError");
           }
@@ -1143,7 +1154,7 @@ export function useChatMessageSubmit({
           ? resolveVideoExtensionOptions(sanitizedOptions)
           : sanitizedOptions;
         const commonStreamPayload = {
-          model: requestPlatformModelName,
+          model: submissionModels.streamRequestModel,
           options: Object.keys(effectiveOptions).length > 0 ? effectiveOptions : undefined,
           clientRunID: clientRunID,
           fileIDs: resolvedEffectiveAttachments.length > 0 ? resolvedEffectiveAttachments.map((item) => item.fileID) : undefined,
@@ -1758,6 +1769,10 @@ export function useChatMessageSubmit({
           ...targetBranchScope,
           conversationPublicID: targetConversationPublicID,
           conversation: targetConversation,
+          isAgentGroupConversation: resolveAgentGroupSubmissionTarget(
+            targetConversation,
+            isAgentGroupConversation,
+          ),
           parentMessagePublicID,
           content,
           attachments: currentAttachments,
@@ -1782,6 +1797,7 @@ export function useChatMessageSubmit({
     currentLeafMessage?.status,
     draft,
     htmlVisualPromptEnabled,
+    isAgentGroupConversation,
     options,
     selectedPlatformModelName,
     selectedPrompts,

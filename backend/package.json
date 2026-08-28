@@ -7,6 +7,7 @@
     "check": "make check-version && go vet ./...",
     "clean": "rm -rf ../.cache/deeix-chat",
     "dev": "make run",
-    "test": "make test"
+    "test": "make test",
+    "test:agent-group-contract": "go test ./internal/domain/conversation ./internal/transport/http/conversation -run \"AgentGroup.*Model\" -count=1"
   }
 }

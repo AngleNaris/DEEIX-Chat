@@ -145,6 +145,12 @@ func Migrate(db *gorm.DB) error {
 	if err := migrateUserMemoryUniqueIndex(db); err != nil {
 		return err
 	}
+	if err := migrateCredentialNameUniqueIndex(db); err != nil {
+		return err
+	}
+	if err := migrateAgentGroupRetryRequestIndex(db); err != nil {
+		return err
+	}
 	if err := invalidateUnsignedFileEmbeddings(db); err != nil {
 		return err
 	}
@@ -152,6 +158,25 @@ func Migrate(db *gorm.DB) error {
 		return err
 	}
 	return backfillUsageLedgerBillingAt(db)
+}
+
+func migrateCredentialNameUniqueIndex(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&model.Credential{}) {
+		return nil
+	}
+	const (
+		legacyIndex = "idx_chat_credentials_user_name"
+		scopedIndex = "idx_chat_credentials_user_name_v2"
+	)
+	if !db.Migrator().HasIndex(&model.Credential{}, scopedIndex) {
+		if err := db.Migrator().CreateIndex(&model.Credential{}, scopedIndex); err != nil {
+			return err
+		}
+	}
+	if db.Migrator().HasIndex(&model.Credential{}, legacyIndex) {
+		return db.Migrator().DropIndex(&model.Credential{}, legacyIndex)
+	}
+	return nil
 }
 
 func migrateUserMemoryUniqueIndex(db *gorm.DB) error {
@@ -169,6 +194,25 @@ func migrateUserMemoryUniqueIndex(db *gorm.DB) error {
 	}
 	if db.Migrator().HasIndex(&model.UserMemory{}, legacyIndex) {
 		return db.Migrator().DropIndex(&model.UserMemory{}, legacyIndex)
+	}
+	return nil
+}
+
+func migrateAgentGroupRetryRequestIndex(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&model.AgentGroupStepAttempt{}) {
+		return nil
+	}
+	const (
+		legacyIndex = "idx_chat_agent_group_attempts_retry_request_id"
+		lookupIndex = "idx_chat_agent_group_attempts_retry_request_id_v2"
+	)
+	if !db.Migrator().HasIndex(&model.AgentGroupStepAttempt{}, lookupIndex) {
+		if err := db.Migrator().CreateIndex(&model.AgentGroupStepAttempt{}, lookupIndex); err != nil {
+			return err
+		}
+	}
+	if db.Migrator().HasIndex(&model.AgentGroupStepAttempt{}, legacyIndex) {
+		return db.Migrator().DropIndex(&model.AgentGroupStepAttempt{}, legacyIndex)
 	}
 	return nil
 }

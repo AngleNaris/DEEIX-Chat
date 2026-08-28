@@ -62,6 +62,54 @@ func TestUpdateArtifactAlsoUpdatesActiveShareTitle(t *testing.T) {
 	}
 }
 
+func TestArtifactShareLifecycleUsesSQLitePortableTimestamps(t *testing.T) {
+	db := openArtifactSQLiteTestDB(t)
+	artifact := model.Artifact{
+		ArtifactPublicID: "artifact-share-lifecycle",
+		UserID:           7,
+		Kind:             "html",
+		Title:            "Artifact",
+		Code:             "<p>artifact</p>",
+	}
+	if err := db.Create(&artifact).Error; err != nil {
+		t.Fatalf("create artifact: %v", err)
+	}
+	oldShare := model.ArtifactShare{
+		ShareID:       "share-old",
+		ArtifactID:    artifact.ID,
+		UserID:        artifact.UserID,
+		TitleSnapshot: artifact.Title,
+		Status:        "active",
+	}
+	if err := db.Create(&oldShare).Error; err != nil {
+		t.Fatalf("create old share: %v", err)
+	}
+
+	repo := NewRepo(db)
+	replacement := &domainartifact.ArtifactShare{ShareID: "share-new", TitleSnapshot: artifact.Title}
+	if err := repo.ReplaceActiveArtifactShare(context.Background(), artifact.UserID, artifact.ID, replacement); err != nil {
+		t.Fatalf("replace active share: %v", err)
+	}
+	var revokedOld model.ArtifactShare
+	if err := db.First(&revokedOld, oldShare.ID).Error; err != nil {
+		t.Fatalf("load old share: %v", err)
+	}
+	if revokedOld.Status != "revoked" || revokedOld.RevokedAt == nil {
+		t.Fatalf("old share was not revoked: %#v", revokedOld)
+	}
+
+	if err := repo.RevokeArtifactShare(context.Background(), artifact.UserID, replacement.ShareID); err != nil {
+		t.Fatalf("revoke replacement share: %v", err)
+	}
+	var revokedNew model.ArtifactShare
+	if err := db.First(&revokedNew, replacement.ID).Error; err != nil {
+		t.Fatalf("load replacement share: %v", err)
+	}
+	if revokedNew.Status != "revoked" || revokedNew.RevokedAt == nil {
+		t.Fatalf("replacement share was not revoked: %#v", revokedNew)
+	}
+}
+
 func openArtifactSQLiteTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 

@@ -3,13 +3,16 @@ package main
 import (
 	"context"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -25,6 +28,7 @@ type Meta struct {
 	ConversationID uint
 	RequestID      string
 	CallID         string
+	Timestamp      int64
 }
 
 // metaTimestampWindow _meta 签名的允许时钟偏移（短期签名，防重放）。
@@ -85,6 +89,7 @@ func ParseMeta(raw []byte, hmacKey string) (*Meta, error) {
 	if drift := time.Since(time.Unix(ts, 0)); drift < -metaTimestampWindow || drift > metaTimestampWindow {
 		return nil, fmt.Errorf("_meta timestamp expired")
 	}
+	meta.Timestamp = ts
 	sig, _ := m["sig"].(string)
 	expected := metaSignature(hmacKey, meta.UserID, meta.ConversationID, meta.RequestID, meta.CallID, ts)
 	if sig == "" || subtle.ConstantTimeCompare([]byte(sig), []byte(expected)) != 1 {
@@ -133,6 +138,7 @@ type Session struct {
 	activeOps  int
 	reclaiming bool
 	reclaimed  chan struct{}
+	drained    chan struct{}
 	tasks      map[string]*BackgroundTask // 后台任务
 }
 
@@ -144,15 +150,30 @@ type BackgroundTask struct {
 	StartedAt time.Time
 }
 
-// SessionManager 管理全部会话：按 scope 懒创建、租约回收。
-type SessionManager struct {
-	cfg  *Config
-	d    *dockerClient
-	mu   sync.Mutex
-	live map[string]*Session // scope -> session
+type sessionDocker interface {
+	inspectContainerConfig(context.Context, string) (*inspectedContainerConfig, bool, error)
+	createContainer(context.Context, containerSpec, string) error
+	renameContainer(context.Context, string, string) error
+	removeContainer(context.Context, string) error
+	removeVolume(string) error
+	execInContainer(context.Context, string, []string, string, []byte, time.Duration, int) (*execResult, error)
 }
 
-func NewSessionManager(cfg *Config, d *dockerClient) *SessionManager {
+var errSessionManagerShuttingDown = errors.New("sandbox session manager is shutting down")
+
+const shutdownCleanupTimeout = 10 * time.Second
+
+// SessionManager 管理全部会话：按 scope 懒创建、租约回收。
+type SessionManager struct {
+	cfg          *Config
+	d            sessionDocker
+	mu           sync.Mutex
+	live         map[string]*Session // scope -> session
+	stopping     bool
+	shutdownDone chan struct{}
+}
+
+func NewSessionManager(cfg *Config, d sessionDocker) *SessionManager {
 	return &SessionManager{cfg: cfg, d: d, live: make(map[string]*Session)}
 }
 
@@ -193,6 +214,10 @@ func (m *SessionManager) GetOrCreate(ctx context.Context, scope string) (*Sessio
 	}
 	for {
 		m.mu.Lock()
+		if m.stopping {
+			m.mu.Unlock()
+			return nil, false, nil, errSessionManagerShuttingDown
+		}
 		if s, ok := m.live[scope]; ok {
 			s.mu.Lock()
 			if s.reclaiming {
@@ -262,6 +287,10 @@ func releaseSessionOperation(s *Session) func() {
 			if s.activeOps > 0 {
 				s.activeOps--
 			}
+			if s.activeOps == 0 && s.drained != nil {
+				close(s.drained)
+				s.drained = nil
+			}
 			s.LastUsedAt = time.Now()
 			s.mu.Unlock()
 		})
@@ -282,6 +311,10 @@ func (m *SessionManager) acquireExisting(ctx context.Context, scope string) (*Se
 	}
 	for {
 		m.mu.Lock()
+		if m.stopping {
+			m.mu.Unlock()
+			return nil, nil, false, errSessionManagerShuttingDown
+		}
 		s, ok := m.live[scope]
 		if !ok {
 			m.mu.Unlock()
@@ -344,12 +377,17 @@ func (m *SessionManager) ensureSessionContainer(ctx context.Context, s *Session)
 	if err != nil {
 		return err
 	}
+	markers, cleanupMarkers, err := prepareSessionBindMarkers(spec)
+	if err != nil {
+		return err
+	}
+	defer cleanupMarkers()
 	actual, exists, err := m.d.inspectContainerConfig(ctx, s.Container)
 	if err != nil {
 		return err
 	}
 	if !exists {
-		return m.d.createContainer(ctx, spec, volumeName)
+		return m.createVerifiedSessionContainer(ctx, spec, volumeName, markers)
 	}
 	if actual.Config != nil && strings.TrimSpace(actual.Config.Image) != "" {
 		s.Image = actual.Config.Image
@@ -357,14 +395,14 @@ func (m *SessionManager) ensureSessionContainer(ctx context.Context, s *Session)
 	}
 	desiredConfig, desiredHost := buildContainerConfig(spec, volumeName)
 	if containerConfigMatches(actual, desiredConfig, desiredHost) {
-		return nil
+		return m.verifySessionBindMarkers(ctx, spec.Name, markers)
 	}
 	slog.Info("recreate sandbox container with current isolation constraints", "container", s.Container)
 	backupName := s.Container + "-migration-" + strconv.FormatInt(time.Now().UnixNano(), 36)
 	if err := m.d.renameContainer(ctx, s.Container, backupName); err != nil {
 		return err
 	}
-	if err := m.d.createContainer(ctx, spec, volumeName); err != nil {
+	if err := m.createVerifiedSessionContainer(ctx, spec, volumeName, markers); err != nil {
 		if restoreErr := m.d.renameContainer(ctx, backupName, s.Container); restoreErr != nil {
 			return fmt.Errorf("recreate sandbox container: %w; restore previous container name: %v", err, restoreErr)
 		}
@@ -382,13 +420,13 @@ func (m *SessionManager) sessionContainerSpec(s *Session) (containerSpec, string
 	}
 	// 宿主侧预先创建本会话的共享子目录：容器只 bind 挂载这一份，
 	// 其他租户目录在容器内物理不可见（P0-05）。0755 允许后端只读挂载读取导出文件。
-	sharedHostSub := filepath.Join(m.cfg.SharedHostDir, s.Scope)
-	if err := os.MkdirAll(sharedHostSub, 0o755); err != nil {
-		return containerSpec{}, "", fmt.Errorf("create shared scope dir %s: %w", sharedHostSub, err)
+	sharedHostSub, err := ensureDirectoryWithoutSymlinks(m.cfg.SharedHostDir, s.Scope)
+	if err != nil {
+		return containerSpec{}, "", fmt.Errorf("create shared scope dir: %w", err)
 	}
-	importsHostSub := filepath.Join(m.cfg.ImportsHostDir, s.Scope)
-	if err := os.MkdirAll(importsHostSub, 0o755); err != nil {
-		return containerSpec{}, "", fmt.Errorf("create imports scope dir %s: %w", importsHostSub, err)
+	importsHostSub, err := ensureDirectoryWithoutSymlinks(m.cfg.ImportsHostDir, s.Scope)
+	if err != nil {
+		return containerSpec{}, "", fmt.Errorf("create imports scope dir: %w", err)
 	}
 	return containerSpec{
 		Name:          s.Container,
@@ -401,11 +439,142 @@ func (m *SessionManager) sessionContainerSpec(s *Session) (containerSpec, string
 		CacheMount:    s.CacheMount,
 		CacheVol:      s.CacheVol,
 		SharedBind:    sharedHostSub,
-		SharedTarget:  filepath.Join(m.cfg.SharedMountDir, s.Scope),
+		SharedTarget:  path.Join(m.cfg.SharedMountDir, s.Scope),
 		ImportsBind:   importsHostSub,
-		ImportsTarget: filepath.Clean(m.cfg.ImportsMountDir),
+		ImportsTarget: path.Clean(m.cfg.ImportsMountDir),
 		Network:       m.cfg.NetworkMode,
 	}, "deeix-sandbox-ws-" + s.Scope, nil
+}
+
+func ensureDirectoryWithoutSymlinks(root, rel string) (string, error) {
+	cleanRoot := filepath.Clean(root)
+	if strings.TrimSpace(root) == "" || !filepath.IsAbs(cleanRoot) {
+		return "", fmt.Errorf("directory root must be absolute")
+	}
+	if err := ensureHostDirectoryWithoutSymlinks(cleanRoot); err != nil {
+		return "", err
+	}
+
+	cleanRel := filepath.Clean(rel)
+	if cleanRel == "." || filepath.IsAbs(cleanRel) || cleanRel == ".." || strings.HasPrefix(cleanRel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("directory is outside root")
+	}
+	current := cleanRoot
+	for _, part := range strings.Split(cleanRel, string(filepath.Separator)) {
+		current = filepath.Join(current, part)
+		if err := ensureHostDirectoryEntry(current); err != nil {
+			return "", err
+		}
+	}
+	return current, nil
+}
+
+func ensureHostDirectoryWithoutSymlinks(path string) error {
+	clean := filepath.Clean(path)
+	parent := filepath.Dir(clean)
+	if parent != clean {
+		if err := ensureHostDirectoryWithoutSymlinks(parent); err != nil {
+			return err
+		}
+	}
+	return ensureHostDirectoryEntry(clean)
+}
+
+func ensureHostDirectoryEntry(path string) error {
+	info, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		if err := os.Mkdir(path, 0o755); err != nil {
+			return fmt.Errorf("create directory %s: %w", path, err)
+		}
+		info, err = os.Lstat(path)
+	}
+	if err != nil {
+		return fmt.Errorf("inspect directory %s: %w", path, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return fmt.Errorf("directory %s is not a regular directory", path)
+	}
+	return nil
+}
+
+type sessionBindMarker struct {
+	hostPath      string
+	containerPath string
+}
+
+// Docker 的 bind API 只接收路径，无法传递已打开的目录句柄。随机 marker 在创建前写入、
+// 启动后从容器内复验，可检测正常多用户调用能触发的路径替换；宿主或 MCP 进程被攻陷
+// 仍属于 docker.sock 的信任边界，不能由此检查兜底。
+func prepareSessionBindMarkers(spec containerSpec) ([]sessionBindMarker, func(), error) {
+	random := make([]byte, 16)
+	if _, err := rand.Read(random); err != nil {
+		return nil, func() {}, fmt.Errorf("generate bind marker: %w", err)
+	}
+	name := ".deeix-bind-check-" + hex.EncodeToString(random)
+	bindings := [][2]string{{spec.SharedBind, spec.SharedTarget}, {spec.ImportsBind, spec.ImportsTarget}}
+	markers := make([]sessionBindMarker, 0, len(bindings))
+	cleanup := func() {
+		for _, marker := range markers {
+			if err := os.Remove(marker.hostPath); err != nil && !os.IsNotExist(err) {
+				slog.Warn("remove sandbox bind marker", "path", marker.hostPath, "err", err)
+			}
+		}
+	}
+	for _, binding := range bindings {
+		before, err := os.Lstat(binding[0])
+		if err != nil || before.Mode()&os.ModeSymlink != 0 || !before.IsDir() {
+			cleanup()
+			return nil, func() {}, fmt.Errorf("inspect bind source %s: not a regular directory", binding[0])
+		}
+		marker := sessionBindMarker{
+			hostPath:      filepath.Join(binding[0], name),
+			containerPath: path.Join(binding[1], name),
+		}
+		file, err := os.OpenFile(marker.hostPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		if err != nil {
+			cleanup()
+			return nil, func() {}, fmt.Errorf("create bind marker %s: %w", marker.hostPath, err)
+		}
+		markers = append(markers, marker)
+		if closeErr := file.Close(); closeErr != nil {
+			cleanup()
+			return nil, func() {}, fmt.Errorf("close bind marker %s: %w", marker.hostPath, closeErr)
+		}
+		after, err := os.Lstat(binding[0])
+		if err != nil || after.Mode()&os.ModeSymlink != 0 || !os.SameFile(before, after) {
+			cleanup()
+			return nil, func() {}, fmt.Errorf("bind source changed while preparing %s", binding[0])
+		}
+	}
+	return markers, cleanup, nil
+}
+
+func (m *SessionManager) verifySessionBindMarkers(ctx context.Context, containerName string, markers []sessionBindMarker) error {
+	cmd := []string{"/bin/sh", "-c", `for marker; do [ -f "$marker" ] || exit 42; done`, "deeix-bind-check"}
+	for _, marker := range markers {
+		cmd = append(cmd, marker.containerPath)
+	}
+	result, err := m.d.execInContainer(ctx, containerName, cmd, "", nil, 10*time.Second, 1024)
+	if err != nil {
+		return fmt.Errorf("verify sandbox bind mounts: %w", err)
+	}
+	if result == nil || result.ExitCode != 0 {
+		return fmt.Errorf("verify sandbox bind mounts: marker mismatch")
+	}
+	return nil
+}
+
+func (m *SessionManager) createVerifiedSessionContainer(ctx context.Context, spec containerSpec, volumeName string, markers []sessionBindMarker) error {
+	if err := m.d.createContainer(ctx, spec, volumeName); err != nil {
+		return err
+	}
+	if err := m.verifySessionBindMarkers(ctx, spec.Name, markers); err != nil {
+		if removeErr := m.d.removeContainer(ctx, spec.Name); removeErr != nil {
+			return fmt.Errorf("%w; remove unverified container: %v", err, removeErr)
+		}
+		return err
+	}
+	return nil
 }
 
 func (m *SessionManager) createSessionContainer(ctx context.Context, s *Session) error {
@@ -413,7 +582,12 @@ func (m *SessionManager) createSessionContainer(ctx context.Context, s *Session)
 	if err != nil {
 		return err
 	}
-	return m.d.createContainer(ctx, spec, volumeName)
+	markers, cleanupMarkers, err := prepareSessionBindMarkers(spec)
+	if err != nil {
+		return err
+	}
+	defer cleanupMarkers()
+	return m.createVerifiedSessionContainer(ctx, spec, volumeName, markers)
 }
 
 // SharedDir 返回当前会话在共享目录中的专属子目录（mm 多模态工具可读取）。
@@ -646,20 +820,113 @@ func (m *SessionManager) sweepExports() {
 	}
 }
 
-// Shutdown removes live session containers while preserving workspace and cache volumes.
+// Shutdown stops admission, drains accepted operations, terminates registered task groups,
+// and removes live containers while preserving workspace and cache volumes.
 func (m *SessionManager) Shutdown(ctx context.Context) {
 	m.mu.Lock()
+	if m.stopping {
+		done := m.shutdownDone
+		m.mu.Unlock()
+		if done == nil {
+			return
+		}
+		select {
+		case <-done:
+		case <-ctx.Done():
+		}
+		return
+	}
+	m.stopping = true
+	m.shutdownDone = make(chan struct{})
+	done := m.shutdownDone
 	sessions := make([]*Session, 0, len(m.live))
 	for _, s := range m.live {
+		s.mu.Lock()
+		if !s.reclaiming {
+			s.reclaiming = true
+			s.reclaimed = make(chan struct{})
+		}
+		if s.activeOps > 0 && s.drained == nil {
+			s.drained = make(chan struct{})
+		}
+		s.mu.Unlock()
 		sessions = append(sessions, s)
 	}
 	m.mu.Unlock()
+	defer close(done)
+
 	for _, s := range sessions {
-		if err := m.d.removeContainer(ctx, s.Container); err != nil {
+		s.mu.Lock()
+		drained := s.drained
+		s.mu.Unlock()
+		if drained != nil {
+			select {
+			case <-drained:
+			case <-ctx.Done():
+				slog.Warn("shutdown timed out waiting for active sandbox operations", "container", s.Container, "err", ctx.Err())
+			}
+		}
+
+		m.terminateBackgroundTasks(s)
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), shutdownCleanupTimeout)
+		err := m.d.removeContainer(cleanupCtx, s.Container)
+		cancel()
+		if err != nil {
 			slog.Warn("shutdown container", "container", s.Container, "err", err)
+		}
+
+		m.mu.Lock()
+		s.mu.Lock()
+		if m.live[s.Scope] == s {
+			delete(m.live, s.Scope)
+		}
+		if s.reclaimed != nil {
+			close(s.reclaimed)
+			s.reclaimed = nil
+		}
+		if s.drained != nil {
+			close(s.drained)
+			s.drained = nil
+		}
+		s.mu.Unlock()
+		m.mu.Unlock()
+	}
+}
+
+func (m *SessionManager) terminateBackgroundTasks(s *Session) {
+	s.mu.Lock()
+	tasks := make([]*BackgroundTask, 0, len(s.tasks))
+	for _, task := range s.tasks {
+		if task != nil {
+			copyTask := *task
+			tasks = append(tasks, &copyTask)
+		}
+	}
+	s.tasks = make(map[string]*BackgroundTask)
+	s.mu.Unlock()
+
+	for _, task := range tasks {
+		if task.PID == "" {
 			continue
 		}
-		m.dropSession(s.Scope, s)
+		output := task.Output
+		if output == "" {
+			output = taskOutputPathFor(task.ID)
+		}
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), shutdownCleanupTimeout)
+		_, err := m.d.execInContainer(
+			cleanupCtx,
+			s.Container,
+			[]string{"/bin/sh", "-c", fmt.Sprintf("kill -TERM -- -%s 2>/dev/null; sleep 1; kill -KILL -- -%s 2>/dev/null; rm -f %s", shellQuote(task.PID), shellQuote(task.PID), shellQuote(output))},
+			"",
+			nil,
+			shutdownCleanupTimeout,
+			m.cfg.OutputLimitBytes,
+		)
+		cancel()
+		if err != nil {
+			slog.Warn("terminate background task during shutdown", "container", s.Container, "task_id", task.ID, "err", err)
+		}
 	}
 }
 

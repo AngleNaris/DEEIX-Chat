@@ -132,18 +132,11 @@ func (s *Service) DeleteAgentGroup(ctx context.Context, userID uint, publicID st
 	if err := s.requireEnabled(ctx); err != nil {
 		return err
 	}
-	group, err := s.repo.GetAgentGroupByPublicID(ctx, userID, publicID)
-	if err != nil {
-		return s.translateRepoError(err)
-	}
-	history, err := s.repo.CountAgentGroupHistory(ctx, group.ID)
-	if err != nil {
-		return err
-	}
-	if history > 0 {
+	err := s.repo.DeleteAgentGroupByPublicID(ctx, userID, publicID)
+	if errors.Is(err, repository.ErrConflict) {
 		return ErrAgentGroupHistoryExists
 	}
-	return s.translateRepoError(s.repo.DeleteAgentGroupByPublicID(ctx, userID, publicID))
+	return s.translateRepoError(err)
 }
 
 // AddAgentGroupMember 添加工作成员。
@@ -207,8 +200,8 @@ func (s *Service) UpdateAgentGroupMember(ctx context.Context, userID uint, group
 		return nil, ErrAgentGroupSupervisorProtected
 	}
 	patch := domainagentgroup.MemberPatch{
-		Enabled:         input.Enabled,
-		SortOrder:       input.SortOrder,
+		Enabled:   input.Enabled,
+		SortOrder: input.SortOrder,
 	}
 	if input.ModelOverride != nil {
 		value := strings.TrimSpace(*input.ModelOverride)
@@ -312,7 +305,7 @@ func (s *Service) ChangeAgentGroupSupervisor(ctx context.Context, userID uint, g
 func (s *Service) resolveRole(ctx context.Context, userID uint, publicID string) (*domainconversation.ConversationRole, error) {
 	role, err := s.roleReader.GetConversationRole(ctx, userID, publicID)
 	if err != nil {
-		if errors.Is(err, repository.ErrNotFound) {
+		if errors.Is(err, repository.ErrNotFound) || errors.Is(err, conversation.ErrConversationRoleNotFound) {
 			return nil, ErrAgentGroupRoleNotFound
 		}
 		return nil, err

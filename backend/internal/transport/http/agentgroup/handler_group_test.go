@@ -63,6 +63,31 @@ func TestResolveErrorMapsInvalidReasoningEffortToBadRequest(t *testing.T) {
 	}
 }
 
+func TestRetryAgentGroupRunStepRejectsInvalidRetryRequestID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tests := map[string]string{
+		"missing":   `{}`,
+		"blank":     `{"retryRequestID":"   "}`,
+		"oversized": `{"retryRequestID":"` + string(bytes.Repeat([]byte("x"), 65)) + `"}`,
+	}
+	for name, body := range tests {
+		t.Run(name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Set(middleware.ContextKeyUserID, uint(42))
+			c.Params = gin.Params{{Key: "run_id", Value: "run-1"}, {Key: "step_id", Value: "step-1"}}
+			c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/agent-group-runs/run-1/steps/step-1/retry", bytes.NewBufferString(body))
+			c.Request.Header.Set("Content-Type", "application/json")
+
+			(&Handler{}).RetryAgentGroupRunStep(c)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400, body=%s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
 // 群组已从项目绑定中拆除（§C1）：列表接口不再要求 projectID query 参数，
 // 无参数时返回当前用户全部群组 —— 回归测试锁定此行为。
 func TestListAgentGroupsWithoutProjectID(t *testing.T) {

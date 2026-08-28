@@ -8,12 +8,23 @@ import { FilePenLine, Loader2, ShieldCheck, ShieldX } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   approvePlatformToolWrite,
-  parsePendingApprovalFromOutput,
+  getPlatformToolWriteApproval,
   rejectPlatformToolWrite,
-  type PlatformToolApproval,
 } from "@/shared/api/platform-tools";
+import {
+  parsePlatformToolApprovalFromOutput,
+  type PlatformToolApproval,
+} from "@/shared/model/platform-tool-approval";
+import { ApiError } from "@/shared/api/http-client";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 import { useLocalizedErrorMessage } from "@/i18n/use-localized-error";
+import {
+  collectPendingPlatformApprovalIDs,
+  initializePlatformApprovalDisplayStates,
+  resolvePlatformToolApprovalDisplayState,
+  resolvePlatformToolApprovalLookupFailure,
+  type PlatformToolApprovalDisplayState,
+} from "@/features/chat/model/platform-tool-approval-state";
 
 // ToolTraceCall 与 message-tool-trace 中的 trace 结构一致（buildToolTrace payload）。
 type ToolTraceCall = {
@@ -28,7 +39,7 @@ type ToolTraceCall = {
   output_detail?: string;
 };
 
-function parsePendingApprovals(payloadJson: string | undefined): { call: ToolTraceCall; approval: PlatformToolApproval }[] {
+function parseApprovals(payloadJson: string | undefined): { call: ToolTraceCall; approval: PlatformToolApproval }[] {
   if (!payloadJson) return [];
   try {
     const parsed = JSON.parse(payloadJson) as { tool_calls?: ToolTraceCall[] };
@@ -36,7 +47,7 @@ function parsePendingApprovals(payloadJson: string | undefined): { call: ToolTra
     const result: { call: ToolTraceCall; approval: PlatformToolApproval }[] = [];
     for (const call of parsed.tool_calls) {
       const output = call.output_detail || call.output || call.output_text || call.output_preview;
-      const approval = parsePendingApprovalFromOutput(output);
+      const approval = parsePlatformToolApprovalFromOutput(output);
       if (approval) {
         result.push({ call, approval });
       }
@@ -77,33 +88,93 @@ function summarizeArguments(call: ToolTraceCall): string {
 export function PlatformToolApprovalCard({ tracePayloadJson }: { tracePayloadJson?: string }) {
   const t = useTranslations("chat.platformTools");
   const resolveErrorMessage = useLocalizedErrorMessage();
-  const [handled, setHandled] = React.useState<Record<string, "approved" | "rejected">>({});
+  const [states, setStates] = React.useState<Record<string, PlatformToolApprovalDisplayState>>({});
   const [busy, setBusy] = React.useState<string | null>(null);
 
-  const pending = React.useMemo(() => parsePendingApprovals(tracePayloadJson), [tracePayloadJson]);
-  if (pending.length === 0) {
+  const approvals = React.useMemo(() => parseApprovals(tracePayloadJson), [tracePayloadJson]);
+  const pendingApprovalIDs = React.useMemo(
+    () => collectPendingPlatformApprovalIDs(approvals.map(({ approval }) => approval)),
+    [approvals],
+  );
+
+  React.useEffect(() => {
+    let cancelled = false;
+    setStates((previous) =>
+      initializePlatformApprovalDisplayStates(
+        approvals.map(({ approval }) => approval),
+        previous,
+      ),
+    );
+
+    if (pendingApprovalIDs.length === 0) return;
+
+    void (async () => {
+      const token = await resolveAccessToken();
+      await Promise.all(
+        pendingApprovalIDs.map(async (approvalID) => {
+          let state: PlatformToolApprovalDisplayState = "pending";
+          if (token) {
+            try {
+              const approval = await getPlatformToolWriteApproval(token, approvalID);
+              state = resolvePlatformToolApprovalDisplayState(approval?.status);
+            } catch (error) {
+              state = resolvePlatformToolApprovalLookupFailure(error instanceof ApiError ? error.status : undefined);
+            }
+          }
+          if (!cancelled) {
+            setStates((previous) => ({ ...previous, [approvalID]: state }));
+          }
+        }),
+      );
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [approvals, pendingApprovalIDs]);
+
+  if (approvals.length === 0) {
     return null;
   }
 
   const act = async (approvalID: string, approve: boolean) => {
     if (busy) return;
     setBusy(approvalID);
+    let token: string | null = null;
     try {
-      const token = await resolveAccessToken();
+      token = await resolveAccessToken();
       if (!token) {
         toast.error(t("authRequired"));
         return;
       }
       if (approve) {
         await approvePlatformToolWrite(token, approvalID);
-        setHandled((prev) => ({ ...prev, [approvalID]: "approved" }));
+        setStates((prev) => ({ ...prev, [approvalID]: "approved" }));
         toast.success(t("approved"));
       } else {
         await rejectPlatformToolWrite(token, approvalID);
-        setHandled((prev) => ({ ...prev, [approvalID]: "rejected" }));
+        setStates((prev) => ({ ...prev, [approvalID]: "rejected" }));
         toast.success(t("rejected"));
       }
     } catch (error) {
+      if (error instanceof ApiError && error.status === 404) {
+        setStates((prev) => ({ ...prev, [approvalID]: "expired" }));
+        toast.error(t("expired"));
+        return;
+      }
+      if (token) {
+        try {
+          const current = await getPlatformToolWriteApproval(token, approvalID);
+          setStates((prev) => ({
+            ...prev,
+            [approvalID]: resolvePlatformToolApprovalDisplayState(current?.status),
+          }));
+        } catch (lookupError) {
+          if (lookupError instanceof ApiError && lookupError.status === 404) {
+            setStates((prev) => ({ ...prev, [approvalID]: "expired" }));
+          }
+        }
+      }
       toast.error(approve ? t("approveFailed") : t("rejectFailed"), { description: resolveErrorMessage(error) });
     } finally {
       setBusy(null);
@@ -112,8 +183,8 @@ export function PlatformToolApprovalCard({ tracePayloadJson }: { tracePayloadJso
 
   return (
     <div className="mt-2 space-y-2">
-      {pending.map(({ call, approval }) => {
-        const state = handled[approval.approval_id];
+      {approvals.map(({ call, approval }) => {
+        const state = states[approval.approval_id] ?? "checking";
         const isBusy = busy === approval.approval_id;
         const target = summarizeArguments(call) || approval.tool;
         return (
@@ -130,14 +201,25 @@ export function PlatformToolApprovalCard({ tracePayloadJson }: { tracePayloadJso
                 </p>
               </div>
             </div>
-            {state ? (
+            {state === "checking" ? (
+              <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                <Loader2 className="size-3.5 animate-spin" />
+                {t("checkingHint")}
+              </div>
+            ) : state !== "pending" ? (
               <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
                 {state === "approved" ? (
                   <ShieldCheck className="size-3.5 text-emerald-500" strokeWidth={1.8} />
                 ) : (
                   <ShieldX className="size-3.5 text-muted-foreground" strokeWidth={1.8} />
                 )}
-                {state === "approved" ? t("approvedHint") : t("rejectedHint")}
+                {state === "approved"
+                  ? t("approvedHint")
+                  : state === "rejected"
+                    ? t("rejectedHint")
+                    : state === "failed"
+                      ? t("failedHint")
+                      : t("expiredHint")}
               </div>
             ) : (
               <div className="flex justify-end gap-1.5">

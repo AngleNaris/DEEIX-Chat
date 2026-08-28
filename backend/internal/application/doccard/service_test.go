@@ -2,8 +2,10 @@ package doccard
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	domaindoccard "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/doccard"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
@@ -71,5 +73,31 @@ func TestUpsertDocCardUpdateRejectsMissingCard(t *testing.T) {
 	}
 	if repo.upserted != nil {
 		t.Fatalf("missing update must not create a new card")
+	}
+}
+
+func TestCardViewJSONContract(t *testing.T) {
+	encoded, err := json.Marshal(NewCardView(domaindoccard.DocCard{
+		ID:           1,
+		CardPublicID: "card-1",
+		UserID:       7,
+		Title:        "title",
+		UpdatedAt:    time.Date(2026, time.August, 29, 12, 34, 56, 0, time.UTC),
+	}))
+	if err != nil {
+		t.Fatalf("marshal card view: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(encoded, &payload); err != nil {
+		t.Fatalf("unmarshal card view: %v", err)
+	}
+	if payload["card_id"] != "card-1" {
+		t.Fatalf("expected card_id contract, got %s", encoded)
+	}
+	for _, internal := range []string{"CardPublicID", "ID", "UserID"} {
+		if _, ok := payload[internal]; ok {
+			t.Fatalf("internal field %q leaked in %s", internal, encoded)
+		}
 	}
 }

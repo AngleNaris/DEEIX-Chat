@@ -16,7 +16,7 @@ import (
 type sandboxServer struct {
 	cfg    *Config
 	mgr    *SessionManager
-	d      *dockerClient
+	d      sessionDocker
 	policy OutboundPolicy // sandbox_download 出站策略（SSRF 防护）
 }
 

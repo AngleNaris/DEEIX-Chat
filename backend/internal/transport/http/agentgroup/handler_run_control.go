@@ -27,6 +27,8 @@ func mapRunControlError(err error) (int, string, string) {
 		return http.StatusConflict, "agent_group.run_not_abandonable", "agent group run is not abandonable"
 	case errors.Is(err, appconversation.ErrAgentGroupRunStateCorrupt):
 		return http.StatusInternalServerError, "agent_group.run_state_corrupt", "agent group run state is corrupt"
+	case errors.Is(err, appconversation.ErrAgentGroupRetryRequestIDRequired):
+		return http.StatusBadRequest, "agent_group.retry_request_id_required", "retry request id is required"
 	case errors.Is(err, appconversation.ErrAgentGroupCASConflict):
 		return http.StatusConflict, "agent_group.cas_conflict", "agent group run state changed concurrently"
 	}
@@ -85,6 +87,11 @@ func (h *Handler) RetryAgentGroupRunStep(c *gin.Context) {
 		response.Error(c, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	retryRequestID := strings.TrimSpace(req.RetryRequestID)
+	if retryRequestID == "" {
+		response.Error(c, http.StatusBadRequest, "retry request id is required")
+		return
+	}
 
 	c.Header("Content-Type", "application/x-ndjson; charset=utf-8")
 	c.Header("Cache-Control", "no-cache, no-transform")
@@ -113,7 +120,7 @@ func (h *Handler) RetryAgentGroupRunStep(c *gin.Context) {
 		UserID:       userID,
 		RunPublicID:  runPublicID,
 		StepPublicID: stepPublicID,
-		RequestID:    strings.TrimSpace(req.RetryRequestID),
+		RequestID:    retryRequestID,
 		Stream:       true,
 		Cancelable:   true,
 		OnEvent: func(eventType string, payload map[string]interface{}) error {

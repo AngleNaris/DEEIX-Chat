@@ -217,41 +217,29 @@ func (s *Service) executeAssistantToolCalls(ctx context.Context, input executeAs
 						slot.persisted = persisted
 						slots[i] = slot
 						if slot.row.Status == "reused" {
-							if write, ok := credentialWriteFromSuccessfulCall(row.ToolName, isPlatformTool, row.InputJSON, input.ToolRuntime); ok {
-								credentialWrites = append(credentialWrites, write)
+							if !isPendingPlatformApprovalOutput(slot.row.OutputJSON) {
+								if write, ok := credentialWriteFromSuccessfulCall(row.ToolName, isPlatformTool, row.InputJSON, input.ToolRuntime); ok {
+									credentialWrites = append(credentialWrites, write)
+								}
 							}
 						}
 						continue
 					}
 				}
 				// 平台内置工具（本地执行）：走同一结果/持久化/预算/去重通道。
-				// 执行参数在发送前展开 {{credential: name}} 占位符（落库保持占位符原文）。
+				// 平台工具层在实际执行或批准时展开凭据；待批准记录只保留占位符或 secret_ref。
 				toolStartedAt := time.Now()
-				executionArguments := row.InputJSON
-				var secretRefErr error
-				if isCredentialWritePlatformTool(row.ToolName) {
-					executionArguments, secretRefErr = input.ToolRuntime.expandCredentialSecretValueInJSON(
-						input.UserID,
-						input.ConversationID,
-						input.RunID,
-						row.InputJSON,
-					)
-				}
-				var (
-					outputJSON string
-					executeErr error
-				)
-				if secretRefErr != nil {
-					executeErr = secretRefErr
-				} else {
-					outputJSON, executeErr = s.executePlatformToolCall(ctx, entry, ExecuteToolInput{
-						UserID:         input.UserID,
-						ConversationID: input.ConversationID,
-						RequestID:      strings.TrimSpace(input.RequestID),
-						ToolName:       row.ToolName,
-						ArgumentsJSON:  executionArguments,
-					})
-				}
+				outputJSON, executeErr := s.executePlatformToolCall(ctx, entry, ExecuteToolInput{
+					UserID:         input.UserID,
+					ConversationID: input.ConversationID,
+					MessageID:      input.MessageID,
+					RequestID:      strings.TrimSpace(input.RequestID),
+					RunID:          input.RunID,
+					ToolCallID:     row.ToolCallID,
+					ToolName:       row.ToolName,
+					ArgumentsJSON:  row.InputJSON,
+					ToolRuntime:    input.ToolRuntime,
+				})
 				row.LatencyMS = time.Since(toolStartedAt).Milliseconds()
 				if row.LatencyMS < 0 {
 					row.LatencyMS = 0
@@ -265,8 +253,10 @@ func (s *Service) executeAssistantToolCalls(ctx context.Context, input executeAs
 					if row.OutputJSON == "" {
 						row.OutputJSON = "{}"
 					}
-					if write, ok := credentialWriteFromSuccessfulCall(row.ToolName, isPlatformTool, row.InputJSON, input.ToolRuntime); ok {
-						credentialWrites = append(credentialWrites, write)
+					if !isPendingPlatformApprovalOutput(row.OutputJSON) {
+						if write, ok := credentialWriteFromSuccessfulCall(row.ToolName, isPlatformTool, row.InputJSON, input.ToolRuntime); ok {
+							credentialWrites = append(credentialWrites, write)
+						}
 					}
 					// 平台内置工具产物（图片等）同样附件化落库。
 					s.attachToolArtifacts(ctx, input, row.OutputJSON)

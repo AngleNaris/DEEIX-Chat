@@ -21,6 +21,8 @@ const (
 	defaultMMSweepInterval = time.Hour
 )
 
+var removeMMOutputAll = os.RemoveAll
+
 func sweepMMOutputs(root string, now time.Time, ttl time.Duration) error {
 	if strings.TrimSpace(root) == "" || root == "." || ttl <= 0 {
 		return nil
@@ -53,7 +55,7 @@ func sweepMMOutputs(root string, now time.Time, ttl time.Duration) error {
 			continue
 		}
 		if mmOutputTempPattern.MatchString(name) && now.Sub(info.ModTime()) > ttl {
-			if err := os.RemoveAll(filepath.Join(root, name)); err != nil {
+			if err := removeMMOutputAll(filepath.Join(root, name)); err != nil {
 				sweepErr = errors.Join(sweepErr, fmt.Errorf("remove temp %s: %w", name, err))
 			}
 		}
@@ -77,7 +79,7 @@ func sweepMMOutputScope(scope string, now time.Time, ttl time.Duration) error {
 			continue
 		}
 		if info.IsDir() && now.Sub(info.ModTime()) > ttl {
-			if err := os.RemoveAll(filepath.Join(scope, entry.Name())); err != nil {
+			if err := removeMMOutputAll(filepath.Join(scope, entry.Name())); err != nil {
 				sweepErr = errors.Join(sweepErr, fmt.Errorf("remove output %s: %w", entry.Name(), err))
 			}
 		}

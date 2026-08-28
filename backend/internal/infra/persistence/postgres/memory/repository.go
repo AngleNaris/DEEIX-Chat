@@ -48,14 +48,16 @@ func (r *Repo) UpsertUserMemory(ctx context.Context, item *domainmemory.UserMemo
 	}
 	var existing model.UserMemory
 	err := r.db.WithContext(ctx).
+		Unscoped().
 		Where("user_id = ? AND memory_key = ?", item.UserID, item.MemoryKey).
 		First(&existing).Error
 	if err == nil {
 		return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			existing.DeletedAt = gorm.DeletedAt{}
 			existing.Value = item.Value
 			existing.Scope = item.Scope
 			existing.UpdatedBy = item.UpdatedBy
-			if err := tx.Save(&existing).Error; err != nil {
+			if err := tx.Unscoped().Save(&existing).Error; err != nil {
 				return translateError(err)
 			}
 			return r.clearUserMemoryEmbedding(ctx, tx, existing.ID)
@@ -124,7 +126,7 @@ func (r *Repo) DeleteUserMemory(ctx context.Context, userID uint, memoryKey stri
 				return translateError(err)
 			}
 		}
-		return translateError(tx.
+		return translateError(tx.Unscoped().
 			Where("user_id = ? AND memory_key = ?", userID, memoryKey).
 			Delete(&model.UserMemory{}).Error)
 	})

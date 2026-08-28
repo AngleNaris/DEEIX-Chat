@@ -1,12 +1,15 @@
 package schema
 
 import (
+	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
 	domainchannel "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/channel"
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/models"
+	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
@@ -32,6 +35,29 @@ type legacyUserMemory struct {
 	UserID    uint   `gorm:"not null"`
 	MemoryKey string `gorm:"size:128;not null;uniqueIndex:idx_user_memories_user_key"`
 	Value     string
+}
+
+type legacyAgentGroupStepAttempt struct {
+	ID             uint   `gorm:"primaryKey"`
+	StepID         uint   `gorm:"not null;uniqueIndex:idx_chat_agent_group_attempts_step_attempt_no"`
+	AttemptNo      int    `gorm:"not null;uniqueIndex:idx_chat_agent_group_attempts_step_attempt_no"`
+	RetryRequestID string `gorm:"size:128;not null;uniqueIndex:idx_chat_agent_group_attempts_retry_request_id"`
+	StartedAt      time.Time
+}
+
+type legacyCredential struct {
+	model.BaseModel
+	UserID   uint   `gorm:"not null"`
+	PublicID string `gorm:"size:32;not null;uniqueIndex"`
+	Name     string `gorm:"size:64;not null;uniqueIndex:idx_chat_credentials_user_name"`
+}
+
+func (legacyCredential) TableName() string {
+	return "chat_credentials"
+}
+
+func (legacyAgentGroupStepAttempt) TableName() string {
+	return "chat_agent_group_step_attempts"
 }
 
 func (legacyUserMemory) TableName() string {
@@ -106,6 +132,139 @@ func TestMigrateUserMemoryUniqueIndexScopesKeysByUser(t *testing.T) {
 	}
 	if err = db.Create(&model.UserMemory{UserID: 1, MemoryKey: "language", Value: "duplicate"}).Error; err == nil {
 		t.Fatal("duplicate key for the same user must be rejected")
+	}
+}
+
+func TestMigrateCredentialNameIndexScopesActiveNamesByUser(t *testing.T) {
+	dbName := strings.NewReplacer("/", "_", " ", "_").Replace(t.Name())
+	db, err := gorm.Open(sqlite.Open("file:"+dbName+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err = db.AutoMigrate(&legacyCredential{}); err != nil {
+		t.Fatalf("migrate legacy credential: %v", err)
+	}
+	if err = db.Create(&legacyCredential{UserID: 1, PublicID: "credential-old", Name: "shared-name"}).Error; err != nil {
+		t.Fatalf("create legacy credential: %v", err)
+	}
+	if err = db.AutoMigrate(&model.Credential{}); err != nil {
+		t.Fatalf("migrate current credential model: %v", err)
+	}
+	if err = migrateCredentialNameUniqueIndex(db); err != nil {
+		t.Fatalf("migrate credential name index: %v", err)
+	}
+	if db.Migrator().HasIndex(&model.Credential{}, "idx_chat_credentials_user_name") {
+		t.Fatal("legacy global credential name index still exists")
+	}
+	if !db.Migrator().HasIndex(&model.Credential{}, "idx_chat_credentials_user_name_v2") {
+		t.Fatal("active user-scoped credential name index was not created")
+	}
+	if err = db.Create(&model.Credential{UserID: 2, PublicID: "credential-other-user", Name: "shared-name"}).Error; err != nil {
+		t.Fatalf("same name for another user must be allowed: %v", err)
+	}
+	if err = db.Where("user_id = ? AND public_id = ?", 1, "credential-old").Delete(&model.Credential{}).Error; err != nil {
+		t.Fatalf("soft delete credential: %v", err)
+	}
+	if err = db.Create(&model.Credential{UserID: 1, PublicID: "credential-new", Name: "shared-name"}).Error; err != nil {
+		t.Fatalf("same user must be able to reuse a deleted name: %v", err)
+	}
+	if err = db.Create(&model.Credential{UserID: 1, PublicID: "credential-duplicate", Name: "shared-name"}).Error; err == nil {
+		t.Fatal("duplicate active name for the same user must be rejected")
+	}
+}
+
+func TestMigrateCredentialNameIndexPostgres(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("DEEIX_TEST_DATABASE_DSN"))
+	if dsn == "" {
+		t.Skip("set DEEIX_TEST_DATABASE_DSN to run the PostgreSQL credential index migration test")
+	}
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open postgres: %v", err)
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("resolve postgres db: %v", err)
+	}
+	sqlDB.SetMaxOpenConns(1)
+	schemaName := fmt.Sprintf("deeix_test_credential_index_%d", time.Now().UnixNano())
+	if err = db.Exec(`CREATE SCHEMA ` + schemaName).Error; err != nil {
+		_ = sqlDB.Close()
+		t.Fatalf("create test schema: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = db.Exec(`DROP SCHEMA IF EXISTS ` + schemaName + ` CASCADE`).Error
+		_ = sqlDB.Close()
+	})
+	if err = db.Exec(`SET search_path TO ` + schemaName + `, public`).Error; err != nil {
+		t.Fatalf("set test search path: %v", err)
+	}
+	if err = db.AutoMigrate(&legacyCredential{}); err != nil {
+		t.Fatalf("migrate legacy credential: %v", err)
+	}
+	if err = db.Create(&legacyCredential{UserID: 1, PublicID: "credential-old", Name: "shared-name"}).Error; err != nil {
+		t.Fatalf("create legacy credential: %v", err)
+	}
+	if err = db.AutoMigrate(&model.Credential{}); err != nil {
+		t.Fatalf("migrate current credential model: %v", err)
+	}
+	if err = migrateCredentialNameUniqueIndex(db); err != nil {
+		t.Fatalf("migrate credential name index: %v", err)
+	}
+	if db.Migrator().HasIndex(&model.Credential{}, "idx_chat_credentials_user_name") {
+		t.Fatal("legacy credential name index still exists")
+	}
+	var indexDefinition string
+	if err = db.Raw(`SELECT indexdef FROM pg_indexes WHERE schemaname = current_schema() AND indexname = ?`, "idx_chat_credentials_user_name_v2").Scan(&indexDefinition).Error; err != nil {
+		t.Fatalf("read credential index definition: %v", err)
+	}
+	if !strings.Contains(indexDefinition, "UNIQUE INDEX") || !strings.Contains(indexDefinition, "(user_id, name)") || !strings.Contains(indexDefinition, "deleted_at IS NULL") {
+		t.Fatalf("credential index definition = %q", indexDefinition)
+	}
+	if err = db.Create(&model.Credential{UserID: 2, PublicID: "credential-other-user", Name: "shared-name"}).Error; err != nil {
+		t.Fatalf("same name for another user must be allowed: %v", err)
+	}
+	if err = db.Where("user_id = ? AND public_id = ?", 1, "credential-old").Delete(&model.Credential{}).Error; err != nil {
+		t.Fatalf("soft delete credential: %v", err)
+	}
+	if err = db.Create(&model.Credential{UserID: 1, PublicID: "credential-new", Name: "shared-name"}).Error; err != nil {
+		t.Fatalf("same user must be able to reuse a deleted name: %v", err)
+	}
+	if err = db.Create(&model.Credential{UserID: 1, PublicID: "credential-duplicate", Name: "shared-name"}).Error; err == nil {
+		t.Fatal("duplicate active name for the same user must be rejected")
+	}
+}
+
+func TestMigrateAgentGroupRetryRequestIndexAllowsIndependentRunsToReuseKey(t *testing.T) {
+	dbName := strings.NewReplacer("/", "_", " ", "_").Replace(t.Name())
+	db, err := gorm.Open(sqlite.Open("file:"+dbName+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err = db.AutoMigrate(&legacyAgentGroupStepAttempt{}); err != nil {
+		t.Fatalf("migrate legacy attempts: %v", err)
+	}
+	if err = db.Create(&legacyAgentGroupStepAttempt{StepID: 1, AttemptNo: 1, RetryRequestID: "shared-request", StartedAt: time.Now()}).Error; err != nil {
+		t.Fatalf("create legacy attempt: %v", err)
+	}
+	if err = db.AutoMigrate(&model.AgentGroupStepAttempt{}); err != nil {
+		t.Fatalf("migrate current attempt model: %v", err)
+	}
+	if err = migrateAgentGroupRetryRequestIndex(db); err != nil {
+		t.Fatalf("migrate retry request index: %v", err)
+	}
+	if db.Migrator().HasIndex(&model.AgentGroupStepAttempt{}, "idx_chat_agent_group_attempts_retry_request_id") {
+		t.Fatal("legacy global retry request index still exists")
+	}
+	if !db.Migrator().HasIndex(&model.AgentGroupStepAttempt{}, "idx_chat_agent_group_attempts_retry_request_id_v2") {
+		t.Fatal("non-unique retry request lookup index was not created")
+	}
+	second := model.AgentGroupStepAttempt{
+		PublicID: "attempt-other-run", StepID: 2, AttemptNo: 1,
+		RetryRequestID: "shared-request", Status: "running", StartedAt: time.Now(),
+	}
+	if err = db.Create(&second).Error; err != nil {
+		t.Fatalf("same request key in an independent run must be allowed: %v", err)
 	}
 }
 

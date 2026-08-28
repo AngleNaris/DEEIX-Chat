@@ -76,7 +76,20 @@ func (r *Repo) trimFunctionName() string {
 // CreateConversation 创建会话。
 func (r *Repo) CreateConversation(ctx context.Context, item *domainconversation.Conversation) error {
 	entity := toConversationModel(item)
-	if err := r.db.WithContext(ctx).Create(&entity).Error; err != nil {
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if entity.AgentGroupID != nil {
+			query := tx.Select("id").Where("id = ? AND user_id = ?", *entity.AgentGroupID, entity.UserID)
+			if tx.Dialector != nil && tx.Dialector.Name() == "postgres" {
+				query = query.Clauses(clause.Locking{Strength: "SHARE"})
+			}
+			var group models.AgentGroup
+			if err := query.First(&group).Error; err != nil {
+				return translateError(err)
+			}
+		}
+		return translateError(tx.Create(&entity).Error)
+	})
+	if err != nil {
 		return translateError(err)
 	}
 	*item = toConversationDomain(entity)
@@ -2170,6 +2183,29 @@ func (r *Repo) UpdateConversationToolCallPayload(
 		return repository.ErrNotFound
 	}
 	return nil
+}
+
+// ListConversationToolCallsByMessageIDs 批量查询消息关联的工具调用行。
+func (r *Repo) ListConversationToolCallsByMessageIDs(
+	ctx context.Context,
+	messageIDs []uint,
+) ([]domainconversation.ToolCall, error) {
+	if len(messageIDs) == 0 {
+		return []domainconversation.ToolCall{}, nil
+	}
+	items := make([]models.ChatRunEvent, 0)
+	if err := r.db.WithContext(ctx).
+		Select(conversationEventDetailSelectColumns(r.db)).
+		Where("message_id IN ? AND event_scope = ?", messageIDs, chatRunEventScopeToolCall).
+		Order("message_id ASC, id ASC").
+		Find(&items).Error; err != nil {
+		return nil, translateError(err)
+	}
+	rows := make([]domainconversation.ToolCall, 0, len(items))
+	for i := range items {
+		rows = append(rows, toConversationToolCallDomain(items[i]))
+	}
+	return rows, nil
 }
 
 func (r *Repo) ListConversationToolCallsByRunID(

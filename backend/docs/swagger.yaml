@@ -17232,6 +17232,10 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/ConversationErrorDoc'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/ConversationErrorDoc'
         "500":
           description: Internal Server Error
           schema:
@@ -19355,6 +19359,31 @@ paths:
       summary: 查询可用模型目录
       tags:
       - llm
+  /platform-tools/approvals/{approval_id}:
+    get:
+      description: 查询当前单实例进程内、属于当前用户的批准记录；服务重启或记录过期后返回 404
+      parameters:
+      - description: 待批准记录 ID
+        in: path
+        name: approval_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/ApprovalResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/Envelope'
+      security:
+      - BearerAuth: []
+      summary: 查询平台工具写操作批准状态
+      tags:
+      - platform-tools
   /platform-tools/approvals/{approval_id}/approve:
     post:
       description: 批准一条待确认的平台工具写操作（ask 批准模式），批准后异步执行
@@ -19371,6 +19400,10 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/ApprovalResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/Envelope'
         "404":
           description: Not Found
           schema:

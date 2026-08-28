@@ -10832,6 +10832,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/ConversationErrorDoc"
                         }
                     },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/ConversationErrorDoc"
+                        }
+                    },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
@@ -14328,6 +14334,46 @@ const docTemplate = `{
                 }
             }
         },
+        "/platform-tools/approvals/{approval_id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "查询当前单实例进程内、属于当前用户的批准记录；服务重启或记录过期后返回 404",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "platform-tools"
+                ],
+                "summary": "查询平台工具写操作批准状态",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "待批准记录 ID",
+                        "name": "approval_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ApprovalResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/Envelope"
+                        }
+                    }
+                }
+            }
+        },
         "/platform-tools/approvals/{approval_id}/approve": {
             "post": {
                 "security": [
@@ -14357,6 +14403,12 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/ApprovalResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/Envelope"
                         }
                     },
                     "404": {

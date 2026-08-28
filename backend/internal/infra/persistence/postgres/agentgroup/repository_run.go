@@ -13,12 +13,17 @@ import (
 
 // CreateAgentGroupRun 创建运行（client_run_id 唯一，冲突返回 ErrDuplicate）。
 func (r *Repo) CreateAgentGroupRun(ctx context.Context, run *domainagentgroup.Run) error {
-	entity := toRunModel(run)
-	if err := r.db.WithContext(ctx).Create(&entity).Error; err != nil {
-		return translateError(err)
-	}
-	run.ID = entity.ID
-	return nil
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockAgentGroupReference(tx, run.UserID, run.GroupID); err != nil {
+			return err
+		}
+		entity := toRunModel(run)
+		if err := tx.Create(&entity).Error; err != nil {
+			return translateError(err)
+		}
+		run.ID = entity.ID
+		return nil
+	})
 }
 
 // CreateAgentGroupRunIfIdle 在会话无活跃运行时原子创建 pending 运行。
@@ -33,6 +38,9 @@ func (r *Repo) CreateAgentGroupRunIfIdle(ctx context.Context, run *domainagentgr
 			if err := tx.Exec("SELECT pg_advisory_xact_lock(?)", agentGroupAdvisoryLockKey(run.ConversationID)).Error; err != nil {
 				return translateError(err)
 			}
+		}
+		if err := lockAgentGroupReference(tx, run.UserID, run.GroupID); err != nil {
+			return err
 		}
 		var active int64
 		if err := tx.Model(&models.AgentGroupRun{}).
@@ -59,6 +67,15 @@ func (r *Repo) CreateAgentGroupRunIfIdle(ctx context.Context, run *domainagentgr
 	return created, translateError(err)
 }
 
+func lockAgentGroupReference(tx *gorm.DB, userID uint, groupID uint) error {
+	query := tx.Select("id").Where("id = ? AND user_id = ?", groupID, userID)
+	if tx.Dialector != nil && tx.Dialector.Name() == "postgres" {
+		query = query.Clauses(clause.Locking{Strength: "SHARE"})
+	}
+	var group models.AgentGroup
+	return translateError(query.First(&group).Error)
+}
+
 // agentGroupAdvisoryLockKey 把会话 ID 映射到 advisory lock 键（负数段，避开迁移锁）。
 func agentGroupAdvisoryLockKey(conversationID uint) int64 {
 	return -1 - int64(conversationID)
@@ -75,18 +92,21 @@ func (r *Repo) BeginAgentGroupStepRetry(
 	stepID uint,
 	attempt *domainagentgroup.Attempt,
 ) (bool, error) {
+	if attempt == nil || attempt.StepID != stepID {
+		return false, repository.ErrConflict
+	}
 	var ok bool
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		runningResult := tx.Model(&models.AgentGroupRun{}).
 			Where("id = ? AND state_version = ? AND status = ?", runID, expectedStateVersion, domainagentgroup.RunStatusPausedRetryable).
 			Updates(map[string]interface{}{
-				"status":             domainagentgroup.RunStatusRunning,
-				"retryable_step_id":  nil,
-				"state_version":      gorm.Expr("state_version + 1"),
-				"error_code":         "",
-				"error_message":      "",
-				"ended_at":           nil,
-				"updated_at":         now(),
+				"status":            domainagentgroup.RunStatusRunning,
+				"retryable_step_id": nil,
+				"state_version":     gorm.Expr("state_version + 1"),
+				"error_code":        "",
+				"error_message":     "",
+				"ended_at":          nil,
+				"updated_at":        now(),
 			})
 		if runningResult.Error != nil {
 			return translateError(runningResult.Error)
@@ -95,13 +115,16 @@ func (r *Repo) BeginAgentGroupStepRetry(
 			return nil
 		}
 		stepResult := tx.Model(&models.AgentGroupStep{}).
-			Where("id = ?", stepID).
+			Where("id = ? AND group_run_id = ?", stepID, runID).
 			Updates(map[string]interface{}{
 				"status":     domainagentgroup.StepStatusRunning,
 				"updated_at": now(),
 			})
 		if stepResult.Error != nil {
 			return translateError(stepResult.Error)
+		}
+		if stepResult.RowsAffected != 1 {
+			return repository.ErrNotFound
 		}
 		entity := toAttemptModel(attempt)
 		if err := tx.Create(&entity).Error; err != nil {
@@ -498,6 +521,23 @@ func (r *Repo) GetAgentGroupStepAttemptByPublicID(ctx context.Context, userID ui
 		Joins("JOIN chat_agent_group_runs ON chat_agent_group_runs.id = chat_agent_group_steps.group_run_id").
 		Where("chat_agent_group_runs.public_id = ? AND chat_agent_group_runs.user_id = ? AND chat_agent_group_step_attempts.public_id = ?",
 			runPublicID, userID, attemptPublicID).
+		First(&entity).Error
+	if err != nil {
+		return nil, translateError(err)
+	}
+	attempt := toAttemptDomain(entity)
+	return &attempt, nil
+}
+
+// GetAgentGroupStepAttemptByRetryRequestID 按用户和运行作用域查询客户端重试幂等键。
+func (r *Repo) GetAgentGroupStepAttemptByRetryRequestID(ctx context.Context, userID uint, runID uint, retryRequestID string) (*domainagentgroup.Attempt, error) {
+	var entity models.AgentGroupStepAttempt
+	err := r.db.WithContext(ctx).
+		Table("chat_agent_group_step_attempts AS attempts").
+		Select("attempts.*").
+		Joins("JOIN chat_agent_group_steps AS steps ON steps.id = attempts.step_id").
+		Joins("JOIN chat_agent_group_runs AS runs ON runs.id = steps.group_run_id").
+		Where("runs.id = ? AND runs.user_id = ? AND attempts.retry_request_id = ?", runID, userID, retryRequestID).
 		First(&entity).Error
 	if err != nil {
 		return nil, translateError(err)

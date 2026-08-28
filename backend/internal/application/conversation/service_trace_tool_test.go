@@ -135,7 +135,7 @@ func TestBuildMessageProcessTraceDTOIncludesOrderedEvents(t *testing.T) {
 			ContentMarkdown: "**fetch**：执行成功",
 			Seq:             2,
 		},
-	})
+	}, nil)
 	if trace == nil || len(trace.Events) != 1 {
 		t.Fatalf("expected trace events, got %#v", trace)
 	}
@@ -144,6 +144,48 @@ func TestBuildMessageProcessTraceDTOIncludesOrderedEvents(t *testing.T) {
 	}
 	if trace.Events[0].EventID != "tools_1" || trace.Events[0].EventType != "tool" {
 		t.Fatalf("unexpected event payload: %#v", trace.Events[0])
+	}
+}
+
+func TestBuildMessageProcessTraceDTOReconcilesOnlyMatchingApprovalToolCall(t *testing.T) {
+	const (
+		pendingA = `{"status":"pending_approval","approval_id":"approval-a","tool":"save_memory"}`
+		pendingB = `{"status":"pending_approval","approval_id":"approval-b","tool":"save_memory"}`
+	)
+	_, _, payload := buildToolTrace([]model.ToolCall{
+		{ToolCallID: "call-a", ToolName: "save_memory", Status: "success", OutputJSON: pendingA},
+		{ToolCallID: "call-b", ToolName: "save_memory", Status: "success", OutputJSON: pendingB},
+	})
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal trace payload: %v", err)
+	}
+	trace := buildMessageProcessTraceDTO([]model.MessageTrace{{
+		TraceType:   messageTraceTypeTools,
+		Status:      messageTraceStatusCompleted,
+		PayloadJSON: string(raw),
+	}}, nil, []model.ToolCall{{
+		ToolCallID: "call-a",
+		OutputJSON: `{"approval_id":"approval-a","status":"rejected","tool":"save_memory"}`,
+	}})
+	if trace == nil || trace.Tools == nil {
+		t.Fatalf("missing tools trace: %#v", trace)
+	}
+	var reconciled struct {
+		ToolCalls []struct {
+			ToolCallID   string `json:"tool_call_id"`
+			OutputDetail string `json:"output_detail"`
+		} `json:"tool_calls"`
+	}
+	if err := json.Unmarshal([]byte(trace.Tools.PayloadJSON), &reconciled); err != nil {
+		t.Fatalf("decode reconciled trace: %v", err)
+	}
+	if len(reconciled.ToolCalls) != 2 || reconciled.ToolCalls[0].ToolCallID != "call-a" ||
+		!strings.Contains(reconciled.ToolCalls[0].OutputDetail, `"status":"rejected"`) {
+		t.Fatalf("matching terminal state was not reconciled: %+v", reconciled.ToolCalls)
+	}
+	if reconciled.ToolCalls[1].ToolCallID != "call-b" || !strings.Contains(reconciled.ToolCalls[1].OutputDetail, "pending_approval") {
+		t.Fatalf("unrelated pending approval changed: %+v", reconciled.ToolCalls)
 	}
 }
 
@@ -389,7 +431,7 @@ func TestBuildMessageProcessTraceDTOExtractsPromptTrace(t *testing.T) {
 		Summary:         "已规划上下文",
 		ContentMarkdown: "**上下文规划**：续接发送",
 		PayloadJSON:     string(raw),
-	}}, nil)
+	}}, nil, nil)
 
 	if trace == nil || trace.PromptTrace == nil {
 		t.Fatalf("expected prompt trace, got %#v", trace)

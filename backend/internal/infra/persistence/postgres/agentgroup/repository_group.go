@@ -7,6 +7,7 @@ import (
 	models "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/models"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // bumpGroupRevision 递增群组配置版本（版本号驱动快照冻结与运行校验）。
@@ -113,12 +114,27 @@ func (r *Repo) UpdateAgentGroupByPublicID(ctx context.Context, userID uint, publ
 	return r.GetAgentGroupByPublicID(ctx, userID, publicID)
 }
 
-// DeleteAgentGroupByPublicID 硬删除群组及其成员（调用方须先保证无会话/运行历史）。
+// DeleteAgentGroupByPublicID 原子删除没有会话或运行历史的群组及其成员。
 func (r *Repo) DeleteAgentGroupByPublicID(ctx context.Context, userID uint, publicID string) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var group models.AgentGroup
-		if err := tx.Where("user_id = ? AND public_id = ?", userID, publicID).First(&group).Error; err != nil {
+		query := tx.Where("user_id = ? AND public_id = ?", userID, publicID)
+		if tx.Dialector != nil && tx.Dialector.Name() == "postgres" {
+			query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		if err := query.First(&group).Error; err != nil {
 			return translateError(err)
+		}
+		var conversationCount int64
+		if err := tx.Model(&models.Conversation{}).Where("agent_group_id = ?", group.ID).Count(&conversationCount).Error; err != nil {
+			return translateError(err)
+		}
+		var runCount int64
+		if err := tx.Model(&models.AgentGroupRun{}).Where("group_id = ?", group.ID).Count(&runCount).Error; err != nil {
+			return translateError(err)
+		}
+		if conversationCount+runCount > 0 {
+			return repository.ErrConflict
 		}
 		if err := tx.Where("group_id = ?", group.ID).Delete(&models.AgentGroupMember{}).Error; err != nil {
 			return translateError(err)

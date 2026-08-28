@@ -57,7 +57,7 @@ func (h *Handler) CreateDocCard(c *gin.Context) {
 		response.Error(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	response.Success(c, item)
+	response.Success(c, appdoccard.NewCardView(*item))
 }
 
 // UpdateDocCard 更新卡片。
@@ -86,7 +86,7 @@ func (h *Handler) UpdateDocCard(c *gin.Context) {
 		response.Error(c, http.StatusNotFound, "doc card not found")
 		return
 	}
-	response.Success(c, item)
+	response.Success(c, appdoccard.NewCardView(*item))
 }
 
 // ListDocCards 列出全部卡片。

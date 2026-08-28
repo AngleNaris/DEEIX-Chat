@@ -8,15 +8,21 @@ import (
 	"strings"
 	"time"
 
-	domaindynamicprompt "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/dynamicprompt"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/jseval"
+	domaindynamicprompt "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/dynamicprompt"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/pkg/conv"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 	"github.com/google/uuid"
 )
 
-// ErrPromptNotFound 动态提示词不存在。
-var ErrPromptNotFound = errors.New("dynamic prompt not found")
+var (
+	// ErrPromptNotFound 动态提示词不存在。
+	ErrPromptNotFound = errors.New("dynamic prompt not found")
+	// ErrPromptNameTooLong 动态提示词名称超过字符限制。
+	ErrPromptNameTooLong = errors.New("dynamic prompt name too long")
+	// ErrPromptContentTooLong 动态提示词内容超过字符限制。
+	ErrPromptContentTooLong = errors.New("dynamic prompt content too long")
+)
 
 // 长度限制。
 const (
@@ -26,8 +32,8 @@ const (
 
 // 脚本执行限制（与提示词展开一致）。
 const (
-	runTimeout     = time.Second
-	runMaxOutput   = 4096
+	runTimeout   = time.Second
+	runMaxOutput = 4096
 )
 
 // UpsertInput 创建/更新动态提示词的输入。
@@ -79,6 +85,13 @@ func (s *Service) UpsertDynamicPrompt(ctx context.Context, userID uint, publicID
 	if name == "" {
 		return nil, errors.New("name is required")
 	}
+	if len([]rune(name)) > MaxNameLen {
+		return nil, ErrPromptNameTooLong
+	}
+	content := strings.TrimSpace(input.Content)
+	if len([]rune(content)) > MaxContentLen {
+		return nil, ErrPromptContentTooLong
+	}
 	kind := strings.TrimSpace(input.Kind)
 	if kind == "" || !domaindynamicprompt.ValidKind(kind) {
 		kind = domaindynamicprompt.KindJS
@@ -87,7 +100,7 @@ func (s *Service) UpsertDynamicPrompt(ctx context.Context, userID uint, publicID
 		UserID:    userID,
 		Name:      name,
 		Kind:      kind,
-		Content:   strings.TrimSpace(input.Content),
+		Content:   content,
 		Enabled:   true,
 		UpdatedBy: strings.TrimSpace(updatedBy),
 	}

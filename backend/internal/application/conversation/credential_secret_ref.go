@@ -179,6 +179,65 @@ func (r *selectedToolRuntime) expandCredentialSecretValueInJSON(
 	return string(data), nil
 }
 
+func (r *selectedToolRuntime) protectCredentialApprovalArguments(
+	userID uint,
+	conversationID uint,
+	runID string,
+	executionToolName string,
+	argumentsJSON string,
+) (string, *credentialSecretRefStore, []string, error) {
+	if !isCredentialWritePlatformTool(executionToolName) {
+		return argumentsJSON, nil, nil, nil
+	}
+	var payload map[string]interface{}
+	if err := json.Unmarshal([]byte(argumentsJSON), &payload); err != nil {
+		return "", nil, nil, err
+	}
+	for key, value := range payload {
+		if key == "value" {
+			continue
+		}
+		if containsCredentialSecretRefLike(value) {
+			return "", nil, nil, fmt.Errorf("secret_ref is only allowed as the credential value, not %q", key)
+		}
+	}
+	rawValue, exists := payload["value"]
+	if !exists {
+		return argumentsJSON, nil, nil, nil
+	}
+	value, ok := rawValue.(string)
+	if !ok {
+		return "", nil, nil, errors.New("credential value must be a string")
+	}
+	if value == "" {
+		return argumentsJSON, nil, nil, nil
+	}
+	if strings.Contains(value, "{{secret_ref:") {
+		expanded, err := r.expandCredentialSecretValueInJSON(userID, conversationID, runID, argumentsJSON)
+		if err != nil {
+			return "", nil, nil, err
+		}
+		if err := json.Unmarshal([]byte(expanded), &payload); err != nil {
+			return "", nil, nil, err
+		}
+		resolved, resolvedOK := payload["value"].(string)
+		if !resolvedOK || resolved == "" {
+			return "", nil, nil, errors.New("credential secret_ref resolved to an empty value")
+		}
+		value = resolved
+	}
+
+	secrets := newCredentialSecretRefStore(userID, conversationID, runID)
+	ref := secrets.protect(value)
+	payload["value"] = ref
+	protected, err := json.Marshal(payload)
+	if err != nil {
+		secrets.destroy(ref)
+		return "", nil, nil, err
+	}
+	return string(protected), secrets, []string{ref}, nil
+}
+
 func containsCredentialSecretRefLike(value interface{}) bool {
 	switch typed := value.(type) {
 	case string:

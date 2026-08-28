@@ -2,8 +2,10 @@ package memory
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	domainmemory "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/memory"
@@ -22,17 +24,52 @@ type auditWriter interface {
 // 前端 UI 对 preference 另有 20 条展示上限；此上限兜底 AI 工具批量写入导致的膨胀。
 const maxUserMemoriesPerUser = 200
 
+// ErrMemoryLimitReached 表示当前用户的新增长期记忆已达到上限。
+var ErrMemoryLimitReached = errors.New("memory limit reached")
+
+type userMemoryLock struct {
+	mu   sync.Mutex
+	refs int
+}
+
 // Service 封装记忆业务能力。
 type Service struct {
 	repo             repository.MemoryRepository
 	cacheInvalidator func(userID uint)
 	embedding        embeddingProvider
 	auditWriter      auditWriter
+	userLocksMu      sync.Mutex
+	userLocks        map[uint]*userMemoryLock
 }
 
 // NewService 创建服务。
 func NewService(repo repository.MemoryRepository) *Service {
-	return &Service{repo: repo}
+	return &Service{repo: repo, userLocks: make(map[uint]*userMemoryLock)}
+}
+
+func (s *Service) lockUserMemory(userID uint) func() {
+	s.userLocksMu.Lock()
+	if s.userLocks == nil {
+		s.userLocks = make(map[uint]*userMemoryLock)
+	}
+	entry := s.userLocks[userID]
+	if entry == nil {
+		entry = &userMemoryLock{}
+		s.userLocks[userID] = entry
+	}
+	entry.refs++
+	s.userLocksMu.Unlock()
+
+	entry.mu.Lock()
+	return func() {
+		entry.mu.Unlock()
+		s.userLocksMu.Lock()
+		entry.refs--
+		if entry.refs == 0 && s.userLocks[userID] == entry {
+			delete(s.userLocks, userID)
+		}
+		s.userLocksMu.Unlock()
+	}
 }
 
 // SetCacheInvalidator 注入缓存失效回调。每当用户记忆写入成功后调用，通知上层清除本地缓存。
@@ -89,6 +126,7 @@ func (s *Service) UpsertUserMemory(ctx context.Context, userID uint, key string,
 		Scope:     strings.TrimSpace(scope),
 		UpdatedBy: strings.TrimSpace(updatedBy),
 	}
+	unlock := s.lockUserMemory(userID)
 	// 防御性条数上限：一次查询同时判断 key 是否已存在（更新不受限）与当前条数。
 	// 查询失败不阻断写入主路径（真实故障会由随后的 Upsert 报错暴露）。
 	if existing, err := s.repo.ListUserMemories(ctx, userID); err == nil {
@@ -100,12 +138,15 @@ func (s *Service) UpsertUserMemory(ctx context.Context, userID uint, key string,
 			}
 		}
 		if isNew && len(existing) >= maxUserMemoriesPerUser {
-			return fmt.Errorf("memory limit reached: %d entries per user", maxUserMemoriesPerUser)
+			unlock()
+			return fmt.Errorf("%w: %d entries per user", ErrMemoryLimitReached, maxUserMemoriesPerUser)
 		}
 	}
 	if err := s.repo.UpsertUserMemory(ctx, item); err != nil {
+		unlock()
 		return err
 	}
+	unlock()
 	if s.cacheInvalidator != nil {
 		s.cacheInvalidator(userID)
 	}
@@ -115,9 +156,12 @@ func (s *Service) UpsertUserMemory(ctx context.Context, userID uint, key string,
 
 // DeleteUserMemory 删除用户长期记忆，并失效会话缓存。
 func (s *Service) DeleteUserMemory(ctx context.Context, userID uint, memoryKey string) error {
+	unlock := s.lockUserMemory(userID)
 	if err := s.repo.DeleteUserMemory(ctx, userID, strings.TrimSpace(memoryKey)); err != nil {
+		unlock()
 		return err
 	}
+	unlock()
 	if s.cacheInvalidator != nil {
 		s.cacheInvalidator(userID)
 	}

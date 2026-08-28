@@ -19,6 +19,8 @@ var (
 	ErrInvalidConversationLabels = errors.New("invalid conversation labels")
 	// ErrConversationProjectNotFound 会话项目不存在或无权限。
 	ErrConversationProjectNotFound = errors.New("conversation project not found")
+	// ErrConversationRoleNotFound 会话角色不存在或无权限。
+	ErrConversationRoleNotFound = errors.New("conversation role not found")
 	// ErrConversationAgentGroupNotFound 会话绑定的群组不存在或无权限。
 	ErrConversationAgentGroupNotFound = errors.New("conversation agent group not found")
 	// ErrConversationRoleInUseByAgentGroup 角色仍被未移除的群组成员引用，禁止删除（§18 删除保护）。
@@ -37,6 +39,8 @@ var (
 	ErrAgentGroupRunNotFound = errors.New("agent group run not found")
 	// ErrAgentGroupRunNotRetryable 当前运行状态不允许重试。
 	ErrAgentGroupRunNotRetryable = errors.New("agent group run not retryable")
+	// ErrAgentGroupRetryRequestIDRequired 重试请求缺少客户端幂等键。
+	ErrAgentGroupRetryRequestIDRequired = errors.New("agent group retry request id required")
 	// ErrAgentGroupRunNotCancelable 当前运行状态不允许取消。
 	ErrAgentGroupRunNotCancelable = errors.New("agent group run not cancelable")
 	// ErrAgentGroupRunNotAbandonable 当前运行状态不允许放弃。
@@ -99,6 +103,8 @@ var (
 	ErrTooManySelectedSkills = errors.New("too many selected skills")
 	// ErrPlatformApprovalNotFound 平台工具写操作批准记录不存在或不属于当前用户。
 	ErrPlatformApprovalNotFound = errors.New("platform tool approval not found")
+	// ErrPlatformWriteDisabled 管理员已关闭平台写工具，待批准操作不得执行。
+	ErrPlatformWriteDisabled = errors.New("platform tool writes disabled")
 	// ErrSkillNotFound 技能不存在或当前用户不可用。
 	ErrSkillNotFound = errors.New("skill not found")
 	// ErrInvalidSkillUse 技能使用入参不合法。

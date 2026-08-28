@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -137,11 +138,17 @@ func TestSweepSharedExportsAggregatesDeletionErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = os.Chtimes(stale, old, old)
-	if err := os.Chmod(scope, 0500); err != nil {
-		t.Skipf("chmod unavailable: %v", err)
+	originalRemove := removeSharedExport
+	removeSharedExport = func(path string) error {
+		if path == stale {
+			return os.ErrPermission
+		}
+		return originalRemove(path)
 	}
-	defer func() { _ = os.Chmod(scope, 0755) }()
+	t.Cleanup(func() { removeSharedExport = originalRemove })
 	if err := sweepSharedExports(root, now, 7*24*time.Hour, nil); err == nil {
 		t.Fatal("sweepSharedExports() error = nil, want aggregated removal error")
+	} else if !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("sweepSharedExports() error = %v, want permission error", err)
 	}
 }

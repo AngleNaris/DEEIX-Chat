@@ -436,7 +436,7 @@
       },
       "writeApprovalDescription": {
         "auto": "Current: Auto. Write operations (editing files/skills) execute immediately (requires the administrator to enable writes).",
-        "ask": "Current: Ask me. Write operations are held for approval — confirm them from the message area before they execute."
+        "ask": "Current: Ask me. Write operations are held in this app instance for up to 30 minutes. A service restart expires them; request the operation again from the message area."
       }
     },
     "memory": {

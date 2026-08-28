@@ -632,23 +632,62 @@ func (s *Service) ResolvePlatformReindexDelay(ctx context.Context) time.Duration
 	return time.Duration(seconds) * time.Second
 }
 
+// GetPlatformWriteApproval 返回当前进程内属主可见的批准记录状态。
+func (s *Service) GetPlatformWriteApproval(approvalID string, userID uint) (string, error) {
+	record := s.platformApprovals.status(strings.TrimSpace(approvalID), userID)
+	if record == nil {
+		return "", ErrPlatformApprovalNotFound
+	}
+	return marshalApprovalSummary(record)
+}
+
+func (s *Service) requirePlatformWritesEnabled(ctx context.Context) error {
+	if s == nil || s.platformToolsSettings == nil {
+		return ErrPlatformWriteDisabled
+	}
+	values, err := s.platformToolsSettings.RuntimeValuesByNamespace(ctx, platformToolsNamespace)
+	if err != nil {
+		return fmt.Errorf("read platform tool settings: %w", err)
+	}
+	if strings.TrimSpace(values[platformToolsKeyWriteEnabled]) != "true" {
+		return ErrPlatformWriteDisabled
+	}
+	return nil
+}
+
 // ApprovePlatformWrite 批准一条待确认的写操作并执行（ask 模式；返回执行错误与记录摘要）。
 func (s *Service) ApprovePlatformWrite(ctx context.Context, approvalID string, userID uint, approve bool) (string, error) {
+	approvalID = strings.TrimSpace(approvalID)
+	if approve {
+		record := s.platformApprovals.status(approvalID, userID)
+		if record == nil || record.Status != platformApprovalStatusPending {
+			return "", ErrPlatformApprovalNotFound
+		}
+		if err := s.requirePlatformWritesEnabled(ctx); err != nil {
+			return "", err
+		}
+	}
 	status := platformApprovalStatusRejected
 	if approve {
-		status = platformApprovalStatusApproved
+		status = platformApprovalStatusExecuting
 	}
 	record := s.platformApprovals.claim(approvalID, userID, status)
 	if record == nil {
 		return "", ErrPlatformApprovalNotFound
 	}
+	defer record.destroyCredentialSecrets()
 	if !approve {
 		if s.auditWriter != nil {
 			s.auditWriter.Write(ctx, record.RequestID, userID, "platform_tools.reject", "platform_tools", record.ID, "", "", map[string]interface{}{
 				"tool": record.ToolName,
 			})
 		}
-		return marshalApprovalSummary(record)
+		summary, err := marshalApprovalSummary(record)
+		if err != nil {
+			return "", err
+		}
+		s.persistPlatformApprovalTerminal(ctx, record)
+		return summary, nil
 	}
 	executionToolName := strings.TrimSpace(record.ExecutionToolName)
 	if executionToolName == "" {
@@ -656,9 +695,26 @@ func (s *Service) ApprovePlatformWrite(ctx context.Context, approvalID string, u
 	}
 	entry, ok := platformToolRegistry()[executionToolName]
 	if !ok || entry.handler == nil {
-		return "", fmt.Errorf("platform tool %q is not registered", executionToolName)
+		err := fmt.Errorf("platform tool %q is not registered", executionToolName)
+		s.failPlatformApproval(ctx, record)
+		return "", err
 	}
-	argumentsJSON := s.expandCredentialRefsInJSON(ctx, record.UserID, record.ArgumentsJSON)
+	argumentsJSON := record.ArgumentsJSON
+	if isCredentialWritePlatformTool(executionToolName) && record.credentialSecrets != nil {
+		runtime := &selectedToolRuntime{credentialSecrets: record.credentialSecrets}
+		var err error
+		argumentsJSON, err = runtime.expandCredentialSecretValueInJSON(
+			record.UserID,
+			record.ConversationID,
+			record.RunID,
+			argumentsJSON,
+		)
+		if err != nil {
+			s.failPlatformApproval(ctx, record)
+			return "", err
+		}
+	}
+	argumentsJSON = s.expandCredentialRefsInJSON(ctx, record.UserID, argumentsJSON)
 	output, err := entry.handler(s, ctx, platformToolCallContext{
 		UserID:         record.UserID,
 		ConversationID: record.ConversationID,
@@ -666,11 +722,90 @@ func (s *Service) ApprovePlatformWrite(ctx context.Context, approvalID string, u
 		Arguments:      json.RawMessage(argumentsJSON),
 	})
 	if err != nil {
+		s.failPlatformApproval(ctx, record)
 		return "", err
 	}
+	record = s.finishPlatformApproval(record, platformApprovalStatusApproved)
 	summary, summaryErr := marshalApprovalSummary(record)
 	if summaryErr != nil {
 		return output, nil
 	}
+	s.persistPlatformApprovalTerminal(ctx, record)
 	return summary, nil
+}
+
+func (s *Service) failPlatformApproval(ctx context.Context, record *platformWriteApproval) {
+	record = s.finishPlatformApproval(record, platformApprovalStatusFailed)
+	s.persistPlatformApprovalTerminal(ctx, record)
+}
+
+func (s *Service) finishPlatformApproval(record *platformWriteApproval, status string) *platformWriteApproval {
+	if record == nil {
+		return nil
+	}
+	if s != nil && s.platformApprovals != nil {
+		if finished := s.platformApprovals.finish(record.ID, record.UserID, status); finished != nil {
+			return finished
+		}
+	}
+	snapshot := *record
+	snapshot.Status = status
+	return &snapshot
+}
+
+func (s *Service) persistPlatformApprovalTerminal(ctx context.Context, record *platformWriteApproval) {
+	if s == nil || s.repo == nil || record == nil || record.UserID == 0 || record.ConversationID == 0 ||
+		strings.TrimSpace(record.RunID) == "" || strings.TrimSpace(record.ToolCallID) == "" {
+		return
+	}
+	output, err := marshalPlatformResult(map[string]interface{}{
+		"approval_id": record.ID,
+		"status":      record.Status,
+		"tool":        record.ToolName,
+	})
+	if err != nil {
+		s.logPlatformApprovalPersistenceFailure(record, err)
+		return
+	}
+	rows, err := s.repo.ListConversationToolCallsByRunID(
+		ctx,
+		record.UserID,
+		record.ConversationID,
+		strings.TrimSpace(record.RunID),
+	)
+	if err != nil {
+		s.logPlatformApprovalPersistenceFailure(record, err)
+		return
+	}
+	for i := range rows {
+		if strings.TrimSpace(rows[i].ToolCallID) != strings.TrimSpace(record.ToolCallID) {
+			continue
+		}
+		if record.MessageID != 0 && rows[i].MessageID != record.MessageID {
+			continue
+		}
+		rows[i].OutputJSON = output
+		rows[i].ErrorJSON = ""
+		if err := s.repo.UpdateConversationToolCallPayload(ctx, record.UserID, record.ConversationID, record.RunID, rows[i]); err != nil {
+			s.logPlatformApprovalPersistenceFailure(record, err)
+		}
+		return
+	}
+	s.logPlatformApprovalPersistenceFailure(record, repository.ErrNotFound)
+}
+
+func (s *Service) logPlatformApprovalPersistenceFailure(record *platformWriteApproval, err error) {
+	if s == nil || s.logger == nil || record == nil || err == nil {
+		return
+	}
+	s.logger.Error("persist_platform_tool_approval_terminal_failed",
+		zap.String("approval_id", record.ID),
+		zap.Uint("user_id", record.UserID),
+		zap.Uint("conversation_id", record.ConversationID),
+		zap.Uint("message_id", record.MessageID),
+		zap.String("run_id", record.RunID),
+		zap.String("tool_call_id", record.ToolCallID),
+		zap.String("status", record.Status),
+		zap.Error(err),
+	)
 }

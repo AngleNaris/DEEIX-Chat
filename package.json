@@ -13,6 +13,8 @@
     "dev:api": "turbo run dev --filter=@deeix/api",
     "dev:web": "turbo run dev --filter=@deeix/web",
     "test": "turbo run test",
+    "test:agent-group-contract": "node scripts/test-agent-group-contract.mjs",
+    "test:load": "node scripts/load-gate.mjs",
     "verify": "turbo run check test build"
   },
   "devDependencies": {

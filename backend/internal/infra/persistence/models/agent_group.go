@@ -99,7 +99,7 @@ type AgentGroupStepAttempt struct {
 	StepID                uint       `gorm:"not null;uniqueIndex:idx_chat_agent_group_attempts_step_attempt_no;index:idx_chat_agent_group_attempts_step_id;comment:所属逻辑步骤ID"`
 	AttemptNo             int        `gorm:"not null;default:0;uniqueIndex:idx_chat_agent_group_attempts_step_attempt_no;comment:尝试序号"`
 	ChildRunID            string     `gorm:"size:128;not null;default:'';index:idx_chat_agent_group_attempts_child_run_id;comment:对应 ConversationRun.RunID"`
-	RetryRequestID        string     `gorm:"size:128;not null;default:'';uniqueIndex:idx_chat_agent_group_attempts_retry_request_id;comment:重试幂等键"`
+	RetryRequestID        string     `gorm:"size:128;not null;default:'';index:idx_chat_agent_group_attempts_retry_request_id_v2;comment:重试幂等键"`
 	RequestedModel        string     `gorm:"size:128;not null;default:'';comment:请求模型快照"`
 	ResolvedModel         string     `gorm:"size:128;not null;default:'';comment:实际模型快照"`
 	InputSnapshotJSON     string     `gorm:"type:text;not null;default:'';comment:当前步骤输入"`

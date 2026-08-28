@@ -2,6 +2,7 @@ package artifact
 
 import (
 	"context"
+	"time"
 
 	domainartifact "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/artifact"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/dberror"
@@ -163,7 +164,7 @@ func (r *Repo) ReplaceActiveArtifactShare(ctx context.Context, userID uint, arti
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(&model.ArtifactShare{}).
 			Where("artifact_id = ? AND user_id = ? AND status = 'active'", artifactID, userID).
-			Updates(map[string]interface{}{"status": "revoked", "revoked_at": gorm.Expr("NOW()")}).Error; err != nil {
+			Updates(map[string]interface{}{"status": "revoked", "revoked_at": time.Now().UTC()}).Error; err != nil {
 			return translateError(err)
 		}
 		record := model.ArtifactShare{
@@ -224,5 +225,5 @@ func (r *Repo) GetArtifactShareByShareID(ctx context.Context, shareID string) (*
 func (r *Repo) RevokeArtifactShare(ctx context.Context, userID uint, shareID string) error {
 	return translateError(r.db.WithContext(ctx).Model(&model.ArtifactShare{}).
 		Where("share_id = ? AND user_id = ? AND status = 'active'", shareID, userID).
-		Updates(map[string]interface{}{"status": "revoked", "revoked_at": gorm.Expr("NOW()")}).Error)
+		Updates(map[string]interface{}{"status": "revoked", "revoked_at": time.Now().UTC()}).Error)
 }

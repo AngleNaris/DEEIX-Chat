@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -98,11 +99,17 @@ func TestSweepMMOutputsAggregatesDeletionErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = os.Chtimes(oldMM, old, old)
-	if err := os.Chmod(scope, 0500); err != nil {
-		t.Skipf("chmod unavailable: %v", err)
+	originalRemoveAll := removeMMOutputAll
+	removeMMOutputAll = func(path string) error {
+		if path == oldMM {
+			return os.ErrPermission
+		}
+		return originalRemoveAll(path)
 	}
-	defer func() { _ = os.Chmod(scope, 0755) }()
+	t.Cleanup(func() { removeMMOutputAll = originalRemoveAll })
 	if err := sweepMMOutputs(root, now, 24*time.Hour); err == nil {
 		t.Fatal("sweepMMOutputs() error = nil, want aggregated removal error")
+	} else if !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("sweepMMOutputs() error = %v, want permission error", err)
 	}
 }

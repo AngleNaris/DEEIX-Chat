@@ -56,5 +56,5 @@ type ChangeAgentGroupSupervisorRequest struct {
 // AgentGroupStepRetryRequest 重试失败步骤请求。
 // retryRequestID 为客户端幂等键：相同键不会创建重复 Attempt。
 type AgentGroupStepRetryRequest struct {
-	RetryRequestID string `json:"retryRequestID" binding:"omitempty,max=64"`
+	RetryRequestID string `json:"retryRequestID" binding:"required,max=64"`
 }

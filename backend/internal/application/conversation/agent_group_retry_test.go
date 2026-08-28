@@ -25,6 +25,13 @@ import (
 	"gorm.io/gorm"
 )
 
+func TestAgentGroupRunRetryRejectsMissingRequestID(t *testing.T) {
+	_, err := (&Service{}).RetryAgentGroupRunStep(t.Context(), RetryAgentGroupRunInput{RequestID: "   "}, nil)
+	if !errors.Is(err, ErrAgentGroupRetryRequestIDRequired) {
+		t.Fatalf("error = %v, want missing retry request id", err)
+	}
+}
+
 // agentGroupRetrySettingsFake 注入 feature flag：agentGroupFeatureEnabled 在
 // agentGroupSettings 为 nil 时禁用特性，测试必须提供该假实现。
 type agentGroupRetrySettingsFake struct {
@@ -630,6 +637,9 @@ func TestAgentGroupRunRetryOnlyRetriesFailedStep(t *testing.T) {
 	if retryAttempt.AttemptNo != 2 || retryAttempt.Status != domainagentgroup.AttemptStatusError {
 		t.Fatalf("retry attempt = no %d status %q, want no 2 / error", retryAttempt.AttemptNo, retryAttempt.Status)
 	}
+	if retryAttempt.RetryRequestID != "retry-req-1" {
+		t.Fatalf("retry request id = %q, want client id %q", retryAttempt.RetryRequestID, "retry-req-1")
+	}
 	if want := domainagentgroup.BillingRef(seed.run.ID, seed.workerStep.ID, 2); retryAttempt.BillingRef != want {
 		t.Fatalf("retry attempt billing ref = %q, want %q", retryAttempt.BillingRef, want)
 	}
@@ -783,13 +793,13 @@ func TestAgentGroupRunRetryDoubleClickCreatesSingleAttempt(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		_, errs[0] = svcA.RetryAgentGroupRunStep(ctxA, RetryAgentGroupRunInput{
-			UserID: agentGroupRetryUserID, RunPublicID: seed.run.PublicID, RequestID: "retry-req-double-a",
+			UserID: agentGroupRetryUserID, RunPublicID: seed.run.PublicID, RequestID: "retry-req-double",
 		}, nil)
 	}()
 	go func() {
 		defer wg.Done()
 		_, errs[1] = svcB.RetryAgentGroupRunStep(ctxB, RetryAgentGroupRunInput{
-			UserID: agentGroupRetryUserID, RunPublicID: seed.run.PublicID, RequestID: "retry-req-double-b",
+			UserID: agentGroupRetryUserID, RunPublicID: seed.run.PublicID, RequestID: "retry-req-double",
 		}, nil)
 	}()
 	wg.Wait()
@@ -811,6 +821,109 @@ func TestAgentGroupRunRetryDoubleClickCreatesSingleAttempt(t *testing.T) {
 	attempts := listAgentGroupAttempts(t, db, seed.workerStep.ID)
 	if len(attempts) != 2 {
 		t.Fatalf("double-click attempts = %d, want 2 (single retry)", len(attempts))
+	}
+	if attempts[1].RetryRequestID != "retry-req-double" {
+		t.Fatalf("double-click retry request id = %q, want client id", attempts[1].RetryRequestID)
+	}
+}
+
+func TestAgentGroupRunRetrySequentialReplayReturnsConflictWithoutNewAttempt(t *testing.T) {
+	db := openAgentGroupRetryTestDB(t)
+	seed := seedAgentGroupPausedRetryableRun(t, db, "worker", 3)
+	service := newAgentGroupRetryTestService(t, db)
+	input := RetryAgentGroupRunInput{
+		UserID: agentGroupRetryUserID, RunPublicID: seed.run.PublicID, RequestID: "retry-req-replay",
+	}
+
+	if _, err := service.RetryAgentGroupRunStep(t.Context(), input, nil); !errors.Is(err, ErrAgentGroupRunBlocked) {
+		t.Fatalf("first retry error = %v, want ErrAgentGroupRunBlocked", err)
+	}
+	if _, err := service.RetryAgentGroupRunStep(t.Context(), input, nil); !errors.Is(err, ErrAgentGroupCASConflict) {
+		t.Fatalf("replayed retry error = %v, want ErrAgentGroupCASConflict", err)
+	}
+	attempts := listAgentGroupAttempts(t, db, seed.workerStep.ID)
+	if len(attempts) != 2 {
+		t.Fatalf("sequential replay attempts = %d, want 2", len(attempts))
+	}
+}
+
+func TestAgentGroupRetryRequestLookupIsScopedToRunOwner(t *testing.T) {
+	db := openAgentGroupRetryTestDB(t)
+	seed := seedAgentGroupPausedRetryableRun(t, db, "worker", 3)
+	service := newAgentGroupRetryTestService(t, db)
+	const requestID = "retry-owner-scope"
+
+	if _, err := service.RetryAgentGroupRunStep(t.Context(), RetryAgentGroupRunInput{
+		UserID: agentGroupRetryUserID, RunPublicID: seed.run.PublicID, RequestID: requestID,
+	}, nil); !errors.Is(err, ErrAgentGroupRunBlocked) {
+		t.Fatalf("retry error = %v, want ErrAgentGroupRunBlocked", err)
+	}
+	store := postgresagentgroup.NewRepo(db)
+	if _, err := store.GetAgentGroupStepAttemptByRetryRequestID(t.Context(), agentGroupRetryUserID, seed.run.ID, requestID); err != nil {
+		t.Fatalf("owner lookup failed: %v", err)
+	}
+	if _, err := store.GetAgentGroupStepAttemptByRetryRequestID(t.Context(), agentGroupRetryUserID+1, seed.run.ID, requestID); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("cross-user lookup error = %v, want repository.ErrNotFound", err)
+	}
+}
+
+// Run/Step 必须属于同一聚合。错误地把 Run A 与 Step B 组合传入时，
+// 事务必须整体回滚，不能把 Run A 推进为 running，也不能污染 Step B。
+func TestBeginAgentGroupStepRetryRejectsStepFromAnotherRun(t *testing.T) {
+	db := openAgentGroupRetryTestDB(t)
+	seedA := seedAgentGroupPausedRetryableRun(t, db, "worker", 3)
+
+	var runB persistencemodels.AgentGroupRun
+	if err := db.Where("id <> ?", seedA.run.ID).First(&runB).Error; err == nil {
+		t.Fatal("unexpected second run before test seed")
+	}
+	runB = *seedA.run
+	runB.BaseModel = persistencemodels.BaseModel{}
+	runB.PublicID = "run-pub-2"
+	runB.ClientRunID = "run-client-2"
+	if err := db.Create(&runB).Error; err != nil {
+		t.Fatalf("create second run: %v", err)
+	}
+	stepB := *seedA.workerStep
+	stepB.BaseModel = persistencemodels.BaseModel{}
+	stepB.PublicID = "step-wkr-2"
+	stepB.GroupRunID = runB.ID
+	if err := db.Create(&stepB).Error; err != nil {
+		t.Fatalf("create second run step: %v", err)
+	}
+
+	attempt := &domainagentgroup.Attempt{
+		PublicID: "att-cross-run", StepID: stepB.ID, AttemptNo: 1,
+		RetryRequestID: "retry-cross-run", Status: domainagentgroup.AttemptStatusRunning,
+		StartedAt: time.Now(),
+	}
+	ok, err := postgresagentgroup.NewRepo(db).BeginAgentGroupStepRetry(
+		t.Context(), seedA.run.ID, seedA.run.StateVersion, stepB.ID, attempt,
+	)
+	if err == nil || ok {
+		t.Fatalf("cross-run retry = ok %v err %v, want rejected transaction", ok, err)
+	}
+
+	var storedRun persistencemodels.AgentGroupRun
+	if err := db.First(&storedRun, seedA.run.ID).Error; err != nil {
+		t.Fatalf("reload run A: %v", err)
+	}
+	if storedRun.Status != domainagentgroup.RunStatusPausedRetryable || storedRun.StateVersion != seedA.run.StateVersion {
+		t.Fatalf("run A changed after rejected retry: status=%q version=%d", storedRun.Status, storedRun.StateVersion)
+	}
+	var storedStep persistencemodels.AgentGroupStep
+	if err := db.First(&storedStep, stepB.ID).Error; err != nil {
+		t.Fatalf("reload step B: %v", err)
+	}
+	if storedStep.Status != seedA.workerStep.Status {
+		t.Fatalf("step B changed after rejected retry: status=%q", storedStep.Status)
+	}
+	var attemptCount int64
+	if err := db.Model(&persistencemodels.AgentGroupStepAttempt{}).Where("step_id = ?", stepB.ID).Count(&attemptCount).Error; err != nil {
+		t.Fatalf("count step B attempts: %v", err)
+	}
+	if attemptCount != 0 {
+		t.Fatalf("cross-run retry created %d attempts, want 0", attemptCount)
 	}
 }
 

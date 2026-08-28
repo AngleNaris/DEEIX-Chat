@@ -93,6 +93,8 @@ type AgentGroupRunRepository interface {
 	ListAttemptsBySteps(ctx context.Context, stepIDs []uint) (map[uint][]domainagentgroup.Attempt, error)
 	// GetAgentGroupStepAttemptByPublicID 查询尝试。
 	GetAgentGroupStepAttemptByPublicID(ctx context.Context, userID uint, runPublicID string, attemptPublicID string) (*domainagentgroup.Attempt, error)
+	// GetAgentGroupStepAttemptByRetryRequestID 按用户、运行和客户端幂等键查询重试尝试。
+	GetAgentGroupStepAttemptByRetryRequestID(ctx context.Context, userID uint, runID uint, retryRequestID string) (*domainagentgroup.Attempt, error)
 	// CountAttemptsByStep 统计步骤累计尝试数量。
 	CountAttemptsByStep(ctx context.Context, stepID uint) (int64, error)
 	// BeginAgentGroupStepRetry 在单事务内完成重试启动：run CAS（paused_retryable→running

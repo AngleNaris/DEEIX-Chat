@@ -15,7 +15,9 @@
     "chatFiles": "文件与检索",
     "knowledgeBases": "知识库",
     "about": "关于",
-    "contentModeration": "内容审核"
+    "contentModeration": "内容审核",
+    "agentGroups": "Agent 群组",
+    "platformTools": "平台工具"
   },
   "aboutPage": {
     "title": "关于",

@@ -3,6 +3,7 @@ package upload
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -14,6 +15,8 @@ import (
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/objectstore"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 )
+
+var errUploadTestFileNotFound = errors.New("test file not found")
 
 func TestUploadFileReturnsExistingActiveDuplicate(t *testing.T) {
 	ctx := context.Background()
@@ -139,6 +142,30 @@ func TestDeleteFileIfUnreferencedSkipsReferencedFile(t *testing.T) {
 	}
 	if got := store.objectCount(); got != 1 {
 		t.Fatalf("referenced file should keep physical object, got %d objects", got)
+	}
+}
+
+func TestFileOperationsMapRepositoryNotFound(t *testing.T) {
+	repo := &notFoundUploadTestRepo{uploadTestRepo: newUploadTestRepo()}
+	service := newUploadTestService(repo, newUploadTestStore())
+	ctx := context.Background()
+
+	tests := []struct {
+		name string
+		call func() error
+	}{
+		{name: "delete", call: func() error { _, err := service.DeleteFile(ctx, 7, "missing"); return err }},
+		{name: "rename", call: func() error { _, err := service.RenameFile(ctx, 7, "missing", "new.txt"); return err }},
+		{name: "rag opt out", call: func() error { _, err := service.UpdateFileRagOptOut(ctx, 7, "missing", true); return err }},
+		{name: "validate image", call: func() error { return service.ValidateImageFile(ctx, 7, "missing") }},
+		{name: "open content", call: func() error { _, err := service.OpenFileContent(ctx, 7, "missing"); return err }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := tt.call(); !errors.Is(err, errUploadTestFileNotFound) {
+				t.Fatalf("error = %v, want mapped file-not-found error", err)
+			}
+		})
 	}
 }
 
@@ -433,7 +460,7 @@ func TestValidateImageFileRejectsNonImage(t *testing.T) {
 	}
 }
 
-func newUploadTestService(repo *uploadTestRepo, store *uploadTestStore) *Service {
+func newUploadTestService(repo repository.UploadRepository, store *uploadTestStore) *Service {
 	cfg := config.Config{
 		MaxUploadFileBytes:    1024 * 1024,
 		UserStorageQuotaBytes: 10 * 1024 * 1024,
@@ -442,6 +469,7 @@ func newUploadTestService(repo *uploadTestRepo, store *uploadTestStore) *Service
 	service := NewServiceWithRuntime(config.NewRuntime(cfg), repo, nil, Hooks{}, ErrorSet{
 		InvalidFileReference: repository.ErrInvalidInput,
 		InvalidFileName:      repository.ErrInvalidInput,
+		FileNotFound:         errUploadTestFileNotFound,
 		StorageQuotaExceeded: repository.ErrConflict,
 		FileTooLarge:         repository.ErrInvalidInput,
 		MIMEBlocked:          repository.ErrInvalidInput,
@@ -524,6 +552,18 @@ type uploadTestRepo struct {
 	missNextDuplicateLookup bool
 	failNextCreateDuplicate bool
 	referencedFileIDs       map[string]bool
+}
+
+type notFoundUploadTestRepo struct {
+	*uploadTestRepo
+}
+
+func (r *notFoundUploadTestRepo) RenameFileObjectByID(context.Context, uint, string, string) (*domainconversation.FileObject, error) {
+	return nil, repository.ErrNotFound
+}
+
+func (r *notFoundUploadTestRepo) UpdateFileObjectRagOptOut(context.Context, uint, string, bool) (*domainconversation.FileObject, error) {
+	return nil, repository.ErrNotFound
 }
 
 func newUploadTestRepo() *uploadTestRepo {

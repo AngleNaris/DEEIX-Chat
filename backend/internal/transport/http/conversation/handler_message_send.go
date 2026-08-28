@@ -53,6 +53,14 @@ func sanitizeMessageOptions(options map[string]interface{}) map[string]interface
 	return sanitized
 }
 
+func validateAgentGroupMessageModel(conversation *model.Conversation, requestModel string) error {
+	if conversation != nil &&
+		!model.AgentGroupRequestModelAllowed(conversation.AgentGroupID != nil, requestModel) {
+		return appconversation.ErrConversationModelNotAllowedWithGroup
+	}
+	return nil
+}
+
 // parseSendMessageInput 解析消息发送请求的公共参数。
 func (h *Handler) parseSendMessageInput(c *gin.Context) (appconversation.SendMessageInput, *model.Conversation, *SendMessageRequest, error) {
 	userID := middleware.MustUserID(c)
@@ -86,9 +94,9 @@ func (h *Handler) parseSendMessageInput(c *gin.Context) (appconversation.SendMes
 	}
 
 	// 群组会话的模型由群组成员覆盖与角色默认值决定，禁止请求级模型覆盖。
-	if conversation.AgentGroupID != nil && strings.TrimSpace(req.Model) != "" {
+	if err = validateAgentGroupMessageModel(conversation, req.Model); err != nil {
 		response.ErrorWithCode(c, http.StatusBadRequest, "agent_group.model_override_not_allowed", "model override not allowed in agent group conversation")
-		return appconversation.SendMessageInput{}, nil, nil, appconversation.ErrConversationModelNotAllowedWithGroup
+		return appconversation.SendMessageInput{}, nil, nil, err
 	}
 
 	input := appconversation.SendMessageInput{

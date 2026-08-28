@@ -6,6 +6,7 @@ import {
   readMentionFileSearchCache,
   searchMentionFiles,
 } from "@/features/chat/model/mention-file-search";
+import { useAgentGroupFeature } from "@/features/agent-groups/context/agent-group-feature-context";
 import type { ChatModelOption, PendingAttachment } from "@/features/chat/types/chat-runtime";
 import { listAgentGroups } from "@/shared/api/agent-groups";
 import type { AgentGroupDTO } from "@/shared/api/agent-groups.types";
@@ -666,6 +667,7 @@ export function useChatMentionMenu({
   onSkillLimitReached,
   onToolLimitReached,
 }: ChatMentionMenuControllerArgs) {
+  const { enabled: agentGroupsEnabled } = useAgentGroupFeature();
   const menuRef = React.useRef<HTMLDivElement | null>(null);
   const menuID = React.useId();
   const [inputFocused, setInputFocused] = React.useState(false);
@@ -688,7 +690,10 @@ export function useChatMentionMenu({
     start: draft.length,
   }));
   const modelCatalogRefreshRequestedRef = React.useRef(false);
-  const enabledKindSet = React.useMemo(() => new Set(enabledKinds), [enabledKinds]);
+  const enabledKindSet = React.useMemo(
+    () => new Set(enabledKinds.filter((kind) => kind !== "group" || agentGroupsEnabled)),
+    [agentGroupsEnabled, enabledKinds],
+  );
   const triggerQuery = selection.start === selection.end ? resolveTriggerQuery(draft, selection.start) : null;
   const mentionQuery = triggerQuery?.kind === "mention" ? triggerQuery.query : null;
   const promptQuery = triggerQuery?.kind === "prompt" ? triggerQuery.query : null;

@@ -95,7 +95,7 @@ func (s *Service) CreateConversation(ctx context.Context, userID uint, title str
 		}
 		// 群组会话的模型由成员覆盖与角色默认值决定，禁止请求级模型覆盖；
 		// 角色默认模型由上方合并进 normalizedModel，属允许的继承值，仅拒绝请求中显式携带的模型。
-		if strings.TrimSpace(modelName) != "" {
+		if !model.AgentGroupRequestModelAllowed(true, modelName) {
 			return nil, ErrConversationModelNotAllowedWithGroup
 		}
 		// 群组已从项目绑定中拆除（§C1）：群组会话可无项目；

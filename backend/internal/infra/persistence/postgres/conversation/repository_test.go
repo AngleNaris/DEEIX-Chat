@@ -2146,6 +2146,27 @@ func TestConversationToolCallPersistencePreservesNonCredentialValue(t *testing.T
 	}
 }
 
+func TestListConversationToolCallsByMessageIDsIsExact(t *testing.T) {
+	db := openConversationRepositoryTestDB(t)
+	repo := NewRepo(db)
+	ctx := context.Background()
+	rows := []domainconversation.ToolCall{
+		{MessageID: 101, UserID: 1, ConversationID: 11, RunID: "run-a", ToolCallID: "call-a", ToolName: "save_memory", Status: "success"},
+		{MessageID: 202, UserID: 2, ConversationID: 22, RunID: "run-b", ToolCallID: "call-b", ToolName: "save_memory", Status: "success"},
+		{MessageID: 303, UserID: 3, ConversationID: 33, RunID: "run-c", ToolCallID: "call-c", ToolName: "save_memory", Status: "success"},
+	}
+	if err := repo.CreateConversationToolCalls(ctx, rows); err != nil {
+		t.Fatalf("CreateConversationToolCalls() error = %v", err)
+	}
+	got, err := repo.ListConversationToolCallsByMessageIDs(ctx, []uint{202, 101})
+	if err != nil {
+		t.Fatalf("ListConversationToolCallsByMessageIDs() error = %v", err)
+	}
+	if len(got) != 2 || got[0].MessageID != 101 || got[1].MessageID != 202 {
+		t.Fatalf("unexpected rows: %+v", got)
+	}
+}
+
 func assertPersistedCredentialValueRedacted(t *testing.T, db *gorm.DB, id uint) {
 	t.Helper()
 	var persisted model.ChatRunEvent

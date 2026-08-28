@@ -6,6 +6,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 
 import { SidebarConversationsProvider } from "@/entities/conversation";
+import { AgentGroupFeatureProvider } from "@/features/agent-groups/context/agent-group-feature-context";
 import { AppSidebar } from "@/features/layouts/components/navigation/app-sidebar";
 import { MobileHeader } from "@/features/layouts/components/sections/mobile-header";
 import { ChatSessionProvider, useChatSession } from "@/features/chat";
@@ -85,16 +86,18 @@ export function ProjectLayout({
       <UserTimeZoneSync />
       <InitialSecurityGuard />
       <AnnouncementDialogHost />
-      <SidebarProvider className="h-svh overflow-hidden" defaultOpen={defaultSidebarOpen}>
-        <SidebarConversationsProvider
-          bulkPendingTitle={tRecent("dialogs.bulk.pending")}
-          newConversationTitle={tRecent("newChat")}
-        >
-          <ChatSessionProvider>
-            <ProjectLayoutShell>{children}</ProjectLayoutShell>
-          </ChatSessionProvider>
-        </SidebarConversationsProvider>
-      </SidebarProvider>
+      <AgentGroupFeatureProvider>
+        <SidebarProvider className="h-svh overflow-hidden" defaultOpen={defaultSidebarOpen}>
+          <SidebarConversationsProvider
+            bulkPendingTitle={tRecent("dialogs.bulk.pending")}
+            newConversationTitle={tRecent("newChat")}
+          >
+            <ChatSessionProvider>
+              <ProjectLayoutShell>{children}</ProjectLayoutShell>
+            </ChatSessionProvider>
+          </SidebarConversationsProvider>
+        </SidebarProvider>
+      </AgentGroupFeatureProvider>
     </>
   );
 }

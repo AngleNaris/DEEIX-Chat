@@ -43,6 +43,11 @@ func (s *Service) RetryAgentGroupRunStep(
 	input RetryAgentGroupRunInput,
 	onDelta func(string) error,
 ) (*SendMessageResult, error) {
+	retryRequestID := strings.TrimSpace(input.RequestID)
+	if retryRequestID == "" {
+		return nil, ErrAgentGroupRetryRequestIDRequired
+	}
+	input.RequestID = retryRequestID
 	if !s.agentGroupFeatureEnabled(ctx) || s.agentGroupRunStore == nil || s.agentGroupRepo == nil {
 		return nil, ErrAgentGroupFeatureDisabled
 	}
@@ -57,6 +62,13 @@ func (s *Service) RetryAgentGroupRunStep(
 	// 同会话串行：与首次执行共享同一把互斥锁。
 	unlockRun := s.lockAgentGroupRun(run.ConversationID)
 	defer unlockRun()
+	// 幂等键检查必须早于状态守卫：首个请求可能已把运行推进到终态，
+	// 后续同键重放仍应识别为同一操作，而不是误报普通的不可重试状态。
+	if _, lookupErr := s.agentGroupRunStore.GetAgentGroupStepAttemptByRetryRequestID(ctx, input.UserID, run.ID, retryRequestID); lookupErr == nil {
+		return nil, ErrAgentGroupCASConflict
+	} else if !errors.Is(lookupErr, repository.ErrNotFound) {
+		return nil, lookupErr
+	}
 
 	// 状态守卫：仅 paused_retryable 且存在可重试步骤时可重试。
 	if run.Status != domainagentgroup.RunStatusPausedRetryable || run.RetryableStepID == nil {
@@ -119,7 +131,7 @@ func (s *Service) RetryAgentGroupRunStep(
 	// 崩溃不再留下「run 已 running 但无 attempt」的中间态。
 	// 双击重试：第二个请求读到旧状态，CAS 冲突 → 409，绝不创建重复 Attempt。
 	running := domainagentgroup.RunStatusRunning
-	attempt, err := st.buildAgentGroupStepRetryAttempt(retryStep, member, int(attempts)+1)
+	attempt, err := st.buildAgentGroupStepRetryAttempt(retryStep, member, int(attempts)+1, retryRequestID)
 	if err != nil {
 		return st.failedResult(), err
 	}
@@ -497,6 +509,7 @@ func (st *agentGroupRunState) buildAgentGroupStepRetryAttempt(
 	step *domainagentgroup.Step,
 	member *domainagentgroup.RunSnapshotMember,
 	attemptNo int,
+	retryRequestID string,
 ) (*domainagentgroup.Attempt, error) {
 	now := time.Now()
 	leaseExpiresAt := now.Add(st.attemptLease)
@@ -504,7 +517,7 @@ func (st *agentGroupRunState) buildAgentGroupStepRetryAttempt(
 		PublicID:          normalizePublicID(uuid.NewString()),
 		StepID:            step.ID,
 		AttemptNo:         attemptNo,
-		RetryRequestID:    normalizePublicID(uuid.NewString()),
+		RetryRequestID:    retryRequestID,
 		RequestedModel:    member.EffectiveModel,
 		ResolvedModel:     member.EffectiveModel,
 		InputSnapshotJSON: marshalAgentGroupAttemptInput(st.snapshot, step.StepType, step.Instruction),

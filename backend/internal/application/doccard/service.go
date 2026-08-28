@@ -48,6 +48,22 @@ type CardView struct {
 	UpdatedAt    string   `json:"updated_at"`
 }
 
+// NewCardView 将领域对象转换为对外响应视图。
+func NewCardView(item domaindoccard.DocCard) CardView {
+	return CardView{
+		CardPublicID: item.CardPublicID,
+		Category:     item.Category,
+		ProjectID:    item.ProjectID,
+		RoleID:       item.RoleID,
+		Title:        item.Title,
+		Content:      item.Content,
+		Keywords:     item.Keywords,
+		Enabled:      item.Enabled,
+		UpdatedBy:    item.UpdatedBy,
+		UpdatedAt:    item.UpdatedAt.Format("2006-01-02 15:04:05"),
+	}
+}
+
 // Service 封装文档卡片业务能力。
 type Service struct {
 	repo             repository.DocCardRepository
@@ -143,18 +159,7 @@ func (s *Service) ListDocCards(ctx context.Context, userID uint) ([]CardView, er
 	}
 	views := make([]CardView, 0, len(items))
 	for _, item := range items {
-		views = append(views, CardView{
-			CardPublicID: item.CardPublicID,
-			Category:     item.Category,
-			ProjectID:    item.ProjectID,
-			RoleID:       item.RoleID,
-			Title:        item.Title,
-			Content:      item.Content,
-			Keywords:     item.Keywords,
-			Enabled:      item.Enabled,
-			UpdatedBy:    item.UpdatedBy,
-			UpdatedAt:    item.UpdatedAt.Format("2006-01-02 15:04:05"),
-		})
+		views = append(views, NewCardView(item))
 	}
 	return views, nil
 }

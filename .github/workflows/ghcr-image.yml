@@ -5,12 +5,14 @@ on:
     branches:
       - main
       - dev
+      - custom
     tags:
       - "v*.*.*"
   pull_request:
     branches:
       - main
       - dev
+      - custom
   workflow_dispatch:
 
 permissions:
@@ -114,6 +116,8 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create manifest list
+        env:
+          DOCKER_METADATA_OUTPUT_JSON: ${{ steps.meta.outputs.json }}
         run: |
           jq -cr '.tags[]' <<< "$DOCKER_METADATA_OUTPUT_JSON" | while read -r tag; do
             docker buildx imagetools create \

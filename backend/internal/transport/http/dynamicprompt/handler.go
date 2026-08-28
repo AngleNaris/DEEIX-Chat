@@ -75,6 +75,10 @@ func (h *Handler) UpdatePrompt(c *gin.Context) {
 		Enabled: req.Enabled,
 	}, "user")
 	if err != nil {
+		if errors.Is(err, appdynamicprompt.ErrPromptNameTooLong) || errors.Is(err, appdynamicprompt.ErrPromptContentTooLong) {
+			response.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
 		response.Error(c, http.StatusNotFound, "dynamic prompt not found")
 		return
 	}

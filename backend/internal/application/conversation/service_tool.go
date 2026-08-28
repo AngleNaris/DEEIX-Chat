@@ -8,16 +8,21 @@ import (
 
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/mcp"
+	"github.com/google/uuid"
 )
 
 // ExecuteToolInput 定义工具执行入参。
 type ExecuteToolInput struct {
 	UserID         uint
 	ConversationID uint
+	MessageID      uint
 	RequestID      string
+	RunID          string
+	ToolCallID     string
 	ToolName       string
 	ArgumentsJSON  string
 	MCPConfig      *mcp.CallConfig
+	ToolRuntime    *selectedToolRuntime
 }
 
 func (s *Service) executeToolCall(ctx context.Context, input ExecuteToolInput) (string, error) {
@@ -141,6 +146,9 @@ func (s *Service) callMCPWithRetry(
 ) (string, error) {
 	if retryCount < 0 {
 		retryCount = 0
+	}
+	if strings.TrimSpace(input.CallID) == "" {
+		input.CallID = uuid.NewString()
 	}
 
 	var lastErr error
