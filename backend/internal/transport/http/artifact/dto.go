@@ -23,6 +23,14 @@ type ShareIDParam struct {
 	ShareID string `uri:"share_id" binding:"required"`
 }
 
+type RenderTokenRequest struct {
+	Document string `json:"document" binding:"required,max=524288"`
+}
+
+type RenderTokenParam struct {
+	Token string `uri:"render_token" binding:"required"`
+}
+
 // PaginationQuery 列表分页查询参数。
 type PaginationQuery struct {
 	Page     int `form:"page" binding:"omitempty,min=1"`

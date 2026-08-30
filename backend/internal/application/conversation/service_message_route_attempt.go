@@ -96,7 +96,7 @@ func (s *Service) buildMessageRoutePrompt(ctx context.Context, route *channel.Re
 		}
 	}
 	if input.PreferencePrompt != "" {
-		assembler.Add(ContextSlot{Kind: SlotPreference, Content: input.PreferencePrompt})
+		assembler.Add(ContextSlot{Kind: SlotPreference, Content: input.PreferencePrompt, Required: true})
 	}
 	baseMessages, _ := assembler.Assemble(historyMessages)
 	return buildPromptPlan(ctx, promptPlanInput{

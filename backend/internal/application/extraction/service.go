@@ -30,30 +30,32 @@ var ErrInvalidStoredFilePath = errors.New("invalid stored file path")
 const defaultStorageRootDir = "./storage"
 
 const (
-	EngineBuiltin      = "builtin"
-	EngineTika         = "tika"
-	EngineDocling      = "docling"
-	EngineMinerU       = "mineru"
-	defaultEngine      = EngineBuiltin
-	TikaSourceExternal = "external"
-	TikaSourceManaged  = "managed"
-	DefaultTikaBaseURL = tikaextract.DefaultTikaBaseURL
-	OCREngineRapidOCR  = "rapidocr"
-	OCREngineTesseract = "tesseract"
-	OCREnginePaddle    = "paddle"
-	OCREngineTencent   = "tencent"
-	OCREngineAliyun    = "aliyun"
-	OCREngineMistral   = "mistral"
-	OCREngineLLM       = "llm"
-	defaultOCREngine   = OCREngineRapidOCR
+	EngineBuiltin         = "builtin"
+	EngineTika            = "tika"
+	EngineDocling         = "docling"
+	EngineMinerU          = "mineru"
+	defaultEngine         = EngineBuiltin
+	TikaSourceExternal    = "external"
+	TikaSourceManaged     = "managed"
+	DefaultTikaBaseURL    = tikaextract.DefaultTikaBaseURL
+	OCREngineRapidOCR     = "rapidocr"
+	OCREngineTesseract    = "tesseract"
+	OCREnginePaddle       = "paddle"
+	OCREngineTencent      = "tencent"
+	OCREngineAliyun       = "aliyun"
+	OCREngineMistral      = "mistral"
+	OCREngineLLM          = "llm"
+	OCREngineSystemVision = "system_vision"
+	defaultOCREngine      = OCREngineRapidOCR
 )
 
 const defaultMinerUFileTypes = "pdf,word,presentation"
 
 // Service 封装文件提取与文本产物读写能力。
 type Service struct {
-	cfg           *config.Runtime
-	storeProvider appstorage.Provider
+	cfg            *config.Runtime
+	storeProvider  appstorage.Provider
+	visionAnalyzer func(context.Context, domainconversation.FileObject) (string, error)
 }
 
 type engine interface {
@@ -98,6 +100,11 @@ func (s *Service) SetObjectStoreProvider(provider appstorage.Provider) {
 	}
 }
 
+// SetVisionAnalyzer 注入系统视觉模型分析器。
+func (s *Service) SetVisionAnalyzer(analyzer func(context.Context, domainconversation.FileObject) (string, error)) {
+	s.visionAnalyzer = analyzer
+}
+
 func (s *Service) openObjectStore(ctx context.Context) (objectstore.Store, error) {
 	if s.storeProvider == nil {
 		s.storeProvider = appstorage.NewRuntimeProvider(s.cfg, nil)
@@ -107,6 +114,14 @@ func (s *Service) openObjectStore(ctx context.Context) (objectstore.Store, error
 
 // ExtractStoredFile 从已落盘文件中提取文本。
 func (s *Service) ExtractStoredFile(ctx context.Context, input ExtractInput) (Result, error) {
+	input.OCREngine = normalizeOCREngine(input.OCREngine)
+	if input.File.FileCategory == "image" && input.OCREngine == OCREngineSystemVision {
+		if !input.ImageOCREnabled {
+			return Result{Engine: "image_direct"}, fmt.Errorf("image_ocr_disabled")
+		}
+		result, err := s.extractImageWithOCR(ctx, input)
+		return sanitizeExtractResult(result), err
+	}
 	store, err := s.openObjectStore(ctx)
 	if err != nil {
 		return Result{}, err
@@ -119,7 +134,6 @@ func (s *Service) ExtractStoredFile(ctx context.Context, input ExtractInput) (Re
 	file := input.File
 	file.StoragePath = absPath
 	input.File = file
-	input.OCREngine = normalizeOCREngine(input.OCREngine)
 
 	pageCount := 0
 	if input.File.FileCategory == "pdf" {
@@ -461,6 +475,8 @@ func normalizeOCREngine(raw string) string {
 		return OCREngineMistral
 	case OCREngineLLM:
 		return OCREngineLLM
+	case OCREngineSystemVision:
+		return OCREngineSystemVision
 	case OCREngineRapidOCR:
 		return OCREngineRapidOCR
 	default:
@@ -497,6 +513,21 @@ func (s *Service) extractWithOCRFallback(ctx context.Context, input ExtractInput
 }
 
 func (s *Service) extractImageWithOCR(ctx context.Context, input ExtractInput) (Result, error) {
+	if normalizeOCREngine(input.OCREngine) == OCREngineSystemVision {
+		result := Result{Engine: ocrEngineName(OCREngineSystemVision), OCRUsed: true}
+		if s == nil || s.visionAnalyzer == nil {
+			return result, errors.New(prefixOCRError(OCREngineSystemVision, "ocr_unavailable"))
+		}
+		text, err := s.visionAnalyzer(ctx, input.File)
+		if err != nil {
+			return result, errors.New(prefixOCRError(OCREngineSystemVision, err.Error()))
+		}
+		result.Text = text
+		if strings.TrimSpace(result.Text) == "" {
+			return result, errors.New(prefixOCRError(OCREngineSystemVision, "ocr_empty_content"))
+		}
+		return result, nil
+	}
 	snapshot := config.Config{}
 	if s != nil && s.cfg != nil {
 		snapshot = s.cfg.Snapshot()
@@ -789,6 +820,8 @@ func ocrEngineName(engine string) string {
 		return "ocr_mistral"
 	case OCREngineLLM:
 		return "ocr_llm"
+	case OCREngineSystemVision:
+		return "ocr_system_vision"
 	case OCREngineRapidOCR:
 		return "ocr_rapidocr"
 	default:

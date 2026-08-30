@@ -1,13 +1,12 @@
 "use client";
 
-import * as React from "react";
 import {
   closestCenter,
   DndContext,
-  KeyboardSensor,
-  PointerSensor,
   type DragEndEvent,
   type DragStartEvent,
+  KeyboardSensor,
+  PointerSensor,
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
@@ -19,10 +18,11 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { usePathname, useRouter } from "next/navigation";
-import { toast } from "sonner";
-import { AnimatePresence, motion, type Transition } from "motion/react";
 import { ChevronDown, PencilLine, Pin, PinOff, Star, StarOff, Trash2 } from "lucide-react";
+import { AnimatePresence, motion, type Transition } from "motion/react";
+import { usePathname, useRouter } from "next/navigation";
+import * as React from "react";
+import { toast } from "sonner";
 
 import { Ellipsis } from "@/components/animate-ui/icons/ellipsis";
 import {
@@ -59,9 +59,9 @@ import {
 } from "@/components/ui/sidebar";
 import {
   ConversationLabelsManagerDialog,
+  type ConversationLabelsTarget,
   ConversationShareDialog,
   sharePatchFromDTO,
-  type ConversationLabelsTarget,
   useConversationExport,
   useSidebarConversations,
 } from "@/entities/conversation";
@@ -73,13 +73,11 @@ import type {
   SidebarConversationDeleteTarget,
   SidebarConversationRenameTarget,
 } from "@/features/layouts/types/navigation";
-import { RoleDialog, EMPTY_ROLE_DRAFT, type RoleDraft } from "@/features/roles/components/role-dialog";
+import { EMPTY_ROLE_DRAFT, RoleDialog, type RoleDraft } from "@/features/roles/components/role-dialog";
+import { RoleIcon } from "@/features/roles/components/role-icon";
 import { useSettingsChatPreferences } from "@/features/settings";
 import { cn } from "@/lib/utils";
-import { CollapsibleMotionContent } from "@/shared/components/collapsible-motion-content";
-import { DeleteFilesOption } from "@/shared/components/delete-files-option";
-import { useDialogSnapshot } from "@/shared/hooks/use-dialog-snapshot";
-import { useStoredBoolean } from "@/shared/hooks/use-stored-boolean";
+import type { ConversationDTO } from "@/shared/api/conversation.types";
 import {
   createConversationRole,
   deleteConversationRole,
@@ -88,8 +86,11 @@ import {
   updateConversationRole,
 } from "@/shared/api/roles";
 import type { ConversationRoleDTO } from "@/shared/api/roles.types";
-import type { ConversationDTO } from "@/shared/api/conversation.types";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
+import { CollapsibleMotionContent } from "@/shared/components/collapsible-motion-content";
+import { DeleteFilesOption } from "@/shared/components/delete-files-option";
+import { useDialogSnapshot } from "@/shared/hooks/use-dialog-snapshot";
+import { useStoredBoolean } from "@/shared/hooks/use-stored-boolean";
 import { isReasoningEffortLevel } from "@/shared/lib/reasoning-effort";
 
 const ROLES_OPEN_STORAGE_KEY = "deeix-roles-open";
@@ -426,7 +427,7 @@ function RoleTreeButton({
           className="flex size-4 shrink-0 items-center justify-center rounded-sm text-sm leading-none"
           style={{ backgroundColor: color || "var(--muted)" }}
         >
-          {icon || "✦"}
+          <RoleIcon value={icon} className="size-3 text-current" />
         </span>
       </span>
       <span className="ml-1 min-w-0 flex-1 truncate text-left">
@@ -456,6 +457,7 @@ export function NavRoles() {
     archiveByPublicID,
     deleteByPublicID,
     touchByPublicID,
+    streamingPublicIDs,
   } = useSidebarConversations();
   const [roles, setRoles] = React.useState<ConversationRoleDTO[]>([]);
   const [rolesOpen, setRolesOpen] = useStoredBoolean(ROLES_OPEN_STORAGE_KEY, true);
@@ -1003,7 +1005,9 @@ export function NavRoles() {
                                 conversation.shareStatus === "active" &&
                                 Boolean(conversation.shareID?.trim()),
                               labelsJSON: conversation.labelsJSON,
+                              hasUnread: conversation.hasUnread,
                             }}
+                            streaming={streamingPublicIDs.has(conversation.publicID)}
                             starAction={{
                               label: conversation.isStarred ? "取消收藏" : "收藏",
                               icon: conversation.isStarred ? StarOff : Star,

@@ -164,7 +164,6 @@ func buildPromptPlan(ctx context.Context, input promptPlanInput) PromptPlan {
 			TokenEstimate: tokenEstimate,
 			Cacheable:     true,
 			SourceCount:   len(input.ToolRuntime.definitions),
-			SourceRefs:    toolDefinitionSourceRefs(input.ToolRuntime.definitions),
 		})
 	}
 	messages = markLeadingSystemMessagesCacheable(messages)
@@ -330,15 +329,6 @@ func skillPromptSourceRefs(skills []domainskill.Skill) []PromptSourceRef {
 	refs := make([]PromptSourceRef, 0, len(skills))
 	for _, skill := range skills {
 		refs = appendPromptSourceRef(refs, "skill", fmt.Sprintf("%d", skill.ID), skill.Title)
-	}
-	return refs
-}
-
-// toolDefinitionSourceRefs 提取本轮可用工具定义的来源引用。
-func toolDefinitionSourceRefs(tools []llm.ToolDefinition) []PromptSourceRef {
-	refs := make([]PromptSourceRef, 0, len(tools))
-	for _, tool := range tools {
-		refs = appendPromptSourceRef(refs, "tool", tool.Name, tool.Name)
 	}
 	return refs
 }

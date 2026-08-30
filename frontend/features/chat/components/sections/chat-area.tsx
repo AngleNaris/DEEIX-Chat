@@ -190,6 +190,7 @@ type ChatAreaProps = {
   onExtendVideoAttachment?: (attachment: MessageAttachment, sourceModelName?: string) => void;
   onOpenCodeArtifact?: (message: ChatAreaMessage, artifact: OpenCodeArtifactInput) => void;
   onCycleMessageBranch: (parentPublicID: string | null, direction: "previous" | "next") => void;
+  onPlatformToolApprovalResolved?: () => void;
   onToggleStar?: () => void | Promise<void>;
   onRename?: (title: string) => void | Promise<void>;
   onAutoRename?: () => void | Promise<void>;
@@ -355,6 +356,7 @@ const ChatMessageRow = React.memo(function ChatMessageRow({
   onEditImageAttachment,
   onExtendVideoAttachment,
   onCycleMessageBranch,
+  onPlatformToolApprovalResolved,
   onReactAssistantMessage,
   onOpenCodeArtifact,
   markdownRender,
@@ -387,6 +389,7 @@ const ChatMessageRow = React.memo(function ChatMessageRow({
   onEditImageAttachment?: (attachment: MessageAttachment, sourceModelName?: string) => void;
   onExtendVideoAttachment?: (attachment: MessageAttachment, sourceModelName?: string) => void;
   onCycleMessageBranch: (parentPublicID: string | null, direction: "previous" | "next") => void;
+  onPlatformToolApprovalResolved?: () => void;
   onReactAssistantMessage: (publicID: string, reaction: AssistantReaction) => void;
   onOpenCodeArtifact?: (message: ChatAreaMessage, artifact: OpenCodeArtifactInput) => void;
   markdownRender: boolean;
@@ -479,6 +482,7 @@ const ChatMessageRow = React.memo(function ChatMessageRow({
         onForkMessage={onForkMessage}
         onCycleMessageBranch={onCycleMessageBranch}
         onReactAssistantMessage={onReactAssistantMessage}
+        onPlatformToolApprovalResolved={onPlatformToolApprovalResolved}
         onCopy={() => void onCopy()}
         copySucceeded={isCopied(copyKey)}
         attachmentContentLoader={attachmentContentLoader}
@@ -534,6 +538,7 @@ const ChatMessageRow = React.memo(function ChatMessageRow({
   previous.attachmentContentLoader === next.attachmentContentLoader &&
   previous.onEditImageAttachment === next.onEditImageAttachment &&
   previous.onExtendVideoAttachment === next.onExtendVideoAttachment &&
+  previous.onPlatformToolApprovalResolved === next.onPlatformToolApprovalResolved &&
   previous.onOpenCodeArtifact === next.onOpenCodeArtifact &&
   areChatAreaMessagesRenderEqual(previous.item, next.item)
 ));
@@ -562,6 +567,7 @@ export function ChatArea({
   onExtendVideoAttachment,
   onOpenCodeArtifact,
   onCycleMessageBranch,
+  onPlatformToolApprovalResolved,
   onToggleStar,
   onRename,
   onAutoRename,
@@ -602,6 +608,9 @@ export function ChatArea({
     onExtendVideoAttachment?.(attachment, sourceModelName);
   });
   const stableOnCycleMessageBranch = useStableEvent(onCycleMessageBranch);
+  const stableOnPlatformToolApprovalResolved = useStableEvent(
+    onPlatformToolApprovalResolved ?? (() => undefined),
+  );
   const stableOnReactAssistantMessage = useStableEvent(onReactAssistantMessage);
   const editImageAttachmentHandler = onEditImageAttachment ? stableOnEditImageAttachment : undefined;
   const extendVideoAttachmentHandler = onExtendVideoAttachment ? stableOnExtendVideoAttachment : undefined;
@@ -654,34 +663,39 @@ export function ChatArea({
     <>
       <div className={cn("px-3 py-2.5 md:pl-0", splitRightInset ? "md:pr-4" : "md:pr-0")}>
         <div className="relative flex w-full items-center justify-between gap-3">
-          <ChatLabel
-            title={title}
-            starred={starred}
-            onToggleStar={canOperateConversation ? onToggleStar : undefined}
-            onRename={canOperateConversation ? onRename : undefined}
-            onAutoRename={canOperateConversation ? onAutoRename : undefined}
-            labels={labels}
-            onUpdateLabels={canOperateConversation ? onUpdateLabels : undefined}
-            projectMenu={canOperateConversation ? projectMenu : undefined}
-            onShare={canOperateConversation ? onShare : undefined}
-            shareActive={shareActive}
-            onExport={canOperateConversation ? onExport : undefined}
-            onDelete={canOperateConversation ? onDelete : undefined}
-            screenshotFullLabel={tScreenshot("captureFull")}
-            screenshotSelectLabel={tScreenshot("captureSelect")}
-            onScreenshotFull={onScreenshotFull}
-            onScreenshotSelect={onScreenshotSelect}
-          />
-          {agentGroup ? (
-            <div className="pointer-events-none absolute inset-x-0 flex justify-center px-24">
+          <div className="flex min-w-0 flex-1 items-center gap-1">
+            <ChatLabel
+              title={title}
+              displayTitle={agentGroup?.contextLabel || undefined}
+              starred={starred}
+              className="min-w-0"
+              onToggleStar={canOperateConversation ? onToggleStar : undefined}
+              onRename={canOperateConversation ? onRename : undefined}
+              onAutoRename={canOperateConversation ? onAutoRename : undefined}
+              labels={labels}
+              onUpdateLabels={canOperateConversation ? onUpdateLabels : undefined}
+              projectMenu={canOperateConversation ? projectMenu : undefined}
+              onShare={canOperateConversation ? onShare : undefined}
+              shareActive={shareActive}
+              onExport={canOperateConversation ? onExport : undefined}
+              onDelete={canOperateConversation ? onDelete : undefined}
+              screenshotFullLabel={tScreenshot("captureFull")}
+              screenshotSelectLabel={tScreenshot("captureSelect")}
+              onScreenshotFull={onScreenshotFull}
+              onScreenshotSelect={onScreenshotSelect}
+            />
+            {agentGroup?.name ? (
               <span
-                className="min-w-0 truncate text-[13px] font-medium text-muted-foreground"
-                title={agentGroup.name}
+                className="inline-flex min-w-0 items-center gap-1 text-sm font-medium leading-none text-foreground"
+                title={`${agentGroup.contextLabel || title} + ${agentGroup.name}`}
               >
-                {agentGroup.name}
+                <span aria-hidden="true" className="shrink-0 text-muted-foreground">
+                  +
+                </span>
+                <span className="truncate">{agentGroup.name}</span>
               </span>
-            </div>
-          ) : null}
+            ) : null}
+          </div>
           <div className="flex shrink-0 items-center gap-1.5">
             {agentGroup ? (
               <AgentGroupConfigButton
@@ -778,6 +792,11 @@ export function ChatArea({
                       onEditImageAttachment={editImageAttachmentHandler}
                       onExtendVideoAttachment={extendVideoAttachmentHandler}
                       onCycleMessageBranch={stableOnCycleMessageBranch}
+                      onPlatformToolApprovalResolved={
+                        onPlatformToolApprovalResolved
+                          ? stableOnPlatformToolApprovalResolved
+                          : undefined
+                      }
                       onReactAssistantMessage={stableOnReactAssistantMessage}
                       onOpenCodeArtifact={onOpenCodeArtifact}
                       markdownRender={markdownRender}

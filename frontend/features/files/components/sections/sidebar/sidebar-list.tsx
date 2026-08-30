@@ -1,14 +1,10 @@
 "use client";
 
-import * as React from "react";
-import { Ellipsis, PencilLine, SquareCheckBig, Trash2, Zap } from "lucide-react";
+import { Ellipsis, PencilLine, Share2, SquareCheckBig, Trash2, Zap } from "lucide-react";
 import { useTranslations } from "next-intl";
-
-import { resolveFileIcon } from "@/shared/lib/file-display";
+import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { CenteredEmptyState } from "@/components/ui/empty-state";
-import { Spinner } from "@/components/ui/spinner";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -16,10 +12,13 @@ import {
   DropdownMenuItemIcon,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { CenteredEmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
-import { useLoadMoreSentinel } from "@/shared/hooks/use-load-more-sentinel";
+import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import type { FileObjectDTO } from "@/shared/api/file.types";
+import { useLoadMoreSentinel } from "@/shared/hooks/use-load-more-sentinel";
+import { resolveFileIcon } from "@/shared/lib/file-display";
 
 type SidebarListProps = {
   items: FileObjectDTO[];
@@ -38,6 +37,7 @@ type SidebarListProps = {
   onRenameValueChange: (value: string) => void;
   onRenameCommit: (fileID: string, currentFileName: string) => void;
   onRenameCancel: () => void;
+  onShareRequest: (item: FileObjectDTO) => void;
   onDeleteRequest: (item: FileObjectDTO) => void;
 };
 
@@ -53,6 +53,7 @@ function SidebarListItem({
   onRenameValueChange,
   onRenameCommit,
   onRenameCancel,
+  onShareRequest,
   onDeleteRequest,
 }: {
   item: FileObjectDTO;
@@ -66,6 +67,7 @@ function SidebarListItem({
   onRenameValueChange: (value: string) => void;
   onRenameCommit: (fileID: string, currentFileName: string) => void;
   onRenameCancel: () => void;
+  onShareRequest: (item: FileObjectDTO) => void;
   onDeleteRequest: (item: FileObjectDTO) => void;
 }) {
   const t = useTranslations("files");
@@ -176,6 +178,15 @@ function SidebarListItem({
               <DropdownMenuItemIcon icon={PencilLine} />
               {t("actions.rename")}
             </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={(event) => {
+                event.preventDefault();
+                onShareRequest(item);
+              }}
+            >
+              <DropdownMenuItemIcon icon={Share2} />
+              {t("actions.share")}
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
 
@@ -216,6 +227,7 @@ export function SidebarList({
   onRenameValueChange,
   onRenameCommit,
   onRenameCancel,
+  onShareRequest,
   onDeleteRequest,
 }: SidebarListProps) {
   const t = useTranslations("files");
@@ -274,6 +286,7 @@ export function SidebarList({
                   onRenameValueChange={onRenameValueChange}
                   onRenameCommit={onRenameCommit}
                   onRenameCancel={onRenameCancel}
+                  onShareRequest={onShareRequest}
                   onDeleteRequest={onDeleteRequest}
                 />
               );

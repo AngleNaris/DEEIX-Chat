@@ -32,6 +32,7 @@ import { cn } from "@/lib/utils";
 
 type ChatLabelProps = {
   title: string;
+  displayTitle?: string;
   starred?: boolean;
   className?: string;
   onToggleStar?: () => void | Promise<void>;
@@ -61,6 +62,7 @@ type ChatLabelProps = {
 
 export function ChatLabel({
   title,
+  displayTitle,
   starred = false,
   className,
   onToggleStar,
@@ -142,7 +144,7 @@ export function ChatLabel({
           >
             <span className="inline-flex min-w-0 items-center px-2">
               <AnimatedText
-                text={title}
+                text={displayTitle || title}
                 className="max-w-full"
                 textClassName="text-sm font-medium leading-none text-foreground"
               />

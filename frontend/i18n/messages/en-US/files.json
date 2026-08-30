@@ -32,6 +32,7 @@
     "sort": "Sort",
     "open": "Open",
     "download": "Download",
+    "share": "Share",
     "delete": "Delete",
     "rename": "Rename",
     "select": "Select",
@@ -152,6 +153,34 @@
     "extractProcessingFailed": "File processing failed. No extracted text is available.",
     "extractProcessing": "Extraction is not complete yet. Try again later.",
     "extractLoadFailed": "Failed to load extracted text"
+  },
+  "shareDialog": {
+    "title": "Share file",
+    "description": "Create a public link for \"{name}\". The link remains available until revoked.",
+    "sessionExpired": "Session expired. Please sign in again.",
+    "loadFailed": "Failed to load share status",
+    "createFailed": "Failed to create file share",
+    "revokeFailed": "Failed to revoke file share",
+    "created": "File share created",
+    "revoked": "File share revoked",
+    "copied": "Share link copied",
+    "copyFailed": "Failed to copy share link",
+    "expiresAt": "Expires {value}",
+    "neverExpires": "Available until revoked",
+    "expired": "The previous share link has expired.",
+    "inactive": "This file has no active public share link.",
+    "open": "Open shared file",
+    "create": "Create share",
+    "revoke": "Revoke share",
+    "close": "Close"
+  },
+  "sharePage": {
+    "notFound": "This share does not exist, was revoked, expired, or its source file was deleted.",
+    "unknownType": "Unknown type",
+    "expiresAt": "Expires {value}",
+    "neverExpires": "Available until revoked",
+    "download": "Download",
+    "preview": "File preview"
   },
   "previewDialog": {
     "sessionExpired": "Session expired. Please sign in again.",

@@ -584,10 +584,10 @@ func validatePatchItem(item PatchItem) error {
 		}
 	case "extract:ocr_engine":
 		switch value {
-		case extraction.OCREngineRapidOCR, extraction.OCREngineTesseract, extraction.OCREnginePaddle, extraction.OCREngineTencent, extraction.OCREngineAliyun, extraction.OCREngineMistral, extraction.OCREngineLLM:
+		case extraction.OCREngineRapidOCR, extraction.OCREngineTesseract, extraction.OCREnginePaddle, extraction.OCREngineTencent, extraction.OCREngineAliyun, extraction.OCREngineMistral, extraction.OCREngineLLM, extraction.OCREngineSystemVision:
 			return nil
 		default:
-			return fmt.Errorf("%s must be one of: %s, %s, %s, %s, %s, %s, %s", key, extraction.OCREngineRapidOCR, extraction.OCREngineTesseract, extraction.OCREnginePaddle, extraction.OCREngineTencent, extraction.OCREngineAliyun, extraction.OCREngineMistral, extraction.OCREngineLLM)
+			return fmt.Errorf("%s must be one of: %s, %s, %s, %s, %s, %s, %s, %s", key, extraction.OCREngineRapidOCR, extraction.OCREngineTesseract, extraction.OCREnginePaddle, extraction.OCREngineTencent, extraction.OCREngineAliyun, extraction.OCREngineMistral, extraction.OCREngineLLM, extraction.OCREngineSystemVision)
 		}
 	case "extract:tika_source":
 		switch value {
@@ -752,7 +752,10 @@ func validateMinerUFileTypes(value string, key string) error {
 func (s *Service) validateFileProcessingSettings(ctx context.Context, patches []PatchItem) error {
 	hasRelevantPatch := false
 	for _, item := range patches {
-		if item.Namespace == "extract" || item.Namespace == "file" {
+		if item.Namespace == "extract" || item.Namespace == "file" ||
+			(item.Namespace == "chat" && (item.Key == "multimodal_delegation_enabled" ||
+				item.Key == "multimodal_delegation_image_model" ||
+				item.Key == "multimodal_delegation_modalities")) {
 			hasRelevantPatch = true
 			break
 		}
@@ -761,11 +764,11 @@ func (s *Service) validateFileProcessingSettings(ctx context.Context, patches []
 		return nil
 	}
 
-	next, err := s.loadEffectiveSettings(ctx, "extract", "file")
+	next, err := s.loadEffectiveSettings(ctx, "extract", "file", "chat")
 	if err != nil {
 		return err
 	}
-	applyPatchesToEffectiveSettings(next, patches, "extract", "file")
+	applyPatchesToEffectiveSettings(next, patches, "extract", "file", "chat")
 
 	if strings.TrimSpace(next["extract:engine"]) == extraction.EngineTika {
 		if strings.TrimSpace(next["extract:tika_base_url"]) == "" {
@@ -834,6 +837,21 @@ func (s *Service) validateFileProcessingSettings(ctx context.Context, patches []
 		}
 		if strings.TrimSpace(next["extract:llm_ocr_model"]) == "" {
 			return fmt.Errorf("extract:llm_ocr_model is required when OCR engine is llm")
+		}
+	case extraction.OCREngineSystemVision:
+		if !imageOCREnabled || pdfOCRFallbackEnabled {
+			return fmt.Errorf("system_vision OCR supports image extraction only")
+		}
+		delegationEnabled, _ := strconv.ParseBool(strings.TrimSpace(next["chat:multimodal_delegation_enabled"]))
+		if !delegationEnabled {
+			return fmt.Errorf("chat:multimodal_delegation_enabled is required when OCR engine is system_vision")
+		}
+		if strings.TrimSpace(next["chat:multimodal_delegation_image_model"]) == "" {
+			return fmt.Errorf("chat:multimodal_delegation_image_model is required when OCR engine is system_vision")
+		}
+		modalities := "," + strings.ToLower(strings.ReplaceAll(next["chat:multimodal_delegation_modalities"], " ", "")) + ","
+		if !strings.Contains(modalities, ",image,") {
+			return fmt.Errorf("chat:multimodal_delegation_modalities must include image when OCR engine is system_vision")
 		}
 	}
 

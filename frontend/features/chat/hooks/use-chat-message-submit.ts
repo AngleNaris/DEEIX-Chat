@@ -496,6 +496,7 @@ export function useChatMessageSubmit({
   onConversationCreated,
   onConversationForked,
   touchByPublicID,
+  setConversationStreaming,
   reload,
   replaceMessage,
   setDraft,
@@ -546,6 +547,7 @@ export function useChatMessageSubmit({
   onConversationCreated?: (conversationPublicID: string) => void;
   onConversationForked?: (conversation: ConversationDTO) => Promise<void> | void;
   touchByPublicID: (publicID: string, patch?: Partial<ConversationDTO>) => void;
+  setConversationStreaming: (publicID: string, ownerID: string, streaming: boolean) => void;
   reload: () => void;
   replaceMessage: (message: MessageDTO) => void;
   setDraft: React.Dispatch<React.SetStateAction<string>>;
@@ -970,6 +972,9 @@ export function useChatMessageSubmit({
         cancelRequested: false,
         cancelSettlementTimer: null,
       });
+      if (targetConversationID) {
+        setConversationStreaming(targetConversationID, clientRunID, true);
+      }
       syncActiveRuns();
       if (resetComposer) {
         setDraft("");
@@ -1077,6 +1082,7 @@ export function useChatMessageSubmit({
           };
           targetConversationID = created.publicID;
           targetConversation = created;
+          setConversationStreaming(created.publicID, clientRunID, true);
           const createdActiveStream = activeStreamsRef.current.get(clientRunID);
           if (createdActiveStream) {
             createdActiveStream.conversationScopeKey = targetConversationScopeKey;
@@ -1484,6 +1490,9 @@ export function useChatMessageSubmit({
         optimisticMessageCountsRef.current.set(targetConversationScopeKey, optimisticMessageCount);
         const conversationPatch: Partial<ConversationDTO> = {
           ...(shouldUpdateConversationModel ? { model: requestPlatformModelName } : {}),
+          ...(assistantMessageSucceeded && conversationScopeKeyRef.current !== targetConversationScopeKey
+            ? { hasUnread: true }
+            : {}),
           updatedAt: new Date().toISOString(),
           messageCount: optimisticMessageCount,
         };
@@ -1640,6 +1649,9 @@ export function useChatMessageSubmit({
           clearCancelSettlementTimer(activeStream);
           activeStreamsRef.current.delete(clientRunID);
         }
+        if (targetConversationID) {
+          setConversationStreaming(targetConversationID, clientRunID, false);
+        }
         activeGenerationRunsRef?.current.delete(clientRunID);
         if (
           branchRunIsVisible(
@@ -1686,6 +1698,7 @@ export function useChatMessageSubmit({
       setDraft,
       setPendingExchanges,
       setShowConversationLayout,
+      setConversationStreaming,
       showConversationLayout,
       startStream,
       touchByPublicID,

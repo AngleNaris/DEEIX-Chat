@@ -31,8 +31,10 @@ import { MessageKnowledgeSources } from "@/features/chat/components/message/mess
 import type { AssistantReaction } from "@/features/chat/components/message/message-meta";
 import { AssistantMessageMeta } from "@/features/chat/components/message/message-meta";
 import { MessageProcessTrace, MessageTraceEventBlocks } from "@/features/chat/components/message/message-process-trace";
+import { MessageSavedArtifactCards } from "@/features/chat/components/message/message-tool-trace";
 import { PlatformToolApprovalCard } from "@/features/chat/components/message/platform-tool-approval-card";
 import { resolveLeadingImagePreview } from "@/features/chat/model/media-image-preview";
+import { collectSavedArtifactTraceItems } from "@/features/chat/model/message-process-trace";
 import {
   clearLiveUpstreamThinkTrace,
   mergeLiveUpstreamThinkTrace,
@@ -170,6 +172,7 @@ type ChatMessageBotProps = {
   onForkMessage?: (message: ChatAreaMessage) => Promise<void> | void;
   onCycleMessageBranch: (parentPublicID: string | null, direction: "previous" | "next") => void;
   onReactAssistantMessage: (publicID: string, reaction: AssistantReaction) => void;
+  onPlatformToolApprovalResolved?: () => void;
   onCopy: () => void;
   copySucceeded?: boolean;
   markdownRender?: boolean;
@@ -201,6 +204,7 @@ export function ChatMessageBot({
   onForkMessage,
   onCycleMessageBranch,
   onReactAssistantMessage,
+  onPlatformToolApprovalResolved,
   onCopy,
   copySucceeded = false,
   markdownRender = true,
@@ -301,6 +305,14 @@ export function ChatMessageBot({
   const upstreamThink = processTrace?.upstreamThink;
   const toolTrace = processTrace?.tools;
   const traceEvents = processTrace?.events ?? EMPTY_TRACE_EVENTS;
+  const savedArtifacts = React.useMemo(
+    () =>
+      collectSavedArtifactTraceItems([
+        ...traceEvents.map((event) => event.payloadJson),
+        toolTrace?.payloadJson,
+      ]),
+    [toolTrace?.payloadJson, traceEvents],
+  );
   const messageStreaming = Boolean(item.isStreaming);
   const renderableMediaAttachments = React.useMemo(
     () =>
@@ -445,7 +457,10 @@ export function ChatMessageBot({
         messageStreaming={messageStreaming}
         autoCollapseReady={hasStreamdownContent || Boolean(item.inlineAlert)}
       />
-      <PlatformToolApprovalCard tracePayloadJson={toolTrace?.payloadJson} />
+      <PlatformToolApprovalCard
+        tracePayloadJson={toolTrace?.payloadJson}
+        onResolved={onPlatformToolApprovalResolved}
+      />
       <MessageAgentGroupTrace
         run={liveGroupRun}
         streaming={messageStreaming}
@@ -490,6 +505,10 @@ export function ChatMessageBot({
         ) : hasStreamdownContent ? (
           <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{item.content}</p>
         ) : null}
+        <MessageSavedArtifactCards
+          artifacts={savedArtifacts}
+          className={hasStreamdownContent ? "mt-3" : undefined}
+        />
       </div>
 
       {inlineMediaAttachments.map((attachment) => {

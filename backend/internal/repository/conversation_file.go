@@ -40,6 +40,14 @@ type FileBatchRepository interface {
 	GetActiveFileObjectsByIDs(ctx context.Context, userID uint, fileIDs []string) ([]domainconversation.FileObject, error)
 }
 
+// FileShareRepository 封装独立文件分享的持久化能力。
+type FileShareRepository interface {
+	ReplaceActiveFileShare(ctx context.Context, item *domainconversation.FileShare) error
+	GetLatestFileShare(ctx context.Context, userID uint, fileID string) (*domainconversation.FileShare, error)
+	GetFileShareByShareID(ctx context.Context, shareID string) (*domainconversation.FileShare, *domainconversation.FileObject, error)
+	RevokeActiveFileShare(ctx context.Context, userID uint, fileID string) error
+}
+
 // DeleteFileObjectOptions 定义文件对象删除的仓储约束。
 type DeleteFileObjectOptions struct {
 	RequireUnreferenced bool

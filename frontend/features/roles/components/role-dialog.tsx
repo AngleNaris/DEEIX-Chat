@@ -1,15 +1,7 @@
 "use client";
 
-import * as React from "react";
-import { useTranslations } from "next-intl";
-import { toast } from "sonner";
-
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Textarea } from "@/components/ui/textarea";
-import { Switch } from "@/components/ui/switch";
+import data from "@emoji-mart/data";
+import Picker from "@emoji-mart/react";
 import {
   Box,
   Check,
@@ -17,13 +9,15 @@ import {
   CopyPlus,
   FolderClosed,
   Globe2,
+  type LucideIcon,
   SlidersHorizontal,
   Sparkles,
   Wrench,
-  type LucideIcon,
 } from "lucide-react";
-import data from "@emoji-mart/data";
-import Picker from "@emoji-mart/react";
+import { useTranslations } from "next-intl";
+import * as React from "react";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogCollapsible,
@@ -33,20 +27,26 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { PromptVarToolbar } from "@/features/prompts/components/prompt-var-toolbar";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import { ProjectDefaultSelector } from "@/features/layouts/components/navigation/project-dialog";
+import { PromptVarToolbar } from "@/features/prompts/components/prompt-var-toolbar";
+import { RoleIcon } from "@/features/roles/components/role-icon";
+import { listConversationProjects } from "@/shared/api/conversation";
+import type { ConversationProjectDTO } from "@/shared/api/conversation.types";
 import { listAvailableMCPTools } from "@/shared/api/mcp";
 import type { MCPToolDTO } from "@/shared/api/mcp.types";
 import { listPublicModels } from "@/shared/api/model";
 import type { PublicModelDTO } from "@/shared/api/model.types";
-import { listConversationProjects } from "@/shared/api/conversation";
-import type { ConversationProjectDTO } from "@/shared/api/conversation.types";
 import { listVisibleSkills } from "@/shared/api/skills";
 import type { SkillSummaryDTO } from "@/shared/api/skills.types";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 import { ReasoningEffortSelector } from "@/shared/components/reasoning-effort-selector";
-import { REASONING_EFFORT_LEVELS, resolveReasoningEffortForProtocols } from "@/shared/lib/reasoning-effort";
 import { parseProtocolsJSON } from "@/shared/lib/model-protocols";
+import { REASONING_EFFORT_LEVELS, resolveReasoningEffortForProtocols } from "@/shared/lib/reasoning-effort";
 
 export type RoleDraft = {
   publicID?: string;
@@ -421,7 +421,7 @@ function RoleForm({
                 >
                   <span className="flex min-w-0 items-center gap-2">
                     {draft.icon ? (
-                      <span className="text-sm leading-none">{draft.icon}</span>
+                      <RoleIcon value={draft.icon} className="size-3.5 text-current" />
                     ) : (
                       <Sparkles className="size-3.5 text-muted-foreground" strokeWidth={1.8} />
                     )}

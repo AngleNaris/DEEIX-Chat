@@ -182,6 +182,83 @@ func platformToolRegistry() map[string]platformToolEntry {
 			kind:    platformToolRead,
 			handler: (*Service).platformReadFile,
 		},
+		"list_knowledge_bases": {
+			definition: llm.ToolDefinition{
+				Name:        "list_knowledge_bases",
+				Description: "List knowledge bases visible to the user. Built-in knowledge bases are readable but cannot be modified; personal knowledge bases can be managed with the knowledge-base content tools.",
+				InputSchema: json.RawMessage(`{
+					"type":"object","properties":{
+						"query":{"type":"string","description":"Optional search keyword in names and descriptions"},
+						"page":{"type":"integer","minimum":1,"description":"Page number, starting at 1 (default 1)"}
+					},"required":[]
+				}`),
+			},
+			kind:    platformToolRead,
+			handler: (*Service).platformListKnowledgeBases,
+		},
+		"list_knowledge_base_contents": {
+			definition: llm.ToolDefinition{
+				Name:        "list_knowledge_base_contents",
+				Description: "List content files in a visible knowledge base, including processing and retrieval readiness. Use the returned content_id for update or delete operations on a personal knowledge base.",
+				InputSchema: json.RawMessage(`{
+					"type":"object","properties":{
+						"knowledge_base_id":{"type":"string","description":"Knowledge base id from list_knowledge_bases"},
+						"page":{"type":"integer","minimum":1,"description":"Page number, starting at 1 (default 1)"}
+					},"required":["knowledge_base_id"]
+				}`),
+			},
+			kind:    platformToolRead,
+			handler: (*Service).platformListKnowledgeBaseContents,
+		},
+		"create_knowledge_base_content": {
+			definition: llm.ToolDefinition{
+				Name:        "create_knowledge_base_content",
+				Description: "Create a Markdown content file in one of the user's personal knowledge bases. Built-in knowledge bases are read-only. This write may require user approval.",
+				InputSchema: json.RawMessage(`{
+					"type":"object","properties":{
+						"knowledge_base_id":{"type":"string","description":"Personal knowledge base id from list_knowledge_bases"},
+						"title":{"type":"string","minLength":1,"maxLength":255,"description":"Content title or file name"},
+						"content":{"type":"string","maxLength":1048576,"description":"Full Markdown content"}
+					},"required":["knowledge_base_id","title","content"]
+				}`),
+			},
+			kind:        platformToolWrite,
+			handler:     (*Service).platformCreateKnowledgeBaseContent,
+			auditAction: "platform_tools.create_knowledge_base_content",
+		},
+		"update_knowledge_base_content": {
+			definition: llm.ToolDefinition{
+				Name: "update_knowledge_base_content",
+				Description: "Rename or replace the full Markdown content of a file in the user's personal knowledge base. " +
+					"Update either the title or the content per call, not both. Built-in knowledge bases are read-only. This write may require user approval.",
+				InputSchema: json.RawMessage(`{
+					"type":"object","properties":{
+						"knowledge_base_id":{"type":"string","description":"Personal knowledge base id from list_knowledge_bases"},
+						"content_id":{"type":"string","description":"Content id from list_knowledge_base_contents"},
+						"title":{"type":"string","minLength":1,"maxLength":255,"description":"Optional new title or file name"},
+						"content":{"type":"string","maxLength":1048576,"description":"Optional full replacement Markdown content"}
+					},"required":["knowledge_base_id","content_id"],"anyOf":[{"required":["title"]},{"required":["content"]}]
+				}`),
+			},
+			kind:        platformToolWrite,
+			handler:     (*Service).platformUpdateKnowledgeBaseContent,
+			auditAction: "platform_tools.update_knowledge_base_content",
+		},
+		"delete_knowledge_base_content": {
+			definition: llm.ToolDefinition{
+				Name:        "delete_knowledge_base_content",
+				Description: "Remove a content file from the user's personal knowledge base without deleting the source file. Built-in knowledge bases are read-only. This write may require user approval.",
+				InputSchema: json.RawMessage(`{
+					"type":"object","properties":{
+						"knowledge_base_id":{"type":"string","description":"Personal knowledge base id from list_knowledge_bases"},
+						"content_id":{"type":"string","description":"Content id from list_knowledge_base_contents"}
+					},"required":["knowledge_base_id","content_id"]
+				}`),
+			},
+			kind:        platformToolWrite,
+			handler:     (*Service).platformDeleteKnowledgeBaseContent,
+			auditAction: "platform_tools.delete_knowledge_base_content",
+		},
 		"read_skill_file": {
 			definition: llm.ToolDefinition{
 				Name: "read_skill_file",
@@ -244,12 +321,13 @@ func platformToolRegistry() map[string]platformToolEntry {
 		},
 		"list_memories": {
 			definition: llm.ToolDefinition{
-				Name: "list_memories",
-				Description: "List the user's long-term memories (key, scope, value summary) to see what is stored about them. " +
-					"Optional scope filter: preference, profile, custom.",
+				Name:        "list_memories",
+				Description: "List the user's long-term memories (key, category, value summary). Use this to read identity, activity, or context memories only when they are relevant to the current request.",
 				InputSchema: json.RawMessage(`{
 					"type":"object","properties":{
-						"scope":{"type":"string","description":"Optional filter: preference, profile, or custom"}
+						"category":{"type":"string","enum":["identity","activity","context","preference","capability","experience"],"description":"Optional category filter"},
+						"query":{"type":"string","description":"Optional keyword filter over memory keys and values"},
+						"limit":{"type":"integer","minimum":1,"maximum":50,"description":"Maximum results (default 20)"}
 					},"required":[]
 				}`),
 			},
@@ -259,15 +337,14 @@ func platformToolRegistry() map[string]platformToolEntry {
 		"save_memory": {
 			definition: llm.ToolDefinition{
 				Name: "save_memory",
-				Description: "Save or update a long-term memory about the user (durable preference, background fact, or standing instruction). " +
-					"Use the same key to update an existing memory. Scope: preference (injected every message, use sparingly), " +
-					"profile/custom (recalled by relevance, default custom). " +
+				Description: "Save or update a stable long-term fact about the user. Never save project, song, task, artifact, conversation, or other temporary work state. " +
+					"Use the same key to update an existing memory. preference is always injected; capability and experience use relevance recall; identity, activity, and context are read on demand. Default: context. " +
 					"This is a WRITE operation: it may require user approval depending on the user's approval mode.",
 				InputSchema: json.RawMessage(`{
 					"type":"object","properties":{
 						"key":{"type":"string","description":"Memory name/key, e.g. language_preference (max 128 chars)"},
 						"value":{"type":"string","description":"Memory content (max 10000 chars)"},
-						"scope":{"type":"string","enum":["preference","profile","custom"],"description":"preference=always injected, use sparingly; profile/custom=recalled by relevance (default custom)"}
+						"category":{"type":"string","enum":["identity","activity","context","preference","capability","experience"],"description":"Long-term memory category (default context)"}
 					},"required":["key","value"]
 				}`),
 			},
@@ -1163,11 +1240,12 @@ func isCredentialWritePlatformTool(toolName string) bool {
 func platformToolGuidancePrompt() string {
 	return strings.TrimSpace(`# platform_tools
 - Platform tools access the user's own data (files, skills, conversations, memories). Only use them when the user asks or when the information is genuinely needed.
-- read_file / read_skill_file / read_conversation / list_memories are read-only; write_file, update_skill, save_memory, delete_memory, execute_js and execute_skill_script modify or execute code and may be held for user approval — if a write returns pending_approval, tell the user it is waiting for their confirmation.
+- read_file / read_skill_file / read_conversation / list_memories / list_knowledge_bases / list_knowledge_base_contents are read-only; write_file, knowledge-base content writes, update_skill, save_memory, delete_memory, execute_js and execute_skill_script modify or execute code and may be held for user approval — if a write returns pending_approval, tell the user it is waiting for their confirmation.
 - Never fabricate file_id / skill_id / conversation_id; obtain them from the list_* tools first.
 - Do not expose raw tool output or internal fields unless the user asks.
-- Memories: use save_memory for durable facts about the user (long-term preferences, background, standing instructions) — not for transient task details or conversation-specific context. Before saving, call list_memories and update the existing entry with the same meaning instead of creating duplicates.
-- Memory scopes: "preference" is injected into every message (use sparingly, high-value always-on preferences only); "profile" and "custom" are recalled by relevance. When the user asks to forget or change something remembered, use delete_memory / save_memory accordingly.
+- Memories: use save_memory only for stable facts about the user. Never save project, song, task, artifact, conversation, or other temporary work state. Before saving, call list_memories and update the existing entry with the same meaning instead of creating duplicates.
+- Memory categories: "preference" is injected into every message (use sparingly); "capability" and "experience" are recalled by relevance; "identity", "activity", and "context" must be read explicitly with list_memories when relevant. When the user asks to forget or change something remembered, use delete_memory / save_memory accordingly.
+- Knowledge bases: built-in knowledge bases are read-only. Only create, update, or delete content in a personal knowledge base returned by list_knowledge_bases; obtain content_id from list_knowledge_base_contents and never guess it.
 - JS execution: use execute_js to compute values on demand (random numbers, math, data transforms). The sandbox has no filesystem/network/process access; print results with console.log and rely on the returned stdout/result. For a script bundled in a skill, use execute_skill_script with the path from list_skills.
 - Credentials: the user may save named credentials (SSH connections, API keys). Call credential_list to see them (descriptions only). When a command/parameter needs a secret, reference it with the placeholder {{credential: name}} (e.g. sshpass -p '{{credential: vpsssh}}') — it is expanded to the real value at execution time and never appears in the conversation record, trace, or share snapshots. Never output secret values in your replies; if the user needs the raw value, point them to Settings → Credentials.
 - Secret references: during credential_create or credential_update, the runtime may replace a newly supplied secret with {{secret_ref:...}}. Treat that opaque reference as the exact original secret for the current run and pass it unchanged in the value field. Do not reveal, rewrite, parse, or use it outside credential_create/credential_update.

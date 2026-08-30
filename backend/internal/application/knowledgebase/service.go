@@ -29,6 +29,7 @@ type Service struct {
 	fileCleaner  fileCleaner
 	fileOpener   fileContentOpener
 	fileUploader fileUploader
+	fileUpdater  fileUpdater
 	logger       *zap.Logger
 }
 
@@ -46,6 +47,11 @@ type fileContentOpener interface {
 
 type fileUploader interface {
 	UploadFile(ctx context.Context, input appupload.UploadFileInput) (*appupload.UploadFileResult, error)
+}
+
+type fileUpdater interface {
+	OverwriteFileContent(ctx context.Context, userID uint, fileID string, content string) error
+	RenameFile(ctx context.Context, userID uint, fileID string, fileName string) (*domainconversation.FileObject, error)
 }
 
 // DeleteResult 描述知识库删除及其可选文件清理结果。
@@ -76,6 +82,11 @@ func (s *Service) SetFileContentOpener(opener fileContentOpener) {
 // SetFileUploader injects the shared upload pipeline used for platform-owned assets.
 func (s *Service) SetFileUploader(uploader fileUploader) {
 	s.fileUploader = uploader
+}
+
+// SetFileUpdater injects the shared text-file update pipeline.
+func (s *Service) SetFileUpdater(updater fileUpdater) {
+	s.fileUpdater = updater
 }
 
 // SetLogger 注入结构化日志记录器。
@@ -109,6 +120,23 @@ type ListInput struct {
 	Enabled  *bool
 	Page     int
 	PageSize int
+}
+
+// UserContentInput creates a Markdown text file inside a personal knowledge base.
+type UserContentInput struct {
+	FileName string
+	Content  string
+}
+
+// UserContentPatch updates the name or full content of a personal knowledge-base file.
+type UserContentPatch struct {
+	FileName *string
+	Content  *string
+}
+
+// UserContentDeleteResult reports the source file removed from the knowledge base.
+type UserContentDeleteResult struct {
+	FileID string
 }
 
 // WriteInput 定义知识库创建入参。
@@ -295,6 +323,95 @@ func (s *Service) ListVisibleFiles(ctx context.Context, userID uint, publicID st
 	}
 	offset, limit := normalizePage(page, pageSize)
 	return s.repo.ListKnowledgeBaseFiles(ctx, item.ID, offset, limit)
+}
+
+// CreateUserContent creates a Markdown file and links it to the user's personal knowledge base.
+func (s *Service) CreateUserContent(ctx context.Context, userID uint, publicID string, input UserContentInput) (*domainconversation.FileObject, error) {
+	item, err := s.getUserKnowledgeBase(ctx, userID, publicID)
+	if err != nil {
+		return nil, err
+	}
+	if s.fileUploader == nil {
+		return nil, ErrKnowledgeBaseFileUploadUnavailable
+	}
+	if s.fileCleaner == nil {
+		return nil, ErrKnowledgeBaseFileCleanupUnavailable
+	}
+	result, err := s.fileUploader.UploadFile(ctx, appupload.UploadFileInput{
+		UserID:       userID,
+		Ownership:    appupload.FileOwnershipUser,
+		Purpose:      "knowledge_base",
+		FileName:     strings.TrimSpace(input.FileName),
+		MimeType:     "text/markdown",
+		DeclaredSize: int64(len(input.Content)),
+		Reader:       strings.NewReader(input.Content),
+	})
+	if err != nil {
+		return nil, err
+	}
+	if result == nil || strings.TrimSpace(result.File.FileID) == "" {
+		return nil, ErrKnowledgeBaseFileUploadUnavailable
+	}
+	if err := s.addFiles(ctx, item, userID, []string{result.File.FileID}); err != nil {
+		_, cleanupErr := s.fileCleaner.DeleteFileIfUnreferenced(ctx, userID, result.File.FileID)
+		if cleanupErr != nil && s.logger != nil {
+			s.logger.Warn("cleanup_unlinked_knowledge_base_content_failed", zap.String("file_id", result.File.FileID), zap.Error(cleanupErr))
+		}
+		return nil, err
+	}
+	file := result.File
+	return &file, nil
+}
+
+// UpdateUserContent updates a file that is still linked to the user's personal knowledge base.
+func (s *Service) UpdateUserContent(ctx context.Context, userID uint, publicID string, fileID string, input UserContentPatch) error {
+	item, err := s.getUserKnowledgeBase(ctx, userID, publicID)
+	if err != nil {
+		return err
+	}
+	file, err := s.repo.GetKnowledgeBaseFile(ctx, item.ID, strings.TrimSpace(fileID))
+	if err != nil {
+		return mapFileRepositoryError(err)
+	}
+	if file.UserID != userID {
+		return ErrKnowledgeBaseFileNotFound
+	}
+	if (input.FileName == nil) == (input.Content == nil) {
+		return ErrInvalidKnowledgeBase
+	}
+	if s.fileUpdater == nil {
+		return ErrKnowledgeBaseFileWriteUnavailable
+	}
+	if input.Content != nil {
+		if err := s.fileUpdater.OverwriteFileContent(ctx, userID, file.FileID, *input.Content); err != nil {
+			return err
+		}
+	}
+	if input.FileName != nil {
+		if _, err := s.fileUpdater.RenameFile(ctx, userID, file.FileID, strings.TrimSpace(*input.FileName)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// DeleteUserContent removes a file from a personal knowledge base without deleting the source file.
+func (s *Service) DeleteUserContent(ctx context.Context, userID uint, publicID string, fileID string) (UserContentDeleteResult, error) {
+	item, err := s.getUserKnowledgeBase(ctx, userID, publicID)
+	if err != nil {
+		return UserContentDeleteResult{}, err
+	}
+	file, err := s.repo.GetKnowledgeBaseFile(ctx, item.ID, strings.TrimSpace(fileID))
+	if err != nil {
+		return UserContentDeleteResult{}, mapFileRepositoryError(err)
+	}
+	if file.UserID != userID {
+		return UserContentDeleteResult{}, ErrKnowledgeBaseFileNotFound
+	}
+	if err := s.repo.RemoveKnowledgeBaseFile(ctx, item.ID, file.FileID); err != nil {
+		return UserContentDeleteResult{}, mapFileRepositoryError(err)
+	}
+	return UserContentDeleteResult{FileID: file.FileID}, nil
 }
 
 // ListAdminFiles 查询管理员内置知识库文件。
@@ -516,6 +633,20 @@ func (s *Service) get(ctx context.Context, publicID string) (*domainknowledgebas
 	item, err := s.repo.GetKnowledgeBaseByPublicID(ctx, strings.TrimSpace(publicID))
 	if err != nil {
 		return nil, mapRepositoryError(err)
+	}
+	return item, nil
+}
+
+func (s *Service) getUserKnowledgeBase(ctx context.Context, userID uint, publicID string) (*domainknowledgebase.KnowledgeBase, error) {
+	if userID == 0 {
+		return nil, ErrInvalidKnowledgeBase
+	}
+	item, err := s.get(ctx, publicID)
+	if err != nil {
+		return nil, err
+	}
+	if item.Scope != domainknowledgebase.ScopeUser || item.OwnerUserID != userID {
+		return nil, ErrKnowledgeBaseNotFound
 	}
 	return item, nil
 }

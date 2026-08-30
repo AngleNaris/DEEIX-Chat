@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 )
 
 func newTestScheduler(delay time.Duration) *fileReindexScheduler {
@@ -80,5 +82,31 @@ func TestReindexSchedulerRespectsRuntimeDelay(t *testing.T) {
 	)
 	if got := scheduler.resolveDelay(context.Background()); got != 60*time.Second {
 		t.Fatalf("expected fallback 60s, got %v", got)
+	}
+}
+
+func TestReindexSchedulerDoesNotRetryDeletedFile(t *testing.T) {
+	now := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
+	attempts := 0
+	scheduler := newFileReindexScheduler(
+		time.Hour,
+		func(context.Context) time.Duration { return time.Minute },
+		func(context.Context, uint, string) error {
+			attempts++
+			return repository.ErrNotFound
+		},
+		nil,
+		nil,
+	)
+	scheduler.nowFn = func() time.Time { return now }
+	scheduler.MarkDirty(7, "deleted_file")
+
+	now = now.Add(time.Minute)
+	scheduler.tick(context.Background(), now)
+	now = now.Add(time.Minute)
+	scheduler.tick(context.Background(), now)
+
+	if attempts != 1 {
+		t.Fatalf("deleted file attempts = %d, want 1", attempts)
 	}
 }

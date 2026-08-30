@@ -3,8 +3,12 @@ package artifact
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"errors"
 	"strings"
+	"sync"
+	"time"
 
 	domainartifact "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/artifact"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/pkg/conv"
@@ -19,6 +23,10 @@ var (
 	ErrShareRevoked      = errors.New("artifact share revoked")
 	ErrInvalidThumbnail  = errors.New("artifact thumbnail must be a supported raster data URL")
 	ErrThumbnailTooLarge = errors.New("artifact thumbnail is too large")
+	ErrInvalidRender     = errors.New("artifact render document is invalid")
+	ErrRenderTooLarge    = errors.New("artifact render document is too large")
+	ErrRenderNotFound    = errors.New("artifact render token not found")
+	ErrRenderCapacity    = errors.New("artifact render capacity reached")
 )
 
 // 制品类型枚举与长度限制。
@@ -31,6 +39,9 @@ const (
 	MaxTitleLen     = 255
 	MaxCodeLen      = 256 * 1024
 	MaxThumbnailLen = 512 * 1024
+	MaxRenderLen    = 512 * 1024
+	maxRenderTokens = 256
+	renderTokenTTL  = time.Minute
 )
 
 // ValidKind 判断制品类型是否合法。
@@ -133,12 +144,77 @@ type PublicShareView struct {
 
 // Service 封装制品业务能力。
 type Service struct {
-	repo repository.ArtifactRepository
+	repo         repository.ArtifactRepository
+	renderMu     sync.Mutex
+	renderTokens map[string]renderTokenEntry
+}
+
+type renderTokenEntry struct {
+	UserID    uint
+	Document  string
+	ExpiresAt time.Time
+}
+
+type RenderTokenView struct {
+	RenderURL       string `json:"render_url"`
+	ExpiresInSecond int    `json:"expires_in_seconds"`
 }
 
 // NewService 创建服务。
 func NewService(repo repository.ArtifactRepository) *Service {
-	return &Service{repo: repo}
+	return &Service{repo: repo, renderTokens: make(map[string]renderTokenEntry)}
+}
+
+// CreateRenderToken creates a short-lived single-use top-level artifact render URL.
+func (s *Service) CreateRenderToken(userID uint, document string) (*RenderTokenView, error) {
+	if userID == 0 || strings.TrimSpace(document) == "" {
+		return nil, ErrInvalidRender
+	}
+	if len(document) > MaxRenderLen {
+		return nil, ErrRenderTooLarge
+	}
+	now := time.Now()
+	s.renderMu.Lock()
+	defer s.renderMu.Unlock()
+	for token, item := range s.renderTokens {
+		if !item.ExpiresAt.After(now) {
+			delete(s.renderTokens, token)
+		}
+	}
+	if len(s.renderTokens) >= maxRenderTokens {
+		return nil, ErrRenderCapacity
+	}
+	for {
+		random := make([]byte, 32)
+		if _, err := rand.Read(random); err != nil {
+			return nil, err
+		}
+		token := base64.RawURLEncoding.EncodeToString(random)
+		if _, exists := s.renderTokens[token]; exists {
+			continue
+		}
+		s.renderTokens[token] = renderTokenEntry{UserID: userID, Document: document, ExpiresAt: now.Add(renderTokenTTL)}
+		return &RenderTokenView{
+			RenderURL:       "/api/v1/artifact-renders/" + token,
+			ExpiresInSecond: int(renderTokenTTL / time.Second),
+		}, nil
+	}
+}
+
+// ConsumeRenderToken atomically consumes a render token. Expired and reused tokens are indistinguishable.
+func (s *Service) ConsumeRenderToken(token string) (string, error) {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return "", ErrRenderNotFound
+	}
+	s.renderMu.Lock()
+	defer s.renderMu.Unlock()
+	item, ok := s.renderTokens[token]
+	delete(s.renderTokens, token)
+	if !ok || !item.ExpiresAt.After(time.Now()) {
+		return "", ErrRenderNotFound
+	}
+	return item.Document, nil
 }
 
 // CreateArtifact 保存制品（public id 由调用方生成，便于幂等更新）。

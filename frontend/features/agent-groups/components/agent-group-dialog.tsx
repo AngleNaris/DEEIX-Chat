@@ -1,14 +1,9 @@
 "use client";
 
+import { Check, ChevronDown, ChevronUp, Crown, Plus, Sparkles, Trash2, Users } from "lucide-react";
 import * as React from "react";
 import { toast } from "sonner";
-
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Switch } from "@/components/ui/switch";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
@@ -17,12 +12,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
+import { RoleIcon } from "@/features/roles/components/role-icon";
 import { cn } from "@/lib/utils";
-import { Check, ChevronDown, ChevronUp, Crown, Plus, Sparkles, Trash2, Users } from "lucide-react";
-import { listConversationRoles } from "@/shared/api/roles";
-import type { ConversationRoleDTO } from "@/shared/api/roles.types";
-import { listPublicModels } from "@/shared/api/model";
-import type { PublicModelDTO } from "@/shared/api/model.types";
 import {
   addAgentGroupMember,
   changeAgentGroupSupervisor,
@@ -39,13 +35,17 @@ import type {
   AgentGroupMemberDTO,
   AgentGroupMemberRequest,
 } from "@/shared/api/agent-groups.types";
-import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 import { ApiError, ApiNetworkError } from "@/shared/api/http-client";
+import { listPublicModels } from "@/shared/api/model";
+import type { PublicModelDTO } from "@/shared/api/model.types";
+import { listConversationRoles } from "@/shared/api/roles";
+import type { ConversationRoleDTO } from "@/shared/api/roles.types";
+import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 import { ReasoningEffortSelector } from "@/shared/components/reasoning-effort-selector";
 import { parseProtocolsJSON } from "@/shared/lib/model-protocols";
 import {
-  REASONING_EFFORT_LEVELS,
   isReasoningEffortLevel,
+  REASONING_EFFORT_LEVELS,
   resolveReasoningEffortForProtocols,
 } from "@/shared/lib/reasoning-effort";
 
@@ -260,7 +260,7 @@ function RoleChip({ color, icon, name }: { color: string; icon: string; name: st
         className="flex size-4 shrink-0 items-center justify-center rounded-sm text-[10px] leading-none"
         style={{ backgroundColor: color || "var(--muted)" }}
       >
-        {icon || "✦"}
+        <RoleIcon value={icon} className="size-3 text-current" />
       </span>
       <span className="truncate">{name}</span>
     </span>
@@ -502,7 +502,7 @@ function SupervisorSection({
                 className="flex size-3.5 shrink-0 items-center justify-center rounded-sm text-[10px] leading-none"
                 style={{ backgroundColor: role.color || "var(--muted)" }}
               >
-                {role.icon || "✦"}
+                <RoleIcon value={role.icon} className="size-2.5 text-current" />
               </span>
             ),
           }))}
@@ -570,7 +570,7 @@ function ChangeSupervisorMenu({
             className="flex size-3.5 shrink-0 items-center justify-center rounded-sm text-[10px] leading-none"
             style={{ backgroundColor: worker.roleColor || "var(--muted)" }}
           >
-            {worker.roleIcon || "✦"}
+            <RoleIcon value={worker.roleIcon} className="size-2.5 text-current" />
           </span>
         ),
       }))}
@@ -691,7 +691,7 @@ function AgentGroupForm({
                     className="flex size-3.5 shrink-0 items-center justify-center rounded-sm text-[10px] leading-none"
                     style={{ backgroundColor: role.color || "var(--muted)" }}
                   >
-                    {role.icon || "✦"}
+                    <RoleIcon value={role.icon} className="size-2.5 text-current" />
                   </span>
                 ),
               }))}

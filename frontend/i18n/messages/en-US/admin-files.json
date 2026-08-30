@@ -284,7 +284,8 @@
           "tencent": "Tencent Cloud OCR",
           "aliyun": "Alibaba Cloud OCR",
           "mistral": "Mistral OCR",
-          "llm": "LLM OCR"
+          "llm": "LLM OCR",
+          "system_vision": "System Vision"
         }
       },
       "tesseract_ocr_base_url": {

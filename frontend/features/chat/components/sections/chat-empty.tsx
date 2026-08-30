@@ -1,7 +1,7 @@
 "use client";
 
-import * as React from "react";
 import { AnimatePresence, motion } from "motion/react";
+import * as React from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 
 type ChatEmptyStateProps = {
   greetingTitle: string;
+  adjacentTitle?: string;
   badgeLabel?: string;
   badgeTooltip?: string;
   contentWidthClassName?: string;
@@ -20,7 +21,14 @@ const CHAT_EMPTY_TEXT_TRANSITION = {
   ease: [0.16, 1, 0.3, 1] as const,
 };
 
-export function ChatEmptyState({ greetingTitle, badgeLabel, badgeTooltip, contentWidthClassName = "max-w-[1080px]", children }: ChatEmptyStateProps) {
+export function ChatEmptyState({
+  greetingTitle,
+  adjacentTitle,
+  badgeLabel,
+  badgeTooltip,
+  contentWidthClassName = "max-w-[1080px]",
+  children,
+}: ChatEmptyStateProps) {
   const badge = badgeLabel ? (
     <span className="absolute left-full top-0 ml-1.5">
       <Badge
@@ -31,7 +39,7 @@ export function ChatEmptyState({ greetingTitle, badgeLabel, badgeTooltip, conten
       </Badge>
     </span>
   ) : null;
-  const titleGroupKey = `${greetingTitle}:${badgeLabel ?? ""}`;
+  const titleGroupKey = `${greetingTitle}:${adjacentTitle ?? ""}:${badgeLabel ?? ""}`;
 
   return (
     <div className="flex h-full min-h-0 flex-col items-center justify-center px-3 py-12 text-center md:px-6 md:py-20">
@@ -42,11 +50,17 @@ export function ChatEmptyState({ greetingTitle, badgeLabel, badgeTooltip, conten
             className="relative inline-flex min-w-0 justify-center"
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -6 }}
+            exit={{ opacity: 0, y: 8 }}
             transition={CHAT_EMPTY_TEXT_TRANSITION}
           >
-            <h1 className="min-w-0 text-balance text-[22px] font-medium leading-[1.12] tracking-[-0.005em] text-foreground [font-family:var(--font-economist)] md:text-[32px]">
-              {greetingTitle}
+            <h1 className="flex min-w-0 flex-wrap items-baseline justify-center gap-x-2 gap-y-1 text-balance text-[22px] font-medium leading-[1.12] text-foreground [font-family:var(--font-economist)] md:text-[32px]">
+              <span>{greetingTitle}</span>
+              {adjacentTitle ? (
+                <span className="inline-flex min-w-0 items-baseline gap-x-2">
+                  <span aria-hidden="true" className="text-muted-foreground">+</span>
+                  <span className="min-w-0 break-words">{adjacentTitle}</span>
+                </span>
+              ) : null}
             </h1>
             {badge && badgeTooltip ? (
               <Tooltip>

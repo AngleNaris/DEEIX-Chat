@@ -1,8 +1,9 @@
 "use client";
 
-import { ExternalLink, FileCode2, Loader2 } from "lucide-react";
+import { Download, ExternalLink, FileCode2, Loader2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import * as React from "react";
+import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -15,16 +16,20 @@ import {
 import {
   type ArtifactPreviewKind,
   buildArtifactPreviewDocument,
+  resolveArtifactDownloadName,
 } from "@/features/chat/model/chat-artifacts";
 import { useLocalizedErrorMessage } from "@/i18n/use-localized-error";
 import {
   type ArtifactDetailDTO,
+  artifactRenderUrl,
+  createArtifactRenderToken,
   getArtifact,
 } from "@/shared/api/artifacts";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 import { CopyActionButton } from "@/shared/components/copy-action";
 import { useTheme } from "@/shared/components/theme-provider";
 import { resolveStoredArtifactPreviewKind } from "@/shared/lib/artifact-preview";
+import { downloadBlob } from "@/shared/lib/export-download";
 import {
   captureHTMLVisualThemeSnapshot,
   type HTMLVisualThemeSnapshot,
@@ -69,11 +74,13 @@ export function ArtifactPreviewDialog({
   shareUrl = null,
 }: ArtifactPreviewDialogProps) {
   const t = useTranslations("settings.chatPage.artifacts");
+  const artifactT = useTranslations("chat.artifacts");
   const resolveErrorMessage = useLocalizedErrorMessage();
   const { resolvedTheme } = useTheme();
   const [detail, setDetail] = React.useState<ArtifactDetailDTO | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [loadError, setLoadError] = React.useState<string | null>(null);
+  const [openingExternal, setOpeningExternal] = React.useState(false);
   const [themeSnapshot, setThemeSnapshot] = React.useState<HTMLVisualThemeSnapshot>({
     colorScheme: "light",
     variables: [],
@@ -133,13 +140,51 @@ export function ArtifactPreviewDialog({
     : null;
 
   const previewHTML = React.useMemo(() => {
-    if (!detail || !previewKind) {
+    if (!detail) {
       return "";
     }
-    return buildArtifactPreviewDocument(previewKind, detail.code, themeSnapshot);
+    if (previewKind) {
+      return buildArtifactPreviewDocument(previewKind, detail.code, themeSnapshot);
+    }
+    const escaped = detail.code.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+    return buildArtifactPreviewDocument("html", `<pre>${escaped}</pre>`, themeSnapshot);
   }, [detail, previewKind, themeSnapshot]);
 
   const isText = Boolean(detail && !previewKind);
+
+  const handleDownload = React.useCallback(() => {
+    if (!detail) return;
+    const blob = previewKind
+      ? new Blob([previewHTML], { type: "text/html;charset=utf-8" })
+      : new Blob([detail.code], { type: "text/plain;charset=utf-8" });
+    downloadBlob(blob, previewKind ? resolveArtifactDownloadName(previewKind) : "artifact.txt");
+  }, [detail, previewHTML, previewKind]);
+
+  const handleOpenExternal = React.useCallback(async () => {
+    if (!detail || !previewHTML || openingExternal) return;
+    const popup = window.open("about:blank", "_blank");
+    if (!popup) {
+      toast.error(artifactT("openInNewTabBlocked"));
+      return;
+    }
+    popup.opener = null;
+    setOpeningExternal(true);
+    try {
+      const token = await resolveAccessToken();
+      if (!token) {
+        toast.error(artifactT("authTokenMissing"));
+        popup.close();
+        return;
+      }
+      const render = await createArtifactRenderToken(token, previewHTML);
+      popup.location.replace(artifactRenderUrl(render.render_url));
+    } catch {
+      popup.close();
+      toast.error(artifactT("openInNewTabFailed"));
+    } finally {
+      setOpeningExternal(false);
+    }
+  }, [artifactT, detail, openingExternal, previewHTML]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -207,6 +252,25 @@ export function ArtifactPreviewDialog({
               >
                 <ExternalLink className="size-3.5" />
               </a>
+            )}
+            {detail && (
+              <Button type="button" variant="outline" size="sm" className="gap-1.5" onClick={handleDownload}>
+                <Download aria-hidden className="size-3.5" />
+                {artifactT("download")}
+              </Button>
+            )}
+            {detail && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                disabled={openingExternal}
+                onClick={() => void handleOpenExternal()}
+              >
+                <ExternalLink aria-hidden className="size-3.5" />
+                {artifactT("openInNewTab")}
+              </Button>
             )}
             {detail && (
               <CopyActionButton

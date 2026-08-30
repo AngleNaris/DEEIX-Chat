@@ -1583,6 +1583,63 @@ func TestUpdateAssistantMessageCompletionPersistsReasoningAndKnowledgeSources(t 
 	if len(got.KnowledgeSources) != 1 || got.KnowledgeSources[0].FileID != "file_handbook" {
 		t.Fatalf("unexpected knowledge sources: %#v", got.KnowledgeSources)
 	}
+
+	readable, err := repo.GetConversationByPublicID(ctx, conversation.PublicID, conversation.UserID)
+	if err != nil {
+		t.Fatalf("GetConversationByPublicID() error = %v", err)
+	}
+	if readable.LastAssistantMessageID == nil || *readable.LastAssistantMessageID != message.ID {
+		t.Fatalf("last assistant message id = %v, want %d", readable.LastAssistantMessageID, message.ID)
+	}
+	if _, err = repo.MarkConversationReadByPublicID(ctx, conversation.UserID, conversation.PublicID); err != nil {
+		t.Fatalf("MarkConversationReadByPublicID() error = %v", err)
+	}
+	readable, err = repo.GetConversationByPublicID(ctx, conversation.PublicID, conversation.UserID)
+	if err != nil {
+		t.Fatalf("reload conversation: %v", err)
+	}
+	if readable.LastReadMessageID == nil || *readable.LastReadMessageID != message.ID {
+		t.Fatalf("last read message id = %v, want %d", readable.LastReadMessageID, message.ID)
+	}
+}
+
+func TestConversationReadCursorsNeverMoveBackwardOrAdvanceOnFailure(t *testing.T) {
+	db := openConversationRepositoryTestDB(t)
+	repo := NewRepo(db)
+	ctx := context.Background()
+	conversation := model.Conversation{UserID: 7, PublicID: "conv_read_cursor", Title: "read cursor", LabelsJSON: "[]", SessionKey: "session_read_cursor", Status: "active"}
+	if err := db.Create(&conversation).Error; err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+	messages := []model.Message{
+		{ConversationID: conversation.ID, UserID: conversation.UserID, PublicID: "msg_success_old", Role: "assistant", ContentType: "text", BranchReason: "default", Status: "pending"},
+		{ConversationID: conversation.ID, UserID: conversation.UserID, PublicID: "msg_success_new", Role: "assistant", ContentType: "text", BranchReason: "default", Status: "pending"},
+		{ConversationID: conversation.ID, UserID: conversation.UserID, PublicID: "msg_failed", Role: "assistant", ContentType: "text", BranchReason: "default", Status: "pending"},
+	}
+	if err := db.Create(&messages).Error; err != nil {
+		t.Fatalf("create messages: %v", err)
+	}
+	for _, index := range []int{1, 0} {
+		if err := repo.UpdateAssistantMessageCompletion(ctx, messages[index].ID, repository.AssistantMessageCompletionUpdate{Content: "done", Status: "success"}); err != nil {
+			t.Fatalf("complete success %d: %v", index, err)
+		}
+	}
+	if err := repo.UpdateAssistantMessageCompletion(ctx, messages[2].ID, repository.AssistantMessageCompletionUpdate{Content: "partial", Status: "error"}); err != nil {
+		t.Fatalf("complete failure: %v", err)
+	}
+	item, err := repo.MarkConversationReadByPublicID(ctx, conversation.UserID, conversation.PublicID)
+	if err != nil {
+		t.Fatalf("mark read: %v", err)
+	}
+	if item.LastAssistantMessageID == nil || *item.LastAssistantMessageID != messages[1].ID {
+		t.Fatalf("last assistant = %v, want %d", item.LastAssistantMessageID, messages[1].ID)
+	}
+	if item.LastReadMessageID == nil || *item.LastReadMessageID != messages[1].ID {
+		t.Fatalf("last read = %v, want %d", item.LastReadMessageID, messages[1].ID)
+	}
+	if _, err = repo.MarkConversationReadByPublicID(ctx, 8, conversation.PublicID); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("cross-user mark read error = %v, want not found", err)
+	}
 }
 
 func TestUpdateConversationMetadataSQLiteUsesPortableTrim(t *testing.T) {

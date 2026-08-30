@@ -393,6 +393,18 @@ func (s *Service) GetConversationByPublicID(ctx context.Context, userID uint, pu
 	return item, nil
 }
 
+// MarkConversationRead marks all currently completed assistant output as read for the conversation owner.
+func (s *Service) MarkConversationRead(ctx context.Context, userID uint, publicID string) (*model.Conversation, error) {
+	item, err := s.repo.MarkConversationReadByPublicID(ctx, userID, strings.TrimSpace(publicID))
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, ErrConversationNotFound
+		}
+		return nil, err
+	}
+	return item, nil
+}
+
 // SetMessageFeedback 设置当前用户对消息的点赞/点踩反馈。
 func (s *Service) SetMessageFeedback(
 	ctx context.Context,

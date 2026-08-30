@@ -50,7 +50,6 @@ const ARTIFACT_CSP = [
   "worker-src 'none'",
   "connect-src 'none'",
   "manifest-src 'none'",
-  "prefetch-src 'none'",
   "img-src data: blob:",
   "media-src data: blob:",
   "font-src data:",
@@ -105,7 +104,7 @@ function artifactRuntimeScript(): string {
     const node = document.createElement("pre");
     node.textContent = message;
     node.style.cssText = "margin:16px;padding:12px;border:1px solid var(--destructive);border-radius:var(--radius);background:color-mix(in oklch,var(--destructive) 12%,var(--background));color:var(--destructive);font:12px/1.5 var(--font-mono);white-space:pre-wrap;";
-    document.body.appendChild(node);
+    (document.body ?? document.documentElement).appendChild(node);
   };
   window.addEventListener("error", (event) => showError(event.error || event.message));
   window.addEventListener("unhandledrejection", (event) => showError(event.reason));
@@ -193,7 +192,7 @@ function artifactThumbnailSnapshotScript(): string {
       "* { scrollbar-width: none !important; }",
       "*::-webkit-scrollbar { width: 0 !important; height: 0 !important; display: none !important; }",
       "*::-webkit-scrollbar-thumb { background: transparent !important; }",
-    ].join("\n");
+    ].join("\\n");
     (clonedRoot.querySelector("head") ?? clonedRoot).appendChild(scrollbarHider);
 
     return {

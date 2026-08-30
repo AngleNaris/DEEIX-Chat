@@ -278,6 +278,49 @@ func TestUpstreamThinkingDeltaIsCoalescedBetweenFlushes(t *testing.T) {
 	}
 }
 
+func TestExtractUpstreamThinkArtifactsReplacesVisibleTrace(t *testing.T) {
+	var events []map[string]interface{}
+	recorder := &messageTraceRecorder{
+		cfg: config.Config{
+			ProcessTraceEnabled:            true,
+			ProcessTraceVisibleToUser:      true,
+			ProcessTraceStoreUpstreamThink: true,
+		},
+		assistant: &model.Message{ID: 1, ConversationID: 2, UserID: 3, RunID: "run_artifact"},
+		onEvent: func(eventType string, payload map[string]interface{}) error {
+			if eventType == "upstream_think_delta" {
+				events = append(events, payload)
+			}
+			return nil
+		},
+	}
+	recorder.appendUpstreamReasoning(
+		messageTraceThinkKindContent,
+		"处理中\n```html\n<main>preview</main>\n```\n完成",
+		nil,
+	)
+
+	artifacts := recorder.extractUpstreamThinkArtifacts()
+
+	if !strings.Contains(artifacts, "```html\n<main>preview</main>\n```") {
+		t.Fatalf("expected extracted artifact, got %q", artifacts)
+	}
+	if recorder.upstreamThink.contentMarkdown != "处理中\n完成" {
+		t.Fatalf("expected artifact removed from trace, got %q", recorder.upstreamThink.contentMarkdown)
+	}
+	if len(events) < 2 || events[len(events)-1]["contentMarkdown"] != "处理中\n完成" {
+		t.Fatalf("expected a full live trace replacement, got %#v", events)
+	}
+
+	events = nil
+	recorder.upstreamThink.contentMarkdown = "```html\n<main>only artifact</main>\n```"
+	recorder.extractUpstreamThinkArtifacts()
+	cleared, exists := events[len(events)-1]["contentMarkdown"]
+	if !exists || cleared != "" {
+		t.Fatalf("expected an explicit empty trace replacement, got %#v", events)
+	}
+}
+
 func TestSyncStructuredThinkDeduplicatesOnlyWithinGenerationCall(t *testing.T) {
 	var events []map[string]interface{}
 	recorder := &messageTraceRecorder{

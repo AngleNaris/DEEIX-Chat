@@ -162,3 +162,22 @@ func TestEnsureImageOCRProcessingQueuesLegacyReadyImageOnce(t *testing.T) {
 		t.Fatalf("expected legacy image to be requeued, got %#v", repo.file)
 	}
 }
+
+func TestMarkFileProcessingFailedPreservesProcessingClaim(t *testing.T) {
+	startedAt := time.Date(2026, time.August, 30, 0, 11, 5, 0, time.UTC)
+	repo := &ocrReprocessRepo{file: domainconversation.FileObject{
+		ID:                  1,
+		UserID:              7,
+		FileID:              "file_vision_failure",
+		StoragePath:         "users/7/file_vision_failure.png",
+		ProcessingStartedAt: &startedAt,
+	}}
+	service := NewService(config.Config{}, repo, nil, nil, nil, nil, DefaultExtractorVersion)
+
+	if err := service.markFileProcessingFailed(t.Context(), &repo.file, "ocr_failed", "vision failed"); err != nil {
+		t.Fatalf("markFileProcessingFailed() error = %v", err)
+	}
+	if repo.processing.StartedAt == nil || !repo.processing.StartedAt.Equal(startedAt) {
+		t.Fatalf("processing claim was not preserved: got %v, want %v", repo.processing.StartedAt, startedAt)
+	}
+}

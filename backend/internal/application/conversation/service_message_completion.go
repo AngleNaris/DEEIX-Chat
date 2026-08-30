@@ -33,6 +33,7 @@ type persistMessageGenerationInput struct {
 	ToolCallRows              []model.ToolCall
 	PersistedToolCallKeys     map[string]struct{}
 	Route                     *channel.ResolvedRoute
+	TraceRecorder             *messageTraceRecorder
 	ReuseUserMessage          bool
 	SkipUserMessageEmbedding  bool
 	// SkipEmbed defers message embedding until the moderation barrier passes.
@@ -88,6 +89,16 @@ type persistMessageToolCallsInput struct {
 }
 
 func (s *Service) persistSuccessfulMessageGeneration(ctx context.Context, input persistMessageGenerationInput) error {
+	if input.TraceRecorder != nil {
+		input.AssistantText, _ = normalizeAssistantArtifactContent(
+			input.AssistantText,
+			input.TraceRecorder.extractUpstreamThinkArtifacts(),
+		)
+	}
+	input.AssistantText, input.AssistantReasoningContent = normalizeAssistantArtifactContent(
+		input.AssistantText,
+		input.AssistantReasoningContent,
+	)
 	if input.ReuseUserMessage {
 		input.AssistantMessage.InputTokens = input.InputTokens
 		input.AssistantMessage.CacheReadTokens = input.CacheReadTokens
@@ -143,6 +154,165 @@ func (s *Service) persistSuccessfulMessageGeneration(ctx context.Context, input 
 	}
 
 	return s.finishSuccessfulMessageGeneration(ctx, input)
+}
+
+// normalizeAssistantArtifactContent moves complete renderable artifact fences out of reasoning.
+func normalizeAssistantArtifactContent(content, reasoning string) (string, string) {
+	var artifacts []string
+	var kept strings.Builder
+	cursor := 0
+
+	for position := 0; position < len(reasoning); {
+		openStart := position
+		line, next := artifactFenceLine(reasoning, position)
+		marker, language, opened := parseArtifactFenceOpen(line)
+		if !opened {
+			position = next
+			continue
+		}
+
+		codeLines := make([]string, 0, 8)
+		blockEnd := -1
+		for position = next; position < len(reasoning); {
+			line, next = artifactFenceLine(reasoning, position)
+			if isArtifactFenceClose(line, marker) {
+				blockEnd = next
+				break
+			}
+			codeLines = append(codeLines, line)
+			position = next
+		}
+		if blockEnd < 0 {
+			break
+		}
+		position = blockEnd
+		if !isSupportedArtifactFence(language, strings.Join(codeLines, "\n")) {
+			continue
+		}
+
+		kept.WriteString(reasoning[cursor:openStart])
+		artifacts = append(artifacts, strings.TrimSpace(reasoning[openStart:blockEnd]))
+		cursor = blockEnd
+	}
+
+	if len(artifacts) == 0 {
+		return content, reasoning
+	}
+	kept.WriteString(reasoning[cursor:])
+	normalizedContent := strings.TrimSpace(content)
+	for _, artifact := range artifacts {
+		if artifact == "" || strings.Contains(normalizedContent, artifact) {
+			continue
+		}
+		if normalizedContent != "" {
+			normalizedContent += "\n\n"
+		}
+		normalizedContent += artifact
+	}
+	return normalizedContent, strings.TrimSpace(kept.String())
+}
+
+func artifactFenceLine(value string, start int) (string, int) {
+	if newline := strings.IndexByte(value[start:], '\n'); newline >= 0 {
+		end := start + newline
+		line := strings.TrimSuffix(value[start:end], "\r")
+		return line, end + 1
+	}
+	return strings.TrimSuffix(value[start:], "\r"), len(value)
+}
+
+func parseArtifactFenceOpen(line string) (string, string, bool) {
+	trimmed := strings.TrimLeft(line, " \t")
+	if len(trimmed) < 3 || (trimmed[0] != '`' && trimmed[0] != '~') {
+		return "", "", false
+	}
+	markerEnd := 1
+	for markerEnd < len(trimmed) && trimmed[markerEnd] == trimmed[0] {
+		markerEnd++
+	}
+	if markerEnd < 3 {
+		return "", "", false
+	}
+	info := strings.Fields(strings.TrimSpace(trimmed[markerEnd:]))
+	language := ""
+	if len(info) > 0 {
+		language = strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(info[0], "{"), "."), "}")
+	}
+	return trimmed[:markerEnd], strings.ToLower(language), true
+}
+
+func isArtifactFenceClose(line, marker string) bool {
+	trimmed := strings.Trim(line, " \t")
+	if len(trimmed) < len(marker) {
+		return false
+	}
+	for index := range trimmed {
+		if trimmed[index] != marker[0] {
+			return false
+		}
+	}
+	return true
+}
+
+func isSupportedArtifactFence(language, code string) bool {
+	if strings.TrimSpace(code) == "" {
+		return false
+	}
+	switch language {
+	case "html", "htm", "xhtml", "css", "scss", "sass", "less", "js", "javascript", "mjs", "cjs", "svg", "svg+xml", "image/svg+xml":
+		return true
+	case "", "markdown":
+		return looksLikeHTMLArtifact(code) || looksLikeSVGArtifact(code)
+	case "xml", "text/xml", "application/xml":
+		return looksLikeSVGArtifact(code)
+	default:
+		return false
+	}
+}
+
+func looksLikeHTMLArtifact(code string) bool {
+	value := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(code, "\ufeff")))
+	if strings.HasPrefix(value, "<!doctype html") {
+		return true
+	}
+	for _, tag := range []string{"html", "head", "body", "article", "canvas", "div", "main", "section", "style", "script"} {
+		prefix := "<" + tag
+		if strings.HasPrefix(value, prefix) && (len(value) == len(prefix) || strings.ContainsRune(" \t\r\n>/", rune(value[len(prefix)]))) {
+			return true
+		}
+	}
+	return false
+}
+
+func looksLikeSVGArtifact(code string) bool {
+	value := strings.TrimSpace(strings.TrimPrefix(code, "\ufeff"))
+	for {
+		switch {
+		case strings.HasPrefix(value, "<!--"):
+			end := strings.Index(value[4:], "-->")
+			if end < 0 {
+				return false
+			}
+			value = strings.TrimSpace(value[end+7:])
+		case strings.HasPrefix(value, "<?"):
+			end := strings.Index(value[2:], "?>")
+			if end < 0 {
+				return false
+			}
+			value = strings.TrimSpace(value[end+4:])
+		default:
+			lower := strings.ToLower(value)
+			if strings.HasPrefix(lower, "<!doctype svg") {
+				end := strings.IndexByte(value, '>')
+				if end < 0 {
+					return false
+				}
+				value = strings.TrimSpace(value[end+1:])
+				continue
+			}
+			return strings.HasPrefix(lower, "<svg") && (len(lower) == 4 || strings.ContainsRune(" \t\r\n>/", rune(lower[4])))
+		}
+	}
 }
 
 func assistantCompletionInputTokens(input persistMessageGenerationInput) int64 {
@@ -323,6 +493,16 @@ func (s *Service) persistInterruptedMessageGeneration(ctx context.Context, input
 	}
 
 	metrics := resolveInterruptedMessageGenerationMetrics(input)
+	if input.TraceRecorder != nil {
+		input.AssistantText, _ = normalizeAssistantArtifactContent(
+			input.AssistantText,
+			input.TraceRecorder.extractUpstreamThinkArtifacts(),
+		)
+	}
+	input.AssistantText, input.AssistantReasoningText = normalizeAssistantArtifactContent(
+		input.AssistantText,
+		input.AssistantReasoningText,
+	)
 
 	if input.ReuseUserMessage {
 		input.AssistantMessage.InputTokens = metrics.InputTokens

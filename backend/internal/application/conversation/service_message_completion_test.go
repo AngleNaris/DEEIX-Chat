@@ -1,12 +1,70 @@
 package conversation
 
 import (
+	"strings"
 	"testing"
 	"time"
 
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/llm"
 )
+
+func TestNormalizeAssistantArtifactContent(t *testing.T) {
+	reasoning := strings.Join([]string{
+		"先核对布局。",
+		"```html",
+		"<main>HTML</main>",
+		"```",
+		"继续处理样式。",
+		"~~~scss",
+		"main { color: red; }",
+		"~~~",
+		"```javascript",
+		"console.log('ready')",
+		"```",
+		"```svg",
+		"<svg viewBox=\"0 0 1 1\"></svg>",
+		"```",
+		"完成。",
+	}, "\n")
+
+	content, remaining := normalizeAssistantArtifactContent("这是正文。", reasoning)
+	for _, expected := range []string{"```html", "~~~scss", "```javascript", "```svg"} {
+		if !strings.Contains(content, expected) {
+			t.Fatalf("content missing %q: %q", expected, content)
+		}
+	}
+	if remaining != "先核对布局。\n继续处理样式。\n完成。" {
+		t.Fatalf("unexpected remaining reasoning: %q", remaining)
+	}
+}
+
+func TestNormalizeAssistantArtifactContentLeavesUnsupportedAndUnclosedFences(t *testing.T) {
+	reasoning := "说明\n```go\nfmt.Println(1)\n```\n```html\n<div>unfinished</div>"
+	content, remaining := normalizeAssistantArtifactContent("answer", reasoning)
+	if content != "answer" || remaining != reasoning {
+		t.Fatalf("unsupported or unclosed fences changed: content=%q reasoning=%q", content, remaining)
+	}
+}
+
+func TestNormalizeAssistantArtifactContentRemovesExactDuplicate(t *testing.T) {
+	artifact := "```html\n<main>same</main>\n```"
+	content, reasoning := normalizeAssistantArtifactContent("answer\n\n"+artifact, "thinking\n"+artifact+"\ndone")
+	if strings.Count(content, artifact) != 1 {
+		t.Fatalf("expected one artifact, got %q", content)
+	}
+	if reasoning != "thinking\ndone" {
+		t.Fatalf("unexpected reasoning: %q", reasoning)
+	}
+}
+
+func TestNormalizeAssistantArtifactContentDetectsUnlabelledDocuments(t *testing.T) {
+	reasoning := "```\n<div>preview</div>\n```\n```xml\n<?xml version=\"1.0\"?><svg></svg>\n```"
+	content, remaining := normalizeAssistantArtifactContent("", reasoning)
+	if remaining != "" || !strings.Contains(content, "<div>preview</div>") || !strings.Contains(content, "<svg></svg>") {
+		t.Fatalf("unexpected normalization: content=%q reasoning=%q", content, remaining)
+	}
+}
 
 func TestCanceledGenerationWithObservedUsageIsRetainedForBilling(t *testing.T) {
 	input := persistInterruptedMessageGenerationInput{
@@ -182,6 +240,32 @@ func TestInterruptedGenerationRetainsReasoningContent(t *testing.T) {
 
 	if assistant.ReasoningContent != "中断前已产出的思考内容" {
 		t.Fatalf("expected trimmed reasoning to be retained, got %q", assistant.ReasoningContent)
+	}
+}
+
+func TestInterruptedGenerationMovesArtifactContentOutOfReasoning(t *testing.T) {
+	assistant := &model.Message{}
+	input := persistInterruptedMessageGenerationInput{
+		UserMessage:            &model.Message{},
+		AssistantMessage:       assistant,
+		AssistantText:          "部分可见回复",
+		AssistantReasoningText: "处理中\n```html\n<main>preview</main>\n```\n完成",
+		Error:                  ErrMessageGenerationCanceled,
+		StartedAt:              time.Now(),
+	}
+	metrics := resolveInterruptedMessageGenerationMetrics(input)
+	input.AssistantText, input.AssistantReasoningText = normalizeAssistantArtifactContent(
+		input.AssistantText,
+		input.AssistantReasoningText,
+	)
+
+	applyInterruptedMessageGenerationState(input, metrics)
+
+	if !strings.Contains(assistant.Content, "```html\n<main>preview</main>\n```") {
+		t.Fatalf("expected artifact in visible content, got %q", assistant.Content)
+	}
+	if assistant.ReasoningContent != "处理中\n完成" {
+		t.Fatalf("expected artifact removed from reasoning, got %q", assistant.ReasoningContent)
 	}
 }
 

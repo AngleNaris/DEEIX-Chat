@@ -1,5 +1,4 @@
 import { authedFetch, authedRequest } from "@/shared/api/authed-client";
-import { pathParam, resolveApiBaseURL } from "@/shared/api/http-client";
 import type {
   ChatFilePolicyDTO,
   DeleteFileResult,
@@ -9,6 +8,7 @@ import type {
   FileProcessingStatusDTO,
   UploadFileResult,
 } from "@/shared/api/file.types";
+import { apiRequest, pathParam, resolveApiBaseURL } from "@/shared/api/http-client";
 
 type UploadFileOptions = {
   purpose?: string;
@@ -30,6 +30,25 @@ export type FileContentResult = {
 };
 
 export type RenameFileResult = FileObjectDTO;
+
+export type FileShareDTO = {
+  share_id?: string;
+  file_id?: string;
+  status: "none" | "active" | "revoked" | "expired";
+  expires_at?: string | null;
+  created_at?: string;
+};
+
+export type PublicFileShareDTO = {
+  share_id: string;
+  file_id: string;
+  file_name: string;
+  mime_type: string;
+  file_category: string;
+  size_bytes: number;
+  created_at: string;
+  expires_at?: string | null;
+};
 
 export async function readFileContentResponse(response: Response): Promise<FileContentResult> {
   const blob = await response.blob();
@@ -176,6 +195,54 @@ export async function fetchSharedFileContent(shareID: string, fileID: string): P
   }
 
   return readFileContentResponse(response);
+}
+
+export async function createFileShare(accessToken: string, fileID: string): Promise<FileShareDTO> {
+  return authedRequest<FileShareDTO>(
+    `/api/v1/files/${pathParam(fileID)}/share`,
+    {
+      method: "POST",
+      accessToken,
+      body: {},
+    },
+    true,
+  );
+}
+
+export async function getFileShare(accessToken: string, fileID: string): Promise<FileShareDTO> {
+  return authedRequest<FileShareDTO>(
+    `/api/v1/files/${pathParam(fileID)}/share`,
+    { method: "GET", accessToken },
+    true,
+  );
+}
+
+export async function revokeFileShare(accessToken: string, fileID: string): Promise<void> {
+  await authedRequest<{ revoked: boolean }>(
+    `/api/v1/files/${pathParam(fileID)}/share`,
+    { method: "DELETE", accessToken },
+    true,
+  );
+}
+
+export async function getPublicFileShare(shareID: string): Promise<PublicFileShareDTO> {
+  return apiRequest<PublicFileShareDTO>(`/api/v1/shared-files/${pathParam(shareID)}`);
+}
+
+export async function fetchPublicFileShareContent(shareID: string): Promise<FileContentResult> {
+  const response = await fetch(
+    `${resolveApiBaseURL()}/api/v1/shared-files/${pathParam(shareID)}/content`,
+    { method: "GET", cache: "no-store", credentials: "include" },
+  );
+  if (!response.ok) {
+    throw new Error("File share not found");
+  }
+  return readFileContentResponse(response);
+}
+
+export function fileShareURL(shareID: string): string {
+  const path = `/share/file?share_id=${encodeURIComponent(shareID)}`;
+  return typeof window === "undefined" ? path : `${window.location.origin}${path}`;
 }
 
 export async function fetchFileExtract(accessToken: string, fileID: string): Promise<FileExtractDTO> {

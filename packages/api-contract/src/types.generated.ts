@@ -1107,6 +1107,7 @@ export interface ConversationResponse {
   agentGroupName: string;
   contextPolicyJSON: string;
   createdAt: string;
+  hasUnread: boolean;
   isStarred: boolean;
   labelsJSON: string;
   lastCompactedAt: string | null;
@@ -1334,6 +1335,14 @@ export interface CreateCredentialRequest {
   name: string;
   type: string;
   value: string;
+}
+
+export interface CreateFileShareRequest {
+  /**
+   * @min 1
+   * @max 720
+   */
+  expires_in_hours: number;
 }
 
 export interface CreateModelDisplayGroupRequest {
@@ -1692,6 +1701,27 @@ export interface FileObjectResponse {
   sizeBytes: number;
   status: string;
   updatedAt: string;
+}
+
+export interface FileShareResponseDoc {
+  data: FileShareResult;
+  errorMsg: string;
+}
+
+export interface FileShareResult {
+  created_at?: string;
+  expires_at?: string;
+  file_id?: string;
+  share_id?: string;
+  status: string;
+}
+
+export interface FileShareRevokeResponseDoc {
+  data: {
+    /** @example true */
+    revoked: boolean;
+  };
+  errorMsg: string;
 }
 
 export interface FileUpdateResponseDoc {
@@ -2959,6 +2989,22 @@ export interface ProviderAuthBridgeStartResponseDoc {
   errorMsg: string;
 }
 
+export interface PublicFileShareResponseDoc {
+  data: PublicFileShareResult;
+  errorMsg: string;
+}
+
+export interface PublicFileShareResult {
+  created_at: string;
+  expires_at?: string;
+  file_category: string;
+  file_id: string;
+  file_name: string;
+  mime_type: string;
+  share_id: string;
+  size_bytes: number;
+}
+
 export interface PublicGroupRunActorResponse {
   color: string;
   icon: string;
@@ -4101,7 +4147,16 @@ export interface UpsertUpstreamModelResponseDoc {
 export interface UpsertUserMemoryRequest {
   /** @maxLength 128 */
   memoryKey: string;
-  scope: "profile" | "preference" | "custom";
+  scope:
+    | "identity"
+    | "activity"
+    | "context"
+    | "preference"
+    | "capability"
+    | "experience"
+    | "profile"
+    | "custom"
+    | "global";
   /** @maxLength 10000 */
   value: string;
 }
@@ -9085,6 +9140,25 @@ export namespace Conversations {
   }
 
   /**
+   * @description 将当前用户的会话已读游标推进到最新成功助手消息
+   * @tags chat
+   * @name ReadCreate
+   * @summary 标记会话已读
+   * @request POST:/conversations/{id}/read
+   * @secure
+   */
+  export namespace ReadCreate {
+    export type RequestParams = {
+      /** 会话 public_id */
+      id: string;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = never;
+    export type RequestHeaders = {};
+    export type ResponseBody = ConversationUpdateResponseDoc;
+  }
+
+  /**
    * @description 查询会话内模型调用运行日志（tokens/时长/错误）
    * @tags chat
    * @name RunsList
@@ -9421,6 +9495,63 @@ export namespace Files {
     export type RequestBody = never;
     export type RequestHeaders = {};
     export type ResponseBody = Blob;
+  }
+
+  /**
+   * No description
+   * @tags chat
+   * @name ShareList
+   * @summary 查询文件分享状态
+   * @request GET:/files/{file_id}/share
+   * @secure
+   */
+  export namespace ShareList {
+    export type RequestParams = {
+      /** 文件 ID */
+      fileId: string;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = never;
+    export type RequestHeaders = {};
+    export type ResponseBody = FileShareResponseDoc;
+  }
+
+  /**
+   * @description 创建或替换当前用户指定文件的公开分享链接
+   * @tags chat
+   * @name ShareCreate
+   * @summary 创建文件分享
+   * @request POST:/files/{file_id}/share
+   * @secure
+   */
+  export namespace ShareCreate {
+    export type RequestParams = {
+      /** 文件 ID */
+      fileId: string;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = CreateFileShareRequest;
+    export type RequestHeaders = {};
+    export type ResponseBody = FileShareResponseDoc;
+  }
+
+  /**
+   * No description
+   * @tags chat
+   * @name ShareDelete
+   * @summary 撤销文件分享
+   * @request DELETE:/files/{file_id}/share
+   * @secure
+   */
+  export namespace ShareDelete {
+    export type RequestParams = {
+      /** 文件 ID */
+      fileId: string;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = never;
+    export type RequestHeaders = {};
+    export type ResponseBody = FileShareRevokeResponseDoc;
   }
 }
 
@@ -10185,6 +10316,44 @@ export namespace SharedConversations {
     export type RequestParams = {
       /** 文件 ID */
       fileId: string;
+      /** 分享 ID */
+      shareId: string;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = never;
+    export type RequestHeaders = {};
+    export type ResponseBody = Blob;
+  }
+}
+
+export namespace SharedFiles {
+  /**
+   * No description
+   * @tags chat
+   * @name SharedFilesDetail
+   * @summary 查询公开文件分享
+   * @request GET:/shared-files/{share_id}
+   */
+  export namespace SharedFilesDetail {
+    export type RequestParams = {
+      /** 分享 ID */
+      shareId: string;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = never;
+    export type RequestHeaders = {};
+    export type ResponseBody = PublicFileShareResponseDoc;
+  }
+
+  /**
+   * No description
+   * @tags chat
+   * @name ContentList
+   * @summary 读取公开文件内容
+   * @request GET:/shared-files/{share_id}/content
+   */
+  export namespace ContentList {
+    export type RequestParams = {
       /** 分享 ID */
       shareId: string;
     };

@@ -27,6 +27,9 @@ const maxUserMemoriesPerUser = 200
 // ErrMemoryLimitReached 表示当前用户的新增长期记忆已达到上限。
 var ErrMemoryLimitReached = errors.New("memory limit reached")
 
+// ErrInvalidMemoryCategory rejects unknown categories at write boundaries.
+var ErrInvalidMemoryCategory = errors.New("invalid memory category")
+
 type userMemoryLock struct {
 	mu   sync.Mutex
 	refs int
@@ -119,11 +122,15 @@ type AuditInput struct {
 // UpsertUserMemory 新增或更新用户长期记忆。
 func (s *Service) UpsertUserMemory(ctx context.Context, userID uint, key string, value string, scope string, updatedBy string) error {
 	key = strings.TrimSpace(key)
+	category, ok := domainmemory.CanonicalCategory(scope)
+	if !ok {
+		return fmt.Errorf("%w: %q", ErrInvalidMemoryCategory, strings.TrimSpace(scope))
+	}
 	item := &domainmemory.UserMemory{
 		UserID:    userID,
 		MemoryKey: key,
 		Value:     strings.TrimSpace(value),
-		Scope:     strings.TrimSpace(scope),
+		Scope:     category,
 		UpdatedBy: strings.TrimSpace(updatedBy),
 	}
 	unlock := s.lockUserMemory(userID)
@@ -170,12 +177,27 @@ func (s *Service) DeleteUserMemory(ctx context.Context, userID uint, memoryKey s
 
 // ListUserMemories 返回用户长期记忆。
 func (s *Service) ListUserMemories(ctx context.Context, userID uint) ([]domainmemory.UserMemory, error) {
-	return s.repo.ListUserMemories(ctx, userID)
+	items, err := s.repo.ListUserMemories(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	return normalizeMemoryCategories(items), nil
 }
 
 // SearchUserMemoriesByEmbedding 语义检索用户记忆（需向量存储支持）。
 func (s *Service) SearchUserMemoriesByEmbedding(ctx context.Context, userID uint, queryEmbedding []float32, embeddingSignature string, topK int, minSimilarity float64) ([]domainmemory.UserMemory, error) {
-	return s.repo.SearchUserMemoriesByEmbedding(ctx, userID, queryEmbedding, embeddingSignature, topK, minSimilarity)
+	items, err := s.repo.SearchUserMemoriesByEmbedding(ctx, userID, queryEmbedding, embeddingSignature, topK, minSimilarity)
+	if err != nil {
+		return nil, err
+	}
+	return normalizeMemoryCategories(items), nil
+}
+
+func normalizeMemoryCategories(items []domainmemory.UserMemory) []domainmemory.UserMemory {
+	for i := range items {
+		items[i].Scope = domainmemory.NormalizeCategory(items[i].Scope)
+	}
+	return items
 }
 
 // UpsertUserMemoryEmbedding 更新记忆向量（异步写入，失败静默）。

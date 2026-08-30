@@ -205,6 +205,38 @@ func (h *Handler) GetConversation(c *gin.Context) {
 	response.Success(c, toConversationResponse(item))
 }
 
+// MarkConversationRead godoc
+// @Summary 标记会话已读
+// @Description 将当前用户的会话已读游标推进到最新成功助手消息
+// @Tags chat
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "会话 public_id"
+// @Success 200 {object} ConversationUpdateResponseDoc
+// @Failure 400 {object} ErrorDoc
+// @Failure 404 {object} ErrorDoc
+// @Failure 500 {object} ErrorDoc
+// @Router /conversations/{id}/read [post]
+func (h *Handler) MarkConversationRead(c *gin.Context) {
+	userID := middleware.MustUserID(c)
+	publicID, err := stringParam(c, "id")
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid conversation id")
+		return
+	}
+
+	item, err := h.service.MarkConversationRead(c.Request.Context(), userID, publicID)
+	if err != nil {
+		if errors.Is(err, appconversation.ErrConversationNotFound) {
+			response.Error(c, http.StatusNotFound, "conversation not found")
+			return
+		}
+		response.Error(c, http.StatusInternalServerError, "mark conversation read failed")
+		return
+	}
+	response.Success(c, toConversationResponse(item))
+}
+
 // ExportConversation godoc
 // @Summary 导出会话 JSON
 // @Description 导出当前用户单个会话的元信息、消息、运行日志和可见处理轨迹

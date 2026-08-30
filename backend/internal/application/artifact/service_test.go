@@ -5,11 +5,51 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	domainartifact "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/artifact"
 )
+
+func TestRenderTokenIsSingleUseAndExpires(t *testing.T) {
+	svc := NewService(nil)
+	view, err := svc.CreateRenderToken(7, "<!doctype html><title>artifact</title>")
+	if err != nil {
+		t.Fatalf("CreateRenderToken() error = %v", err)
+	}
+	token := strings.TrimPrefix(view.RenderURL, "/api/v1/artifact-renders/")
+	var successes atomic.Int32
+	done := make(chan struct{}, 8)
+	for range 8 {
+		go func() {
+			if document, consumeErr := svc.ConsumeRenderToken(token); consumeErr == nil && strings.Contains(document, "artifact") {
+				successes.Add(1)
+			}
+			done <- struct{}{}
+		}()
+	}
+	for range 8 {
+		<-done
+	}
+	if successes.Load() != 1 {
+		t.Fatalf("successful consumes = %d, want 1", successes.Load())
+	}
+
+	expired, err := svc.CreateRenderToken(7, "<title>expired</title>")
+	if err != nil {
+		t.Fatalf("CreateRenderToken(expired) error = %v", err)
+	}
+	expiredToken := strings.TrimPrefix(expired.RenderURL, "/api/v1/artifact-renders/")
+	svc.renderMu.Lock()
+	entry := svc.renderTokens[expiredToken]
+	entry.ExpiresAt = time.Now().Add(-time.Second)
+	svc.renderTokens[expiredToken] = entry
+	svc.renderMu.Unlock()
+	if _, err := svc.ConsumeRenderToken(expiredToken); !errors.Is(err, ErrRenderNotFound) {
+		t.Fatalf("ConsumeRenderToken(expired) error = %v", err)
+	}
+}
 
 type artifactRepositoryStub struct {
 	items []domainartifact.Artifact

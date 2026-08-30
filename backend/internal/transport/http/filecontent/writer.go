@@ -20,7 +20,7 @@ func Write(c *gin.Context, result *appupload.FileContentResult, public bool) err
 	c.Header("Content-Type", contentType)
 	c.Header("Content-Disposition", buildContentDisposition(result.File.FileName, isPassiveInlineContentType(contentType)))
 	if public {
-		c.Header("Cache-Control", "public, max-age=60")
+		c.Header("Cache-Control", "no-store")
 	} else {
 		c.Header("Cache-Control", "private, max-age=60")
 	}

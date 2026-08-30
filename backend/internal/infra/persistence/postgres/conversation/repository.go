@@ -558,6 +558,23 @@ func (r *Repo) GetConversationByPublicID(ctx context.Context, publicID string, u
 	return &result, nil
 }
 
+// MarkConversationReadByPublicID advances the owner's read cursor to the latest successful assistant message.
+func (r *Repo) MarkConversationReadByPublicID(ctx context.Context, userID uint, publicID string) (*domainconversation.Conversation, error) {
+	result := r.db.WithContext(ctx).
+		Model(&models.Conversation{}).
+		Where("user_id = ? AND public_id = ?", userID, strings.TrimSpace(publicID)).
+		UpdateColumn("last_read_message_id", gorm.Expr(
+			"CASE WHEN last_assistant_message_id IS NULL THEN last_read_message_id WHEN last_read_message_id IS NULL OR last_read_message_id < last_assistant_message_id THEN last_assistant_message_id ELSE last_read_message_id END",
+		))
+	if result.Error != nil {
+		return nil, translateError(result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return nil, repository.ErrNotFound
+	}
+	return r.GetConversationByPublicID(ctx, publicID, userID)
+}
+
 // GetActiveConversationShareByConversation 查询会话当前有效分享。
 func (r *Repo) GetActiveConversationShareByConversation(ctx context.Context, userID uint, conversationID uint) (*domainconversation.ConversationShare, error) {
 	var item models.ConversationShare
@@ -1458,11 +1475,12 @@ func (r *Repo) UpdateAssistantMessageCompletion(
 	if update.KnowledgeSources != nil {
 		updates["knowledge_sources_json"] = marshalMessageKnowledgeSources(update.KnowledgeSources)
 	}
-	return translateError(r.db.WithContext(ctx).
-		Model(&models.Message{}).
-		Where("id = ?", messageID).
-		Updates(updates).
-		Error)
+	return translateError(r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&models.Message{}).Where("id = ?", messageID).Updates(updates).Error; err != nil {
+			return err
+		}
+		return advanceConversationAssistantCursor(tx, messageID, update.Status)
+	}))
 }
 
 // CompleteAssistantMessageWithAttachments 原子写入助手附件，并同步用户用量与助手完成态。
@@ -1538,9 +1556,12 @@ func (r *Repo) CompleteAssistantMessageWithAttachments(
 		if assistantCompletion.KnowledgeSources != nil {
 			updates["knowledge_sources_json"] = marshalMessageKnowledgeSources(assistantCompletion.KnowledgeSources)
 		}
-		return tx.Model(&models.Message{}).
+		if err := tx.Model(&models.Message{}).
 			Where("id = ?", assistantMessageID).
-			Updates(updates).Error
+			Updates(updates).Error; err != nil {
+			return err
+		}
+		return advanceConversationAssistantCursor(tx, assistantMessageID, assistantCompletion.Status)
 	}))
 }
 
@@ -1598,10 +1619,29 @@ func (r *Repo) CompleteAssistantMessageWithGeneratedAttachments(
 		if assistantCompletion.KnowledgeSources != nil {
 			updates["knowledge_sources_json"] = marshalMessageKnowledgeSources(assistantCompletion.KnowledgeSources)
 		}
-		return tx.Model(&models.Message{}).
+		if err := tx.Model(&models.Message{}).
 			Where("id = ?", assistantMessageID).
-			Updates(updates).Error
+			Updates(updates).Error; err != nil {
+			return err
+		}
+		return advanceConversationAssistantCursor(tx, assistantMessageID, assistantCompletion.Status)
 	}))
+}
+
+func advanceConversationAssistantCursor(tx *gorm.DB, assistantMessageID uint, status string) error {
+	if strings.TrimSpace(status) != "success" {
+		return nil
+	}
+	conversationID := tx.Model(&models.Message{}).
+		Select("conversation_id").
+		Where("id = ? AND role = ? AND status = ?", assistantMessageID, "assistant", "success")
+	return tx.Model(&models.Conversation{}).
+		Where("id = (?)", conversationID).
+		UpdateColumn("last_assistant_message_id", gorm.Expr(
+			"CASE WHEN last_assistant_message_id IS NULL OR last_assistant_message_id < ? THEN ? ELSE last_assistant_message_id END",
+			assistantMessageID,
+			assistantMessageID,
+		)).Error
 }
 
 // UpdateMessageBilling 回填消息计费金额与计费快照。
@@ -4245,28 +4285,30 @@ func toConversationDomain(item models.Conversation) domainconversation.Conversat
 		labelsJSON = "[]"
 	}
 	return domainconversation.Conversation{
-		ID:                    item.ID,
-		UserID:                item.UserID,
-		ProjectID:             item.ProjectID,
-		RoleID:                item.RoleID,
-		AgentGroupID:          item.AgentGroupID,
-		PublicID:              item.PublicID,
-		Title:                 item.Title,
-		LabelsJSON:            labelsJSON,
-		LabelsManuallyManaged: item.LabelsManuallyManaged,
-		Model:                 item.Model,
-		Provider:              item.Provider,
-		SessionKey:            item.SessionKey,
-		IsStarred:             item.IsStarred,
-		StarredAt:             item.StarredAt,
-		MessageCount:          item.MessageCount,
-		Status:                item.Status,
-		ContextPolicy:         item.ContextPolicy,
-		LastCompactedAt:       item.LastCompactedAt,
-		LastResponseID:        item.LastResponseID,
-		LastPromptFingerprint: item.LastPromptFingerprint,
-		CreatedAt:             item.CreatedAt,
-		UpdatedAt:             item.UpdatedAt,
+		ID:                     item.ID,
+		UserID:                 item.UserID,
+		ProjectID:              item.ProjectID,
+		RoleID:                 item.RoleID,
+		AgentGroupID:           item.AgentGroupID,
+		PublicID:               item.PublicID,
+		Title:                  item.Title,
+		LabelsJSON:             labelsJSON,
+		LabelsManuallyManaged:  item.LabelsManuallyManaged,
+		Model:                  item.Model,
+		Provider:               item.Provider,
+		SessionKey:             item.SessionKey,
+		IsStarred:              item.IsStarred,
+		StarredAt:              item.StarredAt,
+		MessageCount:           item.MessageCount,
+		Status:                 item.Status,
+		ContextPolicy:          item.ContextPolicy,
+		LastCompactedAt:        item.LastCompactedAt,
+		LastResponseID:         item.LastResponseID,
+		LastPromptFingerprint:  item.LastPromptFingerprint,
+		LastAssistantMessageID: item.LastAssistantMessageID,
+		LastReadMessageID:      item.LastReadMessageID,
+		CreatedAt:              item.CreatedAt,
+		UpdatedAt:              item.UpdatedAt,
 	}
 }
 
@@ -4306,25 +4348,27 @@ func toConversationModel(item *domainconversation.Conversation) models.Conversat
 		labelsJSON = "[]"
 	}
 	return models.Conversation{
-		UserID:                item.UserID,
-		ProjectID:             item.ProjectID,
-		RoleID:                item.RoleID,
-		AgentGroupID:          item.AgentGroupID,
-		PublicID:              item.PublicID,
-		Title:                 item.Title,
-		LabelsJSON:            labelsJSON,
-		LabelsManuallyManaged: item.LabelsManuallyManaged,
-		Model:                 item.Model,
-		Provider:              item.Provider,
-		SessionKey:            item.SessionKey,
-		IsStarred:             item.IsStarred,
-		StarredAt:             item.StarredAt,
-		MessageCount:          item.MessageCount,
-		Status:                item.Status,
-		ContextPolicy:         item.ContextPolicy,
-		LastCompactedAt:       item.LastCompactedAt,
-		LastResponseID:        item.LastResponseID,
-		LastPromptFingerprint: item.LastPromptFingerprint,
+		UserID:                 item.UserID,
+		ProjectID:              item.ProjectID,
+		RoleID:                 item.RoleID,
+		AgentGroupID:           item.AgentGroupID,
+		PublicID:               item.PublicID,
+		Title:                  item.Title,
+		LabelsJSON:             labelsJSON,
+		LabelsManuallyManaged:  item.LabelsManuallyManaged,
+		Model:                  item.Model,
+		Provider:               item.Provider,
+		SessionKey:             item.SessionKey,
+		IsStarred:              item.IsStarred,
+		StarredAt:              item.StarredAt,
+		MessageCount:           item.MessageCount,
+		Status:                 item.Status,
+		ContextPolicy:          item.ContextPolicy,
+		LastCompactedAt:        item.LastCompactedAt,
+		LastResponseID:         item.LastResponseID,
+		LastPromptFingerprint:  item.LastPromptFingerprint,
+		LastAssistantMessageID: item.LastAssistantMessageID,
+		LastReadMessageID:      item.LastReadMessageID,
 	}
 }
 

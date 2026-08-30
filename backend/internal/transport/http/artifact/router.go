@@ -21,9 +21,11 @@ func (m *Module) RegisterRoutes(authRequired *gin.RouterGroup) {
 	authRequired.POST("/artifacts/:id/share", m.Handler.CreateShare)
 	authRequired.GET("/artifacts/:id/share", m.Handler.GetShare)
 	authRequired.DELETE("/artifacts/:id/share", m.Handler.RevokeShare)
+	authRequired.POST("/artifact-render-tokens", m.Handler.CreateRenderToken)
 }
 
 // RegisterPublicRoutes 注册制品域公开路由。
 func (m *Module) RegisterPublicRoutes(public *gin.RouterGroup) {
 	public.GET("/shared-artifacts/:share_id", m.Handler.GetPublicShare)
+	public.GET("/artifact-renders/:render_token", m.Handler.GetArtifactRender)
 }

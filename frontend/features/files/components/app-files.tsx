@@ -1,13 +1,7 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-
-import { ContentHeader } from "@/features/files/components/sections/content/content-header";
-import { ContentPreview } from "@/features/files/components/sections/content/content-preview";
-import { SidebarHeader } from "@/features/files/components/sections/sidebar/sidebar-header";
-import { SidebarList } from "@/features/files/components/sections/sidebar/sidebar-list";
-import { StorageQuotaPanel } from "@/features/files/components/sections/storage/storage-quota-panel";
-import { useFilesPage } from "@/features/files/hooks/use-files-page";
+import * as React from "react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -18,9 +12,17 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { FileShareDialog } from "@/features/files/components/file-share-dialog";
+import { ContentHeader } from "@/features/files/components/sections/content/content-header";
+import { ContentPreview } from "@/features/files/components/sections/content/content-preview";
+import { SidebarHeader } from "@/features/files/components/sections/sidebar/sidebar-header";
+import { SidebarList } from "@/features/files/components/sections/sidebar/sidebar-list";
+import { StorageQuotaPanel } from "@/features/files/components/sections/storage/storage-quota-panel";
+import { useFilesPage } from "@/features/files/hooks/use-files-page";
+import { cn } from "@/lib/utils";
+import type { FileObjectDTO } from "@/shared/api/file.types";
 import { useDialogSnapshot } from "@/shared/hooks/use-dialog-snapshot";
 import { useIsMobile } from "@/shared/hooks/use-mobile";
-import { cn } from "@/lib/utils";
 
 export function AppFiles() {
   const tCommon = useTranslations("common.actions");
@@ -87,6 +89,7 @@ export function AppFiles() {
   const sidebarCollapsed = !isMobileViewport && isSidebarCollapsed;
   const selectAllDisabled = loading || files.length === 0 || bulkDeleting;
   const contentDeleting = Boolean(selectedFile && deletingFileID === selectedFile.fileID);
+  const [shareTarget, setShareTarget] = React.useState<FileObjectDTO | null>(null);
 
   return (
     <>
@@ -145,6 +148,7 @@ export function AppFiles() {
                 onRenameValueChange={onRenameValueChange}
                 onRenameCommit={onRenameCommit}
                 onRenameCancel={onRenameCancel}
+                onShareRequest={setShareTarget}
                 onDeleteRequest={onDeleteRequest}
               />
             ) : null}
@@ -163,6 +167,7 @@ export function AppFiles() {
             onBack={mobileView === "detail" ? onBackToList : undefined}
             onOpen={openPreview}
             onDownload={downloadPreview}
+            onShareRequest={setShareTarget}
             onDeleteRequest={onDeleteRequest}
             onToggleRagOptOut={onToggleRagOptOut}
           />
@@ -203,6 +208,14 @@ export function AppFiles() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <FileShareDialog
+        file={shareTarget}
+        open={Boolean(shareTarget)}
+        onOpenChange={(next) => {
+          if (!next) setShareTarget(null);
+        }}
+      />
 
       <AlertDialog
         open={bulkDeleteOpen}

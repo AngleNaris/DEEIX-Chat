@@ -67,6 +67,8 @@ var (
 	ErrInvalidFileName = errors.New("invalid file name")
 	// ErrFileNotFound 文件不存在。
 	ErrFileNotFound = errors.New("file not found")
+	// ErrFileShareNotFound 文件分享不存在、已撤销、已过期或源文件不可用。
+	ErrFileShareNotFound = errors.New("file share not found")
 	// ErrFileInUse 文件正在被头像、知识库等资源使用。
 	ErrFileInUse = errors.New("file in use")
 	// ErrStorageQuotaExceeded 文件配额超限。

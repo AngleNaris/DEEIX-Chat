@@ -99,7 +99,7 @@ func defaultSettings() []domainsettings.SystemSetting {
 		{Namespace: "file", Key: "full_context_pdf_max_pages", Value: "20", ValueType: "int", Description: "PDF Full Context最大页数，留空或0表示不限制"},
 		{Namespace: "file", Key: "allowed_mime_types", Value: defaultAllowedMIMETypes, ValueType: "string", Description: "白名单MIME类型(逗号分隔)"},
 		{Namespace: "extract", Key: "engine", Value: "builtin", ValueType: "string", Description: "提取主引擎枚举(builtin/tika/docling/mineru)"},
-		{Namespace: "extract", Key: "ocr_engine", Value: "rapidocr", ValueType: "string", Description: "OCR 引擎枚举(rapidocr/tesseract/paddle/tencent/aliyun/mistral/llm)"},
+		{Namespace: "extract", Key: "ocr_engine", Value: "rapidocr", ValueType: "string", Description: "OCR 引擎枚举(rapidocr/tesseract/paddle/tencent/aliyun/mistral/llm/system_vision)"},
 		{Namespace: "extract", Key: "image_ocr_enabled", Value: "false", ValueType: "bool", Description: "是否对图片附件执行 OCR"},
 		{Namespace: "extract", Key: "pdf_ocr_fallback_enabled", Value: "false", ValueType: "bool", Description: "PDF 原生文本提取失败或质量较差时是否启用 OCR 回退"},
 		{Namespace: "extract", Key: "tika_source", Value: "external", ValueType: "string", Description: "Tika 服务来源枚举(external/managed)"},

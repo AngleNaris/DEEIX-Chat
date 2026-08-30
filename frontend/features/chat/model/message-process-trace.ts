@@ -46,6 +46,13 @@ export type RecalledEvidenceItem = {
   score?: number;
 };
 
+export type SavedArtifactTraceItem = {
+  artifactID: string;
+  title: string;
+  kind: string;
+  shareURL?: string;
+};
+
 export type RecalledEvidenceKind = "skill" | "tool" | "card" | "memory" | "recall" | "summary" | "image";
 
 export type CompactionTracePayload = {
@@ -85,7 +92,6 @@ export function resolveRecalledEvidenceKind(sourceType: string): RecalledEvidenc
   switch (sourceType.trim().toLowerCase()) {
     case "skill":
       return "skill";
-    case "tool":
     case "tool_result":
     case "native_tool_result":
       return "tool";
@@ -141,6 +147,57 @@ export function parseRecalledEvidence(trace: ChatPromptTrace | undefined): Recal
     }
   }
   return items;
+}
+
+function parseToolValue(value: unknown): unknown {
+  if (typeof value !== "string") return value ?? null;
+  const text = value.trim();
+  if (!text) return null;
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return text;
+  }
+}
+
+function toolOutput(call: Record<string, unknown>): unknown {
+  for (const key of ["output_detail", "output", "output_text", "output_preview"]) {
+    const value = parseToolValue(call[key]);
+    if (value !== null) return value;
+  }
+  return null;
+}
+
+export function resolveSavedArtifactTraceItem(call: unknown): SavedArtifactTraceItem | null {
+  if (!isRecord(call)) return null;
+  const name = readString(call.name).replace(/_call_output$/, "").replace(/_call$/, "");
+  if (!name.includes("save_artifact") && !name.includes("share_artifact")) return null;
+  const output = toolOutput(call);
+  if (!isRecord(output)) return null;
+  const artifactID = readString(output.artifact_id) || readString(output.artifactId);
+  if (!artifactID) return null;
+  return {
+    artifactID,
+    title: readString(output.title) || artifactID,
+    kind: readString(output.kind) || "html",
+    shareURL: readString(output.share_url) || undefined,
+  };
+}
+
+export function collectSavedArtifactTraceItems(
+  payloadJsons: Array<string | undefined>,
+): SavedArtifactTraceItem[] {
+  const artifacts = new Map<string, SavedArtifactTraceItem>();
+  for (const payloadJson of payloadJsons) {
+    const payload = parseTracePayload(payloadJson);
+    const calls = payload?.tool_calls;
+    if (!Array.isArray(calls)) continue;
+    for (const call of calls) {
+      const artifact = resolveSavedArtifactTraceItem(call);
+      if (artifact) artifacts.set(artifact.artifactID, artifact);
+    }
+  }
+  return Array.from(artifacts.values());
 }
 
 function readStringArray(value: unknown): string[] {

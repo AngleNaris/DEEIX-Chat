@@ -146,13 +146,13 @@ function RecentConversationRow({
   const rowContent = (
     <>
       <div className="flex items-center gap-2">
-        {streaming ? (
-          <span className="streaming-dot shrink-0" aria-hidden="true" />
+        {item.hasUnread && !streaming ? (
+          <span className="unread-dot shrink-0" role="status" aria-label={t("row.unread")} />
         ) : null}
         <AnimatedText
           text={title}
           className="min-w-0 shrink"
-          textClassName={cn("text-sm font-medium text-foreground", streaming && "text-primary/90")}
+          textClassName={cn("text-sm font-medium text-foreground", streaming && "trace-sweep")}
         />
         {visibleLabels.length > 0 ? (
           <div className="flex max-w-[55%] shrink-0 items-center gap-1 overflow-hidden">

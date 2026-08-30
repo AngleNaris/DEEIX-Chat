@@ -12,7 +12,7 @@ import (
 type UpsertUserMemoryRequest struct {
 	MemoryKey string `json:"memoryKey" binding:"required,max=128"`
 	Value     string `json:"value" binding:"required,max=10000"`
-	Scope     string `json:"scope" binding:"required,oneof=profile preference custom"`
+	Scope     string `json:"scope" binding:"required,oneof=identity activity context preference capability experience profile custom global"`
 }
 
 // ── 响应 DTO ─────────────────────────────────────────────────────────────────

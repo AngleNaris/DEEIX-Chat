@@ -744,6 +744,7 @@ func (s *Service) markFileProcessingFailed(ctx context.Context, fileObj *domainc
 		ErrorCode:                   code,
 		ErrorMessage:                truncateError(message, 255),
 		ExtractorVersion:            s.version(),
+		StartedAt:                   fileObj.ProcessingStartedAt,
 		CompletedAt:                 &now,
 	}); err != nil {
 		return err
@@ -848,6 +849,8 @@ func resolveOCRExtractTimeout(cfg config.Config) time.Duration {
 		timeoutSeconds = cfg.ExtractMistralOCRTimeoutSeconds
 	case extraction.OCREngineLLM:
 		timeoutSeconds = cfg.ExtractLLMOCRTimeoutSeconds
+	case extraction.OCREngineSystemVision:
+		timeoutSeconds = cfg.MultimodalDelegationTimeoutSeconds
 	default:
 		timeoutSeconds = int(defaultExtractTimeout / time.Second)
 	}

@@ -14,6 +14,7 @@ type ConversationRepository interface {
 	FileLookupRepository
 	ModerationFileRepository
 	FileBatchRepository
+	FileShareRepository
 	UploadRepository
 	SharedFileCloneRepository
 	FileEmbeddingArtifactsRepository

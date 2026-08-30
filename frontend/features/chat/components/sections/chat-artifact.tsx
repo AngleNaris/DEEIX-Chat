@@ -1,9 +1,10 @@
 "use client";
 
-import { Download, Maximize2, Minimize2, X } from "lucide-react";
+import { Download, ExternalLink, Maximize2, Minimize2, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useTranslations } from "next-intl";
 import * as React from "react";
+import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -15,6 +16,7 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { SaveArtifactButton } from "@/features/chat/components/message/save-artifact-button";
 import { ChatArtifactSVGPreview } from "@/features/chat/components/sections/chat-artifact-svg-preview";
 import {
   buildArtifactPreviewDocument,
@@ -27,9 +29,10 @@ import {
 } from "@/features/settings/utils/chat-font";
 import { useFontSizePreference } from "@/features/settings/utils/font-size";
 import { cn } from "@/lib/utils";
+import { artifactRenderUrl, createArtifactRenderToken } from "@/shared/api/artifacts";
+import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 import { CopyActionButton } from "@/shared/components/copy-action";
 import { useTheme } from "@/shared/components/theme-provider";
-import { SaveArtifactButton } from "@/features/chat/components/message/save-artifact-button";
 import { downloadBlob } from "@/shared/lib/export-download";
 import {
   captureHTMLVisualThemeSnapshot,
@@ -154,6 +157,7 @@ function ChatArtifactPanel({
     variables: [],
   });
   const [previewWidth, setPreviewWidth] = React.useState<"full" | "fixed">("full");
+  const [openingExternal, setOpeningExternal] = React.useState(false);
   const previewFrameRef = React.useRef<HTMLIFrameElement | null>(null);
 
   React.useEffect(() => {
@@ -194,6 +198,33 @@ function ChatArtifactPanel({
       resolveArtifactDownloadName(artifact.kind),
     );
   }, [artifact.kind, artifact.code, artifactPreview, canPreview]);
+
+  const handleOpenExternal = React.useCallback(async () => {
+    if (!canPreview || openingExternal) return;
+    const popup = window.open("about:blank", "_blank");
+    if (!popup) {
+      toast.error(t("openInNewTabBlocked"));
+      return;
+    }
+    popup.opener = null;
+    setOpeningExternal(true);
+    try {
+      const token = await resolveAccessToken();
+      if (!token) {
+        toast.error(t("authTokenMissing"));
+        popup.close();
+        return;
+      }
+      const document = artifactPreview.mode === "svg" ? artifact.code : artifactPreview.documentHTML;
+      const render = await createArtifactRenderToken(token, document);
+      popup.location.replace(artifactRenderUrl(render.render_url));
+    } catch {
+      popup.close();
+      toast.error(t("openInNewTabFailed"));
+    } finally {
+      setOpeningExternal(false);
+    }
+  }, [artifact.code, artifactPreview, canPreview, openingExternal, t]);
 
   return (
     <aside
@@ -263,6 +294,13 @@ function ChatArtifactPanel({
               onClick={handleDownload}
             >
               <Download className="size-3" />
+            </ArtifactActionButton>
+            <ArtifactActionButton
+              label={t("openInNewTab")}
+              disabled={!canPreview || openingExternal}
+              onClick={() => void handleOpenExternal()}
+            >
+              <ExternalLink className="size-3" />
             </ArtifactActionButton>
             <SaveArtifactButton artifact={artifact} previewFrameRef={previewFrameRef} />
             <ArtifactActionButton label={t("close")} onClick={onClose}>

@@ -283,6 +283,7 @@ export function AppChatArea() {
     projects,
     prependNewConversation,
     touchByPublicID,
+    markReadByPublicID,
     renameByPublicID,
     upsertConversation,
     regenerateTitleByPublicID,
@@ -371,12 +372,6 @@ export function AppChatArea() {
       name: currentConversation.agentGroupName?.trim() || "",
     };
   }, [currentConversation?.agentGroupID, currentConversation?.agentGroupName]);
-  const activeRouteProject = React.useMemo(() => {
-    if (!routeProjectID || conversationID) {
-      return null;
-    }
-    return projects.find((item) => item.publicID === routeProjectID) ?? null;
-  }, [conversationID, projects, routeProjectID]);
   const newConversationProjectID = !conversationID ? routeProjectID ?? requestedNewConversationProjectID : "";
   const newConversationProject = React.useMemo(
     () => projects.find((item) => item.publicID === newConversationProjectID) ?? null,
@@ -462,13 +457,13 @@ export function AppChatArea() {
       name: activeRouteAgentGroup?.name?.trim() || "",
     };
   }, [activeRouteAgentGroup?.name, currentAgentGroup, newConversationAgentGroupID]);
-  // 群组模式 badge 的上下文标签：已有会话显示其绑定的角色/项目（服务端随会话填充），新会话显示当前路由/请求上下文中的角色/项目。
+  // 群组标题保留项目名；仅在没有项目时才降级为角色名。
   const groupModeContextLabel = React.useMemo(() => {
     const conversationRoleName = currentConversation?.roleName?.trim();
     const conversationProjectName = currentConversation?.projectName?.trim();
     const routeRoleName = activeRouteRole?.name?.trim();
     const routeProjectName = newConversationProject?.name?.trim();
-    return conversationRoleName || conversationProjectName || routeRoleName || routeProjectName || "";
+    return conversationProjectName || routeProjectName || conversationRoleName || routeRoleName || "";
   }, [
     activeRouteRole?.name,
     currentConversation?.projectName,
@@ -891,6 +886,7 @@ export function AppChatArea() {
     onConversationCreated: setLocallyCreatedConversationID,
     onConversationForked: handleConversationForked,
     touchByPublicID,
+    setConversationStreaming,
     reload,
     replaceMessage,
     setDraft,
@@ -904,18 +900,25 @@ export function AppChatArea() {
     autoEditDismissed,
   });
   const generating = sending;
-  // 进行中标记：当前会话存在活跃流式 run（发送中或刷新恢复中）时，
-  // 通知侧边栏/最近列表行显示"进行中"动效。
+  // 刷新恢复流不经过消息提交生命周期，需要单独登记其 run owner。
   React.useEffect(() => {
     const normalizedConversationID = conversationID?.trim() || "";
-    if (!normalizedConversationID) {
+    const normalizedRunID = resumingRunID.trim();
+    if (!normalizedConversationID || !normalizedRunID) {
       return;
     }
-    setConversationStreaming(normalizedConversationID, sending || Boolean(resumingRunID));
+    setConversationStreaming(normalizedConversationID, normalizedRunID, true);
     return () => {
-      setConversationStreaming(normalizedConversationID, false);
+      setConversationStreaming(normalizedConversationID, normalizedRunID, false);
     };
-  }, [conversationID, resumingRunID, sending, setConversationStreaming]);
+  }, [conversationID, resumingRunID, setConversationStreaming]);
+  React.useEffect(() => {
+    const normalizedConversationID = conversationID?.trim() || "";
+    if (!normalizedConversationID || sending || resumingRunID) {
+      return;
+    }
+    void markReadByPublicID(normalizedConversationID).catch(() => undefined);
+  }, [conversationID, markReadByPublicID, resumingRunID, sending]);
   // §16.7/§16.10 刷新恢复：群组会话加载后重建最后一条 assistant 消息的运行时间线；
   // 重试/放弃结算后刷新消息列表（最终答案持久化在顶层消息中，需 reload 展示）。
   const recoveryTargetMessage = visibleMessages[visibleMessages.length - 1];
@@ -1578,11 +1581,10 @@ export function AppChatArea() {
           className="flex min-h-0 flex-1 flex-col overflow-hidden"
         >
           <ChatEmptyState
-            greetingTitle={
-              activeRouteAgentGroup?.name || activeRouteRole?.name || activeRouteProject?.name || greetingTitle
-            }
-            badgeLabel={activeRouteProject ? t("projectMode") : undefined}
-            badgeTooltip={activeRouteProject ? t("projectModeTooltip") : undefined}
+            greetingTitle={newConversationProject?.name || activeRouteRole?.name || greetingTitle}
+            adjacentTitle={activeRouteAgentGroup?.name}
+            badgeLabel={newConversationProject ? t("projectMode") : undefined}
+            badgeTooltip={newConversationProject ? t("projectModeTooltip") : undefined}
             contentWidthClassName={chatContentWidthClassName}
           >
             <ChatInput {...chatInputProps} />
@@ -1634,6 +1636,7 @@ export function AppChatArea() {
                   onExtendVideoAttachment={onExtendGeneratedVideoAttachment}
                   onOpenCodeArtifact={artifactWorkspace.openArtifact}
                   onCycleMessageBranch={onCycleMessageBranch}
+                  onPlatformToolApprovalResolved={reload}
                   onToggleStar={onToggleActiveConversationStar}
                   onRename={onRenameActiveConversation}
                   onAutoRename={onAutoRenameActiveConversation}

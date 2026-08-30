@@ -32,6 +32,7 @@ type SidebarConversationViewModel = {
   url: string;
   shareActive?: boolean;
   labelsJSON?: string;
+  hasUnread?: boolean;
 };
 
 type SidebarConversationStarAction = {
@@ -62,7 +63,7 @@ type SidebarConversationItemProps = {
   projectMenu?: SidebarConversationProjectMenu;
   rowClassName?: string;
   linkClassName?: string;
-  /** 会话正在进行流式生成：标题显示呼吸点 + 扫光提示动效。 */
+  /** 会话正在进行流式生成：标题显示扫光提示动效。 */
   streaming?: boolean;
   onRenameValueChange: (value: string) => void;
   onRenameCommit: (publicID: string, currentTitle: string) => void;
@@ -174,11 +175,13 @@ export function SidebarConversationItem({
         className={cn("flex h-full min-w-0 flex-1 items-center pl-2 pr-9", linkClassName)}
         onClick={(event) => onNavigate?.(item.url, event)}
       >
-        {streaming ? <span className="streaming-dot mr-1.5" aria-hidden="true" /> : null}
+        {item.hasUnread && !streaming ? (
+          <span className="unread-dot mr-1.5" role="status" aria-label={t("unread")} />
+        ) : null}
         <AnimatedText
           text={item.title}
           className="flex-1"
-          textClassName={cn("text-current", streaming && "shimmer")}
+          textClassName={cn("text-current", streaming && "trace-sweep")}
         />
       </Link>
 

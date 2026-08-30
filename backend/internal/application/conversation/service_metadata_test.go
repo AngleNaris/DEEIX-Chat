@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
@@ -270,6 +271,30 @@ func TestConversationMetadataRefreshHint(t *testing.T) {
 				t.Fatalf("unexpected metadata refresh hint: got %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestAgentGroupCompletedResultRequestsMetadataRefresh(t *testing.T) {
+	conversation := model.Conversation{UserID: 7, Title: "New Chat"}
+	userMessage := model.Message{Role: "user", Content: "Compose a new song"}
+	assistantMessage := model.Message{Role: "assistant", Content: "Here is the arrangement"}
+	state := &agentGroupRunState{
+		service:          &Service{},
+		conversation:     &conversation,
+		userMessage:      &userMessage,
+		assistantMessage: &assistantMessage,
+		startedAt:        time.Now(),
+	}
+
+	result := state.completedResult(t.Context())
+	if result.MetadataRefreshHint != conversationMetadataRefreshPending {
+		t.Fatalf("expected group completion to request metadata refresh, got %q", result.MetadataRefreshHint)
+	}
+
+	state.credentialAttempted = true
+	result = state.completedResult(t.Context())
+	if result.MetadataRefreshHint != "" {
+		t.Fatalf("expected credential flow to suppress metadata refresh, got %q", result.MetadataRefreshHint)
 	}
 }
 

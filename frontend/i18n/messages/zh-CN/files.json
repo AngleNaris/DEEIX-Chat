@@ -32,6 +32,7 @@
     "sort": "排序",
     "open": "打开",
     "download": "下载",
+    "share": "分享",
     "delete": "删除",
     "rename": "重命名",
     "select": "选择",
@@ -152,6 +153,34 @@
     "extractProcessingFailed": "文件处理失败，暂无可查看的提取结果。",
     "extractProcessing": "文件尚未完成提取，稍后可查看。",
     "extractLoadFailed": "提取结果加载失败"
+  },
+  "shareDialog": {
+    "title": "分享文件",
+    "description": "创建「{name}」的公开访问链接。链接将保持有效，直至手动撤销。",
+    "sessionExpired": "登录状态已失效，请重新登录。",
+    "loadFailed": "分享状态加载失败",
+    "createFailed": "文件分享创建失败",
+    "revokeFailed": "文件分享撤销失败",
+    "created": "文件分享已创建",
+    "revoked": "文件分享已撤销",
+    "copied": "分享链接已复制",
+    "copyFailed": "复制分享链接失败",
+    "expiresAt": "有效期至 {value}",
+    "neverExpires": "长期有效，直至撤销",
+    "expired": "上一个分享链接已过期。",
+    "inactive": "该文件当前没有可用的公开分享链接。",
+    "open": "打开分享页面",
+    "create": "创建分享",
+    "revoke": "撤销分享",
+    "close": "关闭"
+  },
+  "sharePage": {
+    "notFound": "分享不存在、已撤销、已过期，或源文件已删除。",
+    "unknownType": "未知类型",
+    "expiresAt": "有效期至 {value}",
+    "neverExpires": "长期有效，直至撤销",
+    "download": "下载",
+    "preview": "文件预览"
   },
   "previewDialog": {
     "sessionExpired": "登录状态已失效，请重新登录。",

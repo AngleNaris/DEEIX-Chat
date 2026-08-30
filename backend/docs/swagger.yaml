@@ -2687,6 +2687,8 @@ definitions:
         type: string
       createdAt:
         type: string
+      hasUnread:
+        type: boolean
       isStarred:
         type: boolean
       labelsJSON:
@@ -2744,6 +2746,7 @@ definitions:
     - agentGroupName
     - contextPolicyJSON
     - createdAt
+    - hasUnread
     - isStarred
     - labelsJSON
     - lastCompactedAt
@@ -3863,6 +3866,47 @@ definitions:
     - sizeBytes
     - status
     - updatedAt
+    type: object
+  FileShareResponseDoc:
+    properties:
+      data:
+        $ref: '#/definitions/FileShareResult'
+      errorMsg:
+        type: string
+    required:
+    - data
+    - errorMsg
+    type: object
+  FileShareResult:
+    properties:
+      created_at:
+        type: string
+      expires_at:
+        type: string
+      file_id:
+        type: string
+      share_id:
+        type: string
+      status:
+        type: string
+    required:
+    - status
+    type: object
+  FileShareRevokeResponseDoc:
+    properties:
+      data:
+        properties:
+          revoked:
+            example: true
+            type: boolean
+        required:
+        - revoked
+        type: object
+      errorMsg:
+        type: string
+    required:
+    - data
+    - errorMsg
     type: object
   FileUpdateResponseDoc:
     properties:
@@ -6664,6 +6708,43 @@ definitions:
     - data
     - errorMsg
     type: object
+  PublicFileShareResponseDoc:
+    properties:
+      data:
+        $ref: '#/definitions/PublicFileShareResult'
+      errorMsg:
+        type: string
+    required:
+    - data
+    - errorMsg
+    type: object
+  PublicFileShareResult:
+    properties:
+      created_at:
+        type: string
+      expires_at:
+        type: string
+      file_category:
+        type: string
+      file_id:
+        type: string
+      file_name:
+        type: string
+      mime_type:
+        type: string
+      share_id:
+        type: string
+      size_bytes:
+        type: integer
+    required:
+    - created_at
+    - file_category
+    - file_id
+    - file_name
+    - mime_type
+    - share_id
+    - size_bytes
+    type: object
   PublicGroupRunActorResponse:
     properties:
       color:
@@ -9100,9 +9181,15 @@ definitions:
         type: string
       scope:
         enum:
-        - profile
+        - identity
+        - activity
+        - context
         - preference
+        - capability
+        - experience
+        - profile
         - custom
+        - global
         type: string
       value:
         maxLength: 10000
@@ -10263,6 +10350,15 @@ definitions:
     - markdown
     - title
     - trigger
+    type: object
+  createFileShareRequest:
+    properties:
+      expires_in_hours:
+        maximum: 720
+        minimum: 1
+        type: integer
+    required:
+    - expires_in_hours
     type: object
 info:
   contact: {}
@@ -17856,6 +17952,39 @@ paths:
       summary: 设置会话项目归属
       tags:
       - chat
+  /conversations/{id}/read:
+    post:
+      description: 将当前用户的会话已读游标推进到最新成功助手消息
+      parameters:
+      - description: 会话 public_id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/ConversationUpdateResponseDoc'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/ConversationErrorDoc'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/ConversationErrorDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/ConversationErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 标记会话已读
+      tags:
+      - chat
   /conversations/{id}/runs:
     get:
       consumes:
@@ -18635,6 +18764,96 @@ paths:
       security:
       - BearerAuth: []
       summary: 获取文件内容
+      tags:
+      - chat
+  /files/{file_id}/share:
+    delete:
+      parameters:
+      - description: 文件 ID
+        in: path
+        name: file_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/FileShareRevokeResponseDoc'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/ConversationErrorDoc'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/ConversationErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 撤销文件分享
+      tags:
+      - chat
+    get:
+      parameters:
+      - description: 文件 ID
+        in: path
+        name: file_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/FileShareResponseDoc'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/ConversationErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 查询文件分享状态
+      tags:
+      - chat
+    post:
+      consumes:
+      - application/json
+      description: 创建或替换当前用户指定文件的公开分享链接
+      parameters:
+      - description: 文件 ID
+        in: path
+        name: file_id
+        required: true
+        type: string
+      - description: 分享有效期
+        in: body
+        name: body
+        schema:
+          $ref: '#/definitions/createFileShareRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/FileShareResponseDoc'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/ConversationErrorDoc'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/ConversationErrorDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/ConversationErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 创建文件分享
       tags:
       - chat
   /knowledge-bases:
@@ -19789,6 +20008,50 @@ paths:
           schema:
             $ref: '#/definitions/ConversationErrorDoc'
       summary: 获取公开分享附件内容
+      tags:
+      - chat
+  /shared-files/{share_id}:
+    get:
+      parameters:
+      - description: 分享 ID
+        in: path
+        name: share_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/PublicFileShareResponseDoc'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/ConversationErrorDoc'
+      summary: 查询公开文件分享
+      tags:
+      - chat
+  /shared-files/{share_id}/content:
+    get:
+      parameters:
+      - description: 分享 ID
+        in: path
+        name: share_id
+        required: true
+        type: string
+      produces:
+      - application/octet-stream
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/ConversationErrorDoc'
+      summary: 读取公开文件内容
       tags:
       - chat
   /skills:

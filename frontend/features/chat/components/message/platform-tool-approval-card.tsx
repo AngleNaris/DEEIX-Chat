@@ -85,7 +85,13 @@ function summarizeArguments(call: ToolTraceCall): string {
  * 编辑文件/技能等写操作需用户批准）。从工具 trace payload 中提取 pending_approval 记录，
  * 提供批准/拒绝操作；批准后由后端异步执行写操作。
  */
-export function PlatformToolApprovalCard({ tracePayloadJson }: { tracePayloadJson?: string }) {
+export function PlatformToolApprovalCard({
+  tracePayloadJson,
+  onResolved,
+}: {
+  tracePayloadJson?: string;
+  onResolved?: () => void;
+}) {
   const t = useTranslations("chat.platformTools");
   const resolveErrorMessage = useLocalizedErrorMessage();
   const [states, setStates] = React.useState<Record<string, PlatformToolApprovalDisplayState>>({});
@@ -156,6 +162,7 @@ export function PlatformToolApprovalCard({ tracePayloadJson }: { tracePayloadJso
         setStates((prev) => ({ ...prev, [approvalID]: "rejected" }));
         toast.success(t("rejected"));
       }
+      onResolved?.();
     } catch (error) {
       if (error instanceof ApiError && error.status === 404) {
         setStates((prev) => ({ ...prev, [approvalID]: "expired" }));

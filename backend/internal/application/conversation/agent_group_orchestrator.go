@@ -210,7 +210,7 @@ func (s *Service) executeAgentGroupRun(
 		if onDelta != nil && strings.TrimSpace(st.finalAnswer) != "" {
 			_ = onDelta(st.finalAnswer)
 		}
-		return st.completedResult(), nil
+		return st.completedResult(ctx), nil
 	}
 	// 运行未进入终态时兜底阻塞（CAS 冲突/内部错误）。
 	if st.run.Status == domainagentgroup.RunStatusRunning || st.run.Status == domainagentgroup.RunStatusPending {
@@ -1013,6 +1013,14 @@ func (st *agentGroupRunState) completeAgentGroupRun(ctx context.Context) error {
 
 	if !st.credentialAttempted {
 		s.persistInitialConversationFallbackTitle(ctx, *st.conversation, *st.userMessage)
+		metadataResult := st.completedResult(ctx)
+		s.scheduleConversationMetadataAfterBilling(SendMessageBillingInput{
+			UserID:         st.input.UserID,
+			ConversationID: st.input.ConversationID,
+			Conversation:   st.conversation,
+			ClientRunID:    metadataResult.UserMessage.RunID,
+			Result:         metadataResult,
+		})
 	}
 
 	// 4. 完成事件。
@@ -1197,18 +1205,22 @@ func (st *agentGroupRunState) persistTopLevelRun(ctx context.Context, retErr err
 }
 
 // completedResult 返回群组运行成功结果（Billable=false：计费发生在各 Attempt）。
-func (st *agentGroupRunState) completedResult() *SendMessageResult {
+func (st *agentGroupRunState) completedResult(ctx context.Context) *SendMessageResult {
 	latency := time.Since(st.startedAt).Milliseconds()
 	if latency < 0 {
 		latency = 0
 	}
-	return &SendMessageResult{
+	result := &SendMessageResult{
 		UserMessage:      *st.userMessage,
 		AssistantMessage: *st.assistantMessage,
 		Billable:         false,
 		LatencyMS:        latency,
 		StartedAt:        st.startedAt,
 	}
+	if !st.credentialAttempted && st.service != nil && st.conversation != nil && st.userMessage != nil {
+		result.MetadataRefreshHint = st.service.resolveConversationMetadataRefreshHint(ctx, *st.conversation, *st.userMessage)
+	}
+	return result
 }
 
 // failedResult 返回群组运行失败结果（消息状态已在最终化时标记）。

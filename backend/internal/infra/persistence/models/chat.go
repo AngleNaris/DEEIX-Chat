@@ -5,25 +5,27 @@ import "time"
 // Conversation 记录用户的对话会话元数据。
 type Conversation struct {
 	BaseModel
-	UserID                uint       `gorm:"not null;index:idx_chat_conversations_user_id;comment:用户ID"`
-	ProjectID             *uint      `gorm:"index:idx_chat_conversations_project_id;comment:项目分组ID"`
-	RoleID                *uint      `gorm:"index:idx_chat_conversations_role_id;comment:角色ID"`
-	AgentGroupID          *uint      `gorm:"index:idx_chat_conversations_agent_group_id;comment:群组会话绑定"`
-	PublicID              string     `gorm:"size:32;not null;default:'';index:idx_chat_conversations_public_id;comment:公开会话ID"`
-	Title                 string     `gorm:"size:255;not null;default:'';comment:会话标题"`
-	LabelsJSON            string     `gorm:"type:text;not null;default:'[]';comment:会话标签JSON"`
-	LabelsManuallyManaged bool       `gorm:"not null;default:false;comment:会话标签是否已由用户手动管理"`
-	Model                 string     `gorm:"size:128;not null;default:'';comment:模型名称"`
-	Provider              string     `gorm:"size:32;not null;default:'';index:idx_chat_conversations_provider;comment:模型提供商"`
-	SessionKey            string     `gorm:"size:128;not null;default:'';uniqueIndex:idx_chat_conversations_session_key;comment:会话上下文键"`
-	IsStarred             bool       `gorm:"not null;default:false;index:idx_chat_conversations_is_starred;comment:是否星标"`
-	StarredAt             *time.Time `gorm:"index:idx_chat_conversations_starred_at;comment:最近星标时间"`
-	MessageCount          int        `gorm:"not null;default:0;comment:消息计数"`
-	Status                string     `gorm:"size:32;not null;default:'';index:idx_chat_conversations_status;comment:会话状态"`
-	ContextPolicy         string     `gorm:"type:text;not null;default:'';comment:上下文策略快照JSON"`
-	LastCompactedAt       *time.Time `gorm:"comment:最近上下文压缩时间"`
-	LastResponseID        string     `gorm:"size:128;not null;default:'';index:idx_chat_conversations_last_response_id;comment:最新响应ID"`
-	LastPromptFingerprint string     `gorm:"size:64;not null;default:'';index:idx_chat_conversations_last_prompt_fingerprint;comment:最新上游状态指纹"`
+	UserID                 uint       `gorm:"not null;index:idx_chat_conversations_user_id;comment:用户ID"`
+	ProjectID              *uint      `gorm:"index:idx_chat_conversations_project_id;comment:项目分组ID"`
+	RoleID                 *uint      `gorm:"index:idx_chat_conversations_role_id;comment:角色ID"`
+	AgentGroupID           *uint      `gorm:"index:idx_chat_conversations_agent_group_id;comment:群组会话绑定"`
+	PublicID               string     `gorm:"size:32;not null;default:'';index:idx_chat_conversations_public_id;comment:公开会话ID"`
+	Title                  string     `gorm:"size:255;not null;default:'';comment:会话标题"`
+	LabelsJSON             string     `gorm:"type:text;not null;default:'[]';comment:会话标签JSON"`
+	LabelsManuallyManaged  bool       `gorm:"not null;default:false;comment:会话标签是否已由用户手动管理"`
+	Model                  string     `gorm:"size:128;not null;default:'';comment:模型名称"`
+	Provider               string     `gorm:"size:32;not null;default:'';index:idx_chat_conversations_provider;comment:模型提供商"`
+	SessionKey             string     `gorm:"size:128;not null;default:'';uniqueIndex:idx_chat_conversations_session_key;comment:会话上下文键"`
+	IsStarred              bool       `gorm:"not null;default:false;index:idx_chat_conversations_is_starred;comment:是否星标"`
+	StarredAt              *time.Time `gorm:"index:idx_chat_conversations_starred_at;comment:最近星标时间"`
+	MessageCount           int        `gorm:"not null;default:0;comment:消息计数"`
+	Status                 string     `gorm:"size:32;not null;default:'';index:idx_chat_conversations_status;comment:会话状态"`
+	ContextPolicy          string     `gorm:"type:text;not null;default:'';comment:上下文策略快照JSON"`
+	LastCompactedAt        *time.Time `gorm:"comment:最近上下文压缩时间"`
+	LastResponseID         string     `gorm:"size:128;not null;default:'';index:idx_chat_conversations_last_response_id;comment:最新响应ID"`
+	LastPromptFingerprint  string     `gorm:"size:64;not null;default:'';index:idx_chat_conversations_last_prompt_fingerprint;comment:最新上游状态指纹"`
+	LastAssistantMessageID *uint      `gorm:"index:idx_chat_conversations_last_assistant_message_id;comment:最新成功助手消息ID"`
+	LastReadMessageID      *uint      `gorm:"index:idx_chat_conversations_last_read_message_id;comment:用户已读助手消息ID"`
 }
 
 // TableName 指定表名。
@@ -235,6 +237,22 @@ type FileObject struct {
 // TableName 指定表名。
 func (FileObject) TableName() string {
 	return "file_objects"
+}
+
+// FileShare 存储单个文件的公开分享状态。
+type FileShare struct {
+	BaseModel
+	ShareID   string     `gorm:"size:32;not null;default:'';uniqueIndex:idx_chat_file_shares_share_id;comment:公开分享ID"`
+	FileID    string     `gorm:"size:64;not null;default:'';index:idx_chat_file_shares_file_id;uniqueIndex:idx_chat_file_shares_active_owner,where:status = 'active';comment:文件对象ID"`
+	UserID    uint       `gorm:"not null;default:0;index:idx_chat_file_shares_user_id;uniqueIndex:idx_chat_file_shares_active_owner,where:status = 'active';comment:文件所有者ID"`
+	Status    string     `gorm:"size:32;not null;default:'active';index:idx_chat_file_shares_status;comment:分享状态(active/revoked)"`
+	ExpiresAt *time.Time `gorm:"index:idx_chat_file_shares_expires_at;comment:分享过期时间，空值表示不过期"`
+	RevokedAt *time.Time `gorm:"index:idx_chat_file_shares_revoked_at;comment:撤销时间"`
+}
+
+// TableName 指定表名。
+func (FileShare) TableName() string {
+	return "chat_file_shares"
 }
 
 // FileChunk 存储 RAG 分片及向量嵌入。

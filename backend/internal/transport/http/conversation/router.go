@@ -23,6 +23,7 @@ func (m *Module) RegisterRoutes(authRequired *gin.RouterGroup) {
 	authRequired.DELETE("/conversation-roles/:id", m.Handler.DeleteConversationRole)
 	authRequired.GET("/conversations/export", m.Handler.ExportAllConversations)
 	authRequired.GET("/conversations/:id", m.Handler.GetConversation)
+	authRequired.POST("/conversations/:id/read", m.Handler.MarkConversationRead)
 	authRequired.GET("/conversations/:id/export", m.Handler.ExportConversation)
 	authRequired.PATCH("/conversations/:id/title", m.Handler.RenameConversation)
 	authRequired.POST("/conversations/:id/title/regenerate", m.Handler.RegenerateConversationTitle)
@@ -57,6 +58,9 @@ func (m *Module) RegisterRoutes(authRequired *gin.RouterGroup) {
 	authRequired.GET("/files/:file_id/extract", m.Handler.GetFileExtract)
 	authRequired.PATCH("/files/:file_id", m.Handler.UpdateFile)
 	authRequired.GET("/files/:file_id/content", m.Handler.GetFileContent)
+	authRequired.POST("/files/:file_id/share", m.Handler.CreateFileShare)
+	authRequired.GET("/files/:file_id/share", m.Handler.GetFileShare)
+	authRequired.DELETE("/files/:file_id/share", m.Handler.RevokeFileShare)
 	authRequired.DELETE("/files/:file_id", m.Handler.DeleteFile)
 	authRequired.GET("/runtime/chat-file-policy", m.Handler.GetChatFilePolicy)
 }
@@ -65,4 +69,6 @@ func (m *Module) RegisterRoutes(authRequired *gin.RouterGroup) {
 func (m *Module) RegisterPublicRoutes(public *gin.RouterGroup) {
 	public.GET("/shared-conversations/:share_id", m.Handler.GetPublicSharedConversation)
 	public.GET("/shared-conversations/:share_id/files/:file_id/content", m.Handler.GetPublicSharedFileContent)
+	public.GET("/shared-files/:share_id", m.Handler.GetPublicFileShare)
+	public.GET("/shared-files/:share_id/content", m.Handler.GetPublicFileShareContent)
 }

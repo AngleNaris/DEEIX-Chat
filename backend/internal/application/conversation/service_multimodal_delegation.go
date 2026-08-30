@@ -114,6 +114,40 @@ type multimodalDelegationGroup struct {
 	Route       *channel.ResolvedRoute
 }
 
+// AnalyzeImageForExtraction lets the file pipeline reuse the configured internal vision route.
+func (s *Service) AnalyzeImageForExtraction(ctx context.Context, file domainconversation.FileObject) (string, error) {
+	if file.UserID == 0 || file.FileCategory != "image" {
+		return "", errors.New("system vision extraction requires an owned image")
+	}
+	result, err := s.delegateUnsupportedMedia(ctx, multimodalDelegationInput{
+		UserID:     file.UserID,
+		RequestID:  "extract_" + normalizePublicID(uuid.NewString()),
+		UserPrompt: "Extract all visible text faithfully, then describe the image content, layout, objects, and relationships needed for later search and retrieval.",
+		Attachments: []AttachmentInput{{
+			FileObjID:    file.ID,
+			FileID:       file.FileID,
+			Kind:         "image",
+			FileName:     file.FileName,
+			MimeType:     file.MimeType,
+			DetectedMIME: file.DetectedMIME,
+			FileCategory: file.FileCategory,
+			FileSize:     file.SizeBytes,
+			SHA256:       file.SHA256,
+			StoragePath:  file.StoragePath,
+			Current:      true,
+		}},
+		MainRoute:       &channel.ResolvedRoute{PlatformModelName: "system_vision_extraction", ModelCapabilitiesJSON: `{}`},
+		SkipPersistence: true,
+	})
+	if err != nil {
+		return "", err
+	}
+	if !result.Routed || len(result.Analyses) != 1 || strings.TrimSpace(result.Analyses[0].Content) == "" {
+		return "", errors.New("system vision did not return an image analysis")
+	}
+	return strings.TrimSpace(result.Analyses[0].Content), nil
+}
+
 func (r *selectedToolRuntime) bindMultimodalAnalyzer(
 	cfg config.Config,
 	mainRoute *channel.ResolvedRoute,

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  collectSavedArtifactTraceItems,
   parseRecalledEvidence,
   resolveRecalledEvidenceKind,
 } from "./message-process-trace.ts";
@@ -9,7 +10,6 @@ import {
 test("recalled source types map to user-facing evidence kinds", () => {
   const cases = [
     ["skill", "skill"],
-    ["tool", "tool"],
     ["tool_result", "tool"],
     ["native_tool_result", "tool"],
     ["doc_card", "card"],
@@ -26,6 +26,7 @@ test("recalled source types map to user-facing evidence kinds", () => {
   }
   assert.equal(resolveRecalledEvidenceKind("file_rag_chunk"), null);
   assert.equal(resolveRecalledEvidenceKind("file_rag_fallback"), null);
+  assert.equal(resolveRecalledEvidenceKind("tool"), null);
   assert.equal(resolveRecalledEvidenceKind("unknown"), null);
 });
 
@@ -35,7 +36,8 @@ test("recalled evidence keeps supported sources, trims values, and filters RAG d
       {
         sourceRefs: [
           { sourceType: " skill ", sourceID: " skill-1 ", title: " Image skill ", artifactID: 12 },
-          { sourceType: "tool", sourceID: "tool-1", title: "Browser" },
+          { sourceType: "tool", sourceID: "tool-definition", title: "Browser" },
+          { sourceType: "tool_result", sourceID: "tool-1", title: "Browser result", artifactID: 13 },
           { sourceType: "doc_card", sourceID: "card-1", title: "World setting" },
           { sourceType: "user_memory", sourceID: "memory-1", title: "User preference" },
           { sourceType: "semantic_recall", sourceID: "recall-1", title: "Earlier decision" },
@@ -53,7 +55,7 @@ test("recalled evidence keeps supported sources, trims values, and filters RAG d
     items.map(({ kind, sourceID, title, artifactID }) => ({ kind, sourceID, title, artifactID })),
     [
       { kind: "skill", sourceID: "skill-1", title: "Image skill", artifactID: 12 },
-      { kind: "tool", sourceID: "tool-1", title: "Browser", artifactID: undefined },
+      { kind: "tool", sourceID: "tool-1", title: "Browser result", artifactID: 13 },
       { kind: "card", sourceID: "card-1", title: "World setting", artifactID: undefined },
       { kind: "memory", sourceID: "memory-1", title: "User preference", artifactID: undefined },
       { kind: "recall", sourceID: "recall-1", title: "Earlier decision", artifactID: undefined },
@@ -75,8 +77,8 @@ test("recalled evidence deduplicates aliases after normalization", () => {
             title: "Rolling summary",
             artifactID: 8,
           },
-          { sourceType: "tool", sourceID: "tool-1", title: "Search", artifactID: 0 },
-          { sourceType: "tool_result", sourceID: "tool-1", title: "Search", artifactID: -1 },
+          { sourceType: "tool_result", sourceID: "tool-1", title: "Search", artifactID: 0 },
+          { sourceType: "native_tool_result", sourceID: "tool-1", title: "Search", artifactID: -1 },
         ],
       },
     ],
@@ -90,4 +92,33 @@ test("recalled evidence deduplicates aliases after normalization", () => {
       { kind: "tool", artifactID: undefined },
     ],
   );
+});
+
+test("saved artifact tool results move to the assistant body and deduplicate", () => {
+  const artifactCall = {
+    name: "platform_save_artifact",
+    status: "completed",
+    output_detail: JSON.stringify({
+      artifact_id: "artifact-1",
+      title: "Release page",
+      kind: "html",
+      share_url: "/share/artifact?artifact_id=share-1",
+    }),
+  };
+  const payload = JSON.stringify({
+    tool_calls: [
+      artifactCall,
+      { name: "search_artifact", status: "completed", output: JSON.stringify({ artifact_id: "ignored" }) },
+      { name: "web_search", status: "completed", output: JSON.stringify({ title: "Search result" }) },
+    ],
+  });
+
+  assert.deepEqual(collectSavedArtifactTraceItems([payload, payload, "invalid json"]), [
+    {
+      artifactID: "artifact-1",
+      title: "Release page",
+      kind: "html",
+      shareURL: "/share/artifact?artifact_id=share-1",
+    },
+  ]);
 });

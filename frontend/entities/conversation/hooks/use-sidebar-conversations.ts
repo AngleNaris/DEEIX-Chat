@@ -1,13 +1,20 @@
 "use client";
 
 import * as React from "react";
-
-import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
-import { readAccessToken } from "@/shared/auth/session";
-import { dispatchFileLibraryInvalidated } from "@/shared/events/file-library-events";
-import { runBulkActionInChunks } from "@/shared/lib/bulk-action";
-import { resolveConversationDefaultModel } from "@/shared/model/conversation-default-model";
-import { getAgentGroup } from "@/shared/api/agent-groups";
+import {
+  mergeUniqueByPublicID,
+  removeByPublicID,
+  sortByStarredAtDesc,
+  sortByUpdatedAtDesc,
+  upsertByPublicID,
+} from "@/entities/conversation/model/conversation-list";
+import { updateConversationStreamingOwner } from "@/entities/conversation/model/conversation-streaming-state";
+import type {
+  DeleteConversationOptions,
+  DeleteConversationProjectOptions,
+  SidebarConversationChange,
+  SidebarConversationsControllerValue,
+} from "@/entities/conversation/types/sidebar-conversations";
 import {
   batchSetConversationProject,
   createConversation,
@@ -16,11 +23,12 @@ import {
   deleteConversationProject,
   listConversationProjects,
   listConversations,
+  markConversationRead,
   regenerateConversationTitle,
   renameConversation,
   reorderConversationProjects,
-  setConversationProject,
   setConversationArchive,
+  setConversationProject,
   setConversationStar,
   updateConversationLabels,
   updateConversationProject,
@@ -31,20 +39,11 @@ import type {
   CreateConversationProjectRequest,
   UpdateConversationProjectRequest,
 } from "@/shared/api/conversation.types";
-
-import type {
-  DeleteConversationOptions,
-  DeleteConversationProjectOptions,
-  SidebarConversationChange,
-  SidebarConversationsControllerValue,
-} from "@/entities/conversation/types/sidebar-conversations";
-import {
-  mergeUniqueByPublicID,
-  removeByPublicID,
-  sortByStarredAtDesc,
-  sortByUpdatedAtDesc,
-  upsertByPublicID,
-} from "@/entities/conversation/model/conversation-list";
+import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
+import { readAccessToken } from "@/shared/auth/session";
+import { dispatchFileLibraryInvalidated } from "@/shared/events/file-library-events";
+import { runBulkActionInChunks } from "@/shared/lib/bulk-action";
+import { resolveConversationDefaultModel } from "@/shared/model/conversation-default-model";
 
 const RECENT_PAGE_SIZE = 50;
 const STARRED_VISIBLE_LIMIT = 5;
@@ -246,6 +245,7 @@ export function useSidebarConversationsController({
   const [transferringStarPublicID, setTransferringStarPublicID] = React.useState<string | null>(null);
   const [lastChange, setLastChange] = React.useState<SidebarConversationChange | null>(null);
   const [streamingPublicIDs, setStreamingPublicIDs] = React.useState<ReadonlySet<string>>(new Set());
+  const streamingOwnersRef = React.useRef(new Map<string, Set<string>>());
   const pageRef = React.useRef(initialCache?.page ?? 1);
   const changeSequenceRef = React.useRef(0);
   const initialRequestVersionRef = React.useRef(0);
@@ -498,21 +498,10 @@ export function useSidebarConversationsController({
       const modelName = groupID
         ? ""
         : explicitModel || (await resolveConversationDefaultModel({ accessToken: token })).platformModelName;
-      let resolvedTitle = newConversationTitle;
-      if (groupID) {
-        try {
-          const group = await getAgentGroup(token, groupID);
-          if (group?.name) {
-            resolvedTitle = group.name;
-          }
-        } catch {
-          // 群组查询失败时使用默认标题
-        }
-      }
-      // 角色对话与项目对话一致：不预填角色名，标题随首条消息自动重命名。
+      // 群组、角色和项目对话都保留占位标题，首条消息完成后由统一元数据链自动命名。
 
       const item = await createConversation(token, {
-        title: resolvedTitle,
+        title: newConversationTitle,
         model: modelName,
         projectID: projectID?.trim() || "",
         roleID: roleID?.trim() || "",
@@ -564,6 +553,20 @@ export function useSidebarConversationsController({
     setStarredItems((prev) => patchConversationList(prev, publicID, patch, sortByStarredAtDesc));
     publishChange({ type: "patch", publicID, patch });
   }, [publishChange]);
+
+  const markReadByPublicID = React.useCallback(async (publicID: string): Promise<ConversationDTO | null> => {
+    const normalizedPublicID = publicID.trim();
+    if (!normalizedPublicID) {
+      return null;
+    }
+    touchByPublicID(normalizedPublicID, { hasUnread: false });
+    const token = await resolveAccessToken();
+    if (!token) {
+      return null;
+    }
+    const updated = await markConversationRead(token, normalizedPublicID);
+    return applyConversationUpdate(normalizedPublicID, updated);
+  }, [applyConversationUpdate, touchByPublicID]);
 
   const createProject = React.useCallback(async (payload: CreateConversationProjectRequest): Promise<ConversationProjectDTO | null> => {
     const token = await resolveAccessToken();
@@ -901,20 +904,25 @@ export function useSidebarConversationsController({
     return fetchAllStarred(token);
   }, []);
 
-  const setConversationStreaming = React.useCallback((publicID: string, streaming: boolean) => {
+  const setConversationStreaming = React.useCallback((publicID: string, ownerID: string, streaming: boolean) => {
     const normalizedPublicID = publicID.trim();
-    if (!normalizedPublicID) {
+    const normalizedOwnerID = ownerID.trim();
+    if (!normalizedPublicID || !normalizedOwnerID) {
+      return;
+    }
+    const wasStreaming = streamingOwnersRef.current.has(normalizedPublicID);
+    const isStreaming = updateConversationStreamingOwner(
+      streamingOwnersRef.current,
+      normalizedPublicID,
+      normalizedOwnerID,
+      streaming,
+    );
+    if (wasStreaming === isStreaming) {
       return;
     }
     setStreamingPublicIDs((current) => {
-      if (streaming && current.has(normalizedPublicID)) {
-        return current;
-      }
-      if (!streaming && !current.has(normalizedPublicID)) {
-        return current;
-      }
       const next = new Set(current);
-      if (streaming) {
+      if (isStreaming) {
         next.add(normalizedPublicID);
       } else {
         next.delete(normalizedPublicID);
@@ -943,6 +951,7 @@ export function useSidebarConversationsController({
       prependNewConversation,
       upsertConversation,
       touchByPublicID,
+      markReadByPublicID,
       renameByPublicID,
       regenerateTitleByPublicID,
       updateLabelsByPublicID,
@@ -985,6 +994,7 @@ export function useSidebarConversationsController({
       starredTotal,
       streamingPublicIDs,
       touchByPublicID,
+      markReadByPublicID,
       updateProject,
       renameByPublicID,
       setStarByPublicID,

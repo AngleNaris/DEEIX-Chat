@@ -1,17 +1,17 @@
 "use client";
 
-import * as React from "react";
-import dynamic from "next/dynamic";
 import { Download, FileX } from "lucide-react";
+import dynamic from "next/dynamic";
 import { useTranslations } from "next-intl";
+import * as React from "react";
 
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useLocalizedErrorMessage } from "@/i18n/use-localized-error";
-import { formatBytes, resolveFileExtension, resolveFilePreviewKind } from "@/shared/lib/file-display";
-import { fetchFileContent, type FileContentResult } from "@/shared/api/file";
+import { type FileContentResult, fetchFileContent } from "@/shared/api/file";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 import { PreviewLoading } from "@/shared/components/file-preview/preview-loading";
+import { formatBytes, resolveFileExtension, resolveFilePreviewKind } from "@/shared/lib/file-display";
 
 export type PreviewDialogFile = {
   fileID: string;
@@ -20,7 +20,7 @@ export type PreviewDialogFile = {
   sizeBytes: number;
 };
 
-type PreviewState =
+export type PreviewState =
   | { status: "idle" }
   | { status: "loading" }
   | { status: "error"; message: string }
@@ -113,7 +113,7 @@ function isReadableTextContent(content: string): boolean {
 
 type FileContentLoader = (file: PreviewDialogFile) => Promise<FileContentResult>;
 
-function useFilePreviewDialog(file: PreviewDialogFile | null, loadContent?: FileContentLoader) {
+export function useFilePreviewContent(file: PreviewDialogFile | null, loadContent?: FileContentLoader) {
   const t = useTranslations("files.previewDialog");
   const resolveErrorMessage = useLocalizedErrorMessage();
   const objectURLRef = React.useRef<string | null>(null);
@@ -201,6 +201,83 @@ function useFilePreviewDialog(file: PreviewDialogFile | null, loadContent?: File
   return { state, download };
 }
 
+export function FilePreviewBody({
+  file,
+  state,
+  allowDownload = true,
+  onDownload,
+}: {
+  file: PreviewDialogFile;
+  state: PreviewState;
+  allowDownload?: boolean;
+  onDownload: () => void;
+}) {
+  const t = useTranslations("files.previewDialog");
+
+  if (state.status === "loading") {
+    return <PreviewLoading className="min-h-[180px] sm:min-h-[320px]" />;
+  }
+
+  if (state.status === "error") {
+    return (
+      <div className="flex min-h-[180px] flex-col items-center justify-center gap-3 text-center sm:min-h-[280px]">
+        <FileX className="size-10 text-muted-foreground/50" />
+        <p className="text-sm font-medium text-foreground">{t("cannotPreview")}</p>
+        <p className="max-w-[340px] text-xs text-muted-foreground">{state.message}</p>
+      </div>
+    );
+  }
+
+  if (state.status !== "ready") {
+    return null;
+  }
+
+  const { kind, objectURL, textContent, contentType } = state;
+  if (kind === "image") {
+    return (
+      <div className="overflow-hidden rounded-md">
+        <PreviewMedia kind="image" source={objectURL} alt={file.fileName} contentType={contentType} />
+      </div>
+    );
+  }
+  if (kind === "audio" || kind === "video") {
+    return <PreviewMedia kind={kind} source={objectURL} alt={file.fileName} contentType={contentType} />;
+  }
+  if (kind === "pdf") {
+    return <PreviewPdf source={objectURL} />;
+  }
+  if (kind === "docx") {
+    return <PreviewDocx source={objectURL} />;
+  }
+  if (kind === "spreadsheet") {
+    return <PreviewSheet source={objectURL} />;
+  }
+  if (kind === "native") {
+    return <PreviewDocument source={objectURL} contentType={contentType} />;
+  }
+  if (kind === "markdown" || kind === "code" || kind === "text") {
+    return <PreviewText kind={kind} content={textContent ?? ""} />;
+  }
+
+  return (
+    <div className="flex min-h-[180px] flex-col items-center justify-center gap-3 text-center sm:min-h-[280px]">
+      <FileX className="size-10 text-muted-foreground/50" />
+      <p className="text-sm font-medium text-foreground">{t("unsupported")}</p>
+      {allowDownload ? (
+        <>
+          <p className="text-xs text-muted-foreground">{t("downloadHint")}</p>
+          <Button size="sm" variant="outline" onClick={onDownload} className="mt-2 gap-1.5">
+            <Download className="size-3.5" />
+            {t("downloadFile")}
+          </Button>
+        </>
+      ) : (
+        <p className="text-xs text-muted-foreground">{t("downloadUnavailableForShare")}</p>
+      )}
+    </div>
+  );
+}
+
 export function FilePreviewDialog({
   file,
   open,
@@ -216,77 +293,7 @@ export function FilePreviewDialog({
 }) {
   const t = useTranslations("files.previewDialog");
   const activeFile = open ? file : null;
-  const { state, download } = useFilePreviewDialog(activeFile, loadContent);
-
-  const previewBody = React.useMemo(() => {
-    if (!open || !file) {
-      return null;
-    }
-
-    if (state.status === "loading") {
-      return <PreviewLoading className="min-h-[180px] sm:min-h-[320px]" />;
-    }
-
-    if (state.status === "error") {
-      return (
-        <div className="flex min-h-[180px] flex-col items-center justify-center gap-3 text-center sm:min-h-[280px]">
-          <FileX className="size-10 text-muted-foreground/50" />
-          <p className="text-sm font-medium text-foreground">{t("cannotPreview")}</p>
-          <p className="max-w-[340px] text-xs text-muted-foreground">{state.message}</p>
-        </div>
-      );
-    }
-
-    if (state.status !== "ready") {
-      return null;
-    }
-
-    const { kind, objectURL, textContent, contentType } = state;
-
-    if (kind === "image") {
-      return (
-        <div className="overflow-hidden rounded-md">
-          <PreviewMedia kind="image" source={objectURL} alt={file.fileName} contentType={contentType} />
-        </div>
-      );
-    }
-    if (kind === "audio" || kind === "video") {
-      return <PreviewMedia kind={kind} source={objectURL} alt={file.fileName} contentType={contentType} />;
-    }
-    if (kind === "pdf") {
-      return <PreviewPdf source={objectURL} />;
-    }
-    if (kind === "docx") {
-      return <PreviewDocx source={objectURL} />;
-    }
-    if (kind === "spreadsheet") {
-      return <PreviewSheet source={objectURL} />;
-    }
-    if (kind === "native") {
-      return <PreviewDocument source={objectURL} contentType={contentType} />;
-    }
-    if (kind === "markdown" || kind === "code" || kind === "text") {
-      return <PreviewText kind={kind} content={textContent ?? ""} />;
-    }
-
-    return (
-      <div className="flex min-h-[180px] flex-col items-center justify-center gap-3 text-center sm:min-h-[280px]">
-        <FileX className="size-10 text-muted-foreground/50" />
-        <p className="text-sm font-medium text-foreground">{t("unsupported")}</p>
-        {allowDownload ? (
-          <>
-            <p className="text-xs text-muted-foreground">{t("downloadHint")}</p>
-            <Button size="sm" variant="outline" onClick={download} className="mt-2 gap-1.5">
-              <Download className="size-3.5" />
-              {t("downloadFile")}
-            </Button>
-          </>
-        ) : (
-          <p className="text-xs text-muted-foreground">{t("downloadUnavailableForShare")}</p>
-        )}
-      </div>
-    );
-  }, [allowDownload, download, file, open, state, t]);
+  const { state, download } = useFilePreviewContent(activeFile, loadContent);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -315,7 +322,11 @@ export function FilePreviewDialog({
 
         <div className="min-h-0 flex-1 overflow-hidden">
           <div className="h-full max-h-[calc(68dvh-64px)] overflow-auto sm:max-h-[calc(92vh-72px)]">
-            <div className="px-3 py-3 sm:px-5 sm:py-5">{previewBody}</div>
+            <div className="px-3 py-3 sm:px-5 sm:py-5">
+              {file ? (
+                <FilePreviewBody file={file} state={state} allowDownload={allowDownload} onDownload={download} />
+              ) : null}
+            </div>
           </div>
         </div>
       </DialogContent>

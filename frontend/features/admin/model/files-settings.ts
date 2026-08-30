@@ -76,6 +76,7 @@ export const OCR_ENGINES = {
   ALIYUN: "aliyun",
   MISTRAL: "mistral",
   LLM: "llm",
+  SYSTEM_VISION: "system_vision",
 } as const;
 
 export const EMBEDDING_MODES = {
@@ -420,6 +421,7 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
           { label: "Alibaba Cloud OCR", value: OCR_ENGINES.ALIYUN },
           { label: "Mistral OCR", value: OCR_ENGINES.MISTRAL },
           { label: "LLM OCR", value: OCR_ENGINES.LLM },
+          { label: "System Vision", value: OCR_ENGINES.SYSTEM_VISION },
         ],
         visibleWhen: OCR_ENABLED_RULE,
       },
@@ -915,6 +917,8 @@ export function resolveOCREngine(engine: string): string {
       return OCR_ENGINES.MISTRAL;
     case OCR_ENGINES.LLM:
       return OCR_ENGINES.LLM;
+    case OCR_ENGINES.SYSTEM_VISION:
+      return OCR_ENGINES.SYSTEM_VISION;
     default:
       return OCR_ENGINES.RAPIDOCR;
   }

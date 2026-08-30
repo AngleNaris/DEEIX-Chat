@@ -9,40 +9,42 @@ const (
 
 // Conversation 表示会话元信息。
 type Conversation struct {
-	ID                    uint
-	UserID                uint
-	ProjectID             *uint
-	RoleID                *uint
-	AgentGroupID          *uint
-	ProjectPublicID       string
-	ProjectName           string
-	ProjectSystemPrompt   string
-	RolePublicID          string
-	RoleName              string
-	RoleSystemPrompt      string
-	AgentGroupPublicID    string
-	AgentGroupName        string
-	PublicID              string
-	Title                 string
-	LabelsJSON            string
-	LabelsManuallyManaged bool
-	Model                 string
-	Provider              string
-	SessionKey            string
-	IsStarred             bool
-	StarredAt             *time.Time
-	MessageCount          int
-	Status                string
-	ContextPolicy         string
-	LastCompactedAt       *time.Time
-	LastResponseID        string
-	LastPromptFingerprint string
-	ShareStatus           string
-	ShareID               string
-	SharedAt              *time.Time
-	LastShareAccessedAt   *time.Time
-	CreatedAt             time.Time
-	UpdatedAt             time.Time
+	ID                     uint
+	UserID                 uint
+	ProjectID              *uint
+	RoleID                 *uint
+	AgentGroupID           *uint
+	ProjectPublicID        string
+	ProjectName            string
+	ProjectSystemPrompt    string
+	RolePublicID           string
+	RoleName               string
+	RoleSystemPrompt       string
+	AgentGroupPublicID     string
+	AgentGroupName         string
+	PublicID               string
+	Title                  string
+	LabelsJSON             string
+	LabelsManuallyManaged  bool
+	Model                  string
+	Provider               string
+	SessionKey             string
+	IsStarred              bool
+	StarredAt              *time.Time
+	MessageCount           int
+	Status                 string
+	ContextPolicy          string
+	LastCompactedAt        *time.Time
+	LastResponseID         string
+	LastPromptFingerprint  string
+	LastAssistantMessageID *uint
+	LastReadMessageID      *uint
+	ShareStatus            string
+	ShareID                string
+	SharedAt               *time.Time
+	LastShareAccessedAt    *time.Time
+	CreatedAt              time.Time
+	UpdatedAt              time.Time
 }
 
 // ConversationProject 表示用户会话项目分组。
@@ -343,6 +345,19 @@ type FileObject struct {
 	RagOptOut              bool
 	CreatedAt              time.Time
 	UpdatedAt              time.Time
+}
+
+// FileShare 表示单个用户文件的公开分享。
+type FileShare struct {
+	ID        uint
+	ShareID   string
+	FileID    string
+	UserID    uint
+	Status    string
+	ExpiresAt *time.Time
+	RevokedAt *time.Time
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // FileObjectProcessing 表示 file_objects 中的服务端处理状态。

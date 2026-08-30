@@ -1,14 +1,12 @@
 "use client";
 
-import * as React from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   closestCenter,
   DndContext,
-  KeyboardSensor,
-  PointerSensor,
   type DragEndEvent,
   type DragStartEvent,
+  KeyboardSensor,
+  PointerSensor,
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
@@ -20,15 +18,14 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { AnimatePresence, motion, type Transition } from "motion/react";
 import { ChevronDown, PencilLine, Star, StarOff, Trash } from "lucide-react";
+import { AnimatePresence, motion, type Transition } from "motion/react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
+import * as React from "react";
 import { toast } from "sonner";
 
 import { Ellipsis } from "@/components/animate-ui/icons/ellipsis";
-import { FolderArchiveIcon } from "@/components/ui/folder-archive";
-import { FolderOpenIcon } from "@/components/ui/folder-open";
-import { PlusIcon } from "@/components/ui/plus";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -42,8 +39,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Collapsible } from "@/components/ui/collapsible";
-import { GripVerticalIcon, type GripVerticalIconHandle } from "@/components/ui/grip-vertical";
-import { Spinner } from "@/components/ui/spinner";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -52,6 +47,10 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { FolderArchiveIcon } from "@/components/ui/folder-archive";
+import { FolderOpenIcon } from "@/components/ui/folder-open";
+import { GripVerticalIcon, type GripVerticalIconHandle } from "@/components/ui/grip-vertical";
+import { PlusIcon } from "@/components/ui/plus";
 import {
   SidebarGroup,
   SidebarGroupAction,
@@ -62,11 +61,12 @@ import {
   SidebarMenuSubItem,
   useSidebar,
 } from "@/components/ui/sidebar";
+import { Spinner } from "@/components/ui/spinner";
 import {
   ConversationLabelsManagerDialog,
+  type ConversationLabelsTarget,
   ConversationShareDialog,
   sharePatchFromDTO,
-  type ConversationLabelsTarget,
   useConversationExport,
   useSidebarConversations,
 } from "@/entities/conversation";
@@ -410,6 +410,7 @@ export function NavProjects() {
     archiveByPublicID,
     deleteByPublicID,
     touchByPublicID,
+    streamingPublicIDs,
   } = useSidebarConversations();
   const [draft, setDraft] = React.useState<ProjectDraft | null>(null);
   const [deleteTarget, setDeleteTarget] = React.useState<ProjectActionTarget | null>(null);
@@ -930,7 +931,9 @@ export function NavProjects() {
                                               shareActive:
                                                 conversation.shareStatus === "active" && Boolean(conversation.shareID?.trim()),
                                               labelsJSON: conversation.labelsJSON,
+                                              hasUnread: conversation.hasUnread,
                                             }}
+                                            streaming={streamingPublicIDs.has(conversation.publicID)}
                                             starAction={{
                                               label: conversation.isStarred ? tRecent("row.unstar") : tRecent("row.star"),
                                               icon: conversation.isStarred ? StarOff : Star,

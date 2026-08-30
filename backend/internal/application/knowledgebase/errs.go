@@ -15,6 +15,10 @@ var (
 	ErrKnowledgeBaseFileContentUnavailable = errors.New("knowledge base file content unavailable")
 	// ErrKnowledgeBaseFileCleanupUnavailable 表示请求同步删除文件，但文件安全清理能力不可用。
 	ErrKnowledgeBaseFileCleanupUnavailable = errors.New("knowledge base file cleanup unavailable")
+	// ErrKnowledgeBaseFileUploadUnavailable 表示知识库内容上传能力暂不可用。
+	ErrKnowledgeBaseFileUploadUnavailable = errors.New("knowledge base file upload unavailable")
+	// ErrKnowledgeBaseFileWriteUnavailable 表示知识库内容修改能力暂不可用。
+	ErrKnowledgeBaseFileWriteUnavailable = errors.New("knowledge base file write unavailable")
 	// ErrPlatformFileInUse 表示平台资料仍被知识库或其他资源引用，不能删除。
 	ErrPlatformFileInUse = errors.New("platform file is in use")
 )

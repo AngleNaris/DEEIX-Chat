@@ -12198,6 +12198,58 @@ const docTemplate = `{
                 }
             }
         },
+        "/conversations/{id}/read": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "将当前用户的会话已读游标推进到最新成功助手消息",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "chat"
+                ],
+                "summary": "标记会话已读",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "会话 public_id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ConversationUpdateResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/ConversationErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/ConversationErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/ConversationErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
         "/conversations/{id}/runs": {
             "get": {
                 "security": [
@@ -13179,6 +13231,149 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/ConversationErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/files/{file_id}/share": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "chat"
+                ],
+                "summary": "查询文件分享状态",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "文件 ID",
+                        "name": "file_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/FileShareResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/ConversationErrorDoc"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "创建或替换当前用户指定文件的公开分享链接",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "chat"
+                ],
+                "summary": "创建文件分享",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "文件 ID",
+                        "name": "file_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "分享有效期",
+                        "name": "body",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/createFileShareRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/FileShareResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/ConversationErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/ConversationErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/ConversationErrorDoc"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "chat"
+                ],
+                "summary": "撤销文件分享",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "文件 ID",
+                        "name": "file_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/FileShareRevokeResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/ConversationErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
                         "schema": {
                             "$ref": "#/definitions/ConversationErrorDoc"
                         }
@@ -15010,6 +15205,74 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/ConversationErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/shared-files/{share_id}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "chat"
+                ],
+                "summary": "查询公开文件分享",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "分享 ID",
+                        "name": "share_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/PublicFileShareResponseDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/ConversationErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/shared-files/{share_id}/content": {
+            "get": {
+                "produces": [
+                    "application/octet-stream"
+                ],
+                "tags": [
+                    "chat"
+                ],
+                "summary": "读取公开文件内容",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "分享 ID",
+                        "name": "share_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
                         "schema": {
                             "$ref": "#/definitions/ConversationErrorDoc"
                         }
@@ -19495,6 +19758,7 @@ const docTemplate = `{
                 "agentGroupName",
                 "contextPolicyJSON",
                 "createdAt",
+                "hasUnread",
                 "isStarred",
                 "labelsJSON",
                 "lastCompactedAt",
@@ -19530,6 +19794,9 @@ const docTemplate = `{
                 },
                 "createdAt": {
                     "type": "string"
+                },
+                "hasUnread": {
+                    "type": "boolean"
                 },
                 "isStarred": {
                     "type": "boolean"
@@ -21157,6 +21424,68 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "updatedAt": {
+                    "type": "string"
+                }
+            }
+        },
+        "FileShareResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/FileShareResult"
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "FileShareResult": {
+            "type": "object",
+            "required": [
+                "status"
+            ],
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "expires_at": {
+                    "type": "string"
+                },
+                "file_id": {
+                    "type": "string"
+                },
+                "share_id": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "FileShareRevokeResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "type": "object",
+                    "required": [
+                        "revoked"
+                    ],
+                    "properties": {
+                        "revoked": {
+                            "type": "boolean",
+                            "example": true
+                        }
+                    }
+                },
+                "errorMsg": {
                     "type": "string"
                 }
             }
@@ -25167,6 +25496,59 @@ const docTemplate = `{
                 }
             }
         },
+        "PublicFileShareResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/PublicFileShareResult"
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "PublicFileShareResult": {
+            "type": "object",
+            "required": [
+                "created_at",
+                "file_category",
+                "file_id",
+                "file_name",
+                "mime_type",
+                "share_id",
+                "size_bytes"
+            ],
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "expires_at": {
+                    "type": "string"
+                },
+                "file_category": {
+                    "type": "string"
+                },
+                "file_id": {
+                    "type": "string"
+                },
+                "file_name": {
+                    "type": "string"
+                },
+                "mime_type": {
+                    "type": "string"
+                },
+                "share_id": {
+                    "type": "string"
+                },
+                "size_bytes": {
+                    "type": "integer"
+                }
+            }
+        },
         "PublicGroupRunActorResponse": {
             "type": "object",
             "required": [
@@ -28623,9 +29005,15 @@ const docTemplate = `{
                 "scope": {
                     "type": "string",
                     "enum": [
-                        "profile",
+                        "identity",
+                        "activity",
+                        "context",
                         "preference",
-                        "custom"
+                        "capability",
+                        "experience",
+                        "profile",
+                        "custom",
+                        "global"
                     ]
                 },
                 "value": {
@@ -30245,6 +30633,19 @@ const docTemplate = `{
                 "trigger": {
                     "type": "string",
                     "maxLength": 64
+                }
+            }
+        },
+        "createFileShareRequest": {
+            "type": "object",
+            "required": [
+                "expires_in_hours"
+            ],
+            "properties": {
+                "expires_in_hours": {
+                    "type": "integer",
+                    "maximum": 720,
+                    "minimum": 1
                 }
             }
         }

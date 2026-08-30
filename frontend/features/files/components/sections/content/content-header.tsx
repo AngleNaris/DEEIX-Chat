@@ -1,17 +1,16 @@
 "use client";
 
-import * as React from "react";
-import { ChevronLeft, Download, ExternalLink, LoaderCircle, Trash2 } from "lucide-react";
+import { ChevronLeft, Download, ExternalLink, LoaderCircle, Share2, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
-
-import { formatBytes, formatDateTime, resolveFileExtension, resolveFileIcon } from "@/shared/lib/file-display";
-import type { FilePreviewState } from "@/features/files/hooks/use-file-preview";
+import * as React from "react";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { resolveFileProcessingBadge, resolveFileProcessingToneClass } from "@/shared/lib/file-processing";
-import type { FileObjectDTO } from "@/shared/api/file.types";
-import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
+import type { FilePreviewState } from "@/features/files/hooks/use-file-preview";
 import { useAppLocale } from "@/i18n/app-i18n-provider";
 import { cn } from "@/lib/utils";
+import type { FileObjectDTO } from "@/shared/api/file.types";
+import { formatBytes, formatDateTime, resolveFileExtension, resolveFileIcon } from "@/shared/lib/file-display";
+import { resolveFileProcessingBadge, resolveFileProcessingToneClass } from "@/shared/lib/file-processing";
 
 type ContentHeaderProps = {
   file: FileObjectDTO | null;
@@ -20,6 +19,7 @@ type ContentHeaderProps = {
   onBack?: () => void;
   onOpen: () => void;
   onDownload: () => void;
+  onShareRequest: (file: FileObjectDTO) => void;
   onDeleteRequest: (file: FileObjectDTO) => void;
   onToggleRagOptOut: (fileID: string, current: boolean) => Promise<void>;
 };
@@ -45,6 +45,7 @@ export function ContentHeader({
   onBack,
   onOpen,
   onDownload,
+  onShareRequest,
   onDeleteRequest,
   onToggleRagOptOut,
 }: ContentHeaderProps) {
@@ -142,6 +143,17 @@ export function ContentHeader({
       </div>
 
       <div className="flex shrink-0 items-center gap-1">
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="size-6"
+          onClick={() => onShareRequest(file)}
+          aria-label={t("actions.share")}
+          title={t("actions.share")}
+        >
+          <Share2 className="size-3.5" strokeWidth={1.6} />
+        </Button>
         <Button
           type="button"
           variant="ghost"

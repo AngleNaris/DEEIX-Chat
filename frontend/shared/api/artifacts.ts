@@ -1,6 +1,5 @@
 import { authedRequest } from "@/shared/api/authed-client";
-import { apiRequest } from "@/shared/api/http-client";
-import { pathParam } from "@/shared/api/http-client";
+import { apiRequest, pathParam, resolveApiBaseURL } from "@/shared/api/http-client";
 
 export type ArtifactKind = "html" | "js" | "css" | "text";
 
@@ -52,6 +51,11 @@ export type CreateArtifactInput = {
 };
 
 export type UpdateArtifactInput = Omit<CreateArtifactInput, "artifactId">;
+
+export type ArtifactRenderTokenDTO = {
+  render_url: string;
+  expires_in_seconds: number;
+};
 
 export async function listArtifacts(
   accessToken: string,
@@ -123,6 +127,22 @@ export async function revokeArtifactShare(accessToken: string, artifactId: strin
     method: "DELETE",
     accessToken,
   });
+}
+
+export async function createArtifactRenderToken(
+  accessToken: string,
+  document: string,
+): Promise<ArtifactRenderTokenDTO> {
+  return authedRequest("/api/v1/artifact-render-tokens", {
+    method: "POST",
+    accessToken,
+    body: { document },
+  });
+}
+
+export function artifactRenderUrl(path: string): string {
+  const base = resolveApiBaseURL() || (typeof window === "undefined" ? "http://localhost" : window.location.origin);
+  return new URL(path, `${base}/`).toString();
 }
 
 // 公开分享（免认证）。

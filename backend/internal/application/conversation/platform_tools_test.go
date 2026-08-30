@@ -9,11 +9,14 @@ import (
 	"testing"
 	"time"
 
+	appartifact "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/artifact"
 	appcredentials "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/credentials"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/skill"
+	domainartifact "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/artifact"
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/llm"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 )
 
 // fakePlatformSettingsReader 模拟 platform_tools 运行时设置读取器。
@@ -131,6 +134,16 @@ type approvalPersistenceRepository struct {
 	mu      sync.Mutex
 	rows    []model.ToolCall
 	updates int
+}
+
+type approvalArtifactRepository struct {
+	repository.ArtifactRepository
+	created *domainartifact.Artifact
+}
+
+func (r *approvalArtifactRepository) CreateArtifact(_ context.Context, item *domainartifact.Artifact) error {
+	r.created = item
+	return nil
 }
 
 func (r *approvalPersistenceRepository) ListConversationToolCallsByRunID(
@@ -928,6 +941,67 @@ func TestPlatformWriteApprovalPersistsTerminalToolOutput(t *testing.T) {
 				t.Fatalf("terminal output = %+v, want id=%s status=%s", terminal, record.ID, tt.status)
 			}
 		})
+	}
+}
+
+func TestApprovedSaveArtifactPersistsSafeResult(t *testing.T) {
+	const secret = "artifact-title-secret"
+	service := newAskCredentialService(t, &recordingCredentialResolver{})
+	service.credentials = &fakeCredentialResolver{values: map[string]string{"approval-key": secret}}
+	settingsRepo := service.repo.(*mutableUserSettingsRepository)
+	capture := &approvalPersistenceRepository{mutableUserSettingsRepository: settingsRepo}
+	service.repo = capture
+	artifactRepo := &approvalArtifactRepository{}
+	service.artifactSvc = appartifact.NewService(artifactRepo)
+
+	const runID = "run-artifact-terminal"
+	const toolCallID = "call-artifact-terminal"
+	pendingOutput, err := service.executePlatformToolCall(t.Context(), platformToolRegistry()["save_artifact"], ExecuteToolInput{
+		UserID:         7,
+		ConversationID: 11,
+		MessageID:      32,
+		RequestID:      "req-artifact-terminal",
+		RunID:          runID,
+		ToolCallID:     toolCallID,
+		ToolName:       "save_artifact",
+		ArgumentsJSON:  `{"title":"{{credential: approval-key}}","kind":"html","code":"<h1>safe</h1>"}`,
+		ToolRuntime:    &selectedToolRuntime{},
+	})
+	if err != nil {
+		t.Fatalf("submit artifact approval: %v", err)
+	}
+	record := approvalRecordFromOutput(t, service, pendingOutput)
+	capture.rows = []model.ToolCall{{
+		ID:             92,
+		MessageID:      32,
+		UserID:         7,
+		ConversationID: 11,
+		RunID:          runID,
+		ToolCallID:     toolCallID,
+		ToolName:       "save_artifact",
+		Status:         "success",
+		OutputJSON:     pendingOutput,
+	}}
+
+	if _, err := service.ApprovePlatformWrite(t.Context(), record.ID, 7, true); err != nil {
+		t.Fatalf("approve artifact: %v", err)
+	}
+	row, updates := capture.snapshot()
+	if updates != 1 {
+		t.Fatalf("terminal updates = %d, want 1", updates)
+	}
+	var terminal map[string]interface{}
+	if err := json.Unmarshal([]byte(row.OutputJSON), &terminal); err != nil {
+		t.Fatalf("decode artifact terminal output: %v", err)
+	}
+	if terminal["artifact_id"] == "" || terminal["status"] != platformApprovalStatusApproved || terminal["title"] != "{{credential: approval-key}}" || terminal["kind"] != "html" {
+		t.Fatalf("unexpected artifact terminal output: %s", row.OutputJSON)
+	}
+	if strings.Contains(row.OutputJSON, secret) || strings.Contains(row.OutputJSON, "<h1>safe</h1>") {
+		t.Fatalf("artifact terminal output exposed sensitive input: %s", row.OutputJSON)
+	}
+	if artifactRepo.created == nil || artifactRepo.created.Title != secret {
+		t.Fatalf("artifact handler did not execute with expanded credential: %+v", artifactRepo.created)
 	}
 }
 

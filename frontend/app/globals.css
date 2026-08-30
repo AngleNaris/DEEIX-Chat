@@ -1594,27 +1594,14 @@ html[data-branding-pending] body {
 
 /* ─── 进行中动效 ─────────────────────────────────────────────── */
 
-/* 侧边栏"进行中"呼吸点：提示该对话正在进行流式生成 */
-.streaming-dot {
+/* 小圆点只表示已经完成但尚未查看的新回复。 */
+.unread-dot {
   position: relative;
   flex-shrink: 0;
   width: 6px;
   height: 6px;
   border-radius: 9999px;
   background: var(--primary);
-  animation: streaming-dot-pulse 1.6s ease-in-out infinite;
-}
-
-@keyframes streaming-dot-pulse {
-  0% {
-    box-shadow: 0 0 0 0 color-mix(in oklch, var(--primary) 45%, transparent);
-  }
-  70% {
-    box-shadow: 0 0 0 6px transparent;
-  }
-  100% {
-    box-shadow: 0 0 0 0 transparent;
-  }
 }
 
 /* 行级扫光：进行中的工具调用 / 群组成员活动行，高光从左到右循环扫过 */
@@ -1645,5 +1632,12 @@ html[data-branding-pending] body {
   }
   to {
     background-position: -30% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .trace-sweep::after {
+    animation: none;
+    background-position: 50% 0;
   }
 }

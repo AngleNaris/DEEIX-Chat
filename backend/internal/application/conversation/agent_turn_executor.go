@@ -12,6 +12,7 @@ import (
 	apprag "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/rag"
 	domainbilling "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/billing"
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
+	domainmemory "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/memory"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/llm"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/mcp"
 	platformtracing "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/observability/tracing"
@@ -307,9 +308,8 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 	if s.memoryRecorder != nil {
 		userMemories, _ := s.getCachedUserMemories(ctx, input.UserID)
 		if len(userMemories) > 0 {
-			preferenceMemories := filterMemoriesByScope(userMemories, "preference")
-			preferencePrompt = buildPreferencePrompt(preferenceMemories, 400)
-			otherMemories := filterMemoriesByScope(userMemories, "profile", "custom")
+			preferencePrompt = buildMemorySystemPrompt(userMemories, 400)
+			otherMemories := filterMemoriesByScope(userMemories, domainmemory.CategoryCapability, domainmemory.CategoryExperience)
 			if len(otherMemories) > 0 {
 				userCtx.Memory = s.selectRelevantUserMemories(ctx, input.UserID, ragQuery, otherMemories, 5)
 			}
@@ -1092,15 +1092,14 @@ func (s *Service) ExecuteAgentTurn(ctx context.Context, input AgentTurnInput) (*
 	if latency < 0 {
 		latency = 0
 	}
+	reasoningText := outputReasoningContent(upstreamOutput)
+	if credentialAttemptedForTurn {
+		reasoningText, _ = applyCredentialReplacements(reasoningText, credentialAttemptsForTurn, credentialWritesForTurn)
+	}
+	assistantText, reasoningText = normalizeAssistantArtifactContent(assistantText, reasoningText)
 	return &AgentTurnOutput{
-		Text: strings.TrimSpace(assistantText),
-		ReasoningText: func() string {
-			reasoning := outputReasoningContent(upstreamOutput)
-			if credentialAttemptedForTurn {
-				reasoning, _ = applyCredentialReplacements(reasoning, credentialAttemptsForTurn, credentialWritesForTurn)
-			}
-			return reasoning
-		}(),
+		Text:              strings.TrimSpace(assistantText),
+		ReasoningText:     reasoningText,
 		ToolCallRows:      toolCallRows,
 		Usage:             usageLedger,
 		Route:             route,

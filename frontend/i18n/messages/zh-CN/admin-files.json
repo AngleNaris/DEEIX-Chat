@@ -284,7 +284,8 @@
           "tencent": "腾讯云 OCR",
           "aliyun": "阿里云 OCR",
           "mistral": "Mistral OCR",
-          "llm": "LLM OCR"
+          "llm": "LLM OCR",
+          "system_vision": "系统视觉"
         }
       },
       "tesseract_ocr_base_url": {

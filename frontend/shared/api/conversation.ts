@@ -544,6 +544,20 @@ export async function getConversation(
   );
 }
 
+export async function markConversationRead(
+  accessToken: string,
+  conversationPublicID: string,
+): Promise<ConversationDTO> {
+  return authedRequest<ConversationDTO>(
+    `/api/v1/conversations/${pathParam(conversationPublicID)}/read`,
+    {
+      method: "POST",
+      accessToken,
+    },
+    true,
+  );
+}
+
 export async function exportConversation(
   accessToken: string,
   conversationPublicID: string,

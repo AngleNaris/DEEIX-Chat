@@ -20,6 +20,7 @@ import (
 	appdynamicprompt "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/dynamicprompt"
 	appembedding "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/embedding"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/extraction"
+	appknowledgebase "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/knowledgebase"
 	appstorage "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/objectstorage"
 	appprocessing "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/processing"
 	apppromptpreset "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/promptpreset"
@@ -94,6 +95,14 @@ type skillResolver interface {
 
 type knowledgeBaseResolver interface {
 	ResolveFiles(ctx context.Context, userID uint, publicIDs []string) ([]domainknowledgebase.KnowledgeBase, []model.FileObject, error)
+}
+
+type knowledgeBaseToolService interface {
+	ListVisible(ctx context.Context, userID uint, input appknowledgebase.ListInput) ([]domainknowledgebase.KnowledgeBase, int64, error)
+	ListVisibleFiles(ctx context.Context, userID uint, publicID string, page int, pageSize int) ([]model.FileObject, int64, error)
+	CreateUserContent(ctx context.Context, userID uint, publicID string, input appknowledgebase.UserContentInput) (*model.FileObject, error)
+	UpdateUserContent(ctx context.Context, userID uint, publicID string, fileID string, input appknowledgebase.UserContentPatch) error
+	DeleteUserContent(ctx context.Context, userID uint, publicID string, fileID string) (appknowledgebase.UserContentDeleteResult, error)
 }
 
 type mcpToolResolver interface {
@@ -269,6 +278,7 @@ type Service struct {
 	ragSvc                *apprag.Service
 	skillResolver         skillResolver
 	knowledgeBaseResolver knowledgeBaseResolver
+	knowledgeBaseTools    knowledgeBaseToolService
 	billingSvc            *appbilling.Service
 	auditWriter           auditWriter
 	storeProvider         appstorage.Provider
@@ -350,6 +360,11 @@ func (s *Service) SetSkillResolver(resolver skillResolver) {
 // SetKnowledgeBaseResolver 注入会话知识库解析器。
 func (s *Service) SetKnowledgeBaseResolver(resolver knowledgeBaseResolver) {
 	s.knowledgeBaseResolver = resolver
+}
+
+// SetKnowledgeBaseToolService injects knowledge-base content management for platform tools.
+func (s *Service) SetKnowledgeBaseToolService(service knowledgeBaseToolService) {
+	s.knowledgeBaseTools = service
 }
 
 // SendMessageResult 返回用户消息与 AI 消息。
@@ -494,6 +509,7 @@ func NewServiceWithRuntime(
 	svc.embeddingSvc = embeddingSvc
 	svc.processingSvc = processingSvc
 	svc.extractSvc = extractSvc
+	extractSvc.SetVisionAnalyzer(svc.AnalyzeImageForExtraction)
 	svc.ragSvc = ragSvc
 	// 平台工具：ask 批准存储 + write_file 延迟重建调度器（debounce，缓冲窗口读运行时设置）。
 	svc.platformApprovals = newPlatformWriteApprovalStore()
@@ -726,11 +742,11 @@ func (s *Service) ApprovePlatformWrite(ctx context.Context, approvalID string, u
 		return "", err
 	}
 	record = s.finishPlatformApproval(record, platformApprovalStatusApproved)
+	s.persistPlatformApprovalTerminal(ctx, record, output)
 	summary, summaryErr := marshalApprovalSummary(record)
 	if summaryErr != nil {
 		return output, nil
 	}
-	s.persistPlatformApprovalTerminal(ctx, record)
 	return summary, nil
 }
 
@@ -753,16 +769,46 @@ func (s *Service) finishPlatformApproval(record *platformWriteApproval, status s
 	return &snapshot
 }
 
-func (s *Service) persistPlatformApprovalTerminal(ctx context.Context, record *platformWriteApproval) {
+func (s *Service) persistPlatformApprovalTerminal(ctx context.Context, record *platformWriteApproval, toolOutput ...string) {
 	if s == nil || s.repo == nil || record == nil || record.UserID == 0 || record.ConversationID == 0 ||
 		strings.TrimSpace(record.RunID) == "" || strings.TrimSpace(record.ToolCallID) == "" {
 		return
 	}
-	output, err := marshalPlatformResult(map[string]interface{}{
+	terminal := map[string]interface{}{
 		"approval_id": record.ID,
 		"status":      record.Status,
 		"tool":        record.ToolName,
-	})
+	}
+	if record.Status == platformApprovalStatusApproved && len(toolOutput) > 0 {
+		var result map[string]interface{}
+		if json.Unmarshal([]byte(toolOutput[0]), &result) == nil {
+			executionToolName := strings.TrimSpace(record.ExecutionToolName)
+			if executionToolName == "" {
+				executionToolName = strings.TrimSpace(record.ToolName)
+			}
+			switch executionToolName {
+			case "save_artifact":
+				if artifactID, ok := result["artifact_id"].(string); ok {
+					terminal["artifact_id"] = artifactID
+				}
+				var arguments map[string]interface{}
+				if json.Unmarshal([]byte(record.ArgumentsJSON), &arguments) == nil {
+					for _, key := range []string{"title", "kind"} {
+						if value, ok := arguments[key].(string); ok {
+							terminal[key] = value
+						}
+					}
+				}
+			case "share_artifact":
+				for _, key := range []string{"artifact_id", "share_url"} {
+					if value, ok := result[key].(string); ok {
+						terminal[key] = value
+					}
+				}
+			}
+		}
+	}
+	output, err := marshalPlatformResult(terminal)
 	if err != nil {
 		s.logPlatformApprovalPersistenceFailure(record, err)
 		return

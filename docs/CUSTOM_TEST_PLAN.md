@@ -158,7 +158,7 @@ $env:DEEIX_TEST_DATABASE_DSN = "<ephemeral-postgres-dsn>"
 go test ./internal/infra/persistence/schema -run '^TestMigrateCredentialNameIndexPostgres$' -count=1
 go test ./internal/infra/persistence/postgres/agentgroup -run '^TestPostgresAgentGroup' -count=1
 go test ./internal/infra/persistence/postgres/conversation ./internal/infra/persistence/postgres/billing -count=1
-go test ./internal/infra/persistence/postgres -run '^TestVectorBaselinePostgres' -count=1
+go test ./internal/infra/persistence/postgres -run '^TestEnsurePostgresVectorColumnPreservesLegacyVectors$' -count=1
 Remove-Item Env:DEEIX_TEST_DATABASE_DSN
 
 # Sandbox / MM，必须在 Linux 上执行 race

@@ -1488,10 +1488,11 @@ func fitXMLTextToTokenBudget(value string, maxTokens int64) string {
 func filterMemoriesByScope(memories []domainmemory.UserMemory, scopes ...string) []domainmemory.UserMemory {
 	scopeSet := make(map[string]struct{}, len(scopes))
 	for _, s := range scopes {
-		scopeSet[s] = struct{}{}
+		scopeSet[domainmemory.NormalizeCategory(s)] = struct{}{}
 	}
 	result := make([]domainmemory.UserMemory, 0, len(memories))
 	for _, m := range memories {
+		m.Scope = domainmemory.NormalizeCategory(m.Scope)
 		if _, ok := scopeSet[m.Scope]; ok {
 			result = append(result, m)
 		}
@@ -1505,13 +1506,13 @@ func selectRelevantMemories(memories []domainmemory.UserMemory, query string, to
 	if len(memories) == 0 || topK <= 0 {
 		return nil
 	}
-	if len(memories) <= topK {
-		return memories
-	}
 
 	// 查询词命中的记忆优先注入上下文，降低无关长期记忆对回答的干扰。
 	queryLower := strings.ToLower(strings.TrimSpace(query))
 	words := strings.Fields(queryLower)
+	if queryLower == "" || len(words) == 0 {
+		return nil
+	}
 
 	type scored struct {
 		m     domainmemory.UserMemory
@@ -1519,10 +1520,6 @@ func selectRelevantMemories(memories []domainmemory.UserMemory, query string, to
 	}
 	items := make([]scored, 0, len(memories))
 	for _, m := range memories {
-		if queryLower == "" || len(words) == 0 {
-			items = append(items, scored{m, 0})
-			continue
-		}
 		combined := strings.ToLower(m.MemoryKey + " " + m.Value)
 		score := 0
 		for _, w := range words {
@@ -1530,7 +1527,9 @@ func selectRelevantMemories(memories []domainmemory.UserMemory, query string, to
 				score++
 			}
 		}
-		items = append(items, scored{m, score})
+		if score > 0 {
+			items = append(items, scored{m, score})
+		}
 	}
 
 	// 按分数降序，保持同分时原始顺序（stable）
@@ -1601,22 +1600,34 @@ func (s *Service) selectRelevantUserMemories(ctx context.Context, userID uint, q
 
 // buildPreferencePrompt 将 scope=preference 的记忆格式化为行为指令型 system 提示。
 func buildPreferencePrompt(memories []domainmemory.UserMemory, maxTokens int) string {
-	if len(memories) == 0 {
+	if len(memories) == 0 || maxTokens <= 0 {
 		return ""
 	}
 	var sb strings.Builder
 	sb.WriteString("# prefs\n")
-	tokenCount := estimateTokens(sb.String())
 	for _, m := range memories {
 		line := "- " + strings.TrimSpace(m.MemoryKey) + ": " + strings.TrimSpace(m.Value) + "\n"
-		lineTokens := estimateTokens(line)
-		if int(tokenCount)+int(lineTokens) > maxTokens {
-			break
-		}
 		sb.WriteString(line)
-		tokenCount += lineTokens
 	}
-	return strings.TrimRight(sb.String(), "\n")
+	return truncateByEstimatedTokens(strings.TrimRight(sb.String(), "\n"), int64(maxTokens))
+}
+
+// buildMemorySystemPrompt injects preferences and only advertises on-demand categories.
+func buildMemorySystemPrompt(memories []domainmemory.UserMemory, maxPreferenceTokens int) string {
+	sections := make([]string, 0, 2)
+	if preferences := buildPreferencePrompt(filterMemoriesByScope(memories, domainmemory.CategoryPreference), maxPreferenceTokens); preferences != "" {
+		sections = append(sections, preferences)
+	}
+	counts := make([]string, 0, 3)
+	for _, category := range []string{domainmemory.CategoryIdentity, domainmemory.CategoryActivity, domainmemory.CategoryContext} {
+		if count := len(filterMemoriesByScope(memories, category)); count > 0 {
+			counts = append(counts, fmt.Sprintf("%s=%d", category, count))
+		}
+	}
+	if len(counts) > 0 {
+		sections = append(sections, "# memory_catalog\nAdditional long-term memories are available but not loaded ("+strings.Join(counts, ", ")+"). If list_memories is available, read only the category relevant to the current request; do not assume these memories apply before reading them.")
+	}
+	return strings.Join(sections, "\n\n")
 }
 
 // nonVisionImageExtractText 读取图片文件的 OCR/提取文本，供文本模型（无 vision）

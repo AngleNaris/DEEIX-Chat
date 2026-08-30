@@ -41,6 +41,7 @@ export function useChatSubmitStream({
   onConversationCreated,
   onConversationForked,
   touchByPublicID,
+  setConversationStreaming,
   reload,
   replaceMessage,
   setDraft,
@@ -85,6 +86,7 @@ export function useChatSubmitStream({
   onConversationCreated?: (conversationPublicID: string) => void;
   onConversationForked?: (conversation: ConversationDTO) => Promise<void> | void;
   touchByPublicID: (publicID: string, patch?: Partial<ConversationDTO>) => void;
+  setConversationStreaming: (publicID: string, ownerID: string, streaming: boolean) => void;
   reload: () => void;
   replaceMessage: (message: MessageDTO) => void;
   setDraft: React.Dispatch<React.SetStateAction<string>>;
@@ -134,6 +136,7 @@ export function useChatSubmitStream({
     onConversationCreated,
     onConversationForked,
     touchByPublicID,
+    setConversationStreaming,
     reload,
     replaceMessage,
     setDraft,

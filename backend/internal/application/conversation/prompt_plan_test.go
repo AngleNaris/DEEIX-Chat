@@ -111,6 +111,10 @@ func TestBuildPromptPlanLayersStableDynamicAndToolGuidance(t *testing.T) {
 			t.Fatalf("expected trace to contain %s, got %#v", blockKind, plan.Trace.Blocks)
 		}
 	}
+	toolBlock := promptTraceBlock(plan.Trace, PromptBlockToolGuidance)
+	if toolBlock == nil || toolBlock.SourceCount != 1 || len(toolBlock.SourceRefs) != 0 {
+		t.Fatalf("expected tool guidance count without recalled evidence refs, got %#v", toolBlock)
+	}
 	dynamicBlock := promptTraceBlock(plan.Trace, PromptBlockDynamicContext)
 	if dynamicBlock == nil || len(dynamicBlock.SourceRefs) == 0 {
 		t.Fatalf("expected dynamic trace source refs, got %#v", dynamicBlock)

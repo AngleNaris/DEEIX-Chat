@@ -64,6 +64,11 @@ func (s *Service) RenameFile(ctx context.Context, userID uint, fileID string, fi
 	return s.uploadSvc.RenameFile(ctx, userID, fileID, fileName)
 }
 
+// OverwriteFileContent replaces a user-owned text file and schedules its extraction/RAG rebuild.
+func (s *Service) OverwriteFileContent(ctx context.Context, userID uint, fileID string, content string) error {
+	return s.overwriteFileContent(ctx, userID, fileID, content)
+}
+
 // UpdateFileRagOptOut 更新文件的 RAG 检索开关。
 func (s *Service) UpdateFileRagOptOut(ctx context.Context, userID uint, fileID string, ragOptOut bool) (*model.FileObject, error) {
 	return s.uploadSvc.UpdateFileRagOptOut(ctx, userID, fileID, ragOptOut)

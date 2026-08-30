@@ -577,12 +577,12 @@ func (s *Service) sendMessageInternal(
 		}
 	}
 	if len(prefetch.userMemories) > 0 {
-		prefMems := filterMemoriesByScope(prefetch.userMemories, "preference")
+		prefMems := filterMemoriesByScope(prefetch.userMemories, domainmemory.CategoryPreference)
 		if len(prefMems) > 0 {
 			prefixMemories = prefMems
-			preferencePrompt = buildPreferencePrompt(prefMems, 400)
 		}
-		otherMems := filterMemoriesByScope(prefetch.userMemories, "profile", "custom")
+		preferencePrompt = buildMemorySystemPrompt(prefetch.userMemories, 400)
+		otherMems := filterMemoriesByScope(prefetch.userMemories, domainmemory.CategoryCapability, domainmemory.CategoryExperience)
 		if len(otherMems) > 0 {
 			userCtx.Memory = s.selectRelevantUserMemories(ctx, input.UserID, ragQuery, otherMems, 5)
 		}
@@ -2013,6 +2013,7 @@ func (s *Service) sendMessageInternal(
 		ToolCallRows:              toolCallRows,
 		PersistedToolCallKeys:     persistedToolCallKeys,
 		Route:                     resolvedRoute,
+		TraceRecorder:             traceRecorder,
 		ReuseUserMessage:          reuseUserMessage,
 		SkipUserMessageEmbedding:  credentialAttemptedForRun,
 		SkipEmbed:                 moderationCoord != nil,

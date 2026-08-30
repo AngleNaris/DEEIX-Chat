@@ -66,9 +66,20 @@ const SYSTEM_RECOMMENDED_MODEL = "none";
 
 const MAX_PREFERENCES = 20;
 
-// MemoryScope 记忆作用域（与后端 UpsertUserMemoryRequest.scope 一致；
-// 响应 DTO 的 scope 为宽松 string，写入时需收窄）。
-type MemoryScope = "preference" | "profile" | "custom";
+const MEMORY_GROUPS = [
+  { scope: "preference", label: "groupPreference" },
+  { scope: "identity", label: "groupIdentity" },
+  { scope: "activity", label: "groupActivity" },
+  { scope: "context", label: "groupContext" },
+  { scope: "capability", label: "groupCapability" },
+  { scope: "experience", label: "groupExperience" },
+] as const;
+
+type MemoryScope = (typeof MEMORY_GROUPS)[number]["scope"];
+
+function normalizeMemoryScope(scope: string): MemoryScope {
+  return MEMORY_GROUPS.some((group) => group.scope === scope) ? scope as MemoryScope : "context";
+}
 
 function PreferenceCard({
   item,
@@ -76,26 +87,28 @@ function PreferenceCard({
   onDelete,
 }: {
   item: UserMemoryDTO;
-  onEdit: (key: string, value: string) => void;
+  onEdit: (key: string, value: string, scope: MemoryScope) => Promise<void>;
   onDelete: (key: string) => void;
 }) {
   const t = useTranslations("settings.chatPage.memory");
   const [editingValue, setEditingValue] = React.useState<string | null>(null);
+  const [editingScope, setEditingScope] = React.useState<MemoryScope>(normalizeMemoryScope(item.scope));
   const [confirmDelete, setConfirmDelete] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
 
   const startEdit = () => {
     setConfirmDelete(false);
     setEditingValue(item.value);
+    setEditingScope(normalizeMemoryScope(item.scope));
   };
 
   const cancelEdit = () => setEditingValue(null);
 
   const commitEdit = async () => {
     const v = (editingValue ?? "").trim();
-    if (!v || v === item.value) { setEditingValue(null); return; }
+    if (!v || (v === item.value && editingScope === normalizeMemoryScope(item.scope))) { setEditingValue(null); return; }
     setSaving(true);
-    await onEdit(item.memoryKey, v);
+    await onEdit(item.memoryKey, v, editingScope);
     setSaving(false);
     setEditingValue(null);
   };
@@ -108,6 +121,16 @@ function PreferenceCard({
         <div className="flex gap-2">
           <div className="min-w-0 flex-1">
             <p className="mb-1 text-[11px] font-medium text-foreground/80">{item.memoryKey}</p>
+            <Select value={editingScope} onValueChange={(value) => setEditingScope(value as MemoryScope)}>
+              <SelectTrigger className="mb-1.5 h-7 text-xs" aria-label={t("category")}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {MEMORY_GROUPS.map((group) => (
+                  <SelectItem key={group.scope} value={group.scope}>{t(group.label)}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <textarea
               autoFocus
               rows={2}
@@ -344,7 +367,7 @@ function PreferenceMemorySection() {
       const token = await resolveAccessToken();
       if (!token) return;
       await upsertUserMemory(token, memoryKey, value, scope);
-      setItems((prev) => prev.map((m) => m.memoryKey === memoryKey ? { ...m, value } : m));
+      setItems((prev) => prev.map((m) => m.memoryKey === memoryKey ? { ...m, value, scope } : m));
       toast.success(t("updated"));
     } catch (error) {
       toast.error(t("updateFailed"), { description: resolveErrorMessage(error) });
@@ -364,8 +387,6 @@ function PreferenceMemorySection() {
   }, [resolveErrorMessage, t]);
 
   const preferenceItems = items.filter((m) => m.scope === "preference");
-  const profileItems = items.filter((m) => m.scope === "profile");
-  const customItems = items.filter((m) => m.scope === "custom");
   const preferenceCount = preferenceItems.length;
   const atLimit = preferenceCount >= MAX_PREFERENCES;
 
@@ -376,7 +397,7 @@ function PreferenceMemorySection() {
           <PreferenceCard
             key={item.memoryKey}
             item={item}
-            onEdit={(key, value) => handleEdit(key, value, item.scope as MemoryScope)}
+            onEdit={handleEdit}
             onDelete={handleDelete}
           />
         ))}
@@ -439,19 +460,15 @@ function PreferenceMemorySection() {
           )}
         </div>
 
-        {profileItems.length > 0 && (
-          <div className="space-y-2">
-            <p className="text-xs font-medium text-foreground/70">{t("groupProfile")}</p>
-            {renderCards(profileItems)}
-          </div>
-        )}
-
-        {customItems.length > 0 && (
-          <div className="space-y-2">
-            <p className="text-xs font-medium text-foreground/70">{t("groupCustom")}</p>
-            {renderCards(customItems)}
-          </div>
-        )}
+        {MEMORY_GROUPS.slice(1).map((group) => {
+          const groupItems = items.filter((item) => normalizeMemoryScope(item.scope) === group.scope);
+          return groupItems.length > 0 ? (
+            <div key={group.scope} className="space-y-2">
+              <p className="text-xs font-medium text-foreground/70">{t(group.label)}</p>
+              {renderCards(groupItems)}
+            </div>
+          ) : null;
+        })}
       </div>
     </SettingsSection>
   );

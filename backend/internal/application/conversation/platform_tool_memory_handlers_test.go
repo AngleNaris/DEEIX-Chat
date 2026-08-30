@@ -47,7 +47,7 @@ func TestPlatformSaveMemory(t *testing.T) {
 	rec := &fakeMemoryRecorder{}
 	svc := &Service{memoryRecorder: rec}
 
-	// 默认 scope 为 custom，写入方标注 ai。
+	// 默认 category 为 context，写入方标注 ai。
 	out, err := svc.platformSaveMemory(context.Background(), platformToolCallContext{
 		UserID:    1,
 		RequestID: "req-1",
@@ -60,17 +60,17 @@ func TestPlatformSaveMemory(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &result); err != nil {
 		t.Fatalf("bad output %q: %v", out, err)
 	}
-	if result["saved"] != true || result["scope"] != "custom" || result["key"] != "language_preference" {
+	if result["saved"] != true || result["category"] != "context" || result["key"] != "language_preference" {
 		t.Fatalf("unexpected result: %+v", result)
 	}
-	if got := rec.upserted["language_preference"]; got != "custom|prefers Chinese|ai" {
+	if got := rec.upserted["language_preference"]; got != "context|prefers Chinese|ai" {
 		t.Fatalf("unexpected upsert record %q", got)
 	}
 
-	// 指定 scope 与同 key 更新。
+	// 指定 category 与同 key 更新。
 	if _, err := svc.platformSaveMemory(context.Background(), platformToolCallContext{
 		UserID:    1,
-		Arguments: json.RawMessage(`{"key":"language_preference","value":"prefers Japanese","scope":"preference"}`),
+		Arguments: json.RawMessage(`{"key":"language_preference","value":"prefers Japanese","category":"preference"}`),
 	}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestPlatformSaveMemoryValidation(t *testing.T) {
 		{"missing value", `{"key":"k"}`, "value is required"},
 		{"key too long", fmt.Sprintf(`{"key":%q,"value":"v"}`, strings.Repeat("k", platformMemoryKeyMaxLen+1)), "key exceeds"},
 		{"value too long", fmt.Sprintf(`{"key":"k","value":%q}`, strings.Repeat("v", platformMemoryValueMaxLen+1)), "value exceeds"},
-		{"invalid scope", `{"key":"k","value":"v","scope":"system"}`, "invalid scope"},
+		{"invalid category", `{"key":"k","value":"v","category":"system"}`, "invalid category"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -159,9 +159,9 @@ func TestPlatformListMemories(t *testing.T) {
 	var result struct {
 		Total    int `json:"total"`
 		Memories []struct {
-			Key   string `json:"key"`
-			Scope string `json:"scope"`
-			Value string `json:"value"`
+			Key      string `json:"key"`
+			Category string `json:"category"`
+			Value    string `json:"value"`
 		} `json:"memories"`
 	}
 	if err := json.Unmarshal([]byte(out), &result); err != nil {
@@ -175,10 +175,10 @@ func TestPlatformListMemories(t *testing.T) {
 		t.Fatalf("value must be truncated to %d runes + ellipsis, got %d", platformMemoryListValuePreview, len(valueRunes))
 	}
 
-	// scope 过滤。
+	// category/query/limit 过滤。
 	out, err = svc.platformListMemories(context.Background(), platformToolCallContext{
 		UserID:    1,
-		Arguments: json.RawMessage(`{"scope":"preference"}`),
+		Arguments: json.RawMessage(`{"category":"preference","query":"database","limit":1}`),
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -190,11 +190,17 @@ func TestPlatformListMemories(t *testing.T) {
 		t.Fatalf("unexpected filtered list: %+v", result)
 	}
 
-	// 无效 scope 拒绝。
+	// 无效 category 与越界 limit 拒绝。
 	if _, err := svc.platformListMemories(context.Background(), platformToolCallContext{
 		UserID:    1,
-		Arguments: json.RawMessage(`{"scope":"system"}`),
+		Arguments: json.RawMessage(`{"category":"system"}`),
 	}); err == nil {
-		t.Fatalf("expected error for invalid scope")
+		t.Fatalf("expected error for invalid category")
+	}
+	if _, err := svc.platformListMemories(context.Background(), platformToolCallContext{
+		UserID:    1,
+		Arguments: json.RawMessage(`{"limit":51}`),
+	}); err == nil {
+		t.Fatalf("expected error for invalid limit")
 	}
 }

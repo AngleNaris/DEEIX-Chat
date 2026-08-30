@@ -153,3 +153,32 @@ func TestUpsertUserMemoryLimit(t *testing.T) {
 		t.Fatalf("new entry after delete must be allowed: %v", err)
 	}
 }
+
+func TestServiceNormalizesMemoryCategories(t *testing.T) {
+	repo := &fakeMemoryRepo{items: []domainmemory.UserMemory{
+		{UserID: 1, MemoryKey: "profile", Scope: "profile"},
+		{UserID: 1, MemoryKey: "custom", Scope: "custom"},
+		{UserID: 1, MemoryKey: "unknown", Scope: "legacy-unknown"},
+	}}
+	svc := NewService(repo)
+
+	items, err := svc.ListUserMemories(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("list memories: %v", err)
+	}
+	if items[0].Scope != domainmemory.CategoryIdentity || items[1].Scope != domainmemory.CategoryContext || items[2].Scope != domainmemory.CategoryContext {
+		t.Fatalf("unexpected normalized categories: %+v", items)
+	}
+	if err := svc.UpsertUserMemory(context.Background(), 1, "legacy-write", "value", "profile", "user"); err != nil {
+		t.Fatalf("legacy category write: %v", err)
+	}
+	items, _ = svc.ListUserMemories(context.Background(), 1)
+	for _, item := range items {
+		if item.MemoryKey == "legacy-write" && item.Scope != domainmemory.CategoryIdentity {
+			t.Fatalf("legacy write not canonicalized: %+v", item)
+		}
+	}
+	if err := svc.UpsertUserMemory(context.Background(), 1, "invalid", "value", "not-a-category", "user"); !errors.Is(err, ErrInvalidMemoryCategory) {
+		t.Fatalf("expected invalid category error, got %v", err)
+	}
+}

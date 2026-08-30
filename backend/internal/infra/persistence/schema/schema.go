@@ -39,6 +39,7 @@ func Models() []interface{} {
 		&model.ConversationMessageFeedback{},
 		&model.Attachment{},
 		&model.FileObject{},
+		&model.FileShare{},
 		&model.UserStorageQuota{},
 		&model.ConversationRun{},
 		&model.ContentModerationEvent{},

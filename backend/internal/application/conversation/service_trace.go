@@ -707,6 +707,27 @@ func (r *messageTraceRecorder) upstreamThinkContent() string {
 	return r.upstreamThink.contentMarkdown
 }
 
+// extractUpstreamThinkArtifacts keeps renderable artifacts in the assistant body, not the reasoning trace.
+func (r *messageTraceRecorder) extractUpstreamThinkArtifacts() string {
+	if !r.enabled() || r.upstreamThink == nil {
+		return ""
+	}
+	artifacts, remaining := normalizeAssistantArtifactContent("", r.upstreamThink.contentMarkdown)
+	if strings.TrimSpace(artifacts) == "" {
+		return ""
+	}
+	r.upstreamThink.contentMarkdown = remaining
+	r.upstreamThink.summary = summarizeThinkText(remaining)
+	r.resetUpstreamThinkLiveBuffer()
+	r.emitUpstreamThinkDelta(upstreamThinkLiveUpdate{
+		kind:            messageTraceThinkKindContent,
+		contentMarkdown: remaining,
+		replaceContent:  true,
+	})
+	r.persistDraft(r.upstreamThink, true)
+	return artifacts
+}
+
 func (r *messageTraceRecorder) snapshot() *model.MessageProcessTrace {
 	if !r.visible() {
 		return nil
@@ -796,6 +817,7 @@ type upstreamThinkLiveUpdate struct {
 	kind            string
 	delta           string
 	contentMarkdown string
+	replaceContent  bool
 	reasoning       map[string]interface{}
 }
 
@@ -1087,7 +1109,7 @@ func (r *messageTraceRecorder) emitUpstreamThinkDelta(update upstreamThinkLiveUp
 	if update.delta != "" {
 		payload["delta"] = update.delta
 	}
-	if update.contentMarkdown != "" {
+	if update.replaceContent || update.contentMarkdown != "" {
 		payload["contentMarkdown"] = update.contentMarkdown
 	}
 	if len(update.reasoning) > 0 {

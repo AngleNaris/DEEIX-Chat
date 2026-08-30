@@ -47,6 +47,7 @@ func TestTableNamesUseRestructuredDomains(t *testing.T) {
 		ChatRunEvent{},
 		ChatContextRecord{},
 		FileObject{},
+		FileShare{},
 		FileChunk{},
 		MessageChunk{},
 		UserStorageQuota{},

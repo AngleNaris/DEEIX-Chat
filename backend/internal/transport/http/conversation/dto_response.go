@@ -35,6 +35,7 @@ type ConversationResponse struct {
 	ContextPolicy       string     `json:"contextPolicyJSON"`
 	LastCompactedAt     *time.Time `json:"lastCompactedAt" extensions:"x-nullable,!x-omitempty"`
 	LastResponseID      string     `json:"lastResponseID"`
+	HasUnread           bool       `json:"hasUnread"`
 	ShareStatus         string     `json:"shareStatus"`
 	ShareID             string     `json:"shareID"`
 	SharedAt            *time.Time `json:"sharedAt" extensions:"x-nullable,!x-omitempty"`
@@ -125,6 +126,7 @@ func toConversationResponse(item *model.Conversation) ConversationResponse {
 		ContextPolicy:       item.ContextPolicy,
 		LastCompactedAt:     item.LastCompactedAt,
 		LastResponseID:      item.LastResponseID,
+		HasUnread:           item.LastAssistantMessageID != nil && (item.LastReadMessageID == nil || *item.LastReadMessageID < *item.LastAssistantMessageID),
 		ShareStatus:         shareStatus,
 		ShareID:             item.ShareID,
 		SharedAt:            item.SharedAt,
@@ -1733,6 +1735,68 @@ type RevokeConversationSharesResponseDoc struct {
 type PublicSharedConversationResponseDoc struct {
 	ErrorMsg string                           `json:"errorMsg"`
 	Data     PublicSharedConversationResponse `json:"data"`
+}
+
+// FileShareResponseDoc 文件分享状态响应文档。
+type FileShareResult struct {
+	ShareID   string     `json:"share_id,omitempty"`
+	FileID    string     `json:"file_id,omitempty"`
+	Status    string     `json:"status"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	CreatedAt time.Time  `json:"created_at,omitempty"`
+}
+
+func toFileShareResult(item *appconversation.FileShareResult) FileShareResult {
+	return FileShareResult{
+		ShareID:   item.ShareID,
+		FileID:    item.FileID,
+		Status:    item.Status,
+		ExpiresAt: item.ExpiresAt,
+		CreatedAt: item.CreatedAt,
+	}
+}
+
+type FileShareResponseDoc struct {
+	ErrorMsg string          `json:"errorMsg"`
+	Data     FileShareResult `json:"data"`
+}
+
+// PublicFileShareResponseDoc 公开文件分享响应文档。
+type PublicFileShareResult struct {
+	ShareID   string     `json:"share_id"`
+	FileID    string     `json:"file_id"`
+	FileName  string     `json:"file_name"`
+	MimeType  string     `json:"mime_type"`
+	Category  string     `json:"file_category"`
+	SizeBytes int64      `json:"size_bytes"`
+	CreatedAt time.Time  `json:"created_at"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+}
+
+func toPublicFileShareResult(item *appconversation.PublicFileShareResult) PublicFileShareResult {
+	return PublicFileShareResult{
+		ShareID:   item.ShareID,
+		FileID:    item.FileID,
+		FileName:  item.FileName,
+		MimeType:  item.MimeType,
+		Category:  item.Category,
+		SizeBytes: item.SizeBytes,
+		CreatedAt: item.CreatedAt,
+		ExpiresAt: item.ExpiresAt,
+	}
+}
+
+type PublicFileShareResponseDoc struct {
+	ErrorMsg string                `json:"errorMsg"`
+	Data     PublicFileShareResult `json:"data"`
+}
+
+// FileShareRevokeResponseDoc 文件分享撤销响应文档。
+type FileShareRevokeResponseDoc struct {
+	ErrorMsg string `json:"errorMsg"`
+	Data     struct {
+		Revoked bool `json:"revoked" example:"true"`
+	} `json:"data"`
 }
 
 // ErrorDoc 错误响应文档。

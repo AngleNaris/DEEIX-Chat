@@ -3,6 +3,7 @@ package knowledgebase
 import (
 	"context"
 	"errors"
+	"io"
 	"testing"
 
 	appupload "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/upload"
@@ -231,6 +232,110 @@ func TestOpenVisibleFileContentRejectsUnlinkedFile(t *testing.T) {
 	}
 }
 
+func TestCreateUserContentUploadsAndLinksMarkdown(t *testing.T) {
+	repo := &knowledgeBaseRepositoryStub{item: &domainknowledgebase.KnowledgeBase{ID: 7, Scope: domainknowledgebase.ScopeUser, OwnerUserID: 11}}
+	uploader := &knowledgeBaseFileUploaderStub{result: &appupload.UploadFileResult{File: domainconversation.FileObject{FileID: "file-one", FileName: "policy.md"}}}
+	cleaner := &knowledgeBaseFileCleanerStub{deleted: map[string]bool{}}
+	service := NewService(repo)
+	service.SetFileUploader(uploader)
+	service.SetFileCleaner(cleaner)
+
+	file, err := service.CreateUserContent(context.Background(), 11, "kb-one", UserContentInput{FileName: "policy.md", Content: "# Policy"})
+	if err != nil {
+		t.Fatalf("CreateUserContent() error = %v", err)
+	}
+	body, readErr := io.ReadAll(uploader.input.Reader)
+	if readErr != nil {
+		t.Fatalf("read uploaded content: %v", readErr)
+	}
+	if file.FileID != "file-one" || repo.addCalls != 1 || string(body) != "# Policy" {
+		t.Fatalf("CreateUserContent() file=%#v addCalls=%d body=%q", file, repo.addCalls, body)
+	}
+	if uploader.input.UserID != 11 || uploader.input.Ownership != appupload.FileOwnershipUser || uploader.input.Purpose != "knowledge_base" || uploader.input.MimeType != "text/markdown" {
+		t.Fatalf("UploadFile() input = %#v", uploader.input)
+	}
+}
+
+func TestUpdateUserContentChangesOneFieldPerCall(t *testing.T) {
+	newService := func() (*Service, *knowledgeBaseFileUpdaterStub) {
+		repo := &knowledgeBaseRepositoryStub{
+			item: &domainknowledgebase.KnowledgeBase{ID: 7, Scope: domainknowledgebase.ScopeUser, OwnerUserID: 11},
+			file: &domainconversation.FileObject{FileID: "file-one", UserID: 11},
+		}
+		updater := &knowledgeBaseFileUpdaterStub{}
+		service := NewService(repo)
+		service.SetFileUpdater(updater)
+		return service, updater
+	}
+
+	t.Run("content", func(t *testing.T) {
+		service, updater := newService()
+		content := "updated"
+		if err := service.UpdateUserContent(context.Background(), 11, "kb-one", "file-one", UserContentPatch{Content: &content}); err != nil {
+			t.Fatalf("UpdateUserContent() error = %v", err)
+		}
+		if updater.writeCalls != 1 || updater.renameCalls != 0 || updater.userID != 11 || updater.fileID != "file-one" || updater.content != content {
+			t.Fatalf("content update = %#v", updater)
+		}
+	})
+
+	t.Run("title", func(t *testing.T) {
+		service, updater := newService()
+		title := "renamed.md"
+		if err := service.UpdateUserContent(context.Background(), 11, "kb-one", "file-one", UserContentPatch{FileName: &title}); err != nil {
+			t.Fatalf("UpdateUserContent() error = %v", err)
+		}
+		if updater.writeCalls != 0 || updater.renameCalls != 1 || updater.userID != 11 || updater.fileID != "file-one" || updater.fileName != title {
+			t.Fatalf("title update = %#v", updater)
+		}
+	})
+
+	t.Run("combined", func(t *testing.T) {
+		service, updater := newService()
+		title, content := "renamed.md", "updated"
+		err := service.UpdateUserContent(context.Background(), 11, "kb-one", "file-one", UserContentPatch{FileName: &title, Content: &content})
+		if !errors.Is(err, ErrInvalidKnowledgeBase) || updater.writeCalls != 0 || updater.renameCalls != 0 {
+			t.Fatalf("UpdateUserContent() error=%v updater=%#v", err, updater)
+		}
+	})
+}
+
+func TestUserContentWritesRejectBuiltinAndCrossUserKnowledgeBases(t *testing.T) {
+	for name, item := range map[string]*domainknowledgebase.KnowledgeBase{
+		"builtin":    {ID: 7, Scope: domainknowledgebase.ScopeBuiltin, Enabled: true},
+		"cross user": {ID: 7, Scope: domainknowledgebase.ScopeUser, OwnerUserID: 12, Enabled: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			updater := &knowledgeBaseFileUpdaterStub{}
+			service := NewService(&knowledgeBaseRepositoryStub{item: item, file: &domainconversation.FileObject{FileID: "file-one", UserID: 11}})
+			service.SetFileUpdater(updater)
+			content := "blocked"
+			err := service.UpdateUserContent(context.Background(), 11, "kb-one", "file-one", UserContentPatch{Content: &content})
+			if !errors.Is(err, ErrKnowledgeBaseNotFound) || updater.writeCalls != 0 {
+				t.Fatalf("UpdateUserContent() error=%v calls=%d", err, updater.writeCalls)
+			}
+		})
+	}
+}
+
+func TestDeleteUserContentUnlinksWithoutDeletingSourceFile(t *testing.T) {
+	repo := &knowledgeBaseRepositoryStub{
+		item: &domainknowledgebase.KnowledgeBase{ID: 7, Scope: domainknowledgebase.ScopeUser, OwnerUserID: 11},
+		file: &domainconversation.FileObject{FileID: "file-one", UserID: 11},
+	}
+	cleaner := &knowledgeBaseFileCleanerStub{deleted: map[string]bool{"file-one": true}}
+	service := NewService(repo)
+	service.SetFileCleaner(cleaner)
+
+	result, err := service.DeleteUserContent(context.Background(), 11, "kb-one", "file-one")
+	if err != nil {
+		t.Fatalf("DeleteUserContent() error = %v", err)
+	}
+	if repo.removeCalls != 1 || cleaner.calls != 0 || result.FileID != "file-one" {
+		t.Fatalf("DeleteUserContent() result=%#v removeCalls=%d cleanerCalls=%d", result, repo.removeCalls, cleaner.calls)
+	}
+}
+
 func TestDeleteUserOptionallyCleansOnlyUnreferencedFiles(t *testing.T) {
 	repo := &knowledgeBaseRepositoryStub{
 		item: &domainknowledgebase.KnowledgeBase{ID: 7, Scope: domainknowledgebase.ScopeUser, OwnerUserID: 11},
@@ -312,6 +417,31 @@ type knowledgeBaseFileUploaderStub struct {
 	err    error
 }
 
+type knowledgeBaseFileUpdaterStub struct {
+	writeCalls  int
+	renameCalls int
+	userID      uint
+	fileID      string
+	fileName    string
+	content     string
+}
+
+func (s *knowledgeBaseFileUpdaterStub) OverwriteFileContent(_ context.Context, userID uint, fileID string, content string) error {
+	s.writeCalls++
+	s.userID = userID
+	s.fileID = fileID
+	s.content = content
+	return nil
+}
+
+func (s *knowledgeBaseFileUpdaterStub) RenameFile(_ context.Context, userID uint, fileID string, fileName string) (*domainconversation.FileObject, error) {
+	s.renameCalls++
+	s.userID = userID
+	s.fileID = fileID
+	s.fileName = fileName
+	return &domainconversation.FileObject{FileID: fileID, FileName: fileName}, nil
+}
+
 func (s *knowledgeBaseFileUploaderStub) UploadFile(_ context.Context, input appupload.UploadFileInput) (*appupload.UploadFileResult, error) {
 	s.input = input
 	return s.result, s.err
@@ -340,6 +470,7 @@ type knowledgeBaseRepositoryStub struct {
 	deleteErr                error
 	deleteCalls              int
 	addCalls                 int
+	removeCalls              int
 	resolveCalls             int
 	availableKnowledgeBaseID uint
 	availableOwnerUserID     uint
@@ -419,6 +550,7 @@ func (s *knowledgeBaseRepositoryStub) AddKnowledgeBaseFiles(context.Context, uin
 }
 
 func (s *knowledgeBaseRepositoryStub) RemoveKnowledgeBaseFile(context.Context, uint, string) error {
+	s.removeCalls++
 	return nil
 }
 

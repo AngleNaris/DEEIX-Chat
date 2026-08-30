@@ -431,6 +431,50 @@ func TestMistralOCRSettings(t *testing.T) {
 	}
 }
 
+func TestSystemVisionOCRSettings(t *testing.T) {
+	if err := validatePatchItem(PatchItem{Namespace: "extract", Key: "ocr_engine", Value: "system_vision"}); err != nil {
+		t.Fatalf("expected system_vision OCR engine to pass, got %v", err)
+	}
+	repo := &testSettingsRepo{byNamespace: map[string][]domainsettings.SystemSetting{
+		"extract": {
+			{Namespace: "extract", Key: "image_ocr_enabled", Value: "true"},
+			{Namespace: "extract", Key: "pdf_ocr_fallback_enabled", Value: "false"},
+			{Namespace: "extract", Key: "ocr_engine", Value: "system_vision"},
+		},
+		"file": {},
+		"chat": {
+			{Namespace: "chat", Key: "multimodal_delegation_enabled", Value: "true"},
+			{Namespace: "chat", Key: "multimodal_delegation_image_model", Value: "vision-model"},
+			{Namespace: "chat", Key: "multimodal_delegation_modalities", Value: "image,audio,video"},
+		},
+	}}
+	service := NewService(repo, "test-data-encryption-key")
+	if err := service.validateFileProcessingSettings(context.Background(), []PatchItem{{Namespace: "extract", Key: "ocr_engine", Value: "system_vision"}}); err != nil {
+		t.Fatalf("expected configured system vision to pass, got %v", err)
+	}
+	if err := service.validateFileProcessingSettings(context.Background(), []PatchItem{{Namespace: "extract", Key: "pdf_ocr_fallback_enabled", Value: "true"}}); err == nil {
+		t.Fatal("expected system vision PDF fallback to fail")
+	}
+
+	for _, tc := range []struct {
+		name    string
+		patch   PatchItem
+		wantErr bool
+	}{
+		{name: "disable delegation", patch: PatchItem{Namespace: "chat", Key: "multimodal_delegation_enabled", Value: "false"}, wantErr: true},
+		{name: "clear image model", patch: PatchItem{Namespace: "chat", Key: "multimodal_delegation_image_model", Value: ""}, wantErr: true},
+		{name: "remove image modality", patch: PatchItem{Namespace: "chat", Key: "multimodal_delegation_modalities", Value: "audio,video"}, wantErr: true},
+		{name: "keep image modality", patch: PatchItem{Namespace: "chat", Key: "multimodal_delegation_modalities", Value: "image,audio"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := service.BatchUpdate(context.Background(), []PatchItem{tc.patch})
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("BatchUpdate() error = %v, wantErr %v", err, tc.wantErr)
+			}
+		})
+	}
+}
+
 func TestValidateFileProcessingSettingsRequiresMistralOCRConfiguration(t *testing.T) {
 	baseSettings := []domainsettings.SystemSetting{
 		{Namespace: "extract", Key: "image_ocr_enabled", Value: "true"},

@@ -77,6 +77,10 @@ func (h *Handler) UpsertUserMemory(c *gin.Context) {
 		req.Scope,
 		"user",
 	); err != nil {
+		if errors.Is(err, appmemory.ErrInvalidMemoryCategory) {
+			response.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
 		if errors.Is(err, appmemory.ErrMemoryLimitReached) {
 			response.Error(c, http.StatusConflict, err.Error())
 			return

@@ -2,9 +2,11 @@ package conversation
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 	"go.uber.org/zap"
 )
 
@@ -109,6 +111,9 @@ func (s *fileReindexScheduler) tick(ctx context.Context, now time.Time) {
 	}
 	for _, item := range s.dueItemsWithDelay(now, delay) {
 		if err := s.trigger(ctx, item.userID, item.fileID); err != nil {
+			if errors.Is(err, repository.ErrNotFound) {
+				continue
+			}
 			s.mu.Lock()
 			if _, exists := s.pending[item.fileID]; !exists {
 				s.pending[item.fileID] = reindexPendingItem{userID: item.userID, lastWrite: now}

@@ -155,7 +155,7 @@ func (s *Service) RetryAgentGroupRunStep(
 		if onDelta != nil && strings.TrimSpace(st.finalAnswer) != "" {
 			_ = onDelta(st.finalAnswer)
 		}
-		return st.completedResult(), nil
+		return st.completedResult(ctx), nil
 	}
 	// 运行未进入终态时兜底阻塞（CAS 冲突/内部错误）。
 	if st.run.Status == domainagentgroup.RunStatusRunning || st.run.Status == domainagentgroup.RunStatusPending {
