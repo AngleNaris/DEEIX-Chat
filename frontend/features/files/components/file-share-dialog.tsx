@@ -40,6 +40,7 @@ export function FileShareDialog({
   const [share, setShare] = React.useState<FileShareDTO | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [mutating, setMutating] = React.useState(false);
+  const restoreFocusRef = React.useRef<HTMLElement | null>(null);
 
   React.useEffect(() => {
     if (!open || !file) {
@@ -102,8 +103,23 @@ export function FileShareDialog({
 
   return (
     <Dialog open={open} onOpenChange={(next) => !mutating && onOpenChange(next)}>
-      <DialogContent className="max-w-[calc(100vw-1.5rem)] gap-0 overflow-hidden p-0 sm:max-w-[460px]">
-        <div className="space-y-4 p-5">
+      <DialogContent
+        className="flex min-w-0 max-h-[calc(100svh-2rem)] max-w-[calc(100vw-1.5rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-[460px]"
+        onOpenAutoFocus={() => {
+          const activeElement = document.activeElement;
+          restoreFocusRef.current = activeElement instanceof HTMLElement && activeElement !== document.body
+            ? activeElement
+            : null;
+        }}
+        onCloseAutoFocus={(event) => {
+          const restoreTarget = restoreFocusRef.current;
+          restoreFocusRef.current = null;
+          if (!restoreTarget?.isConnected) return;
+          event.preventDefault();
+          restoreTarget.focus({ preventScroll: true });
+        }}
+      >
+        <div className="min-w-0 flex-1 space-y-4 overflow-y-auto p-5">
           <DialogHeader>
             <DialogTitle>{t("title")}</DialogTitle>
             <DialogDescription>{t("description", { name: file?.fileName ?? "" })}</DialogDescription>
@@ -120,9 +136,11 @@ export function FileShareDialog({
                   ? t("expiresAt", { value: new Date(share.expires_at).toLocaleString() })
                   : t("neverExpires")}
               </p>
-              <div className="flex min-w-0 items-center gap-2 border-y border-border/50 py-2">
-                <Link2 className="size-3.5 shrink-0 text-muted-foreground" />
-                <span dir="ltr" className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{shareURL}</span>
+              <div className="flex min-w-0 items-start gap-2 border-y border-border/50 py-2">
+                <Link2 className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+                <span dir="ltr" className="min-w-0 flex-1 break-all text-xs leading-5 text-muted-foreground">
+                  {shareURL}
+                </span>
                 <CopyActionButton
                   value={shareURL}
                   messages={{ copied: t("copied"), failed: t("copyFailed") }}
@@ -147,7 +165,7 @@ export function FileShareDialog({
           )}
         </div>
 
-        <DialogFooter className="border-t border-border/60 px-5 py-3">
+        <DialogFooter className="shrink-0 border-t border-border/60 px-5 py-3">
           <Button type="button" variant="ghost" disabled={mutating} onClick={() => onOpenChange(false)}>
             {t("close")}
           </Button>

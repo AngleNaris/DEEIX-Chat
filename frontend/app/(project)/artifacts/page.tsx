@@ -2,7 +2,7 @@ import { ArtifactsSection } from "@/features/settings/components/sections/chat/m
 
 export default function ArtifactsPage() {
   return (
-    <div className="md:-mx-4 md:-mb-4">
+    <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-y-auto md:-mx-4 md:-mb-4">
       <div className="mx-auto w-full max-w-5xl px-4 py-6 md:px-6">
         <ArtifactsSection />
       </div>
