@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { syncPackageVersionContent } from "./sync-package-version.mjs";
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const args = process.argv.slice(2);
@@ -40,9 +41,8 @@ function replaceOrThrow(content, pattern, replacement, label) {
 
 function syncPackageVersion(...pathSegments) {
   const packageFile = join(repoRoot, ...pathSegments, "package.json");
-  const packageJson = JSON.parse(readFileSync(packageFile, "utf8"));
-  packageJson.version = version;
-  writeIfChanged(packageFile, `${JSON.stringify(packageJson, null, 2)}\n`);
+  const current = readFileSync(packageFile, "utf8");
+  writeIfChanged(packageFile, syncPackageVersionContent(current, version));
 }
 
 function syncFrontend() {

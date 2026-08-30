@@ -15,6 +15,7 @@
     "test": "turbo run test",
     "test:agent-group-contract": "node scripts/test-agent-group-contract.mjs",
     "test:load": "node scripts/load-gate.mjs",
+    "test:version-sync": "node --test scripts/sync-package-version.test.mjs",
     "verify": "turbo run check test build"
   },
   "devDependencies": {
