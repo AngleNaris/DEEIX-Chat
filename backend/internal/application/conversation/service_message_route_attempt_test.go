@@ -21,6 +21,7 @@ func TestBuildMessageRoutePromptRebuildsRouteSpecificFields(t *testing.T) {
 		UserContent:         "follow up",
 		DomainMessages:      domainMessages,
 		ProjectSystemPrompt: "project policy",
+		RoleSystemPrompt:    "role policy",
 		Config: config.Config{
 			DefaultSystemPrompt: "platform policy",
 		},
@@ -37,6 +38,11 @@ func TestBuildMessageRoutePromptRebuildsRouteSpecificFields(t *testing.T) {
 	}
 	if len(chatPlan.Messages) < 4 || chatPlan.Messages[0].Role != "system" {
 		t.Fatalf("expected native system prompt, got %#v", chatPlan.Messages)
+	}
+	for _, want := range []string{"project policy", "role policy", `<project`, `<role`} {
+		if !strings.Contains(chatPlan.Messages[0].Content, want) {
+			t.Fatalf("expected native system prompt to contain %q, got %#v", want, chatPlan.Messages[0])
+		}
 	}
 	if chatPlan.Messages[2].ReasoningContent != "private reasoning" {
 		t.Fatalf("expected reasoning passback, got %#v", chatPlan.Messages[2])
@@ -59,8 +65,48 @@ func TestBuildMessageRoutePromptRebuildsRouteSpecificFields(t *testing.T) {
 		}
 	}
 	latest := interactionPlan.Messages[len(interactionPlan.Messages)-1]
-	if latest.Role != "user" || !strings.Contains(latest.Content, "platform policy") || !strings.Contains(latest.Content, "follow up") {
+	if latest.Role != "user" ||
+		!strings.Contains(latest.Content, "platform policy") ||
+		!strings.Contains(latest.Content, "project policy") ||
+		!strings.Contains(latest.Content, "role policy") ||
+		!strings.Contains(latest.Content, "follow up") {
 		t.Fatalf("expected inlined system prompt on latest user message, got %#v", latest)
+	}
+}
+
+func TestBuildMessageRoutePromptRoleBoundary(t *testing.T) {
+	service := &Service{cfg: config.NewRuntime(config.Config{})}
+	route := &channel.ResolvedRoute{
+		Protocol:      llm.AdapterOpenAIChatCompletions,
+		UpstreamModel: "test-model",
+	}
+	tests := []struct {
+		name       string
+		rolePrompt string
+		wantRole   bool
+	}{
+		{name: "first role message", rolePrompt: "role-only policy", wantRole: true},
+		{name: "ordinary conversation", wantRole: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			plan, err := service.buildMessageRoutePrompt(t.Context(), route, messageRoutePromptInput{
+				UserContent:      "first question",
+				DomainMessages:   []model.Message{{Role: "user", Content: "first question"}},
+				RoleSystemPrompt: test.rolePrompt,
+				Config:           config.Config{},
+			})
+			if err != nil {
+				t.Fatalf("build prompt: %v", err)
+			}
+			containsRole := false
+			for _, message := range plan.Messages {
+				containsRole = containsRole || strings.Contains(message.Content, `<role`) || strings.Contains(message.Content, "role-only policy")
+			}
+			if containsRole != test.wantRole {
+				t.Fatalf("role prompt presence = %v, want %v: %#v", containsRole, test.wantRole, plan.Messages)
+			}
+		})
 	}
 }
 

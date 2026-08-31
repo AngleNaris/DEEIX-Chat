@@ -56,6 +56,7 @@ func newForkConversationService(repo repository.ConversationRepository) *Service
 
 func TestForkConversationFromMessageBuildsAtomicFork(t *testing.T) {
 	projectID := uint(3)
+	roleID := uint(4)
 	rootID := uint(101)
 	leafID := uint(102)
 	sourceID := uint(88)
@@ -68,6 +69,10 @@ func TestForkConversationFromMessageBuildsAtomicFork(t *testing.T) {
 			ProjectPublicID:       "project_public",
 			ProjectName:           "Project",
 			ProjectSystemPrompt:   "Project instructions",
+			RoleID:                &roleID,
+			RolePublicID:          "role_public",
+			RoleName:              "Music producer",
+			RoleSystemPrompt:      "Role instructions",
 			PublicID:              "conv_source",
 			Title:                 "Source title",
 			LabelsJSON:            `["important"]`,
@@ -114,6 +119,12 @@ func TestForkConversationFromMessageBuildsAtomicFork(t *testing.T) {
 		created.ProjectName != repo.conversation.ProjectName ||
 		created.ProjectSystemPrompt != repo.conversation.ProjectSystemPrompt {
 		t.Fatalf("fork lost project summary: %+v", created)
+	}
+	if created.RoleID == nil || *created.RoleID != roleID ||
+		created.RolePublicID != repo.conversation.RolePublicID ||
+		created.RoleName != repo.conversation.RoleName ||
+		created.RoleSystemPrompt != repo.conversation.RoleSystemPrompt {
+		t.Fatalf("fork lost role binding or summary: %+v", created)
 	}
 	if len(repo.createInput.Messages) != 2 {
 		t.Fatalf("len(createInput.Messages) = %d, want 2", len(repo.createInput.Messages))

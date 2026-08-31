@@ -55,6 +55,7 @@ type agentGroupRunState struct {
 	credentialAttempted bool
 	credentialAttempts  []credentialWrite
 	credentialWrites    []credentialWrite
+	promptVars          systemPromptVars
 }
 
 // executeAgentGroupRun 执行一次 Agent 群组串行运行（主管决策 → 成员执行 → 循环）。
@@ -160,6 +161,7 @@ func (s *Service) executeAgentGroupRun(
 		ledger:            newToolExecutionLedger(),
 		persistToolCalls:  true,
 		mcpActivation:     newMCPActivationState(snapshot.ActivatedMCPServerIDs),
+		promptVars:        s.resolveSystemPromptVars(ctx, input.UserID),
 	}
 	created, err := s.agentGroupRunStore.CreateAgentGroupRunIfIdle(ctx, run)
 	if err != nil {
@@ -272,7 +274,7 @@ func (st *agentGroupRunState) runSerial(ctx context.Context) error {
 		st.emitAgentGroupStepStarted(ctx, memberStep, memberAttempt, member)
 		memberOutput, err := st.executeAgentTurn(ctx, memberAttempt, st.agentTurnInput(
 			memberStep, memberAttempt, member,
-			agentGroupMemberSystemPrompt(st.snapshot, member),
+			agentGroupMemberSystemPrompt(st.snapshot, member, st.promptVars),
 			agentGroupMemberUserContent(st.input.Content, decision, agentGroupContextBrief(st.summaries)),
 			nil,
 		))
@@ -301,7 +303,7 @@ func (st *agentGroupRunState) runSupervisorDecision(
 	baseUser := agentGroupSupervisorUserContent(st.input.Content, st.snapshot.Members, agentGroupContextBrief(st.summaries))
 	output, err := st.executeAgentTurn(ctx, attempt, st.agentTurnInput(
 		step, attempt, member,
-		agentGroupSupervisorSystemPrompt(st.snapshot),
+		agentGroupSupervisorSystemPrompt(st.snapshot, st.promptVars),
 		baseUser,
 		agentGroupSupervisorOptions(nil),
 	))
@@ -334,7 +336,7 @@ func (st *agentGroupRunState) runSupervisorDecision(
 		st.accumulateUsage(output)
 		output, err = st.executeAgentTurn(ctx, attempt, st.agentTurnInput(
 			step, attempt, member,
-			agentGroupSupervisorSystemPrompt(st.snapshot),
+			agentGroupSupervisorSystemPrompt(st.snapshot, st.promptVars),
 			baseUser+"\n\n"+agentGroupSupervisorCorrectionHint(decisionErr, st.snapshot.Members),
 			agentGroupSupervisorOptions(nil),
 		))

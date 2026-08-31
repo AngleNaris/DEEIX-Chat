@@ -59,6 +59,16 @@ func TestExpandSystemPromptJSVars(t *testing.T) {
 	}
 }
 
+func TestRunPromptJSVarTimeoutReturnsEmpty(t *testing.T) {
+	started := time.Now()
+	if got := runPromptJSVar("for (;;) {}"); got != "" {
+		t.Fatalf("timed out js must render empty, got %q", got)
+	}
+	if elapsed := time.Since(started); elapsed > 2*jsVarTimeout {
+		t.Fatalf("js timeout exceeded fail-safe window: %s", elapsed)
+	}
+}
+
 func TestExpandSystemPromptScriptVars(t *testing.T) {
 	vars := newSystemPromptVars(time.Now(), "", "")
 	// 无 resolver 时脚本标签替换为空。
@@ -111,7 +121,6 @@ func (f *fakeDynamicPromptReader) RunDynamicPrompt(ctx context.Context, userID u
 
 func TestResolveSystemPromptScriptsAttached(t *testing.T) {
 	svc := &Service{
-		userProfile: &fakeUserProfile{locale: "zh-CN", username: "alice"},
 		dynamicPrompts: &fakeDynamicPromptReader{items: []appdynamicprompt.PromptView{
 			{Name: "calc", Kind: "js", Content: "40 + 2", Enabled: true},
 			{Name: "off", Kind: "text", Content: "x", Enabled: false},
@@ -119,7 +128,7 @@ func TestResolveSystemPromptScriptsAttached(t *testing.T) {
 	}
 	vars := svc.resolveSystemPromptVars(context.Background(), 1)
 	if vars.scriptResolver == nil {
-		t.Fatalf("script resolver must be attached")
+		t.Fatalf("script resolver must not depend on the user profile service")
 	}
 	if got := vars.scriptResolver("calc"); got != "42" {
 		t.Fatalf("js script expansion: got %q", got)

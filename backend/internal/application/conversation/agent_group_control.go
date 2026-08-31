@@ -415,6 +415,7 @@ func (s *Service) buildAgentGroupRunResumeState(
 		persistToolCalls:      true,
 		mcpActivation:         newMCPActivationState(snapshot.ActivatedMCPServerIDs),
 		credentialAttempted:   snapshot.CredentialWriteAttempted,
+		promptVars:            s.resolveSystemPromptVars(ctx, run.UserID),
 	}, nil
 }
 
@@ -573,7 +574,7 @@ func (st *agentGroupRunState) executeRetryableStep(
 		}
 		output, err := st.executeAgentTurn(ctx, attempt, st.agentTurnInput(
 			step, attempt, member,
-			agentGroupMemberSystemPrompt(st.snapshot, member),
+			agentGroupMemberSystemPrompt(st.snapshot, member, st.promptVars),
 			agentGroupMemberUserContent(st.input.Content, &decision, agentGroupContextBrief(st.summaries)),
 			nil,
 		))
@@ -607,7 +608,7 @@ func (st *agentGroupRunState) executeMemberStepAfterSupervisor(
 	st.emitAgentGroupStepStarted(ctx, memberStep, memberAttempt, member)
 	memberOutput, err := st.executeAgentTurn(ctx, memberAttempt, st.agentTurnInput(
 		memberStep, memberAttempt, member,
-		agentGroupMemberSystemPrompt(st.snapshot, member),
+		agentGroupMemberSystemPrompt(st.snapshot, member, st.promptVars),
 		agentGroupMemberUserContent(st.input.Content, &decision, agentGroupContextBrief(st.summaries)),
 		nil,
 	))

@@ -1604,39 +1604,41 @@ html[data-branding-pending] body {
   background: var(--primary);
 }
 
-/* 行级扫光：进行中的工具调用 / 群组成员活动行，高光从左到右循环扫过 */
+/* 文字扫光：仅标题字形显示从左到右的高光，不改变所在行的背景。 */
 .trace-sweep {
   position: relative;
 }
 
-.trace-sweep::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  border-radius: inherit;
-  background: linear-gradient(
-    100deg,
-    transparent 30%,
-    color-mix(in oklch, currentColor 7%, transparent) 50%,
-    transparent 70%
-  );
-  background-size: 220% 100%;
-  background-repeat: no-repeat;
-  animation: trace-sweep-move var(--trace-sweep-duration, 1.8s) ease-in-out infinite;
+@supports ((background-clip: text) or (-webkit-background-clip: text)) {
+  .trace-sweep {
+    background-image: linear-gradient(
+      100deg,
+      currentColor 0%,
+      currentColor 38%,
+      color-mix(in oklch, currentColor 55%, var(--primary)) 50%,
+      currentColor 62%,
+      currentColor 100%
+    );
+    background-size: 220% 100%;
+    background-repeat: no-repeat;
+    background-clip: text;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: trace-sweep-move var(--trace-sweep-duration, 1.8s) ease-in-out infinite;
+  }
 }
 
 @keyframes trace-sweep-move {
   from {
-    background-position: 130% 0;
+    background-position: 100% 0;
   }
   to {
-    background-position: -30% 0;
+    background-position: 0% 0;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .trace-sweep::after {
+  .trace-sweep {
     animation: none;
     background-position: 50% 0;
   }

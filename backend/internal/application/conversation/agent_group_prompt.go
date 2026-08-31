@@ -130,15 +130,15 @@ func stripMarkdownJSONFence(text string) string {
 
 // agentGroupSupervisorSystemPrompt 组装主管系统提示词：
 // 项目指令 → 主管角色 → 群组协调协议 → 输出协议。
-func agentGroupSupervisorSystemPrompt(snapshot *domainagentgroup.RunSnapshot) string {
+func agentGroupSupervisorSystemPrompt(snapshot *domainagentgroup.RunSnapshot, vars systemPromptVars) string {
 	var layers []string
-	if text := strings.TrimSpace(snapshot.Project.SystemPrompt); text != "" {
+	if text := strings.TrimSpace(expandSystemPromptVars(snapshot.Project.SystemPrompt, vars)); text != "" {
 		layers = append(layers, text)
 	}
-	if text := strings.TrimSpace(snapshot.Supervisor.RoleSystemPrompt); text != "" {
+	if text := strings.TrimSpace(expandSystemPromptVars(snapshot.Supervisor.RoleSystemPrompt, vars)); text != "" {
 		layers = append(layers, text)
 	}
-	if text := strings.TrimSpace(snapshot.Group.CoordinationPrompt); text != "" {
+	if text := strings.TrimSpace(expandSystemPromptVars(snapshot.Group.CoordinationPrompt, vars)); text != "" {
 		layers = append(layers, text)
 	}
 	layers = append(layers, agentGroupSupervisorOutputProtocol)
@@ -147,15 +147,15 @@ func agentGroupSupervisorSystemPrompt(snapshot *domainagentgroup.RunSnapshot) st
 
 // agentGroupMemberSystemPrompt 组装成员系统提示词：
 // 项目指令 → 成员角色 → 成员职责 → 成员输出协议。
-func agentGroupMemberSystemPrompt(snapshot *domainagentgroup.RunSnapshot, member *domainagentgroup.RunSnapshotMember) string {
+func agentGroupMemberSystemPrompt(snapshot *domainagentgroup.RunSnapshot, member *domainagentgroup.RunSnapshotMember, vars systemPromptVars) string {
 	var layers []string
-	if text := strings.TrimSpace(snapshot.Project.SystemPrompt); text != "" {
+	if text := strings.TrimSpace(expandSystemPromptVars(snapshot.Project.SystemPrompt, vars)); text != "" {
 		layers = append(layers, text)
 	}
-	if text := strings.TrimSpace(member.RoleSystemPrompt); text != "" {
+	if text := strings.TrimSpace(expandSystemPromptVars(member.RoleSystemPrompt, vars)); text != "" {
 		layers = append(layers, text)
 	}
-	if text := strings.TrimSpace(member.DutyInstruction); text != "" {
+	if text := strings.TrimSpace(expandSystemPromptVars(member.DutyInstruction, vars)); text != "" {
 		layers = append(layers, text)
 	}
 	layers = append(layers, agentGroupMemberOutputProtocol)

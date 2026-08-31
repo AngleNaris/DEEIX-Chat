@@ -120,19 +120,7 @@ func (s *Service) resolveSystemPromptVars(ctx context.Context, userID uint) syst
 		now = now.In(loc)
 	}
 	vars := newSystemPromptVars(now, "", "")
-	if userID == 0 || s.userProfile == nil {
-		return vars
-	}
-	locale, username, _, err := s.userProfile.GetUserProfile(ctx, userID)
-	if err != nil {
-		if s.logger != nil {
-			s.logger.Warn("system_prompt_user_profile_failed", zap.Error(err))
-		}
-		return vars
-	}
-	vars.Language = locale
-	vars.Username = username
-	if s.dynamicPrompts != nil {
+	if userID != 0 && s.dynamicPrompts != nil {
 		scripts := s.getCachedDynamicPrompts(ctx, userID)
 		if len(scripts) > 0 {
 			vars.scriptResolver = func(name string) string {
@@ -145,6 +133,18 @@ func (s *Service) resolveSystemPromptVars(ctx context.Context, userID uint) syst
 			}
 		}
 	}
+	if userID == 0 || s.userProfile == nil {
+		return vars
+	}
+	locale, username, _, err := s.userProfile.GetUserProfile(ctx, userID)
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Warn("system_prompt_user_profile_failed", zap.Error(err))
+		}
+		return vars
+	}
+	vars.Language = locale
+	vars.Username = username
 	return vars
 }
 

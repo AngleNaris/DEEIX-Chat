@@ -34,6 +34,42 @@ func agentGroupPromptTestSnapshot(nWorkers int) *domainagentgroup.RunSnapshot {
 	return snapshot
 }
 
+func TestAgentGroupSystemPromptsExpandDynamicVariables(t *testing.T) {
+	snapshot := agentGroupPromptTestSnapshot(1)
+	snapshot.Project.SystemPrompt = "project {{date}}"
+	snapshot.Supervisor.RoleSystemPrompt = "supervisor {{language}}"
+	snapshot.Group.CoordinationPrompt = "coordination {{script: note}}"
+	snapshot.Members[0].RoleSystemPrompt = "member {{username}}"
+	snapshot.Members[0].DutyInstruction = "duty {{js: 6 * 7}}"
+	vars := systemPromptVars{
+		Date:     "2026-08-31",
+		Language: "zh-CN",
+		Username: "alice",
+		scriptResolver: func(name string) string {
+			if name == "note" {
+				return "shared-note"
+			}
+			return ""
+		},
+	}
+
+	supervisor := agentGroupSupervisorSystemPrompt(snapshot, vars)
+	for _, want := range []string{"project 2026-08-31", "supervisor zh-CN", "coordination shared-note"} {
+		if !strings.Contains(supervisor, want) {
+			t.Fatalf("supervisor prompt missing %q: %s", want, supervisor)
+		}
+	}
+	member := agentGroupMemberSystemPrompt(snapshot, &snapshot.Members[0], vars)
+	for _, want := range []string{"project 2026-08-31", "member alice", "duty 42"} {
+		if !strings.Contains(member, want) {
+			t.Fatalf("member prompt missing %q: %s", want, member)
+		}
+	}
+	if strings.Contains(supervisor+member, "{{") {
+		t.Fatalf("supported dynamic variable leaked into group prompts")
+	}
+}
+
 // TestValidateAgentGroupDelegation_UniqueWorkerFallback 验证唯一 worker 兜底：
 // 模型把中文角色名翻译成英文（如 lyricist）导致 memberID 无法解析时，
 // 若清单中启用 worker 恰好唯一，采用该成员并归一化 decision.MemberID。

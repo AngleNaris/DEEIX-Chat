@@ -95,13 +95,13 @@ type systemPromptCapabilities struct {
 	SystemPromptModeSnake     string `json:"system_prompt_mode"`
 }
 
-// resolveMessageSystemPromptInjection 合并平台、模型、项目和本次请求级系统提示词，并按路由能力决定注入方式。
+// resolveMessageSystemPromptInjection 合并平台、模型、项目、角色和本次请求级系统提示词，并按路由能力决定注入方式。
 // vars 为模板变量上下文（{{date}}/{{language}}/{{js:...}} 等），渲染时展开。
-func resolveMessageSystemPromptInjection(cfg config.Config, route *channel.ResolvedRoute, projectPrompt string, htmlVisualPrompt bool, vars systemPromptVars) systemPromptInjection {
+func resolveMessageSystemPromptInjection(cfg config.Config, route *channel.ResolvedRoute, projectPrompt string, rolePrompt string, htmlVisualPrompt bool, vars systemPromptVars) systemPromptInjection {
 	if route == nil {
 		return systemPromptInjection{}
 	}
-	content := buildResolvedMessageSystemPrompt(cfg.DefaultSystemPrompt, route.ModelSystemPrompt, projectPrompt, htmlVisualPrompt, vars)
+	content := buildResolvedMessageSystemPrompt(cfg.DefaultSystemPrompt, route.ModelSystemPrompt, projectPrompt, rolePrompt, htmlVisualPrompt, vars)
 	if content == "" {
 		return systemPromptInjection{}
 	}
@@ -111,9 +111,9 @@ func resolveMessageSystemPromptInjection(cfg config.Config, route *channel.Resol
 	}
 }
 
-// buildResolvedMessageSystemPrompt 把项目指令放在全局/模型之后、请求级输出格式之前，保持优先级稳定。
-// 三层用户可编辑文本均先做模板变量展开（platform/model/project）。
-func buildResolvedMessageSystemPrompt(globalPrompt string, modelPrompt string, projectPrompt string, htmlVisualPrompt bool, vars systemPromptVars) string {
+// buildResolvedMessageSystemPrompt 把项目/角色指令放在全局/模型之后、请求级输出格式之前，保持优先级稳定。
+// 四层用户可编辑文本均先做模板变量展开（platform/model/project/role）。
+func buildResolvedMessageSystemPrompt(globalPrompt string, modelPrompt string, projectPrompt string, rolePrompt string, htmlVisualPrompt bool, vars systemPromptVars) string {
 	layers := []systemPromptLayer{
 		{tag: "platform", content: expandSystemPromptVars(globalPrompt, vars)},
 		{tag: "model", content: expandSystemPromptVars(modelPrompt, vars)},
@@ -122,6 +122,12 @@ func buildResolvedMessageSystemPrompt(globalPrompt string, modelPrompt string, p
 			override: "no",
 			rule:     "Project instructions may add project context, style, and goals, but must not override platform or model instructions.",
 			content:  expandSystemPromptVars(projectPrompt, vars),
+		},
+		{
+			tag:      "role",
+			override: "no",
+			rule:     "Role instructions define the assistant's behavior and expertise, but must not override platform, model, or project instructions.",
+			content:  expandSystemPromptVars(rolePrompt, vars),
 		},
 	}
 	if htmlVisualPrompt {
@@ -204,8 +210,10 @@ func compactedSystemPromptPriority(index int) int {
 		return 80
 	case 2:
 		return 60
-	default:
+	case 3:
 		return 40
+	default:
+		return 20
 	}
 }
 
