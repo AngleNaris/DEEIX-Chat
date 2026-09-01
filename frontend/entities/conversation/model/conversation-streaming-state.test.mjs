@@ -34,13 +34,21 @@ test("run owners are isolated by conversation", () => {
 });
 
 test("streaming titles sweep only their text while unread dots remain completion-only", () => {
+  const sweepStyles = globalStyles.slice(
+    globalStyles.indexOf("@supports ((background-clip: text)"),
+    globalStyles.indexOf("@keyframes trace-sweep-move"),
+  );
+
   assert.match(globalStyles, /background-clip:\s*text/);
   assert.match(globalStyles, /-webkit-text-fill-color:\s*transparent/);
   assert.match(globalStyles, /animation:\s*trace-sweep-move/);
   assert.match(globalStyles, /currentColor\s+0%[\s\S]*currentColor\s+100%/);
+  assert.match(sweepStyles, /rgb\(255\s+255\s+255\s*\/\s*98%\)/);
+  assert.doesNotMatch(sweepStyles, /var\(--primary\)/);
   assert.match(globalStyles, /background-position:\s*100%\s+0[\s\S]*background-position:\s*0%\s+0/);
   assert.doesNotMatch(globalStyles, /background-position:\s*(?:130%|-30%)\s+0/);
   assert.doesNotMatch(globalStyles, /\.trace-sweep::after/);
+  assert.match(globalStyles, /prefers-reduced-motion:\s*reduce[\s\S]*\.trace-sweep[\s\S]*animation:\s*none/);
 
   for (const source of [sidebarConversationItem, recentList]) {
     assert.match(source, /item\.hasUnread\s*&&\s*!streaming/);

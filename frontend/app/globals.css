@@ -1615,7 +1615,7 @@ html[data-branding-pending] body {
       100deg,
       currentColor 0%,
       currentColor 38%,
-      color-mix(in oklch, currentColor 55%, var(--primary)) 50%,
+      rgb(255 255 255 / 98%) 50%,
       currentColor 62%,
       currentColor 100%
     );

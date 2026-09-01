@@ -66,7 +66,7 @@ export function ShareWorkspace({
   }, []);
 
   if (!accessToken) {
-    return <>{children}</>;
+    return <div className="fixed inset-0 overflow-hidden">{children}</div>;
   }
 
   return (

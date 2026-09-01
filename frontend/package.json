@@ -15,7 +15,7 @@
     "analyze": "next experimental-analyze",
     "analyze:output": "next experimental-analyze --output",
     "start": "next start",
-    "test": "node --test shared/api/conversation-stream-reader.test.mjs shared/model/platform-tool-approval.test.mjs entities/conversation/model/conversation-streaming-state.test.mjs features/admin/model/files-settings.test.mjs features/agent-groups/model/agent-group-feature.test.mjs features/chat/model/conversation-request-model.test.mjs features/chat/model/platform-tool-approval-state.test.mjs features/chat/model/generation-stream-recovery.test.mjs features/chat/model/upstream-think-content.test.mjs features/chat/model/message-process-trace.test.mjs features/files/components/file-share-dialog-layout.test.mjs features/roles/components/role-icon.test.mjs",
+    "test": "node --test shared/api/conversation-stream-reader.test.mjs shared/model/platform-tool-approval.test.mjs components/ui/badge.test.mjs entities/conversation/model/conversation-streaming-state.test.mjs features/admin/model/files-settings.test.mjs features/agent-groups/model/agent-group-feature.test.mjs features/chat/model/conversation-request-model.test.mjs features/chat/model/platform-tool-approval-state.test.mjs features/chat/model/generation-stream-recovery.test.mjs features/chat/model/upstream-think-content.test.mjs features/chat/model/message-process-trace.test.mjs features/files/components/file-share-dialog-layout.test.mjs features/roles/components/role-icon.test.mjs features/share/components/public-share-layout.test.mjs",
     "test:agent-group-contract": "node --test features/chat/model/conversation-request-model.test.mjs",
     "typecheck": "tsc --noEmit --pretty false",
     "check": "pnpm lint && pnpm typecheck",
