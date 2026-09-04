@@ -3,6 +3,9 @@
 import * as React from "react";
 
 import {
+  shouldStartGroupRunDetailRecovery,
+} from "@/features/agent-groups/model/group-run-recovery";
+import {
   importGroupRunDetail,
   useLiveGroupRun,
 } from "@/features/agent-groups/model/group-run-store";
@@ -29,7 +32,7 @@ export function useGroupRunRecovery(options: {
     if (!isGroupConversation || !runID || !conversationPublicID?.trim()) {
       return;
     }
-    if (liveRun) {
+    if (!shouldStartGroupRunDetailRecovery(liveRun)) {
       return;
     }
     let cancelled = false;

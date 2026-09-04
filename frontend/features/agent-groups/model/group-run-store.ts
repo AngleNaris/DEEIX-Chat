@@ -2,10 +2,11 @@
 
 import * as React from "react";
 
+import { shouldImportGroupRunDetail } from "@/features/agent-groups/model/group-run-recovery";
 import { mergeUpstreamThinkBlock } from "@/features/chat/model/upstream-think-store";
 import type { ChatTraceBlock } from "@/features/chat/types/messages";
-import type { GroupStreamEvent, StreamMessageEvent } from "@/shared/api/conversation.types";
 import type { AgentGroupRunDetailDTO } from "@/shared/api/agent-groups.types";
+import type { GroupStreamEvent, StreamMessageEvent } from "@/shared/api/conversation.types";
 
 // Agent 群组运行实时状态（方案 §16.4-§16.8）。
 // 模块级 Map 以父流的 clientRunID 为键；每个 Attempt 通过 attemptID 复合键隔离思考内容，
@@ -755,7 +756,8 @@ export function notifyGroupRunSettled(clientRunID: string | null | undefined) {
 }
 
 // importGroupRunDetail 从详情端点重建时间线（刷新恢复，§16.7）。
-// 规则：已有运行处于 pending/running/resuming 时跳过（实时事件优先，避免覆盖在途流）；
+// 详情只在没有实时运行，或已有运行是刷新时创建的空 resuming 占位时导入；
+// 真实在途运行由实时事件优先，避免详情接口覆盖在途时间线；
 // 详情不携带 actorIcon/actorColor/model（DTO 无此字段），组件回退到 actorType/requestedModel；
 // 非终态运行时 currentStepID 指向最后一个未成功步骤（失败步骤保持展开）。
 export function importGroupRunDetail(clientRunID: string | null | undefined, detail: AgentGroupRunDetailDTO) {
@@ -764,7 +766,7 @@ export function importGroupRunDetail(clientRunID: string | null | undefined, det
     return undefined;
   }
   const existing = runs.get(runID);
-  if (existing && (existing.status === "pending" || existing.status === "running" || existing.resuming)) {
+  if (!shouldImportGroupRunDetail(existing)) {
     return existing;
   }
 
