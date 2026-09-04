@@ -14,14 +14,18 @@ import { Button } from "@/components/ui/button";
 import { Marker, MarkerContent } from "@/components/ui/marker";
 import { Spinner } from "@/components/ui/spinner";
 import {
-  useAgentGroupRunLabels,
   type AgentGroupRunLabels,
+  useAgentGroupRunLabels,
 } from "@/features/agent-groups/hooks/use-agent-group-run-labels";
 import { useAgentGroupStepActions } from "@/features/agent-groups/hooks/use-agent-group-step-actions";
 import type {
   GroupRunState,
   GroupRunStepState,
 } from "@/features/agent-groups/model/group-run-store";
+import {
+  parseSupervisorDecision,
+  type SupervisorDecision,
+} from "@/features/agent-groups/model/supervisor-decision";
 import { MessageUpstreamThink } from "@/features/chat/components/message/message-thinking-trace";
 import {
   hasActiveToolTraceCalls,
@@ -43,50 +47,6 @@ import { StreamdownRender } from "@/shared/components/markdown/streamdown-render
 
 const WAITING_SECONDS_THRESHOLD = 5;
 const EMPTY_TRACE_EVENTS: TraceDisplayEvent[] = [];
-
-// 主管结构化决策输出（对应后端 agentGroupSupervisorDecision）：
-// {"action":"delegate","memberID":"...","instruction":"...","expectedOutcome":"...","answer":""}
-// 或 {"action":"finish","answer":"..."}，action 仅 delegate/finish。
-type SupervisorDecision = {
-  action: string;
-  memberID?: string;
-  instruction?: string;
-  expectedOutcome?: string;
-  answer?: string;
-};
-
-// 防御性剥离 markdown fence（与后端 stripMarkdownJSONFence 行为一致），
-// 解析失败返回 null，由调用方回落 StreamdownRender。
-function tryParseSupervisorDecision(raw: string): SupervisorDecision | null {
-  let text = raw.trim();
-  const fenceMatch = text.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
-  if (fenceMatch) {
-    text = fenceMatch[1].trim();
-  }
-  if (!text.startsWith("{") || !text.endsWith("}")) {
-    return null;
-  }
-  try {
-    const parsed: unknown = JSON.parse(text);
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-      return null;
-    }
-    const record = parsed as Record<string, unknown>;
-    if (typeof record.action !== "string" || record.action.trim() === "") {
-      return null;
-    }
-    const decision: SupervisorDecision = { action: record.action };
-    for (const key of ["memberID", "instruction", "expectedOutcome", "answer"] as const) {
-      const value = record[key];
-      if (typeof value === "string" && value.trim() !== "") {
-        decision[key] = value;
-      }
-    }
-    return decision;
-  } catch {
-    return null;
-  }
-}
 
 // 主管决策的优雅格式化展示：action 徽章 + 目标成员反查 + 指令/预期产出/最终回答分区。
 function SupervisorDecisionView({
@@ -296,9 +256,11 @@ function AgentGroupStepTrace({
   const actorIcon = step.actor.icon?.trim();
   const toolsActive = isRunning && hasActiveToolTraceCalls(latestAttempt.tools?.payloadJson);
   const output = latestAttempt.output?.trim() ?? "";
-  // §16.x：主管决策回合结束后（非流式）尝试优雅格式化；流式中 JSON 不完整，
-  // 以及解析失败（模型输出非结构化文本）时回落 StreamdownRender。
-  const supervisorDecision = !isRunning ? tryParseSupervisorDecision(output) : null;
+  const parsedSupervisorOutput = step.stepType === "supervisor_decide" ? parseSupervisorDecision(output) : null;
+  const supervisorDecision = parsedSupervisorOutput?.decision ?? null;
+  const suppressStructuredOutput = Boolean(
+    step.stepType === "supervisor_decide" && parsedSupervisorOutput?.hasStructuredCandidate && !supervisorDecision,
+  );
   const showActions = canAbandon || retrying;
   const priorAttempts = step.attempts.slice(0, -1);
 
@@ -365,7 +327,7 @@ function AgentGroupStepTrace({
               block={latestAttempt.think}
               streaming={Boolean(isRunning && latestAttempt.think.status === "streaming")}
               autoCollapseReady={false}
-              defaultOpen={true}
+              defaultOpen={isRunning}
               title={actorLabel}
               subtitle={step.actor.model}
             />
@@ -385,7 +347,7 @@ function AgentGroupStepTrace({
                 memberNameByID={memberNameByID}
                 labels={labels}
               />
-            ) : (
+            ) : suppressStructuredOutput ? null : (
               <StreamdownRender content={latestAttempt.output} streaming={Boolean(isRunning)} />
             )
           ) : null}
@@ -432,9 +394,28 @@ function AgentGroupStepTrace({
                         ) : null}
                       </div>
                       {attempt.output?.trim() ? (
-                        <div className="mt-1 max-h-24 overflow-y-auto">
-                          <StreamdownRender content={attempt.output} />
-                        </div>
+                        (() => {
+                          const parsed = step.stepType === "supervisor_decide" ? parseSupervisorDecision(attempt.output) : null;
+                          if (parsed?.decision) {
+                            return (
+                              <div className="mt-1">
+                                <SupervisorDecisionView
+                                  decision={parsed.decision}
+                                  memberNameByID={memberNameByID}
+                                  labels={labels}
+                                />
+                              </div>
+                            );
+                          }
+                          if (parsed?.hasStructuredCandidate) {
+                            return null;
+                          }
+                          return (
+                            <div className="mt-1 max-h-24 overflow-y-auto">
+                              <StreamdownRender content={attempt.output} />
+                            </div>
+                          );
+                        })()
                       ) : null}
                     </div>
                   ))}
@@ -496,7 +477,7 @@ export function MessageAgentGroupTrace({
   return (
     <div className={TRACE_ROOT_CLASS}>
       <div className="w-full space-y-1">
-        {run.status === "running" && !run.currentStepID ? (
+        {run.status === "running" && !run.currentStepID && run.steps.length > 0 && run.steps.every((step) => step.status === "success") ? (
           <AgentGroupStageMarker labels={labels} streaming={streaming} seconds={seconds} stage={labels.assembling} />
         ) : null}
         {run.steps.map((step) => (

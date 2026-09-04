@@ -46,6 +46,18 @@ test("a populated live run wins if lookup races with stream events", () => {
   assert.equal(shouldImportGroupRunDetail(liveRun), false);
 });
 
+test("a retrying run cannot be overwritten by a stale detail response", () => {
+  assert.equal(
+    shouldImportGroupRunDetail({
+      groupRunID: "group-run-1",
+      status: "running",
+      steps: [{ stepID: "step-1" }],
+      retrying: true,
+    }),
+    false,
+  );
+});
+
 test("terminal runs remain eligible for a detail import", () => {
   assert.equal(
     shouldImportGroupRunDetail({

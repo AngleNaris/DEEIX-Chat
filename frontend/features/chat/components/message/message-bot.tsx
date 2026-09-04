@@ -292,7 +292,7 @@ export function ChatMessageBot({
       return;
     }
     const run = readLiveGroupRun(item.runID);
-    if (run && (run.status === "pending" || run.status === "running")) {
+    if (run && (run.status === "pending" || run.status === "running") && run.steps.length === 0 && !run.groupRunID) {
       clearLiveGroupRun(item.runID);
     }
   }, [item.isStreaming, item.runID]);

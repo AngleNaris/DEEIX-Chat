@@ -3,6 +3,7 @@ export type GroupRunRecoveryState = {
   status?: string | null;
   steps?: readonly unknown[] | null;
   resuming?: boolean | null;
+  retrying?: boolean | null;
 };
 
 export function isEmptyResumingGroupRunPlaceholder(
@@ -26,6 +27,9 @@ export function shouldImportGroupRunDetail(
 ): boolean {
   if (!existing || isEmptyResumingGroupRunPlaceholder(existing)) {
     return true;
+  }
+  if (existing.retrying === true) {
+    return false;
   }
   return existing.status !== "pending" && existing.status !== "running" && existing.resuming !== true;
 }

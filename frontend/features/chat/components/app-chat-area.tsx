@@ -928,6 +928,7 @@ export function AppChatArea() {
     conversationPublicID: currentConversation?.publicID,
     isGroupConversation: Boolean(currentConversation?.agentGroupID?.trim()),
     lastAssistantRunID: recoveryRunID,
+    resumeActive: Boolean(recoveryRunID && recoveryRunID === resumingRunID),
   });
   React.useEffect(() => {
     return subscribeGroupRunSettled((clientRunID) => {

@@ -7,6 +7,7 @@ import {
 } from "@/features/agent-groups/model/group-run-recovery";
 import {
   importGroupRunDetail,
+  isGroupRunResumeActive,
   useLiveGroupRun,
 } from "@/features/agent-groups/model/group-run-store";
 import { getAgentGroupRunDetailByClientRunID } from "@/shared/api/agent-groups";
@@ -22,8 +23,9 @@ export function useGroupRunRecovery(options: {
   conversationPublicID?: string;
   isGroupConversation: boolean;
   lastAssistantRunID?: string;
+  resumeActive?: boolean;
 }) {
-  const { conversationPublicID, isGroupConversation, lastAssistantRunID } = options;
+  const { conversationPublicID, isGroupConversation, lastAssistantRunID, resumeActive = false } = options;
   const runID = lastAssistantRunID?.trim() || "";
   const liveRun = useLiveGroupRun(runID);
   const [recoveredRunID, setRecoveredRunID] = React.useState<string | null>(null);
@@ -32,7 +34,7 @@ export function useGroupRunRecovery(options: {
     if (!isGroupConversation || !runID || !conversationPublicID?.trim()) {
       return;
     }
-    if (!shouldStartGroupRunDetailRecovery(liveRun)) {
+    if (!shouldStartGroupRunDetailRecovery(liveRun) || resumeActive || isGroupRunResumeActive(runID)) {
       return;
     }
     let cancelled = false;
@@ -56,7 +58,7 @@ export function useGroupRunRecovery(options: {
     return () => {
       cancelled = true;
     };
-  }, [conversationPublicID, isGroupConversation, runID, liveRun]);
+  }, [conversationPublicID, isGroupConversation, resumeActive, runID, liveRun]);
 
   return { recoveredRunID };
 }

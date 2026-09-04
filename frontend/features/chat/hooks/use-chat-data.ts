@@ -4,6 +4,9 @@ import { useTranslations } from "next-intl";
 import * as React from "react";
 import {
   ensureLiveGroupRunPlaceholder,
+  markGroupRunResumeActive,
+  releaseGroupRunDetailSnapshots,
+  synthesizeGroupRunPausedState,
   upsertGroupRunEvent,
   upsertLiveGroupRunThink,
   upsertLiveGroupRunTool,
@@ -273,6 +276,7 @@ export function useChatData(
     active.controller.abort();
     clearResumeCheckpoint(active.runID);
     setResumingRunID("");
+    synthesizeGroupRunPausedState(active.runID);
 
     const token = active.accessToken ?? (await resolveAccessToken());
     if (!token) {
@@ -535,6 +539,9 @@ export function useChatData(
           },
         });
         if (!controller.signal.aborted) {
+          if (!completed) {
+            synthesizeGroupRunPausedState(pendingRunID);
+          }
           setResumingActivityLabel("");
           if (completed) {
             clearResumeCheckpoint(pendingRunID);
@@ -549,14 +556,20 @@ export function useChatData(
           } else {
             resumeFailureBudgetRef.current.set(pendingRunID, RESUME_FAILURE_CONFIRMATIONS);
             clearResumeCheckpoint(pendingRunID);
+            synthesizeGroupRunPausedState(pendingRunID);
           }
           setResumingRunID("");
           setResumingActivityLabel("");
           reload();
         }
       } finally {
-        if (activeResumeStreamRef.current?.controller === controller) {
+        const ownsResumeStream = activeResumeStreamRef.current?.controller === controller;
+        if (ownsResumeStream) {
           activeResumeStreamRef.current = null;
+          if (isGroupConversationRef.current) {
+            releaseGroupRunDetailSnapshots(pendingRunID);
+            markGroupRunResumeActive(pendingRunID, false);
+          }
         }
         if (!controller.signal.aborted && !closed) {
           setResumingRunID("");
@@ -568,14 +581,20 @@ export function useChatData(
     // §16.8：群组会话恢复时先创建占位运行（正在恢复运行），事件重放到达后回填时间线。
     if (isGroupConversationRef.current) {
       ensureLiveGroupRunPlaceholder(pendingRunID, { resuming: true });
+      markGroupRunResumeActive(pendingRunID, true);
     }
     void resume();
     return () => {
       closed = true;
       controller.abort();
       setResumingActivityLabel("");
-      if (activeResumeStreamRef.current?.controller === controller) {
+      const ownsResumeStream = activeResumeStreamRef.current?.controller === controller;
+      if (ownsResumeStream) {
         activeResumeStreamRef.current = null;
+        if (isGroupConversationRef.current) {
+          releaseGroupRunDetailSnapshots(pendingRunID);
+          markGroupRunResumeActive(pendingRunID, false);
+        }
       }
     };
   }, [

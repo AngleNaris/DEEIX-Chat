@@ -2,6 +2,12 @@
 
 import * as React from "react";
 
+import {
+  isTerminalAttemptStatus,
+  isTerminalStepStatus,
+  normalizeGroupStreamSeq,
+  shouldApplyGroupAttemptEvent,
+} from "@/features/agent-groups/model/group-run-event-policy";
 import { shouldImportGroupRunDetail } from "@/features/agent-groups/model/group-run-recovery";
 import { mergeUpstreamThinkBlock } from "@/features/chat/model/upstream-think-store";
 import type { ChatTraceBlock } from "@/features/chat/types/messages";
@@ -23,6 +29,7 @@ export type GroupRunAttemptState = {
   output: string;
   errorCode?: string;
   errorMessage?: string;
+  detailSnapshot?: boolean;
   startedAt: string;
   endedAt?: string;
   updatedAt: string;
@@ -61,6 +68,8 @@ export type GroupRunState = {
   resuming?: boolean;
   // 重试流进行中（§16.10）：输入框保持锁定，直到重试结束（成功/再次暂停）或放弃。
   retrying?: boolean;
+  // 流事件全局 seq；用于断线重连/恢复重放去重。
+  lastStreamSeq?: number;
   startedAt: string;
   endedAt?: string;
   updatedAt: string;
@@ -74,6 +83,8 @@ type GroupRunListener = () => void;
 type SettledListener = (clientRunID: string) => void;
 
 const runs = new Map<string, GroupRunState>();
+const activeResumeRuns = new Set<string>();
+const seenStreamSeqs = new Map<string, Set<number>>();
 const listeners = new Map<string, Set<GroupRunListener>>();
 const settledListeners = new Set<SettledListener>();
 
@@ -228,6 +239,29 @@ function touchAttempt(attempt: GroupRunAttemptState, patch: Partial<GroupRunAtte
   };
 }
 
+function acceptGroupStreamEvent(runID: string, event: { seq?: number }): boolean {
+  const seq = normalizeGroupStreamSeq(event.seq);
+  if (seq === 0) {
+    return true;
+  }
+  let seen = seenStreamSeqs.get(runID);
+  if (!seen) {
+    seen = new Set<number>();
+    seenStreamSeqs.set(runID, seen);
+  }
+  if (seen.has(seq)) {
+    return false;
+  }
+  seen.add(seq);
+  if (seen.size > 2048) {
+    const oldest = seen.values().next().value;
+    if (typeof oldest === "number") {
+      seen.delete(oldest);
+    }
+  }
+  return true;
+}
+
 // upsertGroupRunEvent 将群组流事件应用到实时运行状态（§15 协议）。
 export function upsertGroupRunEvent(clientRunID: string | null | undefined, event: GroupStreamEvent) {
   const runID = normalizeRunID(clientRunID);
@@ -236,6 +270,13 @@ export function upsertGroupRunEvent(clientRunID: string | null | undefined, even
   }
   const meta = eventMeta(event);
   let run = runs.get(runID) ?? createRun(meta);
+  if (!acceptGroupStreamEvent(runID, event)) {
+    return run;
+  }
+  const streamSeq = normalizeGroupStreamSeq(event.seq);
+  if (streamSeq > 0) {
+    run = { ...run, lastStreamSeq: Math.max(run.lastStreamSeq ?? 0, streamSeq) };
+  }
   // 占位符运行（groupRunID 为空）收到第一个事件时回填真实 ID，并清除 resuming 标记。
   if (!run.groupRunID && meta.groupRunID) {
     run = touchRun(run, { groupRunID: meta.groupRunID, resuming: undefined });
@@ -260,14 +301,52 @@ export function upsertGroupRunEvent(clientRunID: string | null | undefined, even
       } else {
         let touched = false;
         const steps = mapStep(run, meta.stepID, (step) => {
-          // 重试：同一逻辑步骤内追加新 Attempt，原失败/成功步骤就地恢复 running。
-          if (step.status === "success" || step.status === "failed") {
+          const existingAttempt = findAttempt(step, meta.attemptID);
+          const canApplyEvent = shouldApplyGroupAttemptEvent(
+            {
+              stepStatus: step.status,
+              attemptStatus: existingAttempt?.status || "pending",
+              detailSnapshot: existingAttempt?.detailSnapshot,
+            },
+            event.type,
+          );
+          if (!canApplyEvent) {
+            return step;
+          }
+          if (existingAttempt) {
+            if (event.type === "group_step_started" && existingAttempt.detailSnapshot) {
+              touched = true;
+              return touchStep(step, {
+                status: "running",
+                endedAt: undefined,
+                attempts: step.attempts.map((attempt) =>
+                  attempt.attemptID === meta.attemptID
+                    ? touchAttempt(attempt, {
+                        status: "running",
+                        output: "",
+                        think: undefined,
+                        tools: undefined,
+                        detailSnapshot: false,
+                        errorCode: undefined,
+                        errorMessage: undefined,
+                      })
+                    : attempt,
+                ),
+              });
+            }
+            return step;
+          }
+          if (event.type === "group_step_retry_started" && isTerminalStepStatus(step.status)) {
             touched = true;
             return touchStep(step, { status: "running", endedAt: undefined });
           }
           return step;
         });
         if (!findAttempt(findStep(run, meta.stepID), meta.attemptID)) {
+          const existingStep = findStep(run, meta.stepID);
+          if (existingStep && isTerminalStepStatus(existingStep.status) && event.type !== "group_step_retry_started") {
+            break;
+          }
           const stepsWithAttempt = steps.map((step) =>
             step.stepID === meta.stepID ? { ...step, attempts: [...step.attempts, createAttempt(meta)] } : step,
           );
@@ -295,7 +374,19 @@ export function upsertGroupRunEvent(clientRunID: string | null | undefined, even
       break;
     }
     case "group_step_output_delta": {
-      if (!findAttempt(findStep(run, meta.stepID), meta.attemptID)) {
+      const existingStep = findStep(run, meta.stepID);
+      const existingAttempt = findAttempt(existingStep, meta.attemptID);
+      if (
+        existingStep &&
+        !existingAttempt &&
+        isTerminalStepStatus(existingStep.status)
+      ) {
+        break;
+      }
+      if (existingAttempt && (isTerminalStepStatus(existingStep?.status || "") || isTerminalAttemptStatus(existingAttempt.status))) {
+        break;
+      }
+      if (!existingAttempt) {
         // 防御：delta 先于 started 到达（理论上不会），仍要避免丢弃正文。
         if (!findStep(run, meta.stepID)) {
           run = { ...run, steps: [...run.steps, createStep(meta)] };
@@ -315,18 +406,19 @@ export function upsertGroupRunEvent(clientRunID: string | null | undefined, even
         run = {
           ...run,
           steps: mapStep(run, meta.stepID, (step) => {
-            if (findAttempt(step, meta.attemptID)) {
-              return {
-                ...step,
-                status: "running",
-                attempts: step.attempts.map((attempt) =>
-                  attempt.attemptID === meta.attemptID
-                    ? touchAttempt(attempt, { status: "running", output: attempt.output + delta })
-                    : attempt,
-                ),
-              };
+            const attempt = findAttempt(step, meta.attemptID);
+            if (!attempt || attempt.detailSnapshot || isTerminalStepStatus(step.status) || isTerminalAttemptStatus(attempt.status)) {
+              return step;
             }
-            return step;
+            return {
+              ...step,
+              status: "running",
+              attempts: step.attempts.map((current) =>
+                current.attemptID === meta.attemptID
+                  ? touchAttempt(current, { status: "running", output: current.output + delta })
+                  : current,
+              ),
+            };
           }),
           status: "running",
           updatedAt: nowISO(),
@@ -336,6 +428,14 @@ export function upsertGroupRunEvent(clientRunID: string | null | undefined, even
       break;
     }
     case "group_step_completed": {
+      const completedStep = findStep(run, meta.stepID);
+      const completedAttempt = findAttempt(completedStep, meta.attemptID);
+      if (!completedAttempt) {
+        break;
+      }
+      if (isTerminalStepStatus(completedStep?.status || "") || isTerminalAttemptStatus(completedAttempt.status)) {
+        break;
+      }
       run = {
         ...run,
         steps: mapStep(run, meta.stepID, (step) => {
@@ -369,6 +469,14 @@ export function upsertGroupRunEvent(clientRunID: string | null | undefined, even
       break;
     }
     case "group_step_failed": {
+      const failedStep = findStep(run, meta.stepID);
+      const failedAttempt = findAttempt(failedStep, meta.attemptID);
+      if (!failedAttempt) {
+        break;
+      }
+      if (isTerminalStepStatus(failedStep?.status || "") || isTerminalAttemptStatus(failedAttempt.status)) {
+        break;
+      }
       const attemptStatus = event.status === "canceled" ? "canceled" : event.status === "interrupted" ? "interrupted" : "error";
       run = {
         ...run,
@@ -436,19 +544,33 @@ export function upsertLiveGroupRunThink(
   if (!run) {
     return undefined;
   }
+  if (!acceptGroupStreamEvent(runID, event)) {
+    return run;
+  }
   const nextRun: GroupRunState = {
     ...run,
     steps: mapStep(run, stepID, (step) => {
-      if (!findAttempt(step, attemptID)) {
+      const attempt = findAttempt(step, attemptID);
+      if (
+        !attempt ||
+        !shouldApplyGroupAttemptEvent(
+          {
+            stepStatus: step.status,
+            attemptStatus: attempt.status,
+            detailSnapshot: attempt.detailSnapshot,
+          },
+          "upstream_think_delta",
+        )
+      ) {
         return step;
       }
       return {
         ...step,
-        status: step.status === "success" ? step.status : "running",
-        attempts: step.attempts.map((attempt) =>
-          attempt.attemptID === attemptID
-            ? touchAttempt(attempt, { status: "running", think: mergeUpstreamThinkBlock(attempt.think, event) })
-            : attempt,
+        status: "running",
+        attempts: step.attempts.map((current) =>
+          current.attemptID === attemptID
+            ? touchAttempt(current, { status: "running", think: mergeUpstreamThinkBlock(current.think, event) })
+            : current,
         ),
       };
     }),
@@ -548,6 +670,7 @@ export function ensureLiveGroupRunPlaceholder(
   if (existing) {
     return existing;
   }
+  seenStreamSeqs.delete(runID);
   const timestamp = nowTimestamp();
   const run: GroupRunState = {
     groupRunID: "",
@@ -578,50 +701,60 @@ export function upsertLiveGroupRunTool(clientRunID: string | null | undefined, e
   if (!run) {
     return undefined;
   }
+  if (!acceptGroupStreamEvent(runID, event)) {
+    return run;
+  }
   const nextRun: GroupRunState = {
     ...run,
     steps: mapStep(run, stepID, (step) => {
-      if (!findAttempt(step, attemptID)) {
+      const attempt = findAttempt(step, attemptID);
+      if (
+        !attempt ||
+        !shouldApplyGroupAttemptEvent(
+          {
+            stepStatus: step.status,
+            attemptStatus: attempt.status,
+            detailSnapshot: attempt.detailSnapshot,
+          },
+          event.type,
+        )
+      ) {
         return step;
+      }
+      const calls = parseGroupToolCalls(attempt.tools);
+      if (event.type === "tool_call") {
+        const callID = event.tool_call_id?.trim() || "";
+        if (!callID || calls.some((call) => call.tool_call_id === callID)) {
+          return step;
+        }
+        calls.push({
+          tool_call_id: callID,
+          name: event.tool_name?.trim() || "",
+          status: "requested",
+          input: event.arguments?.trim() ? event.arguments : undefined,
+        });
+      } else {
+        const callID = event.tool_call_id?.trim() || "";
+        const target = calls.find((call) => call.tool_call_id === callID);
+        if (!target) {
+          return step;
+        }
+        target.status = event.status === "error" ? "error" : "success";
+        if (event.output?.trim()) {
+          target.output = event.output.trim();
+        }
+        if (event.error?.trim()) {
+          target.error = event.error;
+        }
       }
       return {
         ...step,
-        status: step.status === "success" ? step.status : "running",
-        attempts: step.attempts.map((attempt) => {
-          if (attempt.attemptID !== attemptID) {
-            return attempt;
-          }
-          const calls = parseGroupToolCalls(attempt.tools);
-          if (event.type === "tool_call") {
-            const callID = event.tool_call_id?.trim() || "";
-            if (!callID || calls.some((call) => call.tool_call_id === callID)) {
-              return attempt;
-            }
-            calls.push({
-              tool_call_id: callID,
-              name: event.tool_name?.trim() || "",
-              status: "requested",
-              input: event.arguments?.trim() ? event.arguments : undefined,
-            });
-          } else {
-            const callID = event.tool_call_id?.trim() || "";
-            const target = calls.find((call) => call.tool_call_id === callID);
-            if (!target) {
-              return attempt;
-            }
-            target.status = event.status === "error" ? "error" : "success";
-            if (event.output?.trim()) {
-              target.output = event.output.trim();
-            }
-            if (event.error?.trim()) {
-              target.error = event.error;
-            }
-          }
-          return touchAttempt(attempt, {
-            status: "running",
-            tools: buildGroupToolBlock(calls),
-          });
-        }),
+        status: "running",
+        attempts: step.attempts.map((current) =>
+          current.attemptID === attemptID
+            ? touchAttempt(current, { status: "running", tools: buildGroupToolBlock(calls) })
+            : current,
+        ),
       };
     }),
     status: run.status === "completed" || run.status === "abandoned" ? run.status : "running",
@@ -719,8 +852,52 @@ export function abortGroupRunRetry(clientRunID: string | null | undefined) {
   retryAbortControllers.get(runID)?.abort();
 }
 
+export function markGroupRunResumeActive(clientRunID: string | null | undefined, active: boolean) {
+  const runID = normalizeRunID(clientRunID);
+  if (!runID) {
+    return;
+  }
+  if (active) {
+    activeResumeRuns.add(runID);
+  } else {
+    activeResumeRuns.delete(runID);
+  }
+}
+
+export function isGroupRunResumeActive(clientRunID: string | null | undefined): boolean {
+  const runID = normalizeRunID(clientRunID);
+  return Boolean(runID && activeResumeRuns.has(runID));
+}
+
+export function releaseGroupRunDetailSnapshots(clientRunID: string | null | undefined) {
+  const runID = normalizeRunID(clientRunID);
+  const run = runs.get(runID);
+  if (!run) {
+    return undefined;
+  }
+  let changed = false;
+  const steps = run.steps.map((step) => {
+    const attempts = step.attempts.map((attempt) => {
+      if (!attempt.detailSnapshot) {
+        return attempt;
+      }
+      changed = true;
+      return touchAttempt(attempt, { detailSnapshot: false });
+    });
+    return attempts === step.attempts ? step : { ...step, attempts };
+  });
+  if (!changed) {
+    return run;
+  }
+  const next = touchRun(run, { steps });
+  runs.set(runID, next);
+  notify(runID);
+  return next;
+}
+
 export function clearLiveGroupRun(clientRunID: string | null | undefined) {
   const runID = normalizeRunID(clientRunID);
+  seenStreamSeqs.delete(runID);
   if (!runID || !runs.delete(runID)) {
     return;
   }
@@ -802,6 +979,7 @@ export function importGroupRunDetail(clientRunID: string | null | undefined, det
           output: attempt.outputMarkdown || "",
           errorCode: attempt.errorCode || undefined,
           errorMessage: attempt.errorMessage || undefined,
+          detailSnapshot: true,
           startedAt: attempt.startedAt,
           endedAt: attempt.endedAt || undefined,
           updatedAt: attempt.createdAt,
