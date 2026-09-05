@@ -120,6 +120,21 @@ function resolveFileIDFromImageSrc(src: string): string | null {
   }
 }
 
+// 收集正文 markdown 图片引用的文件 ID（/api/v1/files/<id>/content）。
+// image_gen 等工具会把生成图同时挂为消息附件并让模型回显 markdown 引用，
+// 该集合用于避免同一张图被"正文内联图 + 附件预览/卡片"重复渲染。
+function collectMarkdownImageFileIDs(content: string): Set<string> {
+  const fileIDs = new Set<string>();
+  const imageMarkdownRe = /!\[[^\]]*]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
+  for (const match of content.matchAll(imageMarkdownRe)) {
+    const fileID = resolveFileIDFromImageSrc(match[1] || "");
+    if (fileID) {
+      fileIDs.add(fileID);
+    }
+  }
+  return fileIDs;
+}
+
 function isGeneratedVideoMarkdownContent(content: string, attachments: MessageAttachment[]): boolean {
   const blocks = content
     .trim()
@@ -330,6 +345,11 @@ export function ChatMessageBot({
     : false;
   const renderableContent = hideGeneratedVideoMarkdown ? "" : item.content;
   const hasStreamdownContent = renderableContent.trim().length > 0;
+  // 仅在 markdown 渲染开启时收集：关闭时正文按纯文本展示，附件预览是唯一图片出口。
+  const contentImageFileIDs = React.useMemo(
+    () => (markdownRender ? collectMarkdownImageFileIDs(renderableContent) : new Set<string>()),
+    [markdownRender, renderableContent],
+  );
   const leadingImagePreview = React.useMemo(() => resolveLeadingImagePreview(renderableContent), [renderableContent]);
   const leadingImageFileID = React.useMemo(
     () => (leadingImagePreview?.source ? resolveFileIDFromImageSrc(leadingImagePreview.source) : null),
@@ -343,17 +363,25 @@ export function ChatMessageBot({
             leadingImageFileID &&
             isEditableImageAttachment(attachment) &&
             attachment.fileID === leadingImageFileID
+          ) &&
+          !(
+            isEditableImageAttachment(attachment) &&
+            contentImageFileIDs.has(attachment.fileID)
           ),
       ),
-    [leadingImageFileID, renderableMediaAttachments],
+    [contentImageFileIDs, leadingImageFileID, renderableMediaAttachments],
   );
   const visibleAttachments = React.useMemo(() => {
-    if (inlineMediaAttachments.length === 0) {
-      return item.attachments ?? [];
+    const attachments = item.attachments ?? [];
+    if (inlineMediaAttachments.length === 0 && contentImageFileIDs.size === 0) {
+      return attachments;
     }
-    const inlineFileIDs = new Set(inlineMediaAttachments.map((attachment) => attachment.fileID));
-    return (item.attachments ?? []).filter((attachment) => !inlineFileIDs.has(attachment.fileID));
-  }, [inlineMediaAttachments, item.attachments]);
+    const hiddenFileIDs = new Set([
+      ...inlineMediaAttachments.map((attachment) => attachment.fileID),
+      ...contentImageFileIDs,
+    ]);
+    return attachments.filter((attachment) => !hiddenFileIDs.has(attachment.fileID));
+  }, [contentImageFileIDs, inlineMediaAttachments, item.attachments]);
   const leadingImageAlt = React.useMemo(
     () => leadingImagePreview?.alt || submitT("imagePreviewAlt"),
     [leadingImagePreview?.alt, submitT],
